@@ -15,6 +15,7 @@ const all = [
   { name: 'sakura', q: 'theme=sakura&seed=3&auto=32&quality=high', wait: 3500 },
   { name: 'marte', q: 'theme=marte&seed=9&auto=32&quality=high', wait: 3500 },
   { name: 'close', q: 'theme=vale&seed=7&auto=32&quality=high&zoom=5', wait: 3500 },
+  { name: 'ghost', q: 'theme=sakura&seed=21&auto=14&quality=high&zoom=7', wait: 2500, ghost: true },
   { name: 'mobile', q: 'theme=cerrado&seed=11&auto=22&quality=medium', wait: 3500, mobile: true },
 ];
 const list = shots.length ? all.filter((s) => shots.includes(s.name)) : all;
@@ -33,6 +34,10 @@ for (const s of list) {
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(`${base}?${s.q}`);
   await page.waitForTimeout(s.wait);
+  if (s.ghost) {
+    await page.evaluate(() => window.__ghostBest());
+    await page.waitForTimeout(2500);
+  }
   await page.screenshot({ path: `${out}/${s.name}.png` });
   const stats = await page.evaluate(() => window.__stats);
   console.log(s.name, JSON.stringify(stats), errors.length ? `ERR ${errors.join(' | ')}` : '');

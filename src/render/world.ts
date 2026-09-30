@@ -317,6 +317,8 @@ export class World {
   private slotCount = 0;
   private hoverRing: THREE.Mesh;
   private markers: THREE.Mesh[] = [];
+  /** Posição das marcas de borda relativa ao fantasma (elas acompanham a peça flutuando). */
+  private markerLocal: THREE.Vector3[] = [];
   private ghost: LiveTile | null = null;
   private ghostKey = '';
   private ghostTarget = new THREE.Vector3();
@@ -409,11 +411,12 @@ export class World {
     this.hoverRing.visible = false;
     this.scene.add(this.hoverRing);
 
-    const pill = new THREE.CapsuleGeometry(0.035, 0.26, 3, 8).rotateZ(Math.PI / 2);
+    const pill = new THREE.CapsuleGeometry(0.026, 0.5, 3, 8).rotateZ(Math.PI / 2);
     for (let i = 0; i < 6; i++) {
       const m = new THREE.Mesh(pill, new THREE.MeshBasicMaterial({ fog: false, transparent: true, opacity: 0.95 }));
       m.visible = false;
       this.markers.push(m);
+      this.markerLocal.push(new THREE.Vector3());
       this.scene.add(m);
     }
 
@@ -625,7 +628,7 @@ export class World {
       m.visible = s === 1 || s === 3;
       if (!m.visible) continue;
       const [mx, mz] = edgeMid(i);
-      m.position.set(x + mx * 0.985, 0.03, z + mz * 0.985);
+      this.markerLocal[i].set(mx * 0.93, 0.03, mz * 0.93);
       m.rotation.y = -(Math.PI / 6 + (Math.PI / 3) * i) + Math.PI / 2;
       (m.material as THREE.MeshBasicMaterial).color.set(s === 1 ? '#ffffff' : '#ff4a3d');
     }
@@ -799,6 +802,7 @@ export class World {
       g.position.y += (this.ghostTarget.y + Math.sin(this.time * 2.4) * 0.025 - g.position.y) * k;
       const inner = this.ghost.inner;
       inner.rotation.y += (-this.ghostAngle - inner.rotation.y) * (1 - Math.exp(-dt * 18));
+      for (let i = 0; i < 6; i++) if (this.markers[i].visible) this.markers[i].position.copy(g.position).add(this.markerLocal[i]);
     }
 
     // Peças caindo.

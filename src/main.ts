@@ -623,6 +623,8 @@ function start(data: unknown) {
   hover = { q: m.q, r: m.r };
   while (game.rot !== m.rot) rotate(1);
   updateGhost();
+  const { x, z } = hexToWorld(m.q, m.r);
+  world.rig.goal.set(x, 0, z);
 };
 
 const hot = (window as unknown as { claude?: { hot?: Hot } }).claude?.hot;
