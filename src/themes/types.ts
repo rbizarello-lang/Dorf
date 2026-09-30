@@ -93,7 +93,7 @@ export interface CropKind {
   soil: string;
 }
 
-export type AnimalKind = 'sheep' | 'cow' | 'goat' | 'horse' | 'llama' | 'camel' | 'deer' | 'rover';
+export type AnimalKind = 'sheep' | 'cow' | 'goat' | 'horse' | 'donkey' | 'buffalo' | 'llama' | 'camel' | 'deer' | 'rover';
 export type BoatKind = 'rowboat' | 'sailboat' | 'felucca' | 'junk' | 'longship' | 'barge' | 'canoe' | 'reedboat' | 'hover';
 /** Como a borda "linha" (índice 5) é desenhada. */
 export type RoadStyle = 'rail' | 'dirt' | 'stone' | 'sand' | 'maglev';

@@ -666,6 +666,10 @@ function animalGeometry(kind: AnimalKind): THREE.BufferGeometry {
       return kit([{ geo: box(0.052, 0.026, 0.024, 0, 0.022), color: '#fff', tint: 1 }, { geo: box(0.018, 0.018, 0.016, 0.034, 0.03), color: '#fff', tint: 1 }, { geo: box(0.006, 0.006, 0.016, 0.044, 0.028), color: '#e8b8a8' }, ...legs(0.018, 0.008, 0.022, '#3a3230')]);
     case 'horse':
       return kit([{ geo: box(0.048, 0.022, 0.017, 0, 0.03), color: '#fff', tint: 1 }, { geo: box(0.012, 0.028, 0.012, 0.026, 0.044).rotateZ(-0.35), color: '#fff', tint: 1 }, { geo: box(0.02, 0.01, 0.01, 0.044, 0.062), color: '#fff', tint: 1 }, { geo: box(0.006, 0.02, 0.004, -0.026, 0.032), color: '#2a2220' }, ...legs(0.017, 0.006, 0.03, '#2a2220')]);
+    case 'donkey':
+      return kit([{ geo: box(0.04, 0.02, 0.016, 0, 0.026), color: '#fff', tint: 1 }, { geo: box(0.011, 0.024, 0.011, 0.022, 0.038).rotateZ(-0.4), color: '#fff', tint: 1 }, { geo: box(0.018, 0.011, 0.011, 0.036, 0.054), color: '#fff', tint: 1 }, { geo: box(0.008, 0.004, 0.008, 0.045, 0.052), color: '#e8e0d4' }, ...[0.003, -0.003].map((z) => ({ geo: cone(0.003, 0.018, 3, 0.03, 0.06, z).rotateZ(0.3), color: '#4a4038' })), { geo: box(0.004, 0.016, 0.003, -0.022, 0.024), color: '#3a3230' }, ...legs(0.014, 0.006, 0.026, '#4a4038')]);
+    case 'buffalo':
+      return kit([{ geo: box(0.054, 0.028, 0.026, 0, 0.022), color: '#fff', tint: 1 }, { geo: box(0.018, 0.017, 0.016, 0.034, 0.03), color: '#fff', tint: 1 }, ...[0.012, -0.012].map((z) => ({ geo: cone(0.004, 0.028, 4, 0.034, 0.042, z).rotateX(z > 0 ? 1.4 : -1.4).translate(0, 0.0, 0), color: '#d8ccb8' })), ...legs(0.019, 0.009, 0.022, '#2a2624')]);
     case 'llama':
       return kit([{ geo: box(0.036, 0.02, 0.018, 0, 0.03), color: '#fff', tint: 1 }, { geo: box(0.01, 0.04, 0.01, 0.017, 0.045), color: '#fff', tint: 1 }, { geo: box(0.016, 0.01, 0.01, 0.022, 0.084), color: '#fff', tint: 1 }, { geo: cone(0.003, 0.01, 4, 0.016, 0.094, 0.003), color: '#3a2e28' }, ...legs(0.012, 0.006, 0.03, '#6a5040')]);
     case 'camel':
@@ -762,10 +766,10 @@ function vehicleGeometry(kind: VehicleKind, [body, det]: [string, string], anima
         car: kit([{ geo: box(0.05, 0.016, 0.034, 0, 0.018), color: body }, { geo: jitter(ico(0.02, 0), 0.004, 30).scale(1.2, 0.7, 0.9).translate(0, 0.036, 0), color: det }, ...wheels([0], 0.016, 0.02), { geo: box(0.04, 0.003, 0.003, 0.04, 0.024, 0.01), color: '#5a4032' }, { geo: box(0.04, 0.003, 0.003, 0.04, 0.024, -0.01), color: '#5a4032' }]),
       };
     case 'caravan': {
-      const a = animal === 'camel' || animal === 'llama' || animal === 'horse' ? animal : 'horse';
+      const a = animal === 'camel' || animal === 'llama' || animal === 'horse' || animal === 'donkey' ? animal : 'horse';
       const pack = (x: number, y: number) => [{ geo: box(0.014, 0.014, 0.03, x, y), color: det }];
       const base = animalGeometry(a);
-      const packY = a === 'camel' ? 0.07 : a === 'llama' ? 0.05 : 0.052;
+      const packY = a === 'camel' ? 0.07 : a === 'llama' ? 0.05 : a === 'donkey' ? 0.046 : 0.052;
       return { head: mergeGeometries([base, kit(pack(-0.004, packY))])!, car: mergeGeometries([base.clone(), kit([...pack(-0.004, packY), { geo: box(0.018, 0.01, 0.022, -0.004, packY + 0.014), color: body }])])! };
     }
   }

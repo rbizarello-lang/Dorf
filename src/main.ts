@@ -592,12 +592,17 @@ qualityBtn.addEventListener('click', () => {
   hud.toast(`Qualidade: ${qualityLabel[next]}`);
 });
 const TIME_LABEL: Record<TimeOfDay, string> = { day: 'Dia', dusk: 'Tarde', night: 'Noite' };
+const TIME_ICON: Record<TimeOfDay, string> = { day: '☀', dusk: '◐', night: '☾' };
+const setTimeLabel = (t: TimeOfDay) => {
+  timeBtn.querySelector('.long')!.textContent = TIME_LABEL[t];
+  timeBtn.querySelector('.short')!.textContent = TIME_ICON[t];
+};
 const timeBtn = document.getElementById('btn-time')!;
 function cycleTime() {
   const order: TimeOfDay[] = ['day', 'dusk', 'night'];
   const next = order[(order.indexOf(world.timeOfDay) + 1) % 3];
   world.setTimeOfDay(next);
-  timeBtn.textContent = TIME_LABEL[next];
+  setTimeLabel(next);
   store.set('time', next);
 }
 timeBtn.addEventListener('click', cycleTime);
@@ -605,7 +610,7 @@ timeBtn.addEventListener('click', cycleTime);
   const saved = (params.get('time') ?? store.get('time')) as TimeOfDay | null;
   if (saved && saved in TIME_LABEL) {
     world.setTimeOfDay(saved);
-    timeBtn.textContent = TIME_LABEL[saved];
+    setTimeLabel(saved);
   }
 }
 

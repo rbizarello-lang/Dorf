@@ -2,12 +2,13 @@
 
 **Pergunta:** dá para criar um jogo parecido com Dorfromantik, com tema adaptável, pequenas mudanças de regra e visual próprio, que rode bem, fluido e bonito?
 
-**Resposta curta: sim.** Para não ficar só no papel, construímos um protótipo jogável nesta sessão. Ele tem regras completas, 5 temas trocáveis em tempo real, animações, som, suporte a toque e perfis de qualidade automáticos, e cabe em um único arquivo HTML de 640 KB (166 KB comprimido). O risco técnico é baixo. Os riscos reais estão em outro lugar: afinar o "prazer" do loop, dar identidade visual própria (por questões legais e de mercado) e o escopo de arte para vários temas.
+**Resposta curta: sim.** Para não ficar só no papel, construímos um protótipo jogável nesta sessão. Ele tem regras completas, animações, som, suporte a toque e perfis de qualidade automáticos. Na segunda rodada (v3, seção 13) ganhou **14 temas de países e épocas**, construções detalhadas, **interações entre tipos de borda**, trigo que ondula ao vento, barcos, trens, caravanas, animais e ciclo dia/noite. Tudo cabe em um único arquivo HTML de cerca de 700 KB. O risco técnico é baixo. Os riscos reais estão em outro lugar: afinar o "prazer" do loop, dar identidade visual própria (por questões legais e de mercado) e o escopo de arte para vários temas.
 
-![Tema Vale Pastel](screens/vale.png)
+![Toscana Renascentista](screens/toscana.png)
 
 Documentos relacionados:
 - [PESQUISA.md](PESQUISA.md): pesquisa de apoio com fontes (mecânicas do original, stacks, desempenho, mercado, jurídico, temas, esforço), feita por um agente Sonnet.
+- [TEMAS.md](TEMAS.md): pesquisa histórica dos 8 temas de países e épocas (também feita por um agente Sonnet).
 - [README.md](../README.md): como rodar, controles e arquitetura do protótipo.
 
 ---
@@ -19,7 +20,7 @@ Documentos relacionados:
 | Regras e loop | ✅ Viável | Implementadas em ~600 linhas de TypeScript puro (`src/core`), sem dependência de renderização, e conferidas em 3.000 partidas simuladas sem falha (Apêndice A). |
 | Visual bonito | ✅ Viável | Estilo "diorama" com peças procedurais, sombras suaves, tilt-shift, água animada, vento nas árvores e fumaça. Veja as telas na seção 4. |
 | Rodar bem | ✅ Viável, com medição pendente em GPU real | Uma partida típica (300 peças) usa 61 draw calls e 2,7 ms de CPU por quadro, de um orçamento de 16,7 ms. Com 2.500 peças: 102 draw calls e 6 ms. Detalhes na seção 5. |
-| Tema adaptável | ✅ Viável e barato | Um tema é um objeto de dados, com cerca de 50 linhas. Os 5 temas reaproveitam a mesma geometria e o mesmo código. |
+| Tema adaptável | ✅ Viável e barato | Um tema é um objeto de dados, com cerca de 70 linhas, que escolhe "kits" de forma e cor. Os 14 temas (do Egito Antigo a uma colônia em Marte) usam o mesmo código (seção 13). |
 | Pequenas adaptações de regra | ✅ Viável | Todas as constantes estão em `Rules`, e cada tema pode sobrescrevê-las (ex.: Marte começa com 36 peças e recebe mais missões). |
 | Jurídico | ⚠️ Cuidado | Regras de jogo não são protegidas, mas nome, arte, UI e "look and feel" podem ser. Seção 8. |
 | Mercado | ⚠️ Competitivo | O gênero é provado, mas movido a hits. Seção 9. |
@@ -167,7 +168,7 @@ Um tema é **dado, não código**: paleta de cada terreno, nomes, cores da inter
 }
 ```
 
-**Temas implementados:** Vale Pastel, Cerrado Dourado, Inverno Nórdico, Jardim Sakura e Colônia Marciana.
+**Temas implementados:** 14. Seis de base (Vale Pastel, Holanda Dourada, Cerrado Dourado, Inverno Nórdico, Jardim Sakura, Colônia Marciana) e oito históricos (Egito do Nilo, Jade Song, Terra dos Vikings, Toscana Renascentista, Andes Incas, Edo Tranquilo, Minas Colonial, Velho Oeste). Veja a seção 13.
 
 **Ideias com twist leve** (da pesquisa, [PESQUISA.md §7](PESQUISA.md)). Todos só recompensam, para manter o clima relaxante:
 
@@ -254,6 +255,68 @@ Custo aproximado (pesquisa, faixa larga): vertical slice de US$ 9 a 48 mil; jogo
 3. Escolher o tema-âncora (o Cerrado, por exemplo, é um diferencial de mercado) e o nome definitivo.
 4. Implementar bandeiras, desfazer e as 3 próximas peças, e depois peças especiais.
 5. Contratar ou definir a direção de arte do tema-âncora.
+
+---
+
+## 13. Evolução v3: temas por época, visual detalhado e interações
+
+**Pedido:** explorar temas de vários países e épocas, um visual mais detalhado e com animações, e interações entre os tipos de conexão, mantendo casa, rio, árvore, campo e plantação (com o trigo balançando ao vento).
+
+**O que mudou:**
+
+- **Temas como kits.** O tema passou a escolher kits de forma (12 árvores, 5 corpos de casa × 9 telhados, com janelas, portas, enxaimel e chaminé; 10 marcos; 15 plantações; 10 animais; 9 barcos; 5 estilos de estrada; 4 veículos) além de cores e nomes. Um agente Sonnet pesquisou e escreveu 8 temas históricos, com as fontes e os anacronismos assumidos em [TEMAS.md](TEMAS.md).
+- **Plantações de verdade.** Cada setor de plantação vira parcelas com fileiras de plantas. Um shader desloca as plantas em ondas de vento que atravessam o campo e deixam as pontas mais claras, como trigo balançando. Capim, juncos e flores seguem a mesma ideia.
+- **Interações entre tipos de borda** (regra nova, pura, em `src/core/synergy.ts`). Quando bordas comuns diferentes se encostam, o encontro deixa de ser desperdício:
+
+  | Encontro | Efeito |
+  |---|---|
+  | vila + floresta | +5 e serraria/carpintaria |
+  | vila + plantação | +5 e moinho de vento (ou celeiro, conforme o tema) |
+  | vila + prado | +5 e pasto com animais |
+  | plantação + prado | +5 e colmeias |
+
+  O encaixe continua valendo mais (+10), e o perfeito continua exigindo tudo igual. A interação cria uma segunda camada de decisão ("encosto a vila no trigal para ganhar o moinho?"). A prévia mostra as bordas em dourado e a construção antes de colocar. Dentro da própria peça surgem construções sem pontos: roda d'água (vila na beira do rio), irrigação (plantação ao lado do rio fica mais verde e alta), estação e silo junto da ferrovia.
+- **Mundo vivo.** Barcos percorrem a rede de rios, trens, carroças e caravanas seguem estradas e trilhos (fazendo meia-volta nas estações), pás de moinho e rodas d'água giram, animais pastam andando e parando, bandos de pássaros circulam e sombras de nuvens atravessam o mapa.
+- **Dia, entardecer e noite**, com transição suave. À noite as janelas acendem.
+
+| Egito do Nilo | Holanda Dourada |
+|---|---|
+| ![](screens/egito.png) | ![](screens/holanda.png) |
+| **Minas Colonial** | **Terra dos Vikings** |
+| ![](screens/colonial.png) | ![](screens/viking.png) |
+| **Velho Oeste** | **Jade Song** |
+| ![](screens/oeste.png) | ![](screens/song.png) |
+| **Trigo, lavanda e girassóis de perto** | **Prévia de interações (bordas douradas e moinho)** |
+| ![](screens/trigo.png) | ![](screens/interacoes.png) |
+| **Noite na Holanda** | **Entardecer na Toscana** |
+| ![](screens/noite.png) | ![](screens/tarde.png) |
+
+Menu de temas agrupado por época e ajuda com a legenda das interações:
+
+| | |
+|---|---|
+| ![](screens/menu-temas.png) | ![](screens/ajuda.png) |
+
+### Custo do visual novo
+
+O detalhe tem preço. A primeira medição da v3 mostrou **3,1 M de triângulos por quadro com 300 peças**, cinco vezes a v1, porque a lavanda sozinha somava 800 mil. Depois de medir o custo por kit (`window.__pools()`), aplicamos:
+
+1. geometrias mais leves para lavanda, chá, trigo e girassol, e janelas como planos em vez de caixas;
+2. **nível de detalhe por distância:** metade das plantas e do capim fica num segundo grupo, que some quando a câmera se afasta, justamente quando elas ficam minúsculas;
+3. a terra das parcelas "puxa" a cor da cultura, então de longe o campo continua dourado, verde ou listrado de tulipas mesmo com menos plantas;
+4. plantas e capim não projetam sombra.
+
+| Peças (qualidade alta) | v1: draw calls | v1: triângulos | v3: draw calls | v3: triângulos | v3: CPU por quadro |
+|---|---|---|---|---|---|
+| 300 | 61 | 0,62 M | 85 | 1,37 M | 4,0 ms |
+| 1.000 | 86 | 2,17 M | 123 | 4,55 M | 7,2 ms |
+| 2.500 (baixa) | 90 | 2,93 M | 114 | 5,58 M | 6,6 ms |
+
+Medido em renderização por software, como na seção 5. **Leitura:** uma partida típica ficou com cerca do dobro da v1, o que ainda cabe folgado em GPU de desktop. No celular, o modo Auto começa em Média, com metade das plantas e sem sombras. Para mapas muito grandes, o próximo passo é o culling por região da decoração (seção 5, item 1), que ficou mais importante na v3.
+
+### O que falta para os temas ficarem mais fiéis
+
+Na lista priorizada do [TEMAS.md](TEMAS.md), burro/mula e búfalo já entraram (Minas Colonial e Song). Os próximos são ponte em arco sobre rios, torre d'água e moinho-bomba para o Oeste, portais (torii, paifang, portal inca), templos por cultura (pilone egípcio, trapezoidal inca), armazém sobre estacas e as culturas de batata, linho e amoreira.
 
 ---
 
