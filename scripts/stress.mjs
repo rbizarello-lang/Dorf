@@ -3,12 +3,16 @@
 import { chromium } from 'playwright-core';
 
 const base = process.argv[2] ?? 'http://127.0.0.1:4173/';
-const runs = [
+const all = [
   { n: 300, quality: 'high' },
   { n: 1000, quality: 'high' },
   { n: 2500, quality: 'high' },
   { n: 2500, quality: 'low' },
 ];
+// RUNS=1000:high,2500:low roda só esses casos. Rode sem outros navegadores abertos:
+// o render por software divide a CPU e distorce a medida de CPU por quadro.
+const only = (process.env.RUNS ?? '').split(',').filter(Boolean);
+const runs = only.length ? all.filter((r) => only.includes(`${r.n}:${r.quality}`)) : all;
 const browser = await chromium.launch({
   executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
   args: ['--ignore-certificate-errors', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],

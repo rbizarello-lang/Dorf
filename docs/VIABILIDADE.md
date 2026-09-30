@@ -18,7 +18,7 @@ Documentos relacionados:
 |---|---|---|
 | Regras e loop | ✅ Viável | Implementadas em ~600 linhas de TypeScript puro (`src/core`), sem dependência de renderização, e conferidas em 3.000 partidas simuladas sem falha (Apêndice A). |
 | Visual bonito | ✅ Viável | Estilo "diorama" com peças procedurais, sombras suaves, tilt-shift, água animada, vento nas árvores e fumaça. Veja as telas na seção 4. |
-| Rodar bem | ✅ Viável, com medição pendente em GPU real | Uma partida típica (300 peças) fica em cerca de 57 draw calls. Com 2.500 peças, 107 draw calls. Detalhes na seção 5. |
+| Rodar bem | ✅ Viável, com medição pendente em GPU real | Uma partida típica (300 peças) usa 61 draw calls e 2,7 ms de CPU por quadro, de um orçamento de 16,7 ms. Com 2.500 peças: 102 draw calls e 6 ms. Detalhes na seção 5. |
 | Tema adaptável | ✅ Viável e barato | Um tema é um objeto de dados, com cerca de 50 linhas. Os 5 temas reaproveitam a mesma geometria e o mesmo código. |
 | Pequenas adaptações de regra | ✅ Viável | Todas as constantes estão em `Rules`, e cada tema pode sobrescrevê-las (ex.: Marte começa com 36 peças e recebe mais missões). |
 | Jurídico | ⚠️ Cuidado | Regras de jogo não são protegidas, mas nome, arte, UI e "look and feel" podem ser. Seção 8. |
@@ -112,17 +112,18 @@ Close com zoom máximo:
 
 Teste de carga (`scripts/stress.mjs`): a IA gulosa coloca N peças; depois medimos a cena em 1280×800. As medições foram feitas no **Chromium headless com renderização por software (SwiftShader)**, porque o ambiente não tem GPU. Por isso **o FPS absoluto dessas medições não vale** (fica entre 0 e 5 FPS em software). O que vale são o volume de trabalho enviado à GPU e o custo de CPU.
 
-| Peças | Qualidade | Draw calls | Triângulos/quadro¹ | Instâncias | Montagem inicial | Heap JS |
-|---|---|---|---|---|---|---|
-| 301 | Alta | 57 | 0,63 M | 8,9 mil | 109 ms | 22 MB |
-| 1.001 | Alta | 85 | 2,15 M | 31 mil | 264 ms | 44 MB |
-| 2.501 | Alta | 107 | 5,25 M | 77 mil | 628 ms | 96 MB |
-| 2.501 | Baixa | 95 | 2,90 M | 77 mil | 593 ms | 102 MB |
+| Peças | Qualidade | Draw calls | Triângulos/quadro¹ | Instâncias | CPU por quadro² | Montagem inicial | Heap JS |
+|---|---|---|---|---|---|---|---|
+| 301 | Alta | 61 | 0,62 M | 8,8 mil | 2,7 ms | 116 ms | 26 MB |
+| 1.001 | Alta | 86 | 2,17 M | 31 mil | 3,7 ms | 297 ms | 38 MB |
+| 2.501 | Alta | 102 | 5,26 M | 78 mil | 6,0 ms | 811 ms | 89 MB |
+| 2.501 | Baixa | 90 | 2,93 M | 78 mil | 1,9 ms | 649 ms | 90 MB |
 
 ¹ Inclui o passe de sombra. Uma partida normal tem de 150 a 600 peças.
+² Tempo da thread principal por quadro (JavaScript + envio de comandos ao WebGL). O orçamento a 60 FPS é 16,7 ms. Com GPU de verdade esse número tende a cair, porque parte do trabalho de software sai da CPU.
 
 **Como ler:**
-- **Draw calls ficam baixas em qualquer tamanho** (57 a 107). A meta citada para mobile é ~100 e, para desktop, algumas centenas. O chão é agrupado em blocos de 8×8 peças que só recebem vértices novos, e cada tipo de objeto é um único InstancedMesh.
+- **Draw calls ficam baixas em qualquer tamanho** (61 a 102). A meta citada para mobile é ~100 e, para desktop, algumas centenas. O chão é agrupado em blocos de 8×8 peças que só recebem vértices novos, e cada tipo de objeto é um único InstancedMesh.
 - **Colocar uma peça é barato**: gerar a geometria leva ~0,3 ms, e as regras (validação, pontuação, grupos, missões) levam 0,14 ms com 300 peças e 1,4 ms com 2.500 (média medida em Node). Não há engasgo ao jogar.
 - **Triângulos crescem com o tamanho do mapa** porque a decoração ainda não tem culling por bloco nem LOD. Numa partida típica (0,6 a 1,3 M triângulos com sombra) isso cabe folgado em GPU integrada de desktop. No celular, o perfil Média/Baixa corta sombras e pós-processamento.
 
@@ -134,11 +135,11 @@ Teste de carga (`scripts/stress.mjs`): a IA gulosa coloca N peças; depois medim
 | Peças confortáveis | 1.000+ | 300 a 600 |
 | Maior risco | fill-rate em telas 4K com DPR 2 | fill-rate e aquecimento em sessões longas |
 
-**Para validar de verdade:** abra `?stress=1000&debug` no seu computador e no seu celular e anote o FPS. Leva 2 minutos e fecha a questão para o hardware que importa.
+**Para validar de verdade:** rode `npm run dev` e abra `http://localhost:5173/?stress=1000&debug` no computador e no celular (na mesma rede, com `npm run dev -- --host`), e anote o FPS. Durante uma partida normal, a tecla `F` mostra as mesmas estatísticas. Leva poucos minutos e fecha a questão para o hardware que importa.
 
 ### Otimizações ainda não feitas (folga disponível)
 
-1. **Culling e LOD da decoração**: dividir os InstancedMesh por super-blocos (16×16) e trocar árvores distantes por versões de 1/4 dos polígonos. Reduz 50 a 75% dos triângulos em mapas grandes.
+1. **Culling e LOD da decoração**: dividir os InstancedMesh por super-blocos (16×16) e trocar árvores distantes por versões de 1/4 dos polígonos. Estimativa: 50 a 75% menos triângulos em mapas grandes.
 2. **Sombra em cache**: redesenhar o mapa de sombra só quando a câmera se move ou uma peça cai.
 3. **Renderizar sob demanda**: em repouso, cair para 30 FPS ou menos (economiza bateria).
 4. **Árvores mais leves**: a árvore redonda tem 80 triângulos e a cerejeira, 240. Dá para chegar a 30–60 sem perda visível de qualidade nessa escala.
