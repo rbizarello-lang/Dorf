@@ -26,7 +26,7 @@ for (const r of runs) {
   await page.waitForFunction(() => window.__load && window.__stats, null, { timeout: 120000 });
   await page.waitForTimeout(6000);
   const { load, stats, heap } = await page.evaluate(() => ({ load: window.__load, stats: window.__stats, heap: performance.memory?.usedJSHeapSize ?? 0 }));
-  if (r.n === 2500 && r.quality === 'high') await page.screenshot({ path: 'docs/screens/stress.png' });
+  if (r.n === 2500 && r.quality === 'high') await page.screenshot({ path: 'docs/screens/stress.png', timeout: 120000 }).catch(() => {});
   console.log(
     [load.tiles, r.quality, load.logic.toFixed(0), load.bake.toFixed(0), stats.calls, Math.round(stats.triangles / 1000) + ' mil', stats.instances, stats.cpu.toFixed(2), (heap / 1e6).toFixed(0)].join(' | '),
     errors.length ? `ERROS: ${errors.join(' ; ')}` : '',

@@ -1,7 +1,7 @@
 import type { Quest } from '../core/board';
 import { corner } from '../core/hex';
 import type { TileDef } from '../core/tiles';
-import { THEMES, type Theme } from '../themes/themes';
+import { PERIOD_LABEL, PERIOD_ORDER, THEMES, type Theme } from '../themes/themes';
 
 const $ = <E extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as E;
 
@@ -184,16 +184,19 @@ export class Hud {
   }
 
   openThemeMenu(current: Theme, onPick: (t: Theme) => void) {
-    this.themeMenu.innerHTML = THEMES.map(
-      (t) => `<button class="theme-opt" type="button" data-id="${t.id}" aria-current="${t.id === current.id}">
+    const opt = (t: Theme) => `<button class="theme-opt" type="button" data-id="${t.id}" aria-current="${t.id === current.id}" title="${esc(t.tagline)}">
         <span class="swatch">${t.terrainColors.slice(0, 5).map((c) => `<i style="background:${c}"></i>`).join('')}</span>
         <strong>${esc(t.name)}</strong>
-        <span>${esc(t.tagline)}</span>
-        ${t.ruleNote ? `<em>${esc(t.ruleNote)}</em>` : '<em>Regras padrão.</em>'}
-      </button>`,
-    ).join('');
+        <span>${esc(t.era)}</span>
+        ${t.ruleNote ? `<em>${esc(t.ruleNote)}</em>` : ''}
+      </button>`;
+    this.themeMenu.innerHTML = PERIOD_ORDER.map((p) => {
+      const list = THEMES.filter((t) => t.period === p);
+      return list.length ? `<h3>${PERIOD_LABEL[p]}</h3>${list.map(opt).join('')}` : '';
+    }).join('');
     this.themeMenu.hidden = false;
     this.themeBtn.setAttribute('aria-expanded', 'true');
+    this.themeMenu.querySelector<HTMLElement>('[aria-current="true"]')?.scrollIntoView({ block: 'nearest' });
     this.themeMenu.querySelectorAll<HTMLButtonElement>('.theme-opt').forEach((b) =>
       b.addEventListener('click', () => {
         this.closeThemeMenu();

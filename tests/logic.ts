@@ -182,12 +182,21 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     // Estado prévio para o oráyculo de pontuação
     const closedBefore = new Set(b.list.filter((t) => oracleClosed(b, t)).map((t) => t.index));
     // vizinhos/encaixes pelo oráculo
-    let nbs = 0, mt = 0;
+    let nbs = 0, mt = 0, syn = 0;
+    // Interações (oráculo próprio): bordas comuns diferentes que formam um dos 4 pares.
+    const SYN_PAIRS = [
+      [T.Village, T.Forest],
+      [T.Village, T.Field],
+      [T.Village, T.Grass],
+      [T.Field, T.Grass],
+    ];
     for (let i = 0; i < 6; i++) {
       const n = b.get(m.q + DIRS[i][0], m.r + DIRS[i][1]);
       if (!n) continue;
       nbs++;
-      if (n.edges[(i + 3) % 6] === edges[i]) mt++;
+      const a = edges[i], c = n.edges[(i + 3) % 6];
+      if (c === a) mt++;
+      else if (SYN_PAIRS.some(([x, y]) => (a === x && c === y) || (a === y && c === x))) syn++;
     }
     const prevQuestStates = b.quests.map((q) => q.state);
     const listBefore = b.list.length;
@@ -205,7 +214,8 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     assert(b.tiles.size === b.list.length, `seed ${seed}: tiles.size != list.length`);
 
     // --- pontuação esperada
-    let pts = mt * rules.matchPoints;
+    let pts = mt * rules.matchPoints + syn * rules.synergyPoints;
+    assert(res.synergies.length === syn, `seed ${seed}: interações ${res.synergies.length} != oráculo ${syn}`);
     const perfect = nbs >= 2 && mt === nbs;
     if (perfect) pts += rules.perfectBonus;
     assert(res.perfect === perfect, `seed ${seed}: perfect diverge`);

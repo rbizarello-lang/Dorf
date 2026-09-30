@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { Sfx } from './audio';
 import { DEFAULT_RULES, type PlaceResult, type Rules } from './core/board';
 import { Game } from './core/game';
-import { hexToWorld, hkey, worldToHex } from './core/hex';
-import type { Quality } from './render/world';
+import { DIRS, hexToWorld, hkey, worldToHex } from './core/hex';
+import type { Quality, TimeOfDay } from './render/world';
 import { World } from './render/world';
 import { themeById, type Theme } from './themes/themes';
 import { Hud, questLabel } from './ui/hud';
@@ -13,15 +13,15 @@ import './ui/style.css';
 
 type QualityMode = 'auto' | Quality;
 type MoveRec = [number, number, number];
-/** v2: sequência de peças por índice. Guarda a pontuação para conferir o replay. */
+/** v3: sequência de peças por índice e pontos de interação. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 2;
+  v: 3;
   seed: number;
   rulesId: string;
   moves: MoveRec[];
   score: number;
 }
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -211,7 +211,7 @@ function updateGhost() {
     return;
   }
   const check = game.check(hover.q, hover.r)!;
-  world.setGhost(game.current, rotSteps * (Math.PI / 3), hover.q, hover.r, check);
+  world.setGhost(game.current, game.rot, rotSteps * (Math.PI / 3), hover.q, hover.r, check);
 }
 
 function rotate(dir: 1 | -1) {
@@ -275,6 +275,17 @@ function announce(res: PlaceResult) {
     world.burst(x, z, 'sparkle', 26);
     hud.floater(s.x, s.y - 46, 'Perfeito!', 'big');
   }
+  // Interações: um aviso por borda, perto dela.
+  res.synergies.forEach((h, k) => {
+    const [dq, dr] = DIRS[h.edge];
+    const a = hexToWorld(res.placed.q, res.placed.r);
+    const b = hexToWorld(res.placed.q + dq, res.placed.r + dr);
+    const p = world.project((a.x + b.x) / 2, 0.35, (a.z + b.z) / 2);
+    setTimeout(() => {
+      hud.floater(p.x, p.y, `${theme.synergy[h.kind]} +${game.rules.synergyPoints}`, 'syn');
+      sfx.note(7 + k * 2, 0, 0.5, 0.08);
+    }, 250 + k * 160);
+  });
   for (const t of res.closed) {
     const p = screenOf(t.q, t.r);
     hud.floater(p.x, p.y - 20, '+1 peça', 'tiles');
@@ -308,10 +319,21 @@ function showHelp() {
       <li><b>Encaixe perfeito</b>: a peça encosta em 2 ou mais vizinhas e todas as bordas combinam (+${game.rules.perfectBonus}).</li>
       <li>Cercar uma peça com 6 vizinhas encaixadas rende <b>+1 peça</b>.</li>
       <li><b>Missões</b> pedem grupos de certo tamanho e dão peças extras. "Exatamente N" falha se passar.</li>
+      <li><b>Interações</b>: bordas diferentes que se encostam também contam (+${game.rules.synergyPoints}) e erguem construções. A borda acende em dourado.</li>
+    </ul>
+    <div class="synergies">${synergyLegend()}</div>
+    <ul>
       <li>A partida acaba quando a pilha esvazia.</li>
     </ul>
     <p class="muted">Mouse: clique coloca, botão direito ou <kbd>R</kbd> gira a peça, arrastar move, roda dá zoom, <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera. Toque: toque num espaço para ver a peça, toque de novo (ou ✓) para colocar.</p>
     <div class="row"><button class="primary" type="button" data-act="close">Jogar</button></div>`);
+}
+
+function synergyLegend() {
+  const T4 = theme.terrainNames;
+  const C = theme.terrainColors;
+  const row = (a: number, b: number, name: string) => `<span><i style="background:${C[a]}"></i><i style="background:${C[b]}"></i>${T4[a]} + ${T4[b]} = <b>${name}</b></span>`;
+  return [row(3, 1, theme.synergy.lumber), row(3, 2, theme.synergy.mill), row(3, 0, theme.synergy.pasture), row(2, 0, theme.synergy.apiary)].join('');
 }
 
 function showGameOver() {
@@ -325,7 +347,7 @@ function showGameOver() {
       <div><b>${game.placedCount}</b><span>peças</span></div>
       <div><b>${b.questsCompleted}</b><span>missões</span></div>
     </div>
-    <p class="muted">${b.perfects} encaixes perfeitos. Recorde: ${best.toLocaleString('pt-BR')}.</p>
+    <p class="muted">${b.perfects} encaixes perfeitos, ${Object.values(b.synergyCount).reduce((a, c) => a + c, 0)} interações. Recorde: ${best.toLocaleString('pt-BR')}.</p>
     <div class="row">
       <button class="primary" type="button" data-act="new">Jogar de novo</button>
       <button class="secondary" type="button" data-act="theme">Trocar tema</button>
@@ -520,6 +542,7 @@ window.addEventListener('keydown', (e) => {
     rotate(e.shiftKey ? -1 : 1);
   } else if (k === 't') rotate(-1);
   else if (k === 'f') hud.stats.hidden = !hud.stats.hidden;
+  else if (k === 'l') cycleTime();
   else if (k === 'h' || k === '?') showHelp();
   else if (k === 'n') requestNewGame();
   else if (k === '+' || k === '=') world.rig.zoom(0.85);
@@ -568,6 +591,24 @@ qualityBtn.addEventListener('click', () => {
   store.set('quality', next);
   hud.toast(`Qualidade: ${qualityLabel[next]}`);
 });
+const TIME_LABEL: Record<TimeOfDay, string> = { day: 'Dia', dusk: 'Tarde', night: 'Noite' };
+const timeBtn = document.getElementById('btn-time')!;
+function cycleTime() {
+  const order: TimeOfDay[] = ['day', 'dusk', 'night'];
+  const next = order[(order.indexOf(world.timeOfDay) + 1) % 3];
+  world.setTimeOfDay(next);
+  timeBtn.textContent = TIME_LABEL[next];
+  store.set('time', next);
+}
+timeBtn.addEventListener('click', cycleTime);
+{
+  const saved = (params.get('time') ?? store.get('time')) as TimeOfDay | null;
+  if (saved && saved in TIME_LABEL) {
+    world.setTimeOfDay(saved);
+    timeBtn.textContent = TIME_LABEL[saved];
+  }
+}
+
 const soundBtn = document.getElementById('btn-sound')!;
 soundBtn.addEventListener('click', () => {
   sfx.enabled = !sfx.enabled;
@@ -709,6 +750,8 @@ function start(data: unknown) {
     (window as unknown as { __load: unknown }).__load = r;
   } else if (params.has('auto')) autoPlace(Number(params.get('auto')) || 40, false);
   if (params.has('debug')) hud.stats.hidden = false;
+  (window as unknown as { __pools: () => unknown }).__pools = () => world.poolReport();
+  if (params.has('gallery')) (window as unknown as { __gallery: string[] }).__gallery = world.showGallery();
   if (params.has('yaw')) world.rig.yaw = world.rig.goalYaw = Number(params.get('yaw'));
   if (params.has('zoom')) world.rig.dist = world.rig.goalDist = Number(params.get('zoom'));
   if (!special && !store.get('seenHelp') && !(resumed && moves.length)) showHelp();
@@ -727,6 +770,28 @@ function start(data: unknown) {
   updateGhost();
   const { x, z } = hexToWorld(m.q, m.r);
   world.rig.goal.set(x, 0, z);
+};
+
+// Idem, escolhendo a jogada com mais interações (para ver as construções).
+(window as unknown as { __ghostSynergy: () => number }).__ghostSynergy = () => {
+  let best: { q: number; r: number; rot: number; n: number } | null = null;
+  for (const k of game.board.frontier) {
+    const [q, r] = [(k >> 13) - 4096, (k & 8191) - 4096];
+    for (let rot = 0; rot < 6; rot++) {
+      game.rot = rot;
+      const c = game.check(q, r)!;
+      if (c.valid && (!best || c.synergies.length > best.n)) best = { q, r, rot, n: c.synergies.length };
+    }
+  }
+  game.rot = 0;
+  rotSteps = 0;
+  if (!best) return 0;
+  hover = { q: best.q, r: best.r };
+  while (game.rot !== best.rot) rotate(1);
+  updateGhost();
+  const { x, z } = hexToWorld(best.q, best.r);
+  world.rig.goal.set(x, 0, z);
+  return best.n;
 };
 
 const hot = (window as unknown as { claude?: { hot?: Hot } }).claude?.hot;

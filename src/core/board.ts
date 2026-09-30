@@ -1,4 +1,5 @@
 import { DIRS, hkey, opposite } from './hex';
+import { type SynHit, type SynKind, synergyOf } from './synergy';
 import { T, isStrict, rotateEdges, type TileDef } from './tiles';
 
 export interface Rules {
@@ -10,6 +11,8 @@ export interface Rules {
   closedTiles: number;
   questChance: number;
   maxQuests: number;
+  /** Pontos por borda de interação (bordas diferentes que "conversam"). */
+  synergyPoints: number;
 }
 
 export const DEFAULT_RULES: Rules = {
@@ -20,6 +23,7 @@ export const DEFAULT_RULES: Rules = {
   closedTiles: 1,
   questChance: 0.24,
   maxQuests: 4,
+  synergyPoints: 5,
 };
 
 export interface Placed {
@@ -32,6 +36,8 @@ export interface Placed {
   edges: T[];
   index: number;
   closed: boolean;
+  /** Interações criadas quando a peça foi colocada (construções nas bordas). */
+  synergies: SynHit[];
 }
 
 export interface Quest {
@@ -51,8 +57,9 @@ export interface Check {
   occupied: boolean;
   neighbors: number;
   matches: number;
-  /** Por borda: 0 sem vizinho, 1 encaixa, 2 não encaixa, 3 conflito (rio/trilho). */
+  /** Por borda: 0 sem vizinho, 1 encaixa, 2 não encaixa, 3 conflito (rio/trilho), 4 interação. */
   edgeState: number[];
+  synergies: SynHit[];
 }
 
 export interface PlaceResult {
@@ -62,6 +69,7 @@ export interface PlaceResult {
   neighbors: number;
   perfect: boolean;
   closed: Placed[];
+  synergies: SynHit[];
   tilesGained: number;
   questsDone: Quest[];
   questsFailed: Quest[];
@@ -76,6 +84,7 @@ export class Board {
   score = 0;
   perfects = 0;
   questsCompleted = 0;
+  readonly synergyCount: Record<SynKind, number> = { lumber: 0, mill: 0, pasture: 0, apiary: 0 };
   private questSeq = 0;
   // Union-find sobre (peça, setor): refeito a cada jogada, O(n).
   private parent = new Int32Array(0);
@@ -97,6 +106,7 @@ export class Board {
     let neighbors = 0;
     let matches = 0;
     let conflict = false;
+    const synergies: SynHit[] = [];
     for (let i = 0; i < 6; i++) {
       const n = this.get(q + DIRS[i][0], r + DIRS[i][1]);
       if (!n) continue;
@@ -109,15 +119,19 @@ export class Board {
       } else if (isStrict(a) || isStrict(b)) {
         edgeState[i] = 3;
         conflict = true;
-      } else edgeState[i] = 2;
+      } else {
+        const kind = synergyOf(a, b);
+        edgeState[i] = kind ? 4 : 2;
+        if (kind) synergies.push({ edge: i, kind });
+      }
     }
-    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState };
+    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, synergies };
   }
 
   /** Coloca sem pontuar (peça inicial, reconstrução de estado). */
   placeRaw(q: number, r: number, def: TileDef, rot: number): Placed {
     const key = hkey(q, r);
-    const p: Placed = { q, r, key, def, rot, edges: rotateEdges(def.edges, rot), index: this.list.length, closed: false };
+    const p: Placed = { q, r, key, def, rot, edges: rotateEdges(def.edges, rot), index: this.list.length, closed: false, synergies: [] };
     this.tiles.set(key, p);
     this.list.push(p);
     this.frontier.delete(key);
@@ -139,6 +153,9 @@ export class Board {
       points += R.perfectBonus;
       this.perfects++;
     }
+    placed.synergies = c.synergies;
+    points += c.synergies.length * R.synergyPoints;
+    for (const h of c.synergies) this.synergyCount[h.kind]++;
 
     // Peças que acabaram de ficar cercadas por 6 vizinhos encaixados.
     const closed: Placed[] = [];
@@ -193,7 +210,7 @@ export class Board {
     }
 
     this.score += points;
-    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, tilesGained, questsDone, questsFailed, newQuest };
+    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest };
   }
 
   private isClosedPerfect(t: Placed) {
