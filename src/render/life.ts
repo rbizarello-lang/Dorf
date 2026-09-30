@@ -139,6 +139,8 @@ export class Life {
   private flocks: Flock[] = [];
   private board: Board | null = null;
   private theme!: Theme;
+  /** Cor dos animais de carroça/caravana (as partes de locomotiva ignoram a tinta). */
+  private beast = new THREE.Color(1, 1, 1);
   private time = 0;
 
   constructor(
@@ -156,6 +158,7 @@ export class Life {
     this.movers = [];
     this.flocks = [];
     this.theme = theme;
+    this.beast.set(theme.animals.colors[0]);
   }
 
   private pool(key: string, shadows = true) {
@@ -219,10 +222,14 @@ export class Life {
     const tile = net[Math.floor(Math.random() * net.length)];
     const exits = strictEdges(tile, terr);
     const b = exits[Math.floor(Math.random() * exits.length)];
+    // Peça com 2+ bordas: nasce sobre o traçado (borda→borda). Nascer no centro deixaria o
+    // mover fora da curva e, se `b` fosse uma borda aberta, preso indo e voltando.
+    const others = exits.filter((e) => e !== b);
+    const a = others.length ? others[Math.floor(Math.random() * others.length)] : -1;
     const th = this.theme;
     const speed = boat ? 0.16 + Math.random() * 0.06 : th.vehicle === 'maglev' ? 0.7 : th.vehicle === 'steam' ? 0.42 : 0.17;
     const { x, z } = hexToWorld(tile.q, tile.r);
-    const m: Mover = { boat, tile, a: -1, b, t: Math.random() * 0.5, len: 0.87, speed, wait: 0, trail: [], x, z, heading: 0 };
+    const m: Mover = { boat, tile, a, b, t: Math.random() * 0.5, len: a < 0 ? 0.87 : Math.abs(a - b) === 3 ? 1.73 : 1.45, speed, wait: 0, trail: [], x, z, heading: 0 };
     this.movers.push(m);
   }
 
@@ -365,14 +372,14 @@ export class Life {
       const bounce = th.vehicle === 'caravan' ? Math.abs(Math.sin(this.time * 7)) * 0.004 : 0;
       q4.setFromAxisAngle(UP, -m.heading);
       m4.compose(v3.set(m.x, roadY + bounce, m.z), q4, s3.setScalar(1));
-      head?.set(hi++, m4);
+      head?.set(hi++, m4, this.beast);
       for (let k = 1; k <= cars; k++) {
         const p = trailAt(m.trail, spacing * k);
         if (!p) break;
         q4.setFromAxisAngle(UP, -p.heading);
         const b2 = th.vehicle === 'caravan' ? Math.abs(Math.sin(this.time * 7 + k)) * 0.004 : 0;
         m4.compose(v3.set(p.x, roadY + b2, p.z), q4, s3.setScalar(1));
-        car?.set(ci++, m4);
+        car?.set(ci++, m4, this.beast);
       }
     }
     boats?.commit(bi);

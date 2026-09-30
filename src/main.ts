@@ -79,7 +79,9 @@ let moves: MoveRec[] = [];
 let rotSteps = 0;
 let hover: { q: number; r: number } | null = null;
 let best = Number(store.get('best')) || 0;
-let qualityMode: QualityMode = (params.get('quality') as QualityMode) || (store.get('quality') as QualityMode) || 'auto';
+const QUALITIES: QualityMode[] = ['auto', 'high', 'medium', 'low'];
+const pickQ = (v: string | null) => (v && (QUALITIES as string[]).includes(v) ? (v as QualityMode) : null);
+let qualityMode: QualityMode = pickQ(params.get('quality')) ?? pickQ(store.get('quality')) ?? 'auto';
 let gameOverShown = false;
 let overTimer = 0;
 let bestAtStart = 0;
@@ -94,8 +96,11 @@ const rulesFor = (t: Theme): Rules => ({ ...DEFAULT_RULES, ...t.rules });
  * na tela) se o replay não reproduz a partida salva, por exemplo depois de uma
  * atualização do gerador de peças.
  */
+const synTimers: number[] = [];
+
 function newGame(seed = 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number): boolean {
   clearTimeout(overTimer);
+  for (const t of synTimers.splice(0)) clearTimeout(t);
   game = new Game(seed, rulesFor(rulesTheme));
   moves = [];
   for (const [q, r, rot] of replay) {
@@ -141,12 +146,16 @@ function validSave(raw: unknown): Save | null {
 
 function readSave(): Save | null {
   let save: Save | null = null;
+  let old = false;
   try {
-    save = validSave(JSON.parse(store.get('save') ?? 'null'));
+    const raw = JSON.parse(store.get('save') ?? 'null') as { v?: unknown } | null;
+    save = validSave(raw);
+    old = !save && typeof raw?.v === 'number' && raw.v < SAVE_VERSION;
   } catch {
     /* save ilegível */
   }
   if (!save) store.set('save', null);
+  if (old) hud.toast('A partida salva vem de uma versão anterior do jogo e foi descartada.');
   return save;
 }
 
@@ -281,10 +290,10 @@ function announce(res: PlaceResult) {
     const a = hexToWorld(res.placed.q, res.placed.r);
     const b = hexToWorld(res.placed.q + dq, res.placed.r + dr);
     const p = world.project((a.x + b.x) / 2, 0.35, (a.z + b.z) / 2);
-    setTimeout(() => {
+    synTimers.push(window.setTimeout(() => {
       hud.floater(p.x, p.y, `${theme.synergy[h.kind]} +${game.rules.synergyPoints}`, 'syn');
       sfx.note(7 + k * 2, 0, 0.5, 0.08);
-    }, 250 + k * 160);
+    }, 250 + k * 160));
   });
   for (const t of res.closed) {
     const p = screenOf(t.q, t.r);
@@ -608,7 +617,7 @@ function cycleTime() {
 timeBtn.addEventListener('click', cycleTime);
 {
   const saved = (params.get('time') ?? store.get('time')) as TimeOfDay | null;
-  if (saved && saved in TIME_LABEL) {
+  if (saved && Object.hasOwn(TIME_LABEL, saved)) {
     world.setTimeOfDay(saved);
     setTimeLabel(saved);
   }
@@ -779,6 +788,7 @@ function start(data: unknown) {
 
 // Idem, escolhendo a jogada com mais interações (para ver as construções).
 (window as unknown as { __ghostSynergy: () => number }).__ghostSynergy = () => {
+  if (!game.current) return 0;
   let best: { q: number; r: number; rot: number; n: number } | null = null;
   for (const k of game.board.frontier) {
     const [q, r] = [(k >> 13) - 4096, (k & 8191) - 4096];

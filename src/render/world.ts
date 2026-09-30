@@ -902,7 +902,10 @@ export class World {
   /** Custo por kit: instâncias e triângulos (para achar o que pesa). */
   poolReport() {
     return [...this.pools.entries()]
-      .map(([k, p]) => ({ k, n: p.count, tris: (p.count * (this.lib.geo(k)?.attributes.position.count ?? 0)) / 3, shadow: p.mesh.castShadow }))
+      .map(([k, p]) => {
+        const base = k.endsWith('~') ? k.slice(0, -1) : k;
+        return { k, n: p.count, tris: (p.count * (this.lib.geo(base)?.attributes.position.count ?? 0)) / 3, shadow: p.mesh.castShadow };
+      })
       .sort((a, b) => b.tris - a.tris);
   }
 
@@ -1069,10 +1072,13 @@ export class World {
     r.autoClear = false;
     r.clearDepth();
     // A pilha usa sempre luz de dia, para a peça da vez ficar legível.
-    const night = this.lib.uniforms.uNight.value;
-    this.lib.uniforms.uNight.value = 0;
+    const u = this.lib.uniforms;
+    const night = u.uNight.value, clouds = u.uClouds.value;
+    u.uNight.value = 0;
+    u.uClouds.value = 0;
     r.render(this.previewScene, this.previewCam);
-    this.lib.uniforms.uNight.value = night;
+    u.uNight.value = night;
+    u.uClouds.value = clouds;
     r.autoClear = auto;
     r.setScissorTest(false);
     r.setViewport(0, 0, this.size.x, this.size.y);

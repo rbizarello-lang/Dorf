@@ -423,7 +423,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       for (let a = 0; a < 3; a++) D('animal', x + (rng() - 0.5) * 0.1, 0, z + (rng() - 0.5) * 0.1, rng() * 6, randRange(rng, 0.9, 1.15), vary(rng, tc(pick(rng, theme.animals.colors)), 0.05), 'wander');
     } else if (s.kind === 'mill') {
       const sc = theme.mill === 'windmill' ? 1.1 : 1.2;
-      const face = yawTo(-mx, -mz); // pás voltadas para o centro da peça
+      const face = Math.atan2(-mx, -mz); // +z local (porta e pás) voltado para o centro da peça
       D('mill', x, 0, z, face, sc, WHITE);
       if (theme.mill === 'windmill') {
         // Cubo das pás: à frente do capuz, na direção +z local do moinho.
@@ -558,7 +558,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         for (let t = -rad + ((row % 2) * step) / 2; t <= rad; t += step) {
           const x = cx + ux * t - uz * o + (rng() - 0.5) * step * 0.25;
           const z = cz + uz * t + ux * o + (rng() - 0.5) * step * 0.25;
-          if (!insidePoly(x, z, inner)) continue;
+          if (!insidePoly(x, z, inner) || !free(x, z, 0)) continue; // não planta dentro de construções
           const s = randRange(rng, L.scale[0], L.scale[1]) * (isLush ? 1.12 : 1);
           let c = rowCol ?? (rng() < 0.7 ? base : tc(pick(rng, crop.colors)));
           c = vary(rng, c, 0.06);

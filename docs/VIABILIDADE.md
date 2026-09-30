@@ -347,6 +347,25 @@ Um segundo agente (Sonnet) revisou o código sem editá-lo, escreveu testes pró
 
 Também entraram: confirmação antes de descartar uma partida em andamento, qualidade Auto começando em Média em telas de toque, alvo de pós-processamento compatível com GPUs sem suporte a render em ponto flutuante e laço de quadros protegido contra exceções.
 
+### Segunda revisão (v3)
+
+O Sonnet revisou a v3 com a mesma abordagem:
+- **Cobertura:** 14 temas × qualidade alta e baixa, sem erros de console; os 7 materiais com shaders customizados compilam com e sem sombras.
+- **Rotação das interações:** 1.221 posições reais, 0 divergências entre a regra, as marcas douradas e a construção desenhada.
+- **Núcleo:** 1,28 milhão de posições candidatas conferidas contra um oráculo independente.
+- **Memória de GPU:** nenhum vazamento em trocas repetidas de tema, qualidade e hora do dia.
+
+Defeito relevante encontrado e corrigido: **27% dos barcos e trens ficavam presos** indo e voltando entre o centro de uma peça e uma borda aberta, às vezes fora do rio. Agora eles nascem sobre o traçado. Também foram corrigidos:
+- cor dos animais de carroça e caravana;
+- plantas atravessando cercas e colmeias;
+- moinho de interação virado de lado;
+- validação de `?quality=` e `?time=`;
+- aviso ao descartar salvamentos antigos;
+- sombra de nuvem pulsando na peça da pilha;
+- avisos de interação que sobreviviam a uma partida nova.
+
+Nota de balanceamento: como o encaixe perfeito exige todas as bordas iguais, uma interação (+5) na peça tira o bônus de perfeito (+20). É uma troca deliberada, a testar com jogadores.
+
 ## Apêndice B: o que as simulações dizem sobre o balanceamento
 
 Nas 3.000 partidas simuladas, jogadores automáticos que **não** perseguem missões (guloso, aleatório e "pior jogada") duraram em média **40 a 50 peças** e cumpriram **cerca de 0,5 missão por partida**. Um humano que mira as missões vai mais longe. Mesmo assim, é um sinal de que as recompensas atuais (+4 a +6 peças por missão, +1 por peça cercada) talvez sejam avaras para partidas longas e relaxantes como as do gênero. Esse é o primeiro ajuste a testar com jogadores reais, e hoje basta mudar números em `Rules`.
