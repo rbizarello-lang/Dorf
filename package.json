@@ -1,0 +1,33 @@
+{
+  "name": "retalhos",
+  "version": "0.1.0",
+  "description": "Protótipo de puzzle relaxante de peças hexagonais com temas trocáveis (inspirado no gênero de Dorfromantik).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "shots": "node scripts/screenshots.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rbizarello-lang/Dorf.git"
+  },
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/rbizarello-lang/Dorf/issues"
+  },
+  "homepage": "https://github.com/rbizarello-lang/Dorf#readme",
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "playwright-core": "^1.63.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "vite-plugin-singlefile": "^2.3.3"
+  },
+  "private": true,
+  "type": "module"
+}

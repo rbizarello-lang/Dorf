@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Retalhos</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caprasimo&family=Nunito:wght@500;700;800&display=swap" />
+  </head>
+  <body>
+    <canvas id="scene" aria-label="Tabuleiro de peças hexagonais"></canvas>
+
+    <div id="markers" class="layer" aria-hidden="true"></div>
+    <div id="floaters" class="layer" aria-hidden="true"></div>
+
+    <header class="hud-top">
+      <div class="score-block">
+        <span class="brand">Retalhos</span>
+        <output id="score" class="score" aria-live="polite">0</output>
+        <span id="best" class="best">recorde 0</span>
+      </div>
+      <nav class="tools" aria-label="Opções">
+        <button id="btn-theme" class="chip" type="button" aria-haspopup="true" aria-expanded="false">
+          <span id="theme-swatch" class="swatch" aria-hidden="true"></span><span id="theme-name">Tema</span>
+        </button>
+        <button id="btn-quality" class="icon-btn" type="button" title="Qualidade gráfica">Auto</button>
+        <button id="btn-sound" class="icon-btn" type="button" title="Som" aria-pressed="true">Som</button>
+        <button id="btn-help" class="icon-btn" type="button" title="Como jogar (H)">?</button>
+        <button id="btn-new" class="icon-btn" type="button" title="Nova partida (N)">Nova</button>
+      </nav>
+    </header>
+
+    <div id="theme-menu" class="popover" hidden></div>
+
+    <aside id="quests" class="quests" aria-label="Missões"></aside>
+
+    <section class="stack" aria-label="Pilha de peças">
+      <div id="preview" class="preview"></div>
+      <div class="stack-count"><output id="stack">0</output><small>peças</small></div>
+      <div class="stack-actions">
+        <button id="rot-left" class="round-btn" type="button" title="Girar para a esquerda (Shift+R)" aria-label="Girar peça para a esquerda">⟲</button>
+        <button id="confirm" class="round-btn confirm" type="button" hidden aria-label="Colocar peça">✓</button>
+        <button id="rot-right" class="round-btn" type="button" title="Girar para a direita (R)" aria-label="Girar peça para a direita">⟳</button>
+      </div>
+      <div class="next"><small>próxima</small><svg id="next" viewBox="-1.1 -1.1 2.2 2.2" aria-hidden="true"></svg></div>
+    </section>
+
+    <p id="hint" class="hint">Clique para colocar · <kbd>R</kbd> ou botão direito gira · arraste para mover · roda para zoom · <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera</p>
+
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+
+    <pre id="stats" class="stats" hidden></pre>
+
+    <div id="modal" class="modal" hidden>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div id="modal-body"></div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
