@@ -427,7 +427,10 @@ export class World {
     this.scene.add(this.particleMesh);
 
     // Pós-processamento: tilt-shift (efeito maquete) + vinheta.
-    const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+    // Alvo em meio-float quando a GPU consegue renderizar nele; senão, 8 bits.
+    const ext = this.renderer.extensions;
+    const halfOk = ext.has('EXT_color_buffer_float') || ext.has('EXT_color_buffer_half_float');
+    const rt = new THREE.WebGLRenderTarget(1, 1, { type: halfOk ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: 4 });
     this.composer = new EffectComposer(this.renderer, rt);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.tiltH = new ShaderPass(TILT_SHIFT);
@@ -475,6 +478,8 @@ export class World {
     }
     this.previewPillar.instanceColor!.needsUpdate = true;
     this.previewDef = null;
+    // O fantasma guarda cores e decoração do tema antigo: descarta em vez de só esconder.
+    this.dropGhost();
     this.clearGhost();
     this.rebuild(board);
   }
@@ -605,7 +610,7 @@ export class World {
   // ---------------------------------------------------------------- fantasma
 
   setGhost(def: TileDef, angle: number, q: number, r: number, check: Check) {
-    const key = `${def.seed}`;
+    const key = `${def.seed}:${this.theme.id}`;
     if (!this.ghost || this.ghostKey !== key) {
       this.ghost?.dispose();
       this.ghost = new LiveTile(def, buildTile(def.edges, def.seed, this.theme), this.lib, this.theme, this.quality !== 'low');

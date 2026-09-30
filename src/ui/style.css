@@ -12,6 +12,8 @@
   --font-display: 'Caprasimo', 'Georgia', 'Times New Roman', serif;
   --font-body: 'Nunito', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --gutter: 16px;
+  --gutter-l: calc(var(--gutter) + env(safe-area-inset-left, 0px));
+  --gutter-r: calc(var(--gutter) + env(safe-area-inset-right, 0px));
   color-scheme: light;
 }
 
@@ -24,6 +26,8 @@ body {
   height: 100%;
   margin: 0;
   overflow: hidden;
+  /* Sem zoom da página por pinça ou toque duplo; modais e menus ainda rolam. */
+  touch-action: pan-x pan-y;
 }
 
 body {
@@ -58,6 +62,7 @@ button {
   font: inherit;
   color: inherit;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 button:focus-visible {
@@ -84,7 +89,7 @@ kbd {
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
-  padding: calc(env(safe-area-inset-top, 0px) + 14px) var(--gutter) 0;
+  padding: calc(env(safe-area-inset-top, 0px) + 14px) var(--gutter-r) 0 var(--gutter-l);
   pointer-events: none;
 }
 
@@ -175,7 +180,7 @@ kbd {
 .popover {
   position: fixed;
   top: calc(env(safe-area-inset-top, 0px) + 62px);
-  right: var(--gutter);
+  right: var(--gutter-r);
   width: min(360px, calc(100vw - 2 * var(--gutter)));
   max-height: calc(100% - 140px);
   overflow: auto;
@@ -235,7 +240,7 @@ kbd {
 /* ---------- missões */
 .quests {
   position: fixed;
-  left: var(--gutter);
+  left: var(--gutter-l);
   bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
   display: grid;
   gap: 8px;
@@ -337,7 +342,7 @@ kbd {
 /* ---------- pilha */
 .stack {
   position: fixed;
-  right: var(--gutter);
+  right: var(--gutter-r);
   bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
   width: 170px;
   display: grid;
@@ -380,6 +385,10 @@ kbd {
 
 .stack-count.low output {
   color: var(--bad);
+}
+
+.stack-count.wide output {
+  font-size: 17px;
 }
 
 .stack-actions {
@@ -756,10 +765,22 @@ kbd {
     top: 76px;
   }
   .quests {
-    width: calc(100vw - 2 * var(--gutter) - 150px);
+    width: min(260px, calc(100vw - 2 * var(--gutter) - 150px));
+  }
+  .toasts {
+    top: calc(env(safe-area-inset-top, 0px) + 104px);
   }
   .tools .icon-btn#btn-quality {
     display: none;
+  }
+}
+
+@media (max-height: 480px) {
+  .quest:nth-child(n + 4) {
+    display: none;
+  }
+  .toasts {
+    top: calc(env(safe-area-inset-top, 0px) + 12px);
   }
 }
 

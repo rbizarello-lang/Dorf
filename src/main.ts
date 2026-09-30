@@ -12,16 +12,29 @@ import './ui/style.css';
 // ------------------------------------------------------------------ estado
 
 type QualityMode = 'auto' | Quality;
+type MoveRec = [number, number, number];
+/** v2: sequência de peças por índice. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 1;
+  v: 2;
   seed: number;
   rulesId: string;
-  moves: [number, number, number][];
+  moves: MoveRec[];
+  score: number;
 }
+const SAVE_VERSION = 2;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
   data?: unknown;
+}
+
+// Fontes entram por JS: uma folha de estilo inserida depois não bloqueia o início do
+// jogo se a rede estiver lenta ou presa (o CSS já tem fontes de reserva).
+{
+  const fonts = document.createElement('link');
+  fonts.rel = 'stylesheet';
+  fonts.href = 'https://fonts.googleapis.com/css2?family=Caprasimo&family=Nunito:wght@500;700;800&display=swap';
+  document.head.appendChild(fonts);
 }
 
 const params = new URLSearchParams(location.search);
@@ -46,24 +59,43 @@ const store = {
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
 const hud = new Hud();
 const sfx = new Sfx();
-const world = new World(canvas);
+function createWorld(): World {
+  try {
+    return new World(canvas);
+  } catch (err) {
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      `<div class="modal"><div class="sheet" role="alertdialog" aria-labelledby="no-gl"><h2 id="no-gl">Sem gráficos 3D</h2><p>O navegador não conseguiu iniciar o WebGL, que o jogo usa para desenhar o mapa. Atualize o navegador ou ative a aceleração por hardware nas configurações e recarregue a página.</p></div></div>`,
+    );
+    throw err;
+  }
+}
+const world = createWorld();
 
 let theme: Theme = themeById(params.get('theme') ?? store.get('theme'));
 let rulesTheme: Theme = theme;
 let game: Game;
-let moves: [number, number, number][] = [];
+let moves: MoveRec[] = [];
 let rotSteps = 0;
 let hover: { q: number; r: number } | null = null;
 let best = Number(store.get('best')) || 0;
 let qualityMode: QualityMode = (params.get('quality') as QualityMode) || (store.get('quality') as QualityMode) || 'auto';
 let gameOverShown = false;
+let overTimer = 0;
+let bestAtStart = 0;
 const special = params.has('stress') || params.has('auto') || params.has('demo');
 
 const rulesFor = (t: Theme): Rules => ({ ...DEFAULT_RULES, ...t.rules });
 
 // ------------------------------------------------------------------ partida
 
-function newGame(seed = Math.floor(Math.random() * 1e9), replay: [number, number, number][] = []) {
+/**
+ * Começa uma partida; com `replay`, refaz as jogadas salvas. Devolve false (sem mexer
+ * na tela) se o replay não reproduz a partida salva, por exemplo depois de uma
+ * atualização do gerador de peças.
+ */
+function newGame(seed = 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number): boolean {
+  clearTimeout(overTimer);
   game = new Game(seed, rulesFor(rulesTheme));
   moves = [];
   for (const [q, r, rot] of replay) {
@@ -72,9 +104,13 @@ function newGame(seed = Math.floor(Math.random() * 1e9), replay: [number, number
     moves.push([q, r, rot]);
     while (game.discardIfStuck());
   }
+  game.rot = 0;
+  if (moves.length !== replay.length || (expectScore !== undefined && game.board.score !== expectScore)) return false;
   rotSteps = 0;
   hover = null;
   gameOverShown = false;
+  bestAtStart = best;
+  hud.hint.style.opacity = moves.length >= 6 ? '0' : '';
   world.dropGhost();
   world.setTheme(theme, game.board);
   hud.applyTheme(theme);
@@ -82,12 +118,57 @@ function newGame(seed = Math.floor(Math.random() * 1e9), replay: [number, number
   frameCamera(true);
   refreshHud(true);
   persist();
+  return true;
 }
 
 function persist() {
   if (special) return;
   if (game.over) store.set('save', null);
-  else store.set('save', JSON.stringify({ v: 1, seed: game.seed, rulesId: rulesTheme.id, moves } satisfies Save));
+  else store.set('save', JSON.stringify(snapshot()));
+}
+
+function snapshot(): Save {
+  return { v: SAVE_VERSION, seed: game.seed, rulesId: rulesTheme.id, moves, score: game.board.score };
+}
+
+/** Aceita só saves completos e da versão atual; qualquer outra coisa é descartada. */
+function validSave(raw: unknown): Save | null {
+  const s = raw as Partial<Save> | null;
+  const okMove = (m: unknown) => Array.isArray(m) && m.length === 3 && m.every(Number.isInteger) && m[2] >= 0 && m[2] < 6;
+  if (s && s.v === SAVE_VERSION && Number.isInteger(s.seed) && s.seed! > 0 && typeof s.rulesId === 'string' && Array.isArray(s.moves) && s.moves.every(okMove) && Number.isFinite(s.score)) return s as Save;
+  return null;
+}
+
+function readSave(): Save | null {
+  let save: Save | null = null;
+  try {
+    save = validSave(JSON.parse(store.get('save') ?? 'null'));
+  } catch {
+    /* save ilegível */
+  }
+  if (!save) store.set('save', null);
+  return save;
+}
+
+/** Nova partida pedida pelo jogador: confirma se há uma partida em andamento. */
+function requestNewGame() {
+  if (game.over || moves.length < 3) {
+    startFresh();
+    return;
+  }
+  hud.showModal(`
+    <h2 id="modal-title">Começar outra partida?</h2>
+    <p>A partida atual (${moves.length} peças, ${game.board.score.toLocaleString('pt-BR')} pontos) será descartada.</p>
+    <div class="row">
+      <button class="primary" type="button" data-act="new">Nova partida</button>
+      <button class="secondary" type="button" data-act="close">Continuar jogando</button>
+    </div>`);
+}
+
+function startFresh() {
+  rulesTheme = theme;
+  newGame();
+  hud.toast(`Nova partida · ${theme.name}`);
 }
 
 function frameCamera(instant: boolean) {
@@ -117,7 +198,8 @@ function frameCamera(instant: boolean) {
 function refreshHud(instant = false) {
   hud.setScore(game.board.score, Math.max(best, game.board.score), instant);
   hud.setStack(game.stack);
-  hud.renderNext(game.over ? null : game.next, theme);
+  // Com 1 peça na pilha, a "próxima" só entraria se a jogada render peças: não mostra.
+  hud.renderNext(game.stack <= 1 ? null : game.next, theme);
   world.setPreview(game.current, rotSteps * (Math.PI / 3), game.stack);
   updateGhost();
 }
@@ -152,7 +234,8 @@ function place(q: number, r: number) {
   if (!check?.valid) {
     if (check && !check.occupied && check.neighbors > 0) {
       sfx.invalid();
-      hud.toast('Rio só encosta em rio, e trilho só em trilho.', 'bad');
+      const [water, rail] = [theme.terrainNames[4], theme.terrainNames[5]];
+      hud.toast(`${water} só encosta em ${water.toLowerCase()}, e ${rail.toLowerCase()} só em ${rail.toLowerCase()}.`, 'bad');
     }
     return;
   }
@@ -171,12 +254,14 @@ function place(q: number, r: number) {
     best = game.board.score;
     if (!special) store.set('best', String(best));
   }
-  if (moves.length === 6) hud.hint.style.opacity = '0';
+  if (moves.length >= 6) hud.hint.style.opacity = '0';
   refreshHud();
   persist();
   if (game.over && !gameOverShown) {
     gameOverShown = true;
-    setTimeout(showGameOver, 1100);
+    overTimer = window.setTimeout(() => {
+      if (game.over) showGameOver();
+    }, 1100);
   }
 }
 
@@ -220,7 +305,7 @@ function showHelp() {
     <div class="legend">${legend}</div>
     <ul>
       <li><b>${theme.terrainNames[4]}</b> e <b>${theme.terrainNames[5]}</b> precisam continuar: só encostam neles mesmos.</li>
-      <li><b>Encaixe perfeito</b>: todas as bordas vizinhas combinam (+${game.rules.perfectBonus}).</li>
+      <li><b>Encaixe perfeito</b>: a peça encosta em 2 ou mais vizinhas e todas as bordas combinam (+${game.rules.perfectBonus}).</li>
       <li>Cercar uma peça com 6 vizinhas encaixadas rende <b>+1 peça</b>.</li>
       <li><b>Missões</b> pedem grupos de certo tamanho e dão peças extras. "Exatamente N" falha se passar.</li>
       <li>A partida acaba quando a pilha esvazia.</li>
@@ -231,7 +316,7 @@ function showHelp() {
 
 function showGameOver() {
   const b = game.board;
-  const record = b.score >= best && b.score > 0;
+  const record = b.score > bestAtStart && b.score > 0;
   hud.showModal(`
     <h2 id="modal-title">${record ? 'Novo recorde!' : 'Pilha vazia'}</h2>
     <p class="muted">${theme.name} · semente ${game.seed}</p>
@@ -254,8 +339,7 @@ hud.modal.addEventListener('click', (e) => {
     store.set('seenHelp', '1');
   } else if (act === 'new') {
     hud.hideModal();
-    rulesTheme = theme;
-    newGame();
+    startFresh();
   } else if (act === 'theme') {
     hud.hideModal();
     hud.openThemeMenu(theme, pickTheme);
@@ -282,15 +366,20 @@ function pickTheme(t: Theme) {
 const qualityLabel: Record<QualityMode, string> = { auto: 'Auto', high: 'Alta', medium: 'Média', low: 'Baixa' };
 const qualityBtn = document.getElementById('btn-quality')!;
 
+// Em telas de toque (celular/tablet) o modo Auto começa em Média.
+const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+const autoStart: Quality = coarsePointer ? 'medium' : 'high';
+let autoLevel: Quality = autoStart;
+
 function applyQuality(mode: QualityMode) {
   qualityMode = mode;
-  world.setQuality(mode === 'auto' ? 'high' : mode);
+  if (mode === 'auto') autoLevel = autoStart;
+  world.setQuality(mode === 'auto' ? autoLevel : mode);
   qualityBtn.textContent = qualityLabel[mode];
   frameTimes.length = 0;
 }
 
 const frameTimes: number[] = [];
-let autoLevel: Quality = 'high';
 function adaptQuality(dt: number) {
   if (qualityMode !== 'auto' || document.hidden) return;
   frameTimes.push(dt);
@@ -327,6 +416,7 @@ function setHover(h: { q: number; r: number } | null) {
 canvas.addEventListener('pointerdown', (e) => {
   sfx.unlock();
   hud.closeThemeMenu();
+  if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 2) return;
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (pointers.size === 2) {
@@ -372,6 +462,7 @@ canvas.addEventListener('pointermove', (e) => {
 });
 
 function endPointer(e: PointerEvent) {
+  sfx.unlock(); // iOS libera áudio no fim do toque
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
   canvas.style.cursor = '';
@@ -413,9 +504,11 @@ canvas.addEventListener(
 
 const held = new Set<string>();
 window.addEventListener('keydown', (e) => {
-  if (e.target instanceof HTMLInputElement) return;
+  // Atalhos do navegador (Ctrl/Cmd+R, Cmd+D...) ficam com o navegador.
+  if (e.target instanceof HTMLInputElement || e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
   if (k === 'escape') {
+    if (hud.modalOpen && !game.over) store.set('seenHelp', '1');
     hud.hideModal();
     hud.closeThemeMenu();
     return;
@@ -428,14 +521,16 @@ window.addEventListener('keydown', (e) => {
   } else if (k === 't') rotate(-1);
   else if (k === 'f') hud.stats.hidden = !hud.stats.hidden;
   else if (k === 'h' || k === '?') showHelp();
-  else if (k === 'n') {
-    rulesTheme = theme;
-    newGame();
-  } else if (k === '+' || k === '=') world.rig.zoom(0.85);
+  else if (k === 'n') requestNewGame();
+  else if (k === '+' || k === '=') world.rig.zoom(0.85);
   else if (k === '-') world.rig.zoom(1.18);
   else held.add(k);
 });
-window.addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
+window.addEventListener('keyup', (e) => {
+  // Com Cmd pressionado o macOS não envia keyup das outras teclas: evita câmera "presa".
+  if (e.key === 'Meta' || e.key === 'Control' || e.key === 'Alt') held.clear();
+  else held.delete(e.key.toLowerCase());
+});
 window.addEventListener('blur', () => held.clear());
 
 function keyboardCamera(dt: number) {
@@ -461,11 +556,7 @@ hud.confirm.addEventListener('click', () => {
   if (hover) place(hover.q, hover.r);
 });
 document.getElementById('btn-help')!.addEventListener('click', showHelp);
-document.getElementById('btn-new')!.addEventListener('click', () => {
-  rulesTheme = theme;
-  newGame();
-  hud.toast(`Nova partida · ${theme.name}`);
-});
+document.getElementById('btn-new')!.addEventListener('click', requestNewGame);
 hud.themeBtn.addEventListener('click', () => {
   if (hud.themeMenu.hidden) hud.openThemeMenu(theme, pickTheme);
   else hud.closeThemeMenu();
@@ -474,7 +565,6 @@ qualityBtn.addEventListener('click', () => {
   const order: QualityMode[] = ['auto', 'high', 'medium', 'low'];
   const next = order[(order.indexOf(qualityMode) + 1) % order.length];
   applyQuality(next);
-  autoLevel = 'high';
   store.set('quality', next);
   hud.toast(`Qualidade: ${qualityLabel[next]}`);
 });
@@ -540,6 +630,14 @@ let cpuAcc = 0;
 let last = performance.now();
 
 function frame(now: number) {
+  try {
+    step(now);
+  } finally {
+    requestAnimationFrame(frame);
+  }
+}
+
+function step(now: number) {
   const realDt = (now - last) / 1000;
   const dt = Math.min(0.05, realDt);
   last = now;
@@ -581,24 +679,28 @@ function frame(now: number) {
     (window as unknown as { __stats: unknown }).__stats = { ...statsText, ...world.stats(), tiles: game.board.list.length, quality: world.quality };
   }
   adaptQuality(realDt);
-  requestAnimationFrame(frame);
 }
 
 // ------------------------------------------------------------------ início
 
 function start(data: unknown) {
-  const hot = data as Partial<Save & { theme: string }> | undefined;
-  if (hot?.theme) theme = themeById(hot.theme);
+  const hotData = data as (Partial<Save> & { theme?: string }) | undefined;
+  if (hotData?.theme) theme = themeById(hotData.theme);
   applyQuality(qualityMode);
-  world.onBaked = () => {};
-  const saved = !special ? (hot?.moves ? hot : (JSON.parse(store.get('save') ?? 'null') as Save | null)) : null;
-  if (saved?.moves && saved.seed) {
+  let saved = special ? null : (validSave(hotData) ?? readSave());
+  // Um link com ?seed= (desafio) vence a partida salva de outra semente.
+  const wantSeed = Math.floor(Number(params.get('seed'))) || 0;
+  if (saved && wantSeed > 0 && saved.seed !== wantSeed) saved = null;
+  let resumed = false;
+  if (saved) {
     rulesTheme = themeById(saved.rulesId);
-    newGame(saved.seed, saved.moves);
-    if (saved.moves.length) hud.toast(`Partida retomada · ${saved.moves.length} peças`);
-  } else {
+    resumed = newGame(saved.seed, saved.moves, saved.score);
+    if (resumed && saved.moves.length) hud.toast(`Partida retomada · ${saved.moves.length} peças`);
+    else if (!resumed) hud.toast('A partida salva é de uma versão anterior e não pôde ser retomada. Começando outra.');
+  }
+  if (!resumed) {
     rulesTheme = theme;
-    newGame(Number(params.get('seed')) || undefined);
+    newGame(wantSeed > 0 ? wantSeed : undefined);
   }
   if (params.has('stress')) {
     const r = autoPlace(Number(params.get('stress')) || 1000, true);
@@ -609,7 +711,7 @@ function start(data: unknown) {
   if (params.has('debug')) hud.stats.hidden = false;
   if (params.has('yaw')) world.rig.yaw = world.rig.goalYaw = Number(params.get('yaw'));
   if (params.has('zoom')) world.rig.dist = world.rig.goalDist = Number(params.get('zoom'));
-  if (!special && !store.get('seenHelp') && !saved?.moves?.length) showHelp();
+  if (!special && !store.get('seenHelp') && !(resumed && moves.length)) showHelp();
   requestAnimationFrame((t) => {
     last = t;
     frame(t);
@@ -628,8 +730,6 @@ function start(data: unknown) {
 };
 
 const hot = (window as unknown as { claude?: { hot?: Hot } }).claude?.hot;
-hot?.snapshot?.(() => ({ v: 1, seed: game.seed, rulesId: rulesTheme.id, moves, theme: theme.id }));
+hot?.snapshot?.(() => ({ ...snapshot(), theme: theme.id }));
 if (hot?.ready) hot.ready(start);
 else start(hot?.data);
-
-

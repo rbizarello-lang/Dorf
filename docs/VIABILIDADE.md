@@ -16,7 +16,7 @@ Documentos relacionados:
 
 | Dimensão | Veredito | Evidência |
 |---|---|---|
-| Regras e loop | ✅ Viável | Implementadas em ~600 linhas de TypeScript puro (`src/core`), sem dependência de renderização. |
+| Regras e loop | ✅ Viável | Implementadas em ~600 linhas de TypeScript puro (`src/core`), sem dependência de renderização, e conferidas em 3.000 partidas simuladas sem falha (Apêndice A). |
 | Visual bonito | ✅ Viável | Estilo "diorama" com peças procedurais, sombras suaves, tilt-shift, água animada, vento nas árvores e fumaça. Veja as telas na seção 4. |
 | Rodar bem | ✅ Viável, com medição pendente em GPU real | Uma partida típica (300 peças) fica em cerca de 57 draw calls. Com 2.500 peças, 107 draw calls. Detalhes na seção 5. |
 | Tema adaptável | ✅ Viável e barato | Um tema é um objeto de dados, com cerca de 50 linhas. Os 5 temas reaproveitam a mesma geometria e o mesmo código. |
@@ -28,7 +28,7 @@ Documentos relacionados:
 
 ## 2. O que o protótipo já faz
 
-**Jogar:** `npm install && npm run dev`, ou abra o `dist/index.html` gerado por `npm run build`.
+**Jogar:** `npm install && npm run dev`, ou abra o `dist/index.html` gerado por `npm run build`. **Testar:** `npm test` simula 600 partidas e confere as regras contra oráculos independentes.
 
 - **Regras completas**: grade hexagonal, 6 tipos de borda, rio e trilho obrigatórios, pontuação por borda, encaixe perfeito, peça "fechada" (6 vizinhos encaixados) que devolve peça à pilha, missões "N ou mais" e "exatamente N" que falham se passarem do alvo, pilha que acaba e fim de jogo. Uma peça que não cabe em lugar nenhum é descartada automaticamente.
 - **Visual**: peças geradas proceduralmente a partir das bordas, com rios que fazem curva, lagos, pontes de trilhos com dormentes, retalhos de plantação, bosques, vilas e torres. O vazio tem uma grade hexagonal que desbota, e a névoa acompanha a cor do tema.
@@ -36,7 +36,7 @@ Documentos relacionados:
 - **Temas**: Vale Pastel, Cerrado Dourado, Inverno Nórdico, Jardim Sakura e Colônia Marciana, trocáveis durante a partida.
 - **Plataformas**: mouse, teclado e toque (pinça para zoom, toque duplo para colocar). O layout se adapta ao celular.
 - **Fluidez**: qualidade Auto/Alta/Média/Baixa. O modo Auto baixa a qualidade sozinho se o quadro passar de ~26 ms.
-- **Persistência**: a partida é salva como semente + lista de jogadas e retomada ao recarregar, com replay determinístico. Também guarda o recorde.
+- **Persistência e desafios**: a partida é salva como semente + lista de jogadas e retomada ao recarregar, com replay determinístico. A mesma semente dá a mesma sequência de peças para qualquer jogador, o que permite desafios por link (`?seed=123`). Também guarda o recorde.
 - **Ferramentas de medição**: `?debug` (FPS, draw calls, triângulos), `?stress=2500` (teste de carga), `?auto=40` (tabuleiro pronto), `?demo` (a IA joga sozinha), `?seed=123` (partida reproduzível).
 
 ### Arquitetura
@@ -94,7 +94,13 @@ O original usa texturas pintadas à mão, vertex color e paletas por bioma (80.l
 | **Inverno Nórdico** | **Celular (390 px)** |
 | ![](screens/inverno.png) | ![](screens/mobile.png) |
 
-Close com zoom máximo: ![](screens/close.png)
+Peça flutuando sobre o espaço escolhido antes de encaixar (a sombra e as marcas de borda mostram onde e como ela vai entrar):
+
+![](screens/ghost.png)
+
+Close com zoom máximo:
+
+![](screens/close.png)
 
 **Onde investir arte de verdade** num produto: modelos autorais para 20 a 40 objetos por tema, em estilo próprio; um contorno suave (rim/fresnel); AO assado; e música. O protótipo prova que a *técnica* não é o gargalo.
 
@@ -250,8 +256,33 @@ Custo aproximado (pesquisa, faixa larga): vertical slice de US$ 9 a 48 mil; jogo
 
 ---
 
-## Apêndice: revisão de código pelo Sonnet
+## Apêndice A: revisão de código e QA pelo Sonnet
 
-Um segundo agente (Sonnet) revisou o código e rodou simulações da lógica. Os achados e as correções estão na seção abaixo.
+Um segundo agente (Sonnet) revisou o código sem editá-lo, escreveu testes próprios e reportou achados com cenário de falha e correção sugerida. Todas as correções foram aplicadas e **conferidas de novo com os próprios testes do revisor**.
 
-_(preenchido após a revisão)_
+**O que ele testou:**
+- Lógica contra oráculos independentes (BFS de grupos, pontuação recalculada, validade por força bruta): **3.000 partidas e 133.753 jogadas, 0 falhas**. Replay de salvamento: 3.000 completos e 33.000 parciais, 0 divergências.
+- Geometria: 7.500 peças e 2 milhões de triângulos, sem NaN, sem triângulo degenerado e sem face invertida. Rotação lógica × render conferida ponta a ponta.
+- Memória de GPU: estável em 25 partidas novas e 40 trocas de tema.
+- Interface no Chromium: mouse, toque, pinça, teclado, salvamento, 5 temas e dois "testes de caos" de 60 s com 562 ações aleatórias, sem erros de console.
+
+**O que ele encontrou e foi corrigido** (nenhum na lógica de regras; todos na camada de fluxo e interface):
+
+| Severidade | Problema | Correção |
+|---|---|---|
+| Média | Trocar de tema com o mouse sobre o mapa deixava a peça seguinte com as cores do tema antigo | O fantasma é descartado na troca de tema |
+| Média | Um salvamento corrompido travava o jogo em todas as visitas | Salvamento validado e versionado; se o replay não bater com a pontuação salva, começa outra partida com aviso |
+| Média | O link `?seed=` era ignorado quando havia partida salva | O link de desafio tem prioridade |
+| Média | A mesma semente só dava as mesmas peças enquanto as jogadas fossem idênticas | Cada peça tem gerador próprio (semente + índice): **a mesma semente dá a mesma sequência de peças para qualquer jogador** |
+| Média | No celular, pinça sobre o placar dava zoom na página | `touch-action` ajustado na página e nos botões |
+| Média | O jogo não iniciava enquanto a folha de fontes do Google estivesse pendurada | Fontes carregadas por script (início em ~0,6 s com a rede presa) |
+| Média | Em celular na horizontal, os cartões de missão cobriam o mapa | Largura limitada e no máximo 3 cartões em telas baixas |
+| Baixa | Limite de missões simultâneas excedido em 1 | As missões ainda na mão contam no limite |
+| Baixa | Árvores e pedras dentro do lago em peças com uma borda de água; retalhos de plantação invadindo rios | Áreas reservadas no gerador (0 ocorrências em 30.000 peças) |
+| Baixa | Modal de fim de jogo aparecendo sobre uma partida nova; botão do meio colocando peça; Ctrl/Cmd+R capturado; ajuda reaparecendo depois de fechar com Esc; dica de controles; textos das regras; placar reescrito a cada quadro; sem mensagem quando falta WebGL | Corrigidos um a um |
+
+Também entraram: confirmação antes de descartar uma partida em andamento, qualidade Auto começando em Média em telas de toque, alvo de pós-processamento compatível com GPUs sem suporte a render em ponto flutuante e laço de quadros protegido contra exceções.
+
+## Apêndice B: o que as simulações dizem sobre o balanceamento
+
+Nas 3.000 partidas simuladas, jogadores automáticos que **não** perseguem missões (guloso, aleatório e "pior jogada") duraram em média **40 a 50 peças** e cumpriram **cerca de 0,5 missão por partida**. Um humano que mira as missões vai mais longe. Mesmo assim, é um sinal de que as recompensas atuais (+4 a +6 peças por missão, +1 por peça cercada) talvez sejam avaras para partidas longas e relaxantes como as do gênero. Esse é o primeiro ajuste a testar com jogadores reais, e hoje basta mudar números em `Rules`.

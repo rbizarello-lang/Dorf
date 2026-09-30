@@ -73,16 +73,19 @@ export class Hud {
       const step = Math.max(1, Math.ceil(Math.abs(diff) * Math.min(1, dt * 8)));
       this.shownScore += Math.sign(diff) * Math.min(step, Math.abs(diff));
     }
-    this.score.textContent = this.shownScore.toLocaleString('pt-BR');
+    const text = this.shownScore.toLocaleString('pt-BR');
+    if (this.score.textContent !== text) this.score.textContent = text;
   }
 
   setStack(n: number) {
     this.stack.textContent = String(Math.max(0, n));
     this.stack.parentElement!.classList.toggle('low', n <= 5);
+    this.stack.parentElement!.classList.toggle('wide', n >= 1000);
   }
 
   renderNext(def: TileDef | null, theme: Theme) {
     const svg = $('next');
+    svg.parentElement!.hidden = !def;
     if (!def) {
       svg.innerHTML = '';
       return;

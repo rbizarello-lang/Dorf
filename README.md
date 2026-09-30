@@ -14,11 +14,12 @@ npm install
 npm run dev        # servidor de desenvolvimento
 npm run build      # gera dist/index.html (arquivo único, ~640 KB)
 npm run typecheck
+npm test           # simula 600 partidas e confere regras, grupos, missões e replay
 ```
 
 ## Como jogar
 
-Coloque peças encostadas no mapa. Cada borda que combina com a vizinha vale 10 pontos. **Rio e trilho** precisam continuar: só encostam neles mesmos. Quando todas as bordas vizinhas combinam, o encaixe é **perfeito**. Cercar uma peça com 6 vizinhas encaixadas devolve uma peça à pilha. **Missões** pedem grupos de certo tamanho ("9 ou mais", "exatamente 8") e dão peças extras. A partida acaba quando a pilha esvazia.
+Coloque peças encostadas no mapa. Cada borda que combina com a vizinha vale 10 pontos. **Rio e trilho** precisam continuar: só encostam neles mesmos. Quando a peça encosta em 2 ou mais vizinhas e todas as bordas combinam, o encaixe é **perfeito**. Cercar uma peça com 6 vizinhas encaixadas devolve uma peça à pilha. **Missões** pedem grupos de certo tamanho ("9 ou mais", "exatamente 8") e dão peças extras. A partida acaba quando a pilha esvazia.
 
 | Ação | Mouse / teclado | Toque |
 |---|---|---|
@@ -50,6 +51,7 @@ src/render/    gerador procedural de peças, chunks, instancing, pós-processame
 src/ui/        HUD em HTML/CSS
 src/main.ts    entrada, fluxo da partida, salvamento, modos de teste
 scripts/       capturas de tela e teste de carga com Playwright
+tests/         simulação de partidas com oráculos independentes (regras, grupos, replay)
 ```
 
 ## Criar um tema

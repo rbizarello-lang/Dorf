@@ -247,6 +247,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme): Tile
   const water = pathsFor(edges, T.Water, RIVER_HW);
   const rail = pathsFor(edges, T.Rail, RAIL_HW);
   const allPaths = [...water.paths, ...rail.paths];
+  // Peça com uma só borda de água termina num lago redondo: reserva o disco inteiro.
+  if (water.idx.length === 1) allPaths.push({ pts: [[0, 0], [0.001, 0]], hw: 0.3 + BANK_EXTRA });
   const bank = tc(theme.bank);
   if (water.idx.length) {
     for (const p of water.paths) {
@@ -328,12 +330,13 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme): Tile
     const want = randInt(rng, 4, 6);
     for (let k = 0, tries = 0; k < want && tries < want * 5; tries++) {
       const p = samplePoint(rng, i, 0.02, 0.03);
-      if (!p || distToPaths(p[0], p[1], allPaths) < 0.12) continue;
+      const rad = randRange(rng, 0.13, 0.2);
+      // O retalho pode chegar a 1,15 × rad do centro: não pode alcançar rio nem trilho.
+      if (!p || distToPaths(p[0], p[1], allPaths) < rad * 1.15 + 0.01) continue;
       if (patches.some(([x, z]) => (x - p[0]) ** 2 + (z - p[1]) ** 2 < 0.15 * 0.15)) continue;
       patches.push(p);
       k++;
       const sides = randInt(rng, 4, 6);
-      const rad = randRange(rng, 0.13, 0.2);
       const rot0 = rng() * Math.PI * 2;
       const pts: V2[] = [];
       for (let j = 0; j < sides; j++) {
