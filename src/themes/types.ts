@@ -102,6 +102,15 @@ export type VehicleKind = 'steam' | 'cart' | 'caravan' | 'maglev';
 /** Estrutura construída quando vila encosta em plantação. */
 export type MillStyle = 'windmill' | 'granary';
 
+/** O que flutua no ar, desenhado pelo shader (sem custo de CPU). */
+export type WeatherKind =
+  | 'none'
+  | 'snow' // flocos redondos caindo devagar
+  | 'petals' // pétalas ovais que giram e viram no ar
+  | 'leaves' // folhas alongadas, caem rodopiando
+  | 'dust' // poeira fina levada pelo vento, quase na horizontal
+  | 'pollen'; // penugem e pólen flutuando, brilham contra a luz
+
 export interface Theme {
   id: string;
   name: string;
@@ -175,6 +184,8 @@ export interface Theme {
 
   // --- efeitos e interface
   smoke: string;
+  /** Partículas no ar e sua densidade (1 = padrão). */
+  weather: { kind: WeatherKind; colors: [string, string]; density: number };
   sparkle: string;
   ui: { accent: string; panel: string; ink: string; soft: string };
   /** Nomes das interações entre bordas neste tema. */

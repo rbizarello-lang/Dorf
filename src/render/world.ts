@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { attribute, vec3 } from 'three/tsl';
+import { vec3 } from 'three/tsl';
 import type { Board, Check, Placed } from '../core/board';
 import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey } from '../core/hex';
 import type { SynHit, SynKind } from '../core/synergy';
@@ -12,6 +12,7 @@ import { Life } from './life';
 import { U, makeVoidMaterial, softShadowFilter } from './materials';
 import { P, buildPost, type Post, type Quality } from './post';
 import { SkyEnv } from './sky';
+import { FX, Fireflies, Sprites, Weather } from './fx';
 import { LiveTile } from './liveTile';
 import { PreviewView } from './preview';
 import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, type TileBuild } from './tileBuilder';
@@ -24,6 +25,9 @@ const CHUNK = 8;
 const ZENITH_TINT = new THREE.Color(0.86, 0.93, 1.08);
 const DETAIL: Record<Quality, number> = { ultra: 1, high: 1, medium: 0.65, low: 0.4 };
 const tmpM = new THREE.Matrix4();
+const tmpColor = new THREE.Color();
+/** Densidade do clima por qualidade. */
+const WEATHER: Record<Quality, number> = { ultra: 1, high: 1, medium: 0.5, low: 0 };
 
 function tileMatrix(q: number, r: number, rot: number, y = 0, out = new THREE.Matrix4()) {
   const { x, z } = hexToWorld(q, r);
@@ -220,20 +224,6 @@ class Chunk {
   }
 }
 
-interface Particle {
-  x: number;
-  y: number;
-  z: number;
-  vx: number;
-  vy: number;
-  vz: number;
-  age: number;
-  life: number;
-  size: number;
-  color: THREE.Color;
-  kind: 0 | 1;
-}
-
 interface Drop {
   live: LiveTile;
   placed: Placed;
@@ -333,9 +323,13 @@ export class World {
   private ghostTarget = new THREE.Vector3();
   private ghostAngle = 0;
   private drops: Drop[] = [];
-  private particles: Particle[] = [];
-  private particleMesh: THREE.InstancedMesh;
+  private sprites = new Sprites();
+  private weather = new Weather();
+  private fireflies = new Fireflies();
   private smokeClock = 0;
+  /** Velocidade suavizada do fantasma (inclina na direção do movimento). */
+  private ghostVel = new THREE.Vector2();
+  private ghostPrev = new THREE.Vector3();
   private post: Post | null = null;
   private time = 0;
   private size = new THREE.Vector2(1, 1);
@@ -411,14 +405,7 @@ export class World {
       this.scene.add(m);
     }
 
-    const partMat = new THREE.MeshStandardNodeMaterial({ flatShading: true, roughness: 1 });
-    const pc = attribute('iColor', 'vec3');
-    partMat.colorNode = pc;
-    partMat.emissiveNode = pc.mul(0.25);
-    this.particleMesh = new THREE.InstancedMesh(instGeometry(new THREE.IcosahedronGeometry(0.05, 0), 400), partMat, 400);
-    this.particleMesh.count = 0;
-    this.particleMesh.frustumCulled = false;
-    this.scene.add(this.particleMesh);
+    this.scene.add(this.sprites.group, this.weather.mesh, this.fireflies.mesh);
   }
 
   // ---------------------------------------------------------------- tema, luz, qualidade
@@ -431,6 +418,8 @@ export class World {
     this.sky = skyFor(theme, this.timeOfDay);
     this.applySky();
     this.preview.setTheme(theme);
+    this.weather.setTheme(theme);
+    this.weather.setDetail(WEATHER[this.quality]);
     // O fantasma guarda cores e decoração do tema antigo: descarta em vez de só esconder.
     this.dropGhost();
     this.clearGhost();
@@ -452,6 +441,7 @@ export class World {
     this.voidU.line.value.copy(s.line);
     U.sky.value.copy(s.hemiSky);
     this.slotMat.color.copy(s.line);
+    this.slotMat.opacity = 0.55 - s.night * 0.3;
     this.sun.color.copy(s.sun);
     this.sun.intensity = s.sunI;
     U.sun.value.copy(s.sun);
@@ -507,6 +497,7 @@ export class World {
       this.sun.shadow.map?.dispose();
       this.sun.shadow.map = null;
     }
+    this.weather.setDetail(WEATHER[q]);
     if (postChanged) {
       this.post?.dispose();
       this.post = q === 'low' ? null : buildPost(this.renderer, this.scene, this.camera, q, this.fx);
@@ -565,13 +556,14 @@ export class World {
     for (const d of this.drops) d.live.dispose();
     this.drops = [];
     this.chimneys = [];
-    this.particles = [];
+    this.sprites.clear();
     this.life.reset(this.theme);
     this.flows.clear();
     for (const p of board.list) this.bake(p, this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p)), false);
     for (const pool of this.pools.values()) pool.flush();
     this.updateFrontier(board);
     this.life.sync(board);
+    this.fireflies.sync(board);
   }
 
   private chunkFor(q: number, r: number) {
@@ -669,6 +661,7 @@ export class World {
     for (const pool of this.pools.values()) pool.flush();
     this.updateFrontier(board);
     this.life.sync(board);
+    this.fireflies.sync(board);
   }
 
   // ---------------------------------------------------------------- fantasma
@@ -691,6 +684,8 @@ export class World {
         const { x, z } = hexToWorld(q, r);
         this.ghost.group.position.set(x, 0.5, z);
         this.ghost.inner.rotation.y = -angle;
+        this.ghostPrev.copy(this.ghost.group.position);
+        this.ghostVel.set(0, 0);
       }
       old?.dispose();
     }
@@ -728,30 +723,13 @@ export class World {
   // ---------------------------------------------------------------- efeitos
 
   burst(x: number, z: number, kind: 'dust' | 'sparkle', n: number, y = 0) {
-    const color = kind === 'dust' ? tc(this.theme.smoke) : tc(this.theme.sparkle);
-    for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = kind === 'dust' ? 0.95 : Math.random() * 0.7;
-      const sp = kind === 'dust' ? 0.5 + Math.random() * 0.6 : 0.2 + Math.random() * 0.4;
-      this.particles.push({
-        x: x + Math.cos(a) * r,
-        y: y + (kind === 'dust' ? 0.02 : 0.1 + Math.random() * 0.2),
-        z: z + Math.sin(a) * r,
-        vx: Math.cos(a) * sp,
-        vy: kind === 'dust' ? 0.25 + Math.random() * 0.3 : 0.9 + Math.random() * 0.8,
-        vz: Math.sin(a) * sp,
-        age: 0,
-        life: kind === 'dust' ? 0.7 + Math.random() * 0.4 : 0.9 + Math.random() * 0.6,
-        size: kind === 'dust' ? 0.9 + Math.random() * 0.8 : 0.35 + Math.random() * 0.3,
-        color,
-        kind: kind === 'dust' ? 0 : 1,
-      });
-    }
+    if (kind === 'dust') this.sprites.dust(x, z, tc(this.theme.smoke), n);
+    else this.sprites.sparkle(x, z, tc(this.theme.sparkle), n, y);
   }
 
   private spawnSmoke(dt: number) {
     const n = this.chimneys.length / 3;
-    if (!n || this.particles.length > 360) return;
+    if (!n || this.sprites.count > 380) return;
     this.smokeClock += dt * Math.min(n * 0.25, 7);
     const tx = this.rig.target.x, tz = this.rig.target.z;
     const view = this.rig.dist * 1.1;
@@ -761,42 +739,10 @@ export class World {
         const i = Math.floor(Math.random() * n) * 3;
         const x = this.chimneys[i], y = this.chimneys[i + 1], z = this.chimneys[i + 2];
         if (Math.abs(x - tx) > view || Math.abs(z - tz) > view) continue;
-        const w = U.wind.value;
-        this.particles.push({ x, y, z, vx: w.x * 0.07, vy: 0.2, vz: w.y * 0.07, age: 0, life: 2.6 + Math.random(), size: 0.45, color: tc(this.theme.smoke), kind: 0 });
+        this.sprites.smoke(x, y, z, tc(this.theme.smoke), U.wind.value);
         break;
       }
     }
-  }
-
-  private updateParticles(dt: number) {
-    const out: Particle[] = [];
-    let i = 0;
-    for (const p of this.particles) {
-      p.age += dt;
-      if (p.age >= p.life) continue;
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.z += p.vz * dt;
-      const drag = p.kind === 0 ? 2.2 : 0.8;
-      if (p.age > 0.4 || p.kind === 1) {
-        p.vx *= Math.exp(-drag * dt);
-        p.vz *= Math.exp(-drag * dt);
-      }
-      if (p.kind === 1) p.vy -= 1.6 * dt;
-      const t = p.age / p.life;
-      const s = p.size * (p.kind === 0 ? Math.sin(Math.PI * Math.min(1, t * 1.15)) * (0.6 + t) : 1 - t);
-      if (i < 400) {
-        tmpM.makeScale(s, s, s).setPosition(p.x, p.y, p.z);
-        this.particleMesh.setMatrixAt(i, tmpM);
-        setInstColor(this.particleMesh, i, p.color);
-        i++;
-      }
-      out.push(p);
-    }
-    this.particles = out;
-    this.particleMesh.count = i;
-    this.particleMesh.instanceMatrix.needsUpdate = true;
-    this.particleMesh.geometry.getAttribute('iColor').needsUpdate = true;
   }
 
   // ---------------------------------------------------------------- utilidades
@@ -869,6 +815,24 @@ export class World {
 
   // ---------------------------------------------------------------- quadro
 
+  /** Eixos da câmera, foco e escala para as partículas, e a luz que elas recebem. */
+  private updateFxUniforms() {
+    const e = this.camera.matrixWorld.elements;
+    FX.right.value.set(e[0], e[1], e[2]);
+    FX.up.value.set(e[4], e[5], e[6]);
+    FX.focus.value.copy(this.rig.target);
+    const d = this.rig.dist;
+    FX.box.value.set(THREE.MathUtils.clamp(d * 1.25, 5, 32), THREE.MathUtils.clamp(d * 0.42, 1.8, 7));
+    FX.scale.value = 0.55 + d / 13;
+    const s = this.sky;
+    FX.ambient.value.copy(s.hemiSky).multiplyScalar(0.45 * s.hemiI).add(tmpColor.copy(s.sun).multiplyScalar(0.3 * s.sunI));
+  }
+
+  /** Onda que corre pelo chão em volta da peça que acabou de assentar. */
+  ripple(x: number, z: number, strength = 1, age = 0) {
+    U.ripple.value.set(x, z, this.time - age, strength);
+  }
+
   tick(dt: number) {
     this.renderer.info.reset();
     this.time += dt;
@@ -915,6 +879,13 @@ export class World {
       g.position.y += (this.ghostTarget.y + Math.sin(this.time * 2.4) * 0.025 - g.position.y) * k;
       const inner = this.ghost.inner;
       inner.rotation.y += (-this.ghostAngle - inner.rotation.y) * (1 - Math.exp(-dt * 18));
+      // Inclina na direção em que desliza, como uma bandeja carregada.
+      const kv = 1 - Math.exp(-dt * 10);
+      this.ghostVel.x += ((g.position.x - this.ghostPrev.x) / Math.max(dt, 1e-3) - this.ghostVel.x) * kv;
+      this.ghostVel.y += ((g.position.z - this.ghostPrev.z) / Math.max(dt, 1e-3) - this.ghostVel.y) * kv;
+      this.ghostPrev.copy(g.position);
+      g.rotation.x = THREE.MathUtils.clamp(this.ghostVel.y * 0.035, -0.22, 0.22);
+      g.rotation.z = THREE.MathUtils.clamp(-this.ghostVel.x * 0.035, -0.22, 0.22);
       for (let i = 0; i < 6; i++) if (this.markers[i].visible) this.markers[i].position.copy(g.position).add(this.markerLocal[i]);
     }
 
@@ -923,15 +894,21 @@ export class World {
     for (const d of this.drops) {
       d.t += dt;
       const g = d.live.group;
+      // A inclinação do fantasma se desfaz na queda.
+      g.rotation.x *= Math.exp(-dt * 14);
+      g.rotation.z *= Math.exp(-dt * 14);
       const fall = 0.16;
       if (d.t < fall) {
         const u = d.t / fall;
         g.position.y = d.y0 * (1 - u * u);
       } else {
-        g.position.y = 0;
+        // Assenta com um quique pequeno.
+        const ub = Math.min(1, (d.t - fall) / 0.34);
+        g.position.y = 0.022 * Math.abs(Math.sin(ub * Math.PI)) * (1 - ub);
         if (!d.landed) {
           d.landed = true;
-          this.burst(g.position.x, g.position.z, 'dust', 14);
+          this.burst(g.position.x, g.position.z, 'dust', 22);
+          this.ripple(g.position.x, g.position.z);
         }
         const u = (d.t - fall) / 0.32;
         g.scale.set(1 + Math.sin(Math.min(1, u) * Math.PI) * 0.03, 1 - Math.sin(Math.min(1, u) * Math.PI) * 0.08, 1 + Math.sin(Math.min(1, u) * Math.PI) * 0.03);
@@ -944,7 +921,10 @@ export class World {
       if (d.t > fall + 0.55) {
         this.bake(d.placed, d.live.build);
         d.live.dispose();
-        if (this.board) this.life.sync(this.board);
+        if (this.board) {
+          this.life.sync(this.board);
+          this.fireflies.sync(this.board);
+        }
         this.onBaked?.(d.placed);
       } else still.push(d);
     }
@@ -956,7 +936,8 @@ export class World {
 
     this.life.update(dt);
     this.spawnSmoke(dt);
-    this.updateParticles(dt);
+    this.sprites.update(dt);
+    this.updateFxUniforms();
     this.slots.visible = this.slotCount > 0;
 
     if (this.post) this.post.pipeline.render();

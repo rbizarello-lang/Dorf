@@ -703,9 +703,12 @@ function frame(now: number) {
   }
 }
 
+// ?timescale=0.05 desacelera o mundo (depuração de animações nas capturas por software).
+const timeScale = THREE.MathUtils.clamp(Number(params.get('timescale')) || 1, 0.01, 4);
+
 function step(now: number) {
   const realDt = (now - last) / 1000;
-  const dt = Math.min(0.05, realDt);
+  const dt = Math.min(0.05, realDt) * timeScale;
   last = now;
   const c0 = performance.now();
   keyboardCamera(dt);
@@ -809,6 +812,21 @@ function start(data: unknown) {
   world.rig.goal.set(x, 0, z);
   world.rig.target.set(x, 0, z);
   if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
+
+// Dispara a onda do chão no foco da câmera, já com `age` segundos (capturas com ?timescale=0.01).
+(window as unknown as { __ripple: (age: number) => void }).__ripple = (age) => world.ripple(world.rig.target.x, world.rig.target.z, 1, age);
+
+// Coloca a peça atual na melhor posição, com animação (capturas da queda e da onda).
+(window as unknown as { __placeBest: () => boolean }).__placeBest = () => {
+  const m = game.bestMove();
+  if (!m) return false;
+  const { x, z } = hexToWorld(m.q, m.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  while (game.rot !== m.rot) rotate(1);
+  place(m.q, m.r);
   return true;
 };
 

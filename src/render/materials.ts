@@ -8,6 +8,7 @@ import {
   clamp,
   cos,
   dot,
+  exp,
   float,
   fract,
   fwidth,
@@ -58,6 +59,8 @@ export const U = {
   bank: uniform(new THREE.Color('#d9e3a2')),
   /** Cor do céu refletida na água (acompanha a hora do dia). */
   sky: uniform(new THREE.Color('#fff4f0')),
+  /** Onda no chão quando uma peça assenta: (x, z, instante inicial, força). */
+  ripple: uniform(new THREE.Vector4(0, 0, -100, 0)),
   /** Direção (para o sol) e cor da luz do sol, para o cintilar da água. */
   sunDir: uniform(new THREE.Vector3(-0.5, 0.8, 0.3).normalize()),
   sun: uniform(new THREE.Color('#fff0d8')),
@@ -79,6 +82,35 @@ export const cloudLight = Fn(([p]: [N2]) => {
   const n = texture(noiseTex, uv).r;
   return float(1).sub(U.clouds.mul(smoothstep(0.47, 0.7, n)).mul(1.8));
 });
+
+/**
+ * Onda que corre pelo chão a partir da peça que assentou: um pulso que sobe e desce,
+ * some em ~1,5 s e não mexe na própria peça (começa na borda dela).
+ */
+const rippleY = (pw: N, t: N) => {
+  const d = length(pw.xz.sub(U.ripple.xy));
+  const age = t.sub(U.ripple.z).max(0);
+  const x = d.sub(age.mul(3.2).add(0.75));
+  const wave = sin(x.mul(10)).mul(exp(x.mul(x).mul(-14)));
+  return wave.mul(exp(age.mul(-1.9))).mul(smoothstep(0.6, 0.95, d)).mul(U.ripple.w).mul(0.042);
+};
+
+/** Desloca `positionLocal` (e `positionPrevious`, para o TRAA) pela onda e por um extra opcional. */
+function displaced(extra?: (p: N, t: N, now: boolean) => N) {
+  return Fn(() => {
+    const now = modelWorldMatrix.mul(vec4(positionLocal, 1)).xyz;
+    const prev = modelWorldMatrix.mul(vec4(positionPrevious, 1)).xyz;
+    const tPrev = U.time.sub(U.dt);
+    let dNow: N = vec3(0, rippleY(now, U.time), 0);
+    let dPrev: N = vec3(0, rippleY(prev, tPrev), 0);
+    if (extra) {
+      dNow = dNow.add(extra(positionLocal, U.time, true));
+      dPrev = dPrev.add(extra(positionPrevious, tPrev, false));
+    }
+    positionPrevious.addAssign(dPrev);
+    return positionLocal.add(dNow);
+  })();
+}
 
 /** Recebe a sombra do sol e multiplica pelas nuvens (o tipo do three declara a função sem parâmetro). */
 const shadowWithClouds = Fn(([shadow]: [N]) => shadow.mul(cloudLight(positionWorld.xz))) as unknown as () => THREE.Node;
@@ -116,24 +148,20 @@ function decoMaterial(o: DecoOpts) {
   const glow = attribute('glow', 'float');
   const iColor = attribute('iColor', 'vec3');
   let base: N3 = vertexColor().rgb.mul(mix(vec3(1), iColor, tint));
+  // positionLocal já vem transformado pela instância (r186: instância antes do positionNode).
   if (o.sway === 'tree') {
     const h = max(positionGeometry.y.sub(0.08), 0);
-    m.positionNode = Fn(() => {
-      // positionLocal já vem transformado pela instância (r186: instância antes do positionNode).
-      positionPrevious.addAssign(treeSway(positionPrevious, h, U.time.sub(U.dt)));
-      return positionLocal.add(treeSway(positionLocal, h, U.time));
-    })();
+    m.positionNode = displaced((p, t) => treeSway(p, h, t));
   } else if (o.sway === 'crop') {
     const hgt = max(positionGeometry.y, 0);
     const sheen = varying(float(0), 'vSheen');
-    m.positionNode = Fn(() => {
-      const now = cropBend(positionLocal, hgt, U.time);
-      positionPrevious.addAssign(cropBend(positionPrevious, hgt, U.time.sub(U.dt)).d);
-      sheen.assign(now.gust.mul(clamp(hgt.mul(14), 0, 1)));
-      return positionLocal.add(now.d);
-    })();
+    m.positionNode = displaced((p, t, now) => {
+      const b = cropBend(p, hgt, t);
+      if (now) sheen.assign(b.gust.mul(clamp(hgt.mul(14), 0, 1)));
+      return b.d;
+    });
     base = base.mul(sheen.mul(0.22).add(1));
-  }
+  } else m.positionNode = displaced();
   m.colorNode = base;
   // Cada janela acende num momento diferente do anoitecer.
   const lit = smoothstep(0, 0.25, U.night.mul(1.25).sub(hash(instanceIndex).mul(0.5)));
@@ -168,6 +196,7 @@ export function makeDecoMaterials(): Record<MatKey, THREE.MeshStandardNodeMateri
  */
 export function makeGroundMaterial() {
   const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0, flatShading: true });
+  m.positionNode = displaced();
   const p = positionWorld.xz;
   const sp = attribute('splat', 'vec4');
   const blot = texture(noiseTex, p.div(2.6)).g;
@@ -212,6 +241,7 @@ export function makeGroundMaterial() {
  */
 export function makeWaterMaterial() {
   const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.08, metalness: 0 });
+  m.positionNode = displaced();
   const p = positionWorld.xz;
   const t = U.time;
   // Correnteza em coordenadas de mundo (o bloco estático já vem girado; a peça viva não).
