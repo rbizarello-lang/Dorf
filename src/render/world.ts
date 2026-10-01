@@ -116,7 +116,7 @@ class Chunk {
   private gSpl = new Float32Array(0);
   private wPos = new Float32Array(0);
   private wFlow = new Float32Array(0);
-  private wEdge = new Float32Array(0);
+  private wBed = new Float32Array(0);
   private gN = 0;
   private wN = 0;
   private centerSum = new THREE.Vector3();
@@ -158,16 +158,16 @@ class Chunk {
       p.set(this.wPos.subarray(0, this.wN * 3));
       const f = new Float32Array(cap * 2);
       f.set(this.wFlow.subarray(0, this.wN * 2));
-      const e = new Float32Array(cap);
-      e.set(this.wEdge.subarray(0, this.wN));
+      const bd = new Float32Array(cap * 4);
+      bd.set(this.wBed.subarray(0, this.wN * 4));
       this.wPos = p;
       this.wFlow = f;
-      this.wEdge = e;
+      this.wBed = bd;
       this.water.geometry.dispose();
       this.water.geometry.setAttribute('position', new THREE.BufferAttribute(p, 3));
       this.water.geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(cap * 3).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
       this.water.geometry.setAttribute('wflow', new THREE.BufferAttribute(f, 2));
-      this.water.geometry.setAttribute('wedge', new THREE.BufferAttribute(e, 1));
+      this.water.geometry.setAttribute('wbed', new THREE.BufferAttribute(bd, 4));
     }
     const xf = (src: Float32Array, dst: Float32Array, at: number) => {
       for (let i = 0; i < src.length; i += 3) {
@@ -199,11 +199,11 @@ class Chunk {
         this.wFlow[(this.wN + i) * 2] = e[0] * fx + e[8] * fz;
         this.wFlow[(this.wN + i) * 2 + 1] = e[2] * fx + e[10] * fz;
       }
-      this.wEdge.set(b.wedge, this.wN);
+      this.wBed.set(b.wbed, this.wN * 4);
       const attrs: [string, number][] = [
         ['position', 3],
         ['wflow', 2],
-        ['wedge', 1],
+        ['wbed', 4],
       ];
       for (const [name, size] of attrs) {
         const a = this.water.geometry.getAttribute(name) as THREE.BufferAttribute;
@@ -470,7 +470,6 @@ export class World {
     this.voidU.bg.value.copy(s.bg);
     this.voidU.fill.value.copy(s.fill);
     this.voidU.line.value.copy(s.line);
-    U.sky.value.copy(s.hemiSky);
     this.slotMat.color.copy(s.line);
     this.slotMat.opacity = 0.55 - s.night * 0.3;
     this.sun.color.copy(s.sun);
@@ -1091,6 +1090,7 @@ export class World {
     for (const [k, p] of this.pools) if (k.endsWith('~')) p.mesh.visible = fine;
 
     this.life.update(dt);
+    this.life.wakes(this.rig.target.x, this.rig.target.z);
     this.spawnSmoke(dt);
     this.sprites.update(dt);
     this.updateFxUniforms();

@@ -10,6 +10,7 @@ import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { ssgi } from 'three/addons/tsl/display/SSGINode.js';
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { traa } from 'three/addons/tsl/display/TRAANode.js';
+import { ssrMask } from './materials';
 
 // Pós-processamento por perfil de qualidade, montado como um grafo de nós (RenderPipeline).
 //   ultra: iluminação indireta com oclusão (SSGI) + reflexos na água (SSR) + raios de luz
@@ -54,8 +55,9 @@ export const P = {
 };
 
 /**
- * Só a água tem rugosidade abaixo de ~0,1 (o vidro e o cristal ficam em 0,2 ou mais;
- * materiais sem PBR leem 0). A espuma sobe a rugosidade e apaga o reflexo.
+ * Máscara do reflexo no alfa da normal: só a água grava valores entre ~0,04 e ~0,09 (a
+ * máscara própria dela, `ssrMask`); os outros materiais gravam a rugosidade (o vidro e o
+ * cristal ficam em 0,2 ou mais; materiais sem PBR leem 0). A espuma apaga o reflexo.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const WATER_MASK = (r: any) => smoothstep(0.02, 0.04, r).mul(smoothstep(0.14, 0.09, r));
@@ -92,7 +94,8 @@ const sceneNormal = (withRoughness: boolean) =>
   Fn((builder: any) => {
     const m = builder.material as (THREE.Material & { roughness?: number }) | null;
     if (m?.transparent) return vec4(0);
-    return vec4(packNormalToRGB(normalView), withRoughness && m?.roughness !== undefined ? roughness : float(1));
+    const mask = m && ssrMask.get(m);
+    return vec4(packNormalToRGB(normalView), !withRoughness ? float(1) : mask ? mask : m?.roughness !== undefined ? roughness : float(1));
   })();
 
 export interface Post {

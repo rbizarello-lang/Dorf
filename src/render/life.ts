@@ -4,6 +4,7 @@ import { DIRS, edgeMid, hexToWorld, hkey, opposite } from '../core/hex';
 import { T } from '../core/tiles';
 import type { Theme } from '../themes/types';
 import { instGeometry, setInstColor, type Lib } from './lib';
+import { WAKES, WAKE_MAX, WAKE_N } from './materials';
 import { ROAD_Y, WATER_Y } from './tileBuilder';
 
 // Vida do mapa: tudo que se move depois de assentado.
@@ -115,6 +116,8 @@ interface Mover {
   x: number;
   z: number;
   heading: number;
+  /** Força da esteira (0 parado, 1 andando), suavizada para nascer e sumir devagar. */
+  wake: number;
 }
 
 interface Flock {
@@ -139,6 +142,7 @@ export class Life {
   private spinners: Spinner[] = [];
   private animals: Animal[] = [];
   private movers: Mover[] = [];
+  private wakeList: Mover[] = [];
   private flocks: Flock[] = [];
   private board: Board | null = null;
   private theme!: Theme;
@@ -232,7 +236,7 @@ export class Life {
     const th = this.theme;
     const speed = boat ? 0.16 + Math.random() * 0.06 : th.vehicle === 'maglev' ? 0.7 : th.vehicle === 'steam' ? 0.42 : 0.17;
     const { x, z } = hexToWorld(tile.q, tile.r);
-    const m: Mover = { boat, tile, a, b, t: Math.random() * 0.5, len: a < 0 ? 0.87 : Math.abs(a - b) === 3 ? 1.73 : 1.45, speed, wait: 0, trail: [], x, z, heading: 0 };
+    const m: Mover = { boat, tile, a, b, t: Math.random() * 0.5, len: a < 0 ? 0.87 : Math.abs(a - b) === 3 ? 1.73 : 1.45, speed, wait: 0, trail: [], x, z, heading: 0, wake: 0 };
     this.movers.push(m);
   }
 
@@ -300,6 +304,27 @@ export class Life {
     }
   }
 
+  /** Posição de um barco andando, ou null (capturas das esteiras). */
+  boatPos(): { x: number; z: number } | null {
+    const m = this.movers.find((m) => m.boat && m.wait <= 0);
+    return m ? { x: m.x, z: m.z } : null;
+  }
+
+  /** Esteiras para o shader da água: os barcos andando mais perto de (x, z). */
+  wakes(x: number, z: number) {
+    const near = this.wakeList;
+    near.length = 0;
+    for (const m of this.movers) if (m.boat && m.wake > 0.01) near.push(m);
+    const d2 = (m: Mover) => (m.x - x) ** 2 + (m.z - z) ** 2;
+    if (near.length > WAKE_MAX) near.sort((a, b) => d2(a) - d2(b));
+    const n = Math.min(WAKE_MAX, near.length);
+    for (let i = 0; i < n; i++) {
+      const m = near[i];
+      (WAKES.array[i] as THREE.Vector4).set(m.x, m.z, Math.cos(m.heading) * m.wake, Math.sin(m.heading) * m.wake);
+    }
+    WAKE_N.value = n;
+  }
+
   private advance(m: Mover) {
     const board = this.board!;
     const terr = m.boat ? T.Water : T.Rail;
@@ -359,6 +384,7 @@ export class Life {
       m.x = pos.x;
       m.z = pos.z;
       if (m.boat) {
+        m.wake += ((m.wait > 0 ? 0 : 1) - m.wake) * Math.min(1, dt * 1.5);
         const bob = Math.sin(this.time * 2 + m.speed * 40) * 0.003;
         q4.setFromAxisAngle(UP, -m.heading);
         m4.compose(v3.set(m.x, WATER_Y - 0.001 + bob, m.z), q4, s3.setScalar(1));
