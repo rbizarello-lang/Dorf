@@ -99,6 +99,7 @@ let qualityMode: QualityMode = pickQ(params.get('quality')) ?? pickQ(store.get('
 let gameOverShown = false;
 let overTimer = 0;
 let bestAtStart = 0;
+let recordCheered = false;
 const special = params.has('stress') || params.has('auto') || params.has('demo');
 
 // Regras: padrão ← tema ← modo. O desafio do dia ignora as regras do tema (é igual para todos).
@@ -141,6 +142,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   hover = null;
   gameOverShown = false;
   bestAtStart = best;
+  recordCheered = false;
   hud.hint.style.opacity = moves.length >= 6 ? '0' : '';
   world.dropGhost();
   world.setTheme(theme, game.board);
@@ -268,7 +270,7 @@ function rotate(dir: 1 | -1) {
   if (!game.current) return;
   game.rotate(dir);
   rotSteps += dir;
-  sfx.rotate();
+  sfx.rotate(dir);
   world.setPreview(game.current, rotSteps * (Math.PI / 3), game.stack);
   updateGhost();
 }
@@ -304,13 +306,26 @@ function place(q: number, r: number) {
     best = game.board.score;
     if (!special) store.set('best', String(best));
   }
+  // Passar do recorde é um momento: comemora uma vez por partida (não na primeira partida).
+  if (!recordCheered && bestAtStart > 0 && game.board.score > bestAtStart && !special) {
+    recordCheered = true;
+    sfx.record();
+    hud.bumpScore('record');
+    hud.toast(`Novo recorde! Passou de ${bestAtStart.toLocaleString('pt-BR')} pontos.`, 'good');
+  }
   if (moves.length >= 6) hud.hint.style.opacity = '0';
   refreshHud();
+  hud.say(`${res.points > 0 ? `Mais ${res.points} pontos. ` : ''}Total ${game.board.score.toLocaleString('pt-BR')}. ${game.rules.infinite ? '' : `${game.stack} peças na pilha.`}`);
   persist();
   if (game.over && !gameOverShown) {
     gameOverShown = true;
     overTimer = window.setTimeout(() => {
-      if (game.over) showGameOver();
+      if (!game.over) return;
+      // A câmera recua devagar até mostrar o mapa inteiro antes do placar final.
+      frameCamera(false);
+      overTimer = window.setTimeout(() => {
+        if (game.over) showGameOver();
+      }, 900);
     }, 1100);
   }
 }
@@ -318,7 +333,10 @@ function place(q: number, r: number) {
 function announce(res: PlaceResult) {
   const s = screenOf(res.placed.q, res.placed.r);
   sfx.place(res.matches);
-  if (res.points > 0) hud.floater(s.x, s.y - 10, `+${res.points}`, res.perfect ? 'big' : '');
+  if (res.points > 0) {
+    hud.floater(s.x, s.y - 10, `+${res.points}`, res.perfect ? 'big' : '');
+    hud.bumpScore(res.perfect || res.synergies.length ? 'big' : '');
+  }
   const { x, z } = hexToWorld(res.placed.q, res.placed.r);
   if (res.perfect) {
     sfx.perfect();
@@ -396,6 +414,7 @@ function showHelp() {
       <li><b>Eras</b>: com ${game.rules.eraScores.slice(1).map((v) => v.toLocaleString('pt-BR')).join(', ')} pontos a vila muda de era e ganha +${game.rules.eraTiles} peças.</li>
       <li><b>Sítios</b>: carimbos no mapa marcam ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.</li>
       <li><kbd>U</kbd> desfaz a última jogada (o número de vezes depende do modo).</li>
+      <li>O botão de som alterna entre música e efeitos, só efeitos e mudo; <kbd>M</kbd> liga ou desliga a música.</li>
       <li>A partida acaba quando a pilha esvazia.</li>
     </ul>
     <p class="muted">Mouse: clique coloca, botão direito ou <kbd>R</kbd> gira a peça, arrastar move, roda dá zoom, <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera. Toque: toque num espaço para ver a peça, toque de novo (ou ✓) para colocar.</p>
@@ -416,7 +435,7 @@ function showGameOver() {
     <h2 id="modal-title">${record ? 'Novo recorde!' : b.sites.length && !b.sitesLeft() && game.rules.endOnSites ? 'Todos os sítios achados!' : 'Pilha vazia'}</h2>
     <p class="muted">${mode.name} · ${theme.name} · semente ${game.seed}</p>
     <div class="final">
-      <div><b>${b.score.toLocaleString('pt-BR')}</b><span>pontos</span></div>
+      <div><b data-count="${b.score}">${b.score.toLocaleString('pt-BR')}</b><span>pontos</span></div>
       <div><b>${game.placedCount}</b><span>peças</span></div>
       <div><b>${b.questsCompleted}</b><span>missões</span></div>
     </div>
@@ -425,6 +444,9 @@ function showGameOver() {
       <button class="primary" type="button" data-act="new">Jogar de novo</button>
       <button class="secondary" type="button" data-act="theme">Trocar tema</button>
     </div>`);
+  if (record) hud.modalBody.querySelector('h2')!.classList.add('record');
+  sfx.gameOver(record);
+  hud.countUp(hud.modalBody.querySelector<HTMLElement>('[data-count]')!, b.score);
 }
 
 hud.modal.addEventListener('click', (e) => {
@@ -623,6 +645,7 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'h' || k === '?') showHelp();
   else if (k === 'n') requestNewGame();
   else if (k === 'u') undo();
+  else if (k === 'm') toggleMusic();
   else if (k === '+' || k === '=') world.rig.zoom(0.85);
   else if (k === '-') world.rig.zoom(1.18);
   else held.add(k);
@@ -681,6 +704,7 @@ function cycleTime() {
   const next = order[(order.indexOf(world.timeOfDay) + 1) % 3];
   world.setTimeOfDay(next);
   setTimeLabel(next);
+  sfx.setMood(next);
   store.set('time', next);
 }
 timeBtn.addEventListener('click', cycleTime);
@@ -689,20 +713,41 @@ timeBtn.addEventListener('click', cycleTime);
   if (saved && Object.hasOwn(TIME_LABEL, saved)) {
     world.setTimeOfDay(saved);
     setTimeLabel(saved);
+    sfx.setMood(saved);
   }
 }
 
+// Som em três estados: música e efeitos ('1'), só efeitos ('sfx'), mudo ('0').
+type SoundMode = '1' | 'sfx' | '0';
+const SOUND: Record<SoundMode, { long: string; short: string; title: string }> = {
+  '1': { long: 'Som', short: '♫', title: 'Som: música e efeitos (M liga ou desliga a música)' },
+  sfx: { long: 'Efeitos', short: '♪', title: 'Som: só efeitos (M liga a música)' },
+  '0': { long: 'Mudo', short: '✕', title: 'Som desligado' },
+};
 const soundBtn = document.getElementById('btn-sound')!;
-soundBtn.addEventListener('click', () => {
-  sfx.enabled = !sfx.enabled;
-  sfx.unlock();
-  soundBtn.setAttribute('aria-pressed', String(sfx.enabled));
-  store.set('sound', sfx.enabled ? '1' : '0');
-});
-if (store.get('sound') === '0') {
-  sfx.enabled = false;
-  soundBtn.setAttribute('aria-pressed', 'false');
+let soundMode: SoundMode = 'sfx';
+function setSound(m: SoundMode, save = true) {
+  soundMode = m;
+  sfx.setOutput(m !== '0', m === '1');
+  soundBtn.setAttribute('aria-pressed', String(m !== '0'));
+  soundBtn.title = SOUND[m].title;
+  soundBtn.querySelector('.long')!.textContent = SOUND[m].long;
+  soundBtn.querySelector('.short')!.textContent = SOUND[m].short;
+  if (save) store.set('sound', m);
 }
+function toggleMusic() {
+  setSound(soundMode === '1' ? 'sfx' : '1');
+  hud.toast(soundMode === '1' ? 'Música ligada' : 'Música desligada');
+}
+soundBtn.addEventListener('click', () => {
+  sfx.unlock();
+  setSound(({ '1': 'sfx', sfx: '0', '0': '1' } as const)[soundMode]);
+});
+{
+  const saved = store.get('sound');
+  setSound(saved === '0' || saved === 'sfx' ? saved : '1', false);
+}
+document.addEventListener('visibilitychange', () => sfx.pause(document.hidden));
 
 window.addEventListener('resize', () => world.resize());
 
