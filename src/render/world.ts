@@ -340,6 +340,8 @@ export class World {
   private hoverRing: THREE.Mesh;
   private hoverMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.9, depthWrite: false, fog: false });
   private markers: THREE.Mesh[] = [];
+  /** Anéis dourados que se abrem em volta da peça (encaixe perfeito, nova era); cada um com o próprio material para apagar sozinho. */
+  private halos: { mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicNodeMaterial>; t: number; dur: number; grow: number }[] = [];
   /** Posição das marcas de borda relativa ao fantasma (elas acompanham a peça flutuando). */
   private markerLocal: THREE.Vector3[] = [];
   private ghost: LiveTile | null = null;
@@ -801,6 +803,46 @@ export class World {
 
   // ---------------------------------------------------------------- efeitos
 
+  /** Anel dourado que sai das bordas da peça e se apaga; acima de 1 a cor alimenta o bloom. */
+  halo(x: number, z: number, strength = 1) {
+    let h = this.halos.find((o) => !o.mesh.visible);
+    if (!h) {
+      if (this.halos.length >= 6) h = this.halos[0];
+      else {
+        const geo = this.halos[0]?.mesh.geometry ?? new THREE.RingGeometry(0.93, 1.0, 6, 1).rotateX(-Math.PI / 2);
+        const mat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false, blending: THREE.AdditiveBlending });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.renderOrder = 2;
+        this.scene.add(mesh);
+        h = { mesh, t: 0, dur: 1, grow: 1 };
+        this.halos.push(h);
+      }
+    }
+    h.mesh.material.color.copy(tc(this.theme.sparkle)).multiplyScalar(1.1 + strength * 0.4);
+    h.mesh.position.set(x, 0.06, z);
+    h.mesh.visible = true;
+    h.t = 0;
+    h.dur = 0.8 + strength * 0.35;
+    h.grow = 0.35 + strength * 0.4;
+  }
+
+  /** Bando de pássaros que levanta voo do lugar (marcos da partida). */
+  flushBirds(x: number, z: number) {
+    this.life.flush(x, z);
+  }
+
+  private stepHalos(dt: number) {
+    for (const h of this.halos) {
+      if (!h.mesh.visible) continue;
+      h.t += dt;
+      const u = Math.min(1, h.t / h.dur);
+      const e = 1 - Math.pow(1 - u, 3);
+      h.mesh.scale.setScalar(1 + e * h.grow);
+      h.mesh.material.opacity = (1 - u) * (1 - u);
+      if (u >= 1) h.mesh.visible = false;
+    }
+  }
+
   burst(x: number, z: number, kind: 'dust' | 'sparkle', n: number, y = 0) {
     if (kind === 'dust') this.sprites.dust(x, z, tc(this.theme.smoke), n);
     else this.sprites.sparkle(x, z, tc(this.theme.sparkle), n, y);
@@ -993,6 +1035,8 @@ export class World {
       g.rotation.z = THREE.MathUtils.clamp(-this.ghostVel.x * 0.035, -0.22, 0.22);
       for (let i = 0; i < 6; i++) if (this.markers[i].visible) this.markers[i].position.copy(g.position).add(this.markerLocal[i]);
     }
+
+    this.stepHalos(dt);
 
     // Peças caindo.
     const still: Drop[] = [];

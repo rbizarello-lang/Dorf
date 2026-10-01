@@ -311,6 +311,8 @@ function place(q: number, r: number) {
     recordCheered = true;
     sfx.record();
     hud.bumpScore('record');
+    const w = hexToWorld(res.placed.q, res.placed.r);
+    world.flushBirds(w.x, w.z);
     hud.toast(`Novo recorde! Passou de ${bestAtStart.toLocaleString('pt-BR')} pontos.`, 'good');
   }
   if (moves.length >= 6) hud.hint.style.opacity = '0';
@@ -341,6 +343,7 @@ function announce(res: PlaceResult) {
   if (res.perfect) {
     sfx.perfect();
     world.burst(x, z, 'sparkle', 26);
+    world.halo(x, z);
     hud.floater(s.x, s.y - 46, 'Perfeito!', 'big');
   }
   // Interações: um aviso por borda, perto dela.
@@ -385,6 +388,8 @@ function announce(res: PlaceResult) {
     sfx.quest();
     world.ripple(x, z, 2.2);
     world.burst(x, z, 'sparkle', 60);
+    world.halo(x, z, 2);
+    world.flushBirds(x, z);
     const el = document.getElementById('era')!;
     el.classList.remove('up');
     void el.offsetWidth;
@@ -927,6 +932,10 @@ function start(data: unknown) {
 };
 
 // Dispara a onda do chão no foco da câmera, já com `age` segundos (capturas com ?timescale=0.01).
+(window as unknown as { __celebrate: () => void }).__celebrate = () => {
+  world.halo(world.rig.target.x, world.rig.target.z, 2);
+  world.flushBirds(world.rig.target.x, world.rig.target.z);
+};
 (window as unknown as { __ripple: (age: number) => void }).__ripple = (age) => world.ripple(world.rig.target.x, world.rig.target.z, 1, age);
 
 // Coloca a peça atual na melhor posição, com animação (capturas da queda e da onda).
