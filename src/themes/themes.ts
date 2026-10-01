@@ -1,65 +1,18 @@
-import type { Rules } from '../core/board';
+import { ERA_THEMES } from './eras';
+import type { Theme } from './types';
 
-// Um tema troca paleta, nomes, formas da decoração e, opcionalmente, regras.
-// A lógica do jogo não conhece temas: tudo aqui é dado.
+export type * from './types';
 
-export type TreeGeo = 'conifer' | 'round' | 'palm' | 'crystal' | 'blossom';
-export type RoofStyle = 'gable' | 'flat' | 'dome' | 'pagoda';
+// Temas "base" do protótipo e o modelo histórico (Holanda). Os demais temas de
+// países e épocas ficam em eras.ts. Tudo aqui é dado: nenhum tema tem código próprio.
 
-export interface ForestKind {
-  geo: TreeGeo;
-  weight: number;
-  colors: string[];
-}
-
-export interface Theme {
-  id: string;
-  name: string;
-  tagline: string;
-  /** Índice = enum T: Prado, Floresta, Plantação, Vila, Rio, Trilhos. */
-  terrainNames: [string, string, string, string, string, string];
-  terrainColors: [string, string, string, string, string, string];
-  bg: string;
-  voidFill: string;
-  voidLine: string;
-  sun: string;
-  sunIntensity: number;
-  sunDir: [number, number, number];
-  hemiSky: string;
-  hemiGround: string;
-  hemiIntensity: number;
-  ground: [string, string, string, string, string, string];
-  side: string;
-  sideDark: string;
-  water: string;
-  bank: string;
-  railBed: string;
-  rail: string;
-  sleeper: string;
-  forest: ForestKind[];
-  trunk: string;
-  treesPerSector: [number, number];
-  walls: string[];
-  roofs: string[];
-  roofStyle: RoofStyle;
-  towerChance: number;
-  field: string[];
-  bush: string[];
-  flowers: string[];
-  rock: string;
-  lily: string;
-  smoke: string;
-  sparkle: string;
-  ui: { accent: string; panel: string; ink: string; soft: string };
-  rules?: Partial<Rules>;
-  ruleNote?: string;
-}
-
-export const THEMES: Theme[] = [
+export const BASE_THEMES: Theme[] = [
   {
     id: 'vale',
     name: 'Vale Pastel',
-    tagline: 'Vilarejos, bosques e plantações sob um céu de pêssego.',
+    era: 'Vale imaginário · atemporal',
+    period: 'fantasia',
+    tagline: 'Vilarejos, bosques e trigais sob um céu de pêssego.',
     terrainNames: ['Prado', 'Floresta', 'Plantação', 'Vila', 'Rio', 'Trilhos'],
     terrainColors: ['#8fbf5a', '#2f7a45', '#f0a53a', '#d9653b', '#58a8d6', '#7d6a58'],
     bg: '#f3d3c8',
@@ -71,38 +24,122 @@ export const THEMES: Theme[] = [
     hemiSky: '#fff4f0',
     hemiGround: '#9a8f78',
     hemiIntensity: 1.35,
-    ground: ['#8cbd57', '#5d8f3f', '#b99a55', '#bba27c', '#8fbd5c', '#8cbd57'],
+    ground: ['#8cbd57', '#5d8f3f', '#a98f52', '#bba27c', '#8fbd5c', '#8cbd57'],
     side: '#8a6048',
     sideDark: '#4d3528',
     water: '#63b1dc',
     bank: '#d9e3a2',
-    railBed: '#9b8c7c',
-    rail: '#5a4a44',
+    road: 'rail',
+    roadBed: '#9b8c7c',
+    roadDetail: '#5a4a44',
     sleeper: '#7a5a3e',
+    vehicle: 'steam',
+    vehicleColors: ['#c8553a', '#3b2a24'],
     forest: [
-      { geo: 'conifer', weight: 0.55, colors: ['#2e6a3c', '#3b7c45', '#26583a', '#46864a'] },
-      { geo: 'round', weight: 0.35, colors: ['#5c9b3d', '#79ae45', '#4c8a48', '#93b84e'] },
+      { geo: 'conifer', weight: 0.4, colors: ['#2e6a3c', '#3b7c45', '#26583a', '#46864a'] },
+      { geo: 'oak', weight: 0.3, colors: ['#5c9b3d', '#79ae45', '#4c8a48'] },
+      { geo: 'round', weight: 0.2, colors: ['#6aa843', '#93b84e', '#5a9a40'] },
       { geo: 'round', weight: 0.1, colors: ['#8a70b4', '#a07cc4', '#d98a3d'] },
     ],
     trunk: '#6b4a32',
     treesPerSector: [5, 8],
-    walls: ['#f3e5cc', '#ead3b2', '#dcc4a4', '#f6ecdc'],
-    roofs: ['#d9653b', '#c8553a', '#e07b45', '#b94a3a', '#5f8fb5'],
-    roofStyle: 'gable',
-    towerChance: 0.06,
-    field: ['#f2a43a', '#f7c44c', '#e8913a', '#f3b24a', '#c47ed4'],
+    houses: [
+      { weight: 0.6, body: 'cottage', roof: 'gable', walls: ['#f3e5cc', '#ead3b2', '#f6ecdc'], roofs: ['#d9653b', '#c8553a', '#e07b45', '#5f8fb5'], trim: '#7a5238', chimney: true },
+      { weight: 0.25, body: 'tall', roof: 'hip', walls: ['#f3e5cc', '#e8d2b0', '#dcc4a4'], roofs: ['#c8553a', '#5f8fb5', '#b94a3a'], chimney: true },
+      { weight: 0.15, body: 'long', roof: 'thatch', walls: ['#efe2c8', '#e6d4b4'], roofs: ['#d9b25a', '#c9a24a'] },
+    ],
+    landmark: 'church',
+    landmarkChance: 0.14,
+    landmarkColors: ['#efe6d6', '#6f7fa0', '#c8a24a'],
+    window: '#ffd98a',
+    mill: 'windmill',
+    crops: [
+      { style: 'wheat', weight: 0.45, colors: ['#f2b84b', '#f5c95a', '#e8a73a'], soil: '#b99a55' },
+      { style: 'barley', weight: 0.2, colors: ['#e0c870', '#d6bb5e'], soil: '#b5a060' },
+      { style: 'lavender', weight: 0.2, colors: ['#9f7ad6', '#b48fe0', '#8a68c4'], soil: '#a8906a' },
+      { style: 'sunflower', weight: 0.15, colors: ['#f7c948', '#f5b82e'], soil: '#9a8a55' },
+    ],
+    grass: ['#7fb24c', '#8fc25a', '#6aa043'],
     bush: ['#5c9b3d', '#6eaa45'],
     flowers: ['#ffffff', '#ffd84a', '#f58fb0', '#b9a4ff'],
     rock: '#a79f97',
+    animals: { kind: 'sheep', colors: ['#f4f1ea', '#ebe5d8', '#f8f6f0'] },
+    boat: 'sailboat',
+    boatColors: ['#8a5a3c', '#fbf6ee'],
     lily: '#6aa84a',
     smoke: '#ffffff',
     sparkle: '#fff6c4',
     ui: { accent: '#c8553a', panel: '#fff8f3', ink: '#3b2a24', soft: '#8a6e62' },
+    synergy: { lumber: 'Serraria', mill: 'Moinho', pasture: 'Pasto', apiary: 'Colmeias' },
+  },
+  {
+    id: 'holanda',
+    name: 'Holanda Dourada',
+    era: 'Países Baixos · século XVII',
+    period: 'moderna',
+    tagline: 'Pôlderes, canais, moinhos de vento e faixas de tulipas.',
+    terrainNames: ['Pôlder', 'Bosque', 'Tulipas', 'Aldeia', 'Canal', 'Dique'],
+    terrainColors: ['#7da64e', '#4f7a3a', '#e63946', '#9a4a32', '#6f9fb8', '#8a8070'],
+    bg: '#dfe5ea',
+    voidFill: '#e7ecf0',
+    voidLine: '#f3f6f8',
+    sun: '#fff3dc',
+    sunIntensity: 2.2,
+    sunDir: [-0.6, 0.9, 0.4],
+    hemiSky: '#eef3f8',
+    hemiGround: '#7e8a6a',
+    hemiIntensity: 1.4,
+    ground: ['#7da64e', '#5b8a44', '#7a6a48', '#a89a86', '#7da64e', '#7da64e'],
+    side: '#6e5a48',
+    sideDark: '#3c3028',
+    water: '#6f9fb8',
+    bank: '#a9c27a',
+    road: 'stone',
+    roadBed: '#9a9082',
+    roadDetail: '#7a7064',
+    sleeper: '#5a4a3e',
+    vehicle: 'cart',
+    vehicleColors: ['#6a4a34', '#c9a24a'],
+    forest: [
+      { geo: 'oak', weight: 0.45, colors: ['#4f7a3a', '#5f8a42', '#57803e'] },
+      { geo: 'round', weight: 0.3, colors: ['#6a9448', '#76a050'] },
+      { geo: 'birch', weight: 0.25, colors: ['#8fb05a', '#9dbb66'] },
+    ],
+    trunk: '#5a4232',
+    treesPerSector: [4, 7],
+    houses: [
+      { weight: 0.55, body: 'tall', roof: 'stepgable', walls: ['#9a4a32', '#8a3e2c', '#a85a3c', '#7a3a2a'], roofs: ['#4a3a34', '#5a4038', '#3e3a3a'], trim: '#f1e6d2', chimney: true },
+      { weight: 0.45, body: 'cottage', roof: 'gable', walls: ['#b0563a', '#e8dcc4', '#c66a44'], roofs: ['#3e4a5c', '#7a3a2a', '#4a4a4a'], trim: '#f1e6d2', chimney: true },
+    ],
+    landmark: 'windmill',
+    landmarkChance: 0.2,
+    landmarkColors: ['#6b5a4c', '#3e3530', '#f1e6d2'],
+    window: '#ffd98a',
+    mill: 'windmill',
+    crops: [
+      { style: 'tulip', weight: 0.6, colors: ['#e63946', '#f4c430', '#f28bb8', '#fbf6ee', '#9b5de5', '#ff7f2a'], soil: '#6b5a3e' },
+      { style: 'wheat', weight: 0.25, colors: ['#e8b54a', '#f0c45c'], soil: '#8a7a50' },
+      { style: 'barley', weight: 0.15, colors: ['#d9c06a', '#cfb45a'], soil: '#857650' },
+    ],
+    grass: ['#6f9a42', '#7da64e', '#86ae55'],
+    bush: ['#5b8a44', '#6a9448'],
+    flowers: ['#ffffff', '#f4c430', '#e63946'],
+    rock: '#8a847a',
+    animals: { kind: 'cow', colors: ['#f2efe8', '#2f2a28', '#f2efe8'] },
+    boat: 'barge',
+    boatColors: ['#5a3a2a', '#c9a24a'],
+    lily: '#5f8a42',
+    smoke: '#f4f4f4',
+    sparkle: '#fff6d0',
+    ui: { accent: '#c2410c', panel: '#fbfaf6', ink: '#27231f', soft: '#6f6558' },
+    synergy: { lumber: 'Serraria', mill: 'Moinho de vento', pasture: 'Pasto de vacas', apiary: 'Colmeias' },
   },
   {
     id: 'cerrado',
     name: 'Cerrado Dourado',
-    tagline: 'Ipês floridos, buritis, roças e a maria-fumaça cortando a chapada.',
+    era: 'Brasil Central · hoje',
+    period: 'contemporanea',
+    tagline: 'Ipês floridos, buritis, canaviais e a maria-fumaça na chapada.',
     terrainNames: ['Campo', 'Mata', 'Roça', 'Vila', 'Rio', 'Ferrovia'],
     terrainColors: ['#c2b25a', '#e9b92c', '#7fb34a', '#f19b8a', '#2f96b0', '#a0694a'],
     bg: '#f4cf9a',
@@ -114,43 +151,63 @@ export const THEMES: Theme[] = [
     hemiSky: '#fff1dc',
     hemiGround: '#a8653e',
     hemiIntensity: 1.3,
-    ground: ['#c4b05a', '#8e9540', '#a9884a', '#c29266', '#b9b35e', '#c4b05a'],
+    ground: ['#c4b05a', '#8e9540', '#9a7a45', '#c29266', '#b9b35e', '#c4b05a'],
     side: '#b0532e',
     sideDark: '#6e2e1a',
     water: '#2f9fb8',
     bank: '#e6d38a',
-    railBed: '#a0694a',
-    rail: '#4a3a36',
+    road: 'rail',
+    roadBed: '#a0694a',
+    roadDetail: '#4a3a36',
     sleeper: '#6a4430',
+    vehicle: 'steam',
+    vehicleColors: ['#2f3a2f', '#c4623a'],
     forest: [
-      { geo: 'round', weight: 0.35, colors: ['#f2c12e', '#f5cf3a', '#e8b21e'] },
+      { geo: 'round', weight: 0.3, colors: ['#f2c12e', '#f5cf3a', '#e8b21e'] },
       { geo: 'blossom', weight: 0.2, colors: ['#e96fae', '#d85c9e', '#f18cc0'] },
       { geo: 'palm', weight: 0.25, colors: ['#4f8a3a', '#5f9a40', '#6aa545'] },
-      { geo: 'round', weight: 0.2, colors: ['#6f9a3a', '#7ea845', '#5f8a35'] },
+      { geo: 'olive', weight: 0.25, colors: ['#6f9a3a', '#7ea845', '#5f8a35'] },
     ],
     trunk: '#5a3b2a',
     treesPerSector: [3, 6],
-    walls: ['#fbf6ee', '#f6e27a', '#8ec3e6', '#f19b8a', '#b9e1a4'],
-    roofs: ['#b5502f', '#c4623a', '#a8452a'],
-    roofStyle: 'gable',
-    towerChance: 0.08,
-    field: ['#7fb34a', '#9cc957', '#d8b94a', '#6aa23f', '#e3c65a'],
+    houses: [
+      { weight: 0.7, body: 'cottage', roof: 'hip', walls: ['#fbf6ee', '#f6e27a', '#8ec3e6', '#f19b8a', '#b9e1a4'], roofs: ['#b5502f', '#c4623a', '#a8452a'], trim: '#2f6fa0' },
+      { weight: 0.3, body: 'long', roof: 'gable', walls: ['#fbf6ee', '#f3ead8'], roofs: ['#b5502f', '#c4623a'], trim: '#2f6fa0' },
+    ],
+    landmark: 'church',
+    landmarkChance: 0.1,
+    landmarkColors: ['#fbf6ee', '#b5502f', '#2f6fa0'],
+    window: '#ffd98a',
+    mill: 'granary',
+    crops: [
+      { style: 'sugarcane', weight: 0.35, colors: ['#7fb34a', '#9cc957', '#8abb4e'], soil: '#8a5a3a' },
+      { style: 'coffee', weight: 0.25, colors: ['#3f7a3a', '#4a8a40'], soil: '#7a3f2a' },
+      { style: 'corn', weight: 0.25, colors: ['#8ab84a', '#9cc44f'], soil: '#946040' },
+      { style: 'cotton', weight: 0.15, colors: ['#f8f6f0'], soil: '#a0694a' },
+    ],
+    grass: ['#b9ad52', '#c9bc60', '#a89c48'],
     bush: ['#8e9540', '#a3a94a'],
     flowers: ['#f2c12e', '#e96fae', '#ffffff', '#ff8a3d'],
     rock: '#b8805c',
+    animals: { kind: 'cow', colors: ['#f2eee4', '#e6dccb', '#c9a27a'] },
+    boat: 'canoe',
+    boatColors: ['#6a4430', '#e6d38a'],
     lily: '#5f9a40',
     smoke: '#fff6ea',
     sparkle: '#fff1b0',
     ui: { accent: '#b5502f', panel: '#fff7ea', ink: '#3a2418', soft: '#8a6248' },
+    synergy: { lumber: 'Serraria', mill: 'Silo', pasture: 'Curral', apiary: 'Apiário' },
     rules: { perfectBonus: 25 },
     ruleNote: 'Encaixe perfeito vale 25 pontos.',
   },
   {
     id: 'inverno',
     name: 'Inverno Nórdico',
+    era: 'Escandinávia · hoje, no inverno',
+    period: 'contemporanea',
     tagline: 'Pinheiros nevados, cabanas vermelhas e lagos quase congelados.',
-    terrainNames: ['Neve', 'Pinhal', 'Estufa', 'Aldeia', 'Riacho', 'Trilhos'],
-    terrainColors: ['#e6eef5', '#2e5a4c', '#b8c9dc', '#9a3b2e', '#7fc1d8', '#5a5f6a'],
+    terrainNames: ['Neve', 'Pinhal', 'Lavoura', 'Aldeia', 'Riacho', 'Trilhos'],
+    terrainColors: ['#e6eef5', '#2e5a4c', '#d9c9a0', '#9a3b2e', '#7fc1d8', '#5a5f6a'],
     bg: '#d9e4ef',
     voidFill: '#e3ebf4',
     voidLine: '#f1f6fb',
@@ -160,40 +217,59 @@ export const THEMES: Theme[] = [
     hemiSky: '#eef4ff',
     hemiGround: '#8f9aa8',
     hemiIntensity: 1.45,
-    ground: ['#eef3f7', '#dfe7ee', '#d4dde6', '#e4e7ea', '#e6eef4', '#eef3f7'],
+    ground: ['#eef3f7', '#dfe7ee', '#d8dfe6', '#e4e7ea', '#e6eef4', '#eef3f7'],
     side: '#6b7a8a',
     sideDark: '#3b4654',
     water: '#86c6da',
     bank: '#ffffff',
-    railBed: '#8d939c',
-    rail: '#3f434b',
+    road: 'rail',
+    roadBed: '#8d939c',
+    roadDetail: '#3f434b',
     sleeper: '#5b4a3e',
+    vehicle: 'steam',
+    vehicleColors: ['#2f4a5c', '#9a3b2e'],
     forest: [
-      { geo: 'conifer', weight: 0.85, colors: ['#2e5a4c', '#3b6b58', '#24493f', '#355f52'] },
+      { geo: 'conifer', weight: 0.65, colors: ['#2e5a4c', '#3b6b58', '#24493f', '#355f52'] },
+      { geo: 'birch', weight: 0.2, colors: ['#dfe9ee', '#cfdde4'] },
       { geo: 'conifer', weight: 0.15, colors: ['#dfe9ee', '#cfdde4'] },
     ],
     trunk: '#4b3a30',
     treesPerSector: [5, 8],
-    walls: ['#9a3b2e', '#8c4a2c', '#6b3a2e', '#b8863a', '#2f4a5c'],
-    roofs: ['#f4f7fb', '#e9eef3', '#dde5ec'],
-    roofStyle: 'gable',
-    towerChance: 0.05,
-    field: ['#c9d6e3', '#b8c9dc', '#e0c9a6', '#d6e2ec'],
+    houses: [
+      { weight: 0.7, body: 'cottage', roof: 'gable', walls: ['#9a3b2e', '#8c4a2c', '#6b3a2e', '#b8863a', '#2f4a5c'], roofs: ['#f4f7fb', '#e9eef3'], trim: '#f4f7fb', chimney: true },
+      { weight: 0.3, body: 'long', roof: 'gable', walls: ['#9a3b2e', '#7a2e24'], roofs: ['#f4f7fb', '#dde5ec'], trim: '#f4f7fb', chimney: true },
+    ],
+    landmark: 'stave',
+    landmarkChance: 0.1,
+    landmarkColors: ['#4a2e22', '#2e2420', '#c9a24a'],
+    window: '#ffcf7a',
+    mill: 'windmill',
+    crops: [
+      { style: 'barley', weight: 0.7, colors: ['#d9c9a0', '#e6dbc0', '#cbbb92'], soil: '#dfe6ec' },
+      { style: 'tea', weight: 0.3, colors: ['#cfdde4', '#dce7ec'], soil: '#e6edf2' },
+    ],
+    grass: ['#e9f0f5', '#d9e3ea', '#f4f8fb'],
     bush: ['#3b6b58', '#dfe9ee'],
     flowers: ['#ffffff', '#cfe3ff'],
     rock: '#8c96a3',
+    animals: { kind: 'deer', colors: ['#8a6a4e', '#6e5440', '#a08262'] },
+    boat: 'rowboat',
+    boatColors: ['#9a3b2e', '#f4f7fb'],
     lily: '#f4f9fc',
     smoke: '#ffffff',
     sparkle: '#ffffff',
     ui: { accent: '#9a3b2e', panel: '#f7fafd', ink: '#1f2a36', soft: '#5f6f80' },
+    synergy: { lumber: 'Lenhadores', mill: 'Moinho', pasture: 'Renas', apiary: 'Colmeias' },
     rules: { startTiles: 45, questChance: 0.2 },
     ruleNote: 'Começa com 45 peças, missões um pouco mais raras.',
   },
   {
     id: 'sakura',
     name: 'Jardim Sakura',
-    tagline: 'Cerejeiras, arrozais espelhados e telhados de pagode.',
-    terrainNames: ['Musgo', 'Cerejal', 'Arrozal', 'Vila', 'Lago', 'Trilhos'],
+    era: 'Japão · hoje, na primavera',
+    period: 'contemporanea',
+    tagline: 'Cerejeiras, arrozais espelhados e o trem-bala ao fundo.',
+    terrainNames: ['Musgo', 'Cerejal', 'Arrozal', 'Vila', 'Lago', 'Ferrovia'],
     terrainColors: ['#9cc37a', '#f4a3c0', '#a8d08d', '#3e4a5c', '#6fbfd0', '#6d5a50'],
     bg: '#eedcea',
     voidFill: '#f3e6f0',
@@ -204,36 +280,55 @@ export const THEMES: Theme[] = [
     hemiSky: '#fff5fb',
     hemiGround: '#8a7d8f',
     hemiIntensity: 1.4,
-    ground: ['#9cc37a', '#86ad6c', '#8fb87a', '#b2a489', '#9cc37a', '#9cc37a'],
+    ground: ['#9cc37a', '#86ad6c', '#7aa0a0', '#b2a489', '#9cc37a', '#9cc37a'],
     side: '#7a5d4c',
     sideDark: '#44332b',
     water: '#72bfd0',
     bank: '#c9e2b0',
-    railBed: '#a39585',
-    rail: '#4d423e',
+    road: 'rail',
+    roadBed: '#a39585',
+    roadDetail: '#4d423e',
     sleeper: '#6e5646',
+    vehicle: 'maglev',
+    vehicleColors: ['#f7f7f5', '#2f6fb0'],
     forest: [
-      { geo: 'blossom', weight: 0.65, colors: ['#f7b7cf', '#f4a3c0', '#fbd0de', '#f09ab8'] },
-      { geo: 'conifer', weight: 0.35, colors: ['#3d6b4a', '#2f5a3e', '#4a7a52'] },
+      { geo: 'blossom', weight: 0.55, colors: ['#f7b7cf', '#f4a3c0', '#fbd0de', '#f09ab8'] },
+      { geo: 'conifer', weight: 0.25, colors: ['#3d6b4a', '#2f5a3e', '#4a7a52'] },
+      { geo: 'bamboo', weight: 0.2, colors: ['#7aa84a', '#8cb858'] },
     ],
     trunk: '#4e3a33',
     treesPerSector: [4, 7],
-    walls: ['#f3ede2', '#e6dccb', '#efe4d3'],
-    roofs: ['#3e4a5c', '#2f3d4f', '#5a3a3a', '#46536a'],
-    roofStyle: 'pagoda',
-    towerChance: 0.08,
-    field: ['#a8d08d', '#c5e0a0', '#8cc07c', '#b7dc9a'],
+    houses: [
+      { weight: 0.7, body: 'cottage', roof: 'pagoda', walls: ['#f3ede2', '#e6dccb', '#efe4d3'], roofs: ['#3e4a5c', '#2f3d4f', '#5a3a3a', '#46536a'], trim: '#5a3a2e' },
+      { weight: 0.3, body: 'long', roof: 'hip', walls: ['#f3ede2', '#e9e0cf'], roofs: ['#3e4a5c', '#46536a'], trim: '#5a3a2e' },
+    ],
+    landmark: 'pagoda',
+    landmarkChance: 0.12,
+    landmarkColors: ['#f3ede2', '#3e4a5c', '#c2303a'],
+    window: '#ffe2a8',
+    mill: 'granary',
+    crops: [
+      { style: 'rice', weight: 0.65, colors: ['#8cc07c', '#a8d08d', '#9ccb84'], soil: '#7fb6b8' },
+      { style: 'tea', weight: 0.35, colors: ['#5fa04a', '#6fae5a'], soil: '#8a7a5a' },
+    ],
+    grass: ['#8fbb6c', '#9cc37a', '#86b464'],
     bush: ['#6e9a5a', '#f4a3c0'],
     flowers: ['#fbd0de', '#ffffff', '#f7b7cf'],
     rock: '#9d958f',
+    animals: { kind: 'deer', colors: ['#b08a5e', '#a07a50'] },
+    boat: 'rowboat',
+    boatColors: ['#6e5646', '#f3ede2'],
     lily: '#78a65a',
     smoke: '#ffffff',
     sparkle: '#fff0f6',
     ui: { accent: '#c2466e', panel: '#fff8fb', ink: '#2e2230', soft: '#7c6378' },
+    synergy: { lumber: 'Carpintaria', mill: 'Celeiro', pasture: 'Cervos', apiary: 'Colmeias' },
   },
   {
     id: 'marte',
     name: 'Colônia Marciana',
+    era: 'Marte · século XXII',
+    period: 'futuro',
     tagline: 'Cúpulas pressurizadas, cristais e canais sob um céu violeta.',
     terrainNames: ['Regolito', 'Cristais', 'Hidroponia', 'Cúpulas', 'Canal', 'Maglev'],
     terrainColors: ['#c9683f', '#7ee0f2', '#6fe08a', '#dfe6f2', '#36d1d1', '#b9c0cc'],
@@ -246,34 +341,58 @@ export const THEMES: Theme[] = [
     hemiSky: '#a58ae0',
     hemiGround: '#5a2a22',
     hemiIntensity: 1.2,
-    ground: ['#c46a42', '#a4543a', '#8a4a36', '#b0725a', '#c47a4a', '#c46a42'],
+    ground: ['#c46a42', '#a4543a', '#6a3a30', '#b0725a', '#c47a4a', '#c46a42'],
     side: '#7a3326',
     sideDark: '#3e1a15',
     water: '#3fe0e0',
     bank: '#e8a070',
-    railBed: '#6a3a30',
-    rail: '#e3e8f0',
+    road: 'maglev',
+    roadBed: '#6a3a30',
+    roadDetail: '#e3e8f0',
     sleeper: '#9aa3b2',
-    forest: [
-      { geo: 'crystal', weight: 1, colors: ['#7ee0f2', '#b58cf5', '#f28bd2', '#9af0ff'] },
-    ],
+    vehicle: 'maglev',
+    vehicleColors: ['#e3e8f0', '#36d1d1'],
+    forest: [{ geo: 'crystal', weight: 1, colors: ['#7ee0f2', '#b58cf5', '#f28bd2', '#9af0ff'] }],
     trunk: '#5a3b2a',
     treesPerSector: [3, 5],
-    walls: ['#e8e6ea', '#cfd3da', '#f2f0f4'],
-    roofs: ['#9fd9ff', '#bfe6ff', '#8fc9f5'],
-    roofStyle: 'dome',
-    towerChance: 0.12,
-    field: ['#6fe08a', '#9af0a0', '#4cc37a', '#b6f5b0'],
+    houses: [
+      { weight: 0.65, body: 'round', roof: 'dome', walls: ['#e8e6ea', '#cfd3da', '#f2f0f4'], roofs: ['#9fd9ff', '#bfe6ff', '#8fc9f5'] },
+      { weight: 0.35, body: 'cube', roof: 'flat', walls: ['#d8dce4', '#c4cad4'], roofs: ['#9aa3b2', '#b0b8c4'], trim: '#36d1d1' },
+    ],
+    landmark: 'dome',
+    landmarkChance: 0.15,
+    landmarkColors: ['#e8e6ea', '#9fd9ff', '#36d1d1'],
+    window: '#9af0ff',
+    mill: 'granary',
+    crops: [{ style: 'hydro', weight: 1, colors: ['#6fe08a', '#9af0a0', '#4cc37a'], soil: '#4a2e2a' }],
+    grass: ['#b85f3a', '#c46a42', '#a4543a'],
     bush: ['#e39a6a', '#b85f3a'],
     flowers: ['#9af0ff', '#f28bd2'],
     rock: '#8a4a36',
+    animals: { kind: 'rover', colors: ['#dfe3ea', '#f2a03a'] },
+    boat: 'hover',
+    boatColors: ['#dfe3ea', '#36d1d1'],
     lily: '#9af0ff',
     smoke: '#e8e0ff',
     sparkle: '#b8fff6',
     ui: { accent: '#36b7c9', panel: '#241a36', ink: '#f1eaff', soft: '#b3a3d4' },
+    synergy: { lumber: 'Extrator de cristais', mill: 'Silo de sementes', pasture: 'Garagem de rovers', apiary: 'Polinizadores' },
     rules: { startTiles: 36, questChance: 0.32, maxQuests: 5 },
     ruleNote: 'Começa com 36 peças, mas recebe mais missões.',
   },
 ];
+
+export const THEMES: Theme[] = [...BASE_THEMES, ...ERA_THEMES];
+
+export const PERIOD_LABEL: Record<Theme['period'], string> = {
+  antiguidade: 'Antiguidade',
+  medieval: 'Séculos V a XV',
+  moderna: 'Séculos XVI a XVIII',
+  contemporanea: 'Séculos XIX a XXI',
+  futuro: 'Futuro',
+  fantasia: 'Fantasia',
+};
+
+export const PERIOD_ORDER: Theme['period'][] = ['antiguidade', 'medieval', 'moderna', 'contemporanea', 'futuro', 'fantasia'];
 
 export const themeById = (id: string | null | undefined) => THEMES.find((t) => t.id === id) ?? THEMES[0];

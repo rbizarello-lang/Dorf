@@ -5,15 +5,19 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import type { Board, Check, Placed } from '../core/board';
 import { edgeMid, hexToWorld, unkey } from '../core/hex';
+import type { SynHit, SynKind } from '../core/synergy';
 import type { TileDef } from '../core/tiles';
-import type { Theme } from '../themes/themes';
+import type { Theme } from '../themes/types';
 import { CameraRig } from './cameraRig';
-import { DECO_KINDS, type DecoKind, Lib } from './lib';
+import { Lib } from './lib';
+import { Life } from './life';
 import { TILE_T, buildTile, decoMatrix, tc, type Deco, type TileBuild } from './tileBuilder';
 
 export type Quality = 'high' | 'medium' | 'low';
+export type TimeOfDay = 'day' | 'dusk' | 'night';
 
 const CHUNK = 8;
+const DETAIL: Record<Quality, number> = { high: 1, medium: 0.65, low: 0.4 };
 const tmpM = new THREE.Matrix4();
 const tmpM2 = new THREE.Matrix4();
 
@@ -22,7 +26,17 @@ function tileMatrix(q: number, r: number, rot: number, y = 0, out = new THREE.Ma
   return out.makeRotationY((-rot * Math.PI) / 3).setPosition(x, y, z);
 }
 
-/** InstancedMesh que cresce sob demanda (dobra a capacidade). */
+/** Interações de uma peça colocada, convertidas para a orientação de origem da peça. */
+function synBase(hits: SynHit[], rot: number): { sector: number; kind: SynKind }[] {
+  return hits.map((h) => ({ sector: (h.edge - rot + 6) % 6, kind: h.kind }));
+}
+const synSig = (s: { sector: number; kind: SynKind }[]) =>
+  s
+    .map((x) => `${x.sector}${x.kind[0]}`)
+    .sort()
+    .join('');
+
+/** InstancedMesh estático que cresce sob demanda (dobra a capacidade). */
 class Pool {
   mesh: THREE.InstancedMesh;
   count = 0;
@@ -30,7 +44,8 @@ class Pool {
     private geo: THREE.BufferGeometry,
     private mat: THREE.Material,
     private parent: THREE.Object3D,
-    private cap = 256,
+    private shadows: boolean,
+    private cap = 128,
   ) {
     this.mesh = this.make(cap);
   }
@@ -39,7 +54,7 @@ class Pool {
     const m = new THREE.InstancedMesh(this.geo, this.mat, cap);
     m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
     m.count = this.count;
-    m.castShadow = true;
+    m.castShadow = this.shadows;
     m.receiveShadow = true;
     m.frustumCulled = false;
     this.parent.add(m);
@@ -72,7 +87,6 @@ class Pool {
     this.mesh.dispose();
   }
 }
-
 /** Buffer de vértices "somente acrescenta" para o chão e a água de um bloco de 8×8 peças. */
 class Chunk {
   readonly ground: THREE.Mesh;
@@ -180,8 +194,8 @@ export class LiveTile {
   constructor(
     readonly def: TileDef,
     readonly build: TileBuild,
+    readonly sig: string,
     lib: Lib,
-    theme: Theme,
     shadows = true,
   ) {
     this.group.add(this.inner);
@@ -196,15 +210,17 @@ export class LiveTile {
     this.waterGeo.computeVertexNormals();
     const water = new THREE.Mesh(this.waterGeo, lib.water);
     this.inner.add(ground, water);
-    const byKind = new Map<DecoKind, Deco[]>();
+    const byKey = new Map<string, Deco[]>();
     for (const d of build.decos) {
-      let arr = byKind.get(d.kind);
-      if (!arr) byKind.set(d.kind, (arr = []));
+      let arr = byKey.get(d.key);
+      if (!arr) byKey.set(d.key, (arr = []));
       arr.push(d);
     }
-    for (const [kind, items] of byKind) {
-      const mesh = new THREE.InstancedMesh(lib.geos[kind], lib.materialFor(kind, theme), items.length);
-      mesh.castShadow = shadows;
+    for (const [key, items] of byKey) {
+      const geo = lib.geo(key);
+      if (!geo) continue;
+      const mesh = new THREE.InstancedMesh(geo, lib.material(key), items.length);
+      mesh.castShadow = shadows && lib.castsShadow(key);
       mesh.receiveShadow = true;
       items.forEach((d, i) => {
         mesh.setMatrixAt(i, decoMatrix(d));
@@ -296,27 +312,91 @@ const GRADE = {
     }`,
 };
 
+/** Estado da iluminação: interpolado suavemente entre dia, entardecer e noite. */
+interface Sky {
+  bg: THREE.Color;
+  fill: THREE.Color;
+  line: THREE.Color;
+  sun: THREE.Color;
+  sunI: number;
+  sunDir: THREE.Vector3;
+  hemiSky: THREE.Color;
+  hemiGround: THREE.Color;
+  hemiI: number;
+  night: number;
+}
+
+function skyFor(theme: Theme, tod: TimeOfDay): Sky {
+  const C = (h: string) => new THREE.Color(h);
+  const mix = (a: string, b: string, t: number) => C(a).lerp(C(b), t);
+  const [dx, dy, dz] = theme.sunDir;
+  if (tod === 'dusk')
+    return {
+      bg: mix(theme.bg, '#f09a74', 0.42),
+      fill: mix(theme.voidFill, '#f4ae88', 0.4),
+      line: mix(theme.voidLine, '#fbd0b4', 0.35),
+      sun: C('#ffb074'),
+      sunI: theme.sunIntensity * 0.95,
+      sunDir: new THREE.Vector3(dx * 1.8, 0.42, dz * 1.8),
+      hemiSky: mix(theme.hemiSky, '#ffc2a0', 0.55),
+      hemiGround: mix(theme.hemiGround, '#5a3a4a', 0.4),
+      hemiI: theme.hemiIntensity * 0.8,
+      night: 0.35,
+    };
+  if (tod === 'night')
+    return {
+      bg: mix(theme.bg, '#18203e', 0.9),
+      fill: mix(theme.voidFill, '#1f2848', 0.88),
+      line: mix(theme.voidLine, '#34426e', 0.82),
+      sun: C('#b4c6ff'),
+      sunI: 0.75,
+      sunDir: new THREE.Vector3(-dx, 0.9, -dz),
+      hemiSky: C('#51639c'),
+      hemiGround: C('#1c2130'),
+      hemiI: 1.05,
+      night: 1,
+    };
+  return {
+    bg: C(theme.bg),
+    fill: C(theme.voidFill),
+    line: C(theme.voidLine),
+    sun: C(theme.sun),
+    sunI: theme.sunIntensity,
+    sunDir: new THREE.Vector3(dx, dy, dz),
+    hemiSky: C(theme.hemiSky),
+    hemiGround: C(theme.hemiGround),
+    hemiI: theme.hemiIntensity,
+    night: 0,
+  };
+}
+
 export class World {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(32, 1, 0.1, 400);
   readonly rig = new CameraRig();
   readonly lib = new Lib();
+  readonly life: Life;
   theme!: Theme;
   quality: Quality = 'high';
+  timeOfDay: TimeOfDay = 'day';
 
   private readonly staticRoot = new THREE.Group();
-  private readonly fxRoot = new THREE.Group();
   private chunks = new Map<number, Chunk>();
-  private pools = new Map<DecoKind, Pool>();
+  private pools = new Map<string, Pool>();
+  private board: Board | null = null;
   private chimneys: number[] = [];
   private sun = new THREE.DirectionalLight();
   private hemi = new THREE.HemisphereLight();
+  private sky!: Sky;
+  private skyTarget!: Sky;
   private voidMat: THREE.ShaderMaterial;
   private slots: THREE.InstancedMesh;
   private slotCount = 0;
   private hoverRing: THREE.Mesh;
   private markers: THREE.Mesh[] = [];
+  /** Posição das marcas de borda relativa ao fantasma (elas acompanham a peça flutuando). */
+  private markerLocal: THREE.Vector3[] = [];
   private ghost: LiveTile | null = null;
   private ghostKey = '';
   private ghostTarget = new THREE.Vector3();
@@ -353,8 +433,9 @@ export class World {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.info.autoReset = false;
 
-    this.scene.add(this.staticRoot, this.fxRoot);
+    this.scene.add(this.staticRoot);
     this.scene.fog = new THREE.Fog('#ffffff', 10, 40);
+    this.life = new Life(this.lib, this.scene);
 
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -409,11 +490,12 @@ export class World {
     this.hoverRing.visible = false;
     this.scene.add(this.hoverRing);
 
-    const pill = new THREE.CapsuleGeometry(0.035, 0.26, 3, 8).rotateZ(Math.PI / 2);
+    const pill = new THREE.CapsuleGeometry(0.026, 0.5, 3, 8).rotateZ(Math.PI / 2);
     for (let i = 0; i < 6; i++) {
       const m = new THREE.Mesh(pill, new THREE.MeshBasicMaterial({ fog: false, transparent: true, opacity: 0.95 }));
       m.visible = false;
       this.markers.push(m);
+      this.markerLocal.push(new THREE.Vector3());
       this.scene.add(m);
     }
 
@@ -424,7 +506,10 @@ export class World {
     this.scene.add(this.particleMesh);
 
     // Pós-processamento: tilt-shift (efeito maquete) + vinheta.
-    const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+    // Alvo em meio-float quando a GPU consegue renderizar nele; senão, 8 bits.
+    const ext = this.renderer.extensions;
+    const halfOk = ext.has('EXT_color_buffer_float') || ext.has('EXT_color_buffer_half_float');
+    const rt = new THREE.WebGLRenderTarget(1, 1, { type: halfOk ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: 4 });
     this.composer = new EffectComposer(this.renderer, rt);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.tiltH = new ShaderPass(TILT_SHIFT);
@@ -444,23 +529,15 @@ export class World {
     this.previewCam.lookAt(0, -0.55, 0);
   }
 
-  // ---------------------------------------------------------------- tema
+  // ---------------------------------------------------------------- tema, luz, qualidade
 
   setTheme(theme: Theme, board: Board) {
     this.theme = theme;
     this.lib.applyTheme(theme);
-    const bg = tc(theme.bg);
-    this.scene.background = bg;
-    (this.scene.fog as THREE.Fog).color.copy(bg);
-    this.voidMat.uniforms.uBg.value.copy(bg);
-    this.voidMat.uniforms.uFill.value.copy(tc(theme.voidFill));
-    this.voidMat.uniforms.uLine.value.copy(tc(theme.voidLine));
-    (this.slots.material as THREE.MeshBasicMaterial).color.copy(tc(theme.voidLine));
-    this.sun.color.set(theme.sun);
-    this.sun.intensity = theme.sunIntensity;
-    this.hemi.color.set(theme.hemiSky);
-    this.hemi.groundColor.set(theme.hemiGround);
-    this.hemi.intensity = theme.hemiIntensity;
+    this.lib.uniforms.uClouds.value = theme.period === 'futuro' ? 0.08 : 0.16;
+    this.skyTarget = skyFor(theme, this.timeOfDay);
+    this.sky = skyFor(theme, this.timeOfDay);
+    this.applySky();
     this.previewSun.color.set(theme.sun);
     this.previewSun.intensity = theme.sunIntensity;
     this.previewHemi.color.set(theme.hemiSky);
@@ -471,12 +548,56 @@ export class World {
       this.previewPillar.setColorAt(i, c);
     }
     this.previewPillar.instanceColor!.needsUpdate = true;
+    this.previewTile?.dispose();
+    this.previewTile = null;
     this.previewDef = null;
+    // O fantasma guarda cores e decoração do tema antigo: descarta em vez de só esconder.
+    this.dropGhost();
     this.clearGhost();
     this.rebuild(board);
   }
 
+  setTimeOfDay(tod: TimeOfDay) {
+    this.timeOfDay = tod;
+    if (this.theme) this.skyTarget = skyFor(this.theme, tod);
+  }
+
+  private applySky() {
+    const s = this.sky;
+    (this.scene.background as THREE.Color | null)?.copy?.(s.bg);
+    if (!(this.scene.background instanceof THREE.Color)) this.scene.background = s.bg.clone();
+    (this.scene.fog as THREE.Fog).color.copy(s.bg);
+    this.voidMat.uniforms.uBg.value.copy(s.bg);
+    this.voidMat.uniforms.uFill.value.copy(s.fill);
+    this.voidMat.uniforms.uLine.value.copy(s.line);
+    (this.slots.material as THREE.MeshBasicMaterial).color.copy(s.line);
+    this.sun.color.copy(s.sun);
+    this.sun.intensity = s.sunI;
+    this.hemi.color.copy(s.hemiSky);
+    this.hemi.groundColor.copy(s.hemiGround);
+    this.hemi.intensity = s.hemiI;
+    this.lib.uniforms.uNight.value = s.night;
+  }
+
+  private stepSky(dt: number) {
+    const a = this.sky, b = this.skyTarget;
+    if (!a || !b) return;
+    const k = 1 - Math.exp(-dt * 1.6);
+    a.bg.lerp(b.bg, k);
+    a.fill.lerp(b.fill, k);
+    a.line.lerp(b.line, k);
+    a.sun.lerp(b.sun, k);
+    a.hemiSky.lerp(b.hemiSky, k);
+    a.hemiGround.lerp(b.hemiGround, k);
+    a.sunDir.lerp(b.sunDir, k);
+    a.sunI += (b.sunI - a.sunI) * k;
+    a.hemiI += (b.hemiI - a.hemiI) * k;
+    a.night += (b.night - a.night) * k;
+    this.applySky();
+  }
+
   setQuality(q: Quality) {
+    const detailChanged = DETAIL[q] !== DETAIL[this.quality];
     this.quality = q;
     const dpr = window.devicePixelRatio || 1;
     this.renderer.setPixelRatio(q === 'high' ? Math.min(dpr, 2) : q === 'medium' ? Math.min(dpr, 1.5) : 1);
@@ -493,6 +614,10 @@ export class World {
       const m = (o as THREE.Mesh).material as THREE.Material | undefined;
       if (m) m.needsUpdate = true;
     });
+    if (detailChanged && this.board && this.theme) {
+      this.dropGhost();
+      this.rebuild(this.board);
+    }
     this.resize();
   }
 
@@ -512,7 +637,12 @@ export class World {
 
   // ---------------------------------------------------------------- mapa
 
+  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[]) {
+    return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta });
+  }
+
   rebuild(board: Board) {
+    this.board = board;
     for (const c of this.chunks.values()) c.dispose(this.staticRoot);
     this.chunks.clear();
     for (const p of this.pools.values()) p.dispose();
@@ -521,10 +651,11 @@ export class World {
     this.drops = [];
     this.chimneys = [];
     this.particles = [];
-    for (const kind of DECO_KINDS) this.pools.set(kind, new Pool(this.lib.geos[kind], this.lib.materialFor(kind, this.theme), this.staticRoot));
-    for (const p of board.list) this.bake(p, buildTile(p.def.edges, p.def.seed, this.theme), false);
+    this.life.reset(this.theme);
+    for (const p of board.list) this.bake(p, this.build(p.def, synBase(p.synergies, p.rot)), false);
     for (const pool of this.pools.values()) pool.flush();
     this.updateFrontier(board);
+    this.life.sync(board);
   }
 
   private chunkFor(q: number, r: number) {
@@ -537,13 +668,33 @@ export class World {
     return c;
   }
 
+  private pool(key: string) {
+    let p = this.pools.get(key);
+    if (!p) {
+      // Chave com "~" = metade "fina" de plantas e capim, escondida de longe (nível de detalhe).
+      const base = key.endsWith('~') ? key.slice(0, -1) : key;
+      const geo = this.lib.geo(base);
+      if (!geo) return null;
+      p = new Pool(geo, this.lib.material(base), this.staticRoot, this.lib.castsShadow(base));
+      this.pools.set(key, p);
+    }
+    return p;
+  }
+
+  private lodFlip = 0;
+  private isLod(key: string) {
+    return key.startsWith('crop:') || key === 'grass' || key === 'flower';
+  }
+
   private bake(p: Placed, b: TileBuild, flush = true) {
     const m = tileMatrix(p.q, p.r, p.rot);
     this.chunkFor(p.q, p.r).append(b, m);
     for (const d of b.decos) {
       decoMatrix(d, tmpM);
       tmpM.premultiply(m);
-      this.pools.get(d.kind)!.add(tmpM, d.color);
+      if (d.anim === 'spin-z' || d.anim === 'spin-x') this.life.addSpinner(d.key, tmpM, d.anim === 'spin-x' ? 'x' : 'z');
+      else if (d.anim === 'wander') this.life.addAnimal(tmpM, d.color);
+      else this.pool(this.isLod(d.key) && this.lodFlip++ % 2 ? `${d.key}~` : d.key)?.add(tmpM, d.color);
     }
     const v = new THREE.Vector3();
     for (let i = 0; i < b.chimneys.length; i += 3) {
@@ -554,6 +705,7 @@ export class World {
   }
 
   updateFrontier(board: Board) {
+    this.board = board;
     let i = 0;
     let maxR = 3;
     for (const k of board.frontier) {
@@ -570,21 +722,23 @@ export class World {
     this.rig.bounds = maxR;
   }
 
-  /** Coloca com animação: a peça assenta, levanta poeira e depois é "cozida" no chunk. */
+  /** Coloca com animação: a peça assenta, levanta poeira e depois é "cozida" no bloco. */
   placeAnimated(p: Placed) {
+    const syn = synBase(p.synergies, p.rot);
+    const sig = synSig(syn);
     let live: LiveTile;
     let y0 = 1.2;
-    if (this.ghost && this.ghost.def === p.def) {
+    if (this.ghost && this.ghost.def === p.def && this.ghost.sig === sig) {
       live = this.ghost;
       y0 = live.group.position.y;
       this.ghost = null;
       this.ghostKey = '';
-      live.inner.rotation.y = (-p.rot * Math.PI) / 3;
     } else {
-      live = new LiveTile(p.def, buildTile(p.def.edges, p.def.seed, this.theme), this.lib, this.theme, this.quality !== 'low');
-      live.inner.rotation.y = (-p.rot * Math.PI) / 3;
+      live = new LiveTile(p.def, this.build(p.def, syn), sig, this.lib, this.quality !== 'low');
       this.scene.add(live.group);
+      this.dropGhost();
     }
+    live.inner.rotation.y = (-p.rot * Math.PI) / 3;
     const { x, z } = hexToWorld(p.q, p.r);
     live.group.position.set(x, y0, z);
     this.hoverRing.visible = false;
@@ -594,23 +748,33 @@ export class World {
 
   /** Coloca várias peças de uma vez, sem animação (modo automático / teste de carga). */
   placeInstant(list: Placed[], board: Board) {
-    for (const p of list) this.bake(p, buildTile(p.def.edges, p.def.seed, this.theme), false);
+    for (const p of list) this.bake(p, this.build(p.def, synBase(p.synergies, p.rot)), false);
     for (const pool of this.pools.values()) pool.flush();
     this.updateFrontier(board);
+    this.life.sync(board);
   }
 
   // ---------------------------------------------------------------- fantasma
 
-  setGhost(def: TileDef, angle: number, q: number, r: number, check: Check) {
-    const key = `${def.seed}`;
+  setGhost(def: TileDef, rot: number, angle: number, q: number, r: number, check: Check) {
+    const syn = check.valid ? synBase(check.synergies, rot) : [];
+    const sig = synSig(syn);
+    const key = `${def.seed}:${this.theme.id}:${sig}`;
     if (!this.ghost || this.ghostKey !== key) {
-      this.ghost?.dispose();
-      this.ghost = new LiveTile(def, buildTile(def.edges, def.seed, this.theme), this.lib, this.theme, this.quality !== 'low');
+      const old = this.ghost;
+      this.ghost = new LiveTile(def, this.build(def, syn), sig, this.lib, this.quality !== 'low');
       this.ghostKey = key;
       this.scene.add(this.ghost.group);
-      const { x, z } = hexToWorld(q, r);
-      this.ghost.group.position.set(x, 0.5, z);
-      this.ghost.inner.rotation.y = -angle;
+      if (old && old.def === def) {
+        // Mesma peça, outras construções: preserva posição e giro para não "pular".
+        this.ghost.group.position.copy(old.group.position);
+        this.ghost.inner.rotation.y = old.inner.rotation.y;
+      } else {
+        const { x, z } = hexToWorld(q, r);
+        this.ghost.group.position.set(x, 0.5, z);
+        this.ghost.inner.rotation.y = -angle;
+      }
+      old?.dispose();
     }
     this.ghost.group.visible = true;
     this.ghostAngle = angle;
@@ -622,12 +786,12 @@ export class World {
     for (let i = 0; i < 6; i++) {
       const m = this.markers[i];
       const s = check.edgeState[i];
-      m.visible = s === 1 || s === 3;
+      m.visible = s === 1 || s === 3 || s === 4;
       if (!m.visible) continue;
       const [mx, mz] = edgeMid(i);
-      m.position.set(x + mx * 0.985, 0.03, z + mz * 0.985);
+      this.markerLocal[i].set(mx * 0.93, 0.03, mz * 0.93);
       m.rotation.y = -(Math.PI / 6 + (Math.PI / 3) * i) + Math.PI / 2;
-      (m.material as THREE.MeshBasicMaterial).color.set(s === 1 ? '#ffffff' : '#ff4a3d');
+      (m.material as THREE.MeshBasicMaterial).color.set(s === 1 ? '#ffffff' : s === 4 ? '#ffc83d' : '#ff4a3d');
     }
   }
 
@@ -645,7 +809,7 @@ export class World {
 
   // ---------------------------------------------------------------- efeitos
 
-  burst(x: number, z: number, kind: 'dust' | 'sparkle', n: number) {
+  burst(x: number, z: number, kind: 'dust' | 'sparkle', n: number, y = 0) {
     const color = kind === 'dust' ? tc(this.theme.smoke) : tc(this.theme.sparkle);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -653,7 +817,7 @@ export class World {
       const sp = kind === 'dust' ? 0.5 + Math.random() * 0.6 : 0.2 + Math.random() * 0.4;
       this.particles.push({
         x: x + Math.cos(a) * r,
-        y: kind === 'dust' ? 0.02 : 0.1 + Math.random() * 0.2,
+        y: y + (kind === 'dust' ? 0.02 : 0.1 + Math.random() * 0.2),
         z: z + Math.sin(a) * r,
         vx: Math.cos(a) * sp,
         vy: kind === 'dust' ? 0.25 + Math.random() * 0.3 : 0.9 + Math.random() * 0.8,
@@ -679,7 +843,8 @@ export class World {
         const i = Math.floor(Math.random() * n) * 3;
         const x = this.chimneys[i], y = this.chimneys[i + 1], z = this.chimneys[i + 2];
         if (Math.abs(x - tx) > view || Math.abs(z - tz) > view) continue;
-        this.particles.push({ x, y, z, vx: 0.06, vy: 0.22, vz: 0.03, age: 0, life: 2.6 + Math.random(), size: 0.5, color: tc(this.theme.smoke), kind: 0 });
+        const w = this.lib.uniforms.uWind.value;
+        this.particles.push({ x, y, z, vx: w.x * 0.07, vy: 0.2, vz: w.y * 0.07, age: 0, life: 2.6 + Math.random(), size: 0.45, color: tc(this.theme.smoke), kind: 0 });
         break;
       }
     }
@@ -695,8 +860,10 @@ export class World {
       p.y += p.vy * dt;
       p.z += p.vz * dt;
       const drag = p.kind === 0 ? 2.2 : 0.8;
-      p.vx *= Math.exp(-drag * dt);
-      p.vz *= Math.exp(-drag * dt);
+      if (p.age > 0.4 || p.kind === 1) {
+        p.vx *= Math.exp(-drag * dt);
+        p.vz *= Math.exp(-drag * dt);
+      }
       if (p.kind === 1) p.vy -= 1.6 * dt;
       const t = p.age / p.life;
       const s = p.size * (p.kind === 0 ? Math.sin(Math.PI * Math.min(1, t * 1.15)) * (0.6 + t) : 1 - t);
@@ -732,13 +899,23 @@ export class World {
     return { x: (v.x * 0.5 + 0.5) * this.size.x, y: (-v.y * 0.5 + 0.5) * this.size.y, visible: v.z < 1 && Math.abs(v.x) < 1.2 && Math.abs(v.y) < 1.2 };
   }
 
+  /** Custo por kit: instâncias e triângulos (para achar o que pesa). */
+  poolReport() {
+    return [...this.pools.entries()]
+      .map(([k, p]) => {
+        const base = k.endsWith('~') ? k.slice(0, -1) : k;
+        return { k, n: p.count, tris: (p.count * (this.lib.geo(base)?.attributes.position.count ?? 0)) / 3, shadow: p.mesh.castShadow };
+      })
+      .sort((a, b) => b.tris - a.tris);
+  }
+
   stats() {
     const info = this.renderer.info;
     let tris = 0;
     for (const c of this.chunks.values()) tris += c.triangles();
     let inst = 0;
     for (const p of this.pools.values()) inst += p.count;
-    return { calls: info.render.calls, triangles: info.render.triangles, chunks: this.chunks.size, instances: inst, groundTris: tris };
+    return { calls: info.render.calls, triangles: info.render.triangles, chunks: this.chunks.size, instances: inst, groundTris: tris, life: this.life.counts() };
   }
 
   setPreview(def: TileDef | null, angle: number, stack: number) {
@@ -747,7 +924,7 @@ export class World {
       this.previewTile = null;
       this.previewDef = def;
       if (def) {
-        this.previewTile = new LiveTile(def, buildTile(def.edges, def.seed, this.theme), this.lib, this.theme, false);
+        this.previewTile = new LiveTile(def, this.build(def, []), '', this.lib, false);
         this.previewScene.add(this.previewTile.group);
         this.previewDrop = 0.6;
       }
@@ -759,26 +936,54 @@ export class World {
     this.previewPillar.instanceMatrix.needsUpdate = true;
   }
 
+  /** Depuração visual: todos os kits do tema lado a lado (?gallery). */
+  showGallery() {
+    const keys = [...this.lib.geos.keys()];
+    const cols = Math.ceil(Math.sqrt(keys.length));
+    const root = new THREE.Group();
+    keys.forEach((k, i) => {
+      const geo = this.lib.geo(k)!;
+      const mesh = new THREE.Mesh(geo, this.lib.material(k));
+      const x = (i % cols) * 0.45, z = Math.floor(i / cols) * 0.45;
+      mesh.position.set(x - (cols * 0.45) / 2, 0, z - (cols * 0.45) / 2);
+      mesh.scale.setScalar(k.startsWith('crop:') || k === 'grass' || k === 'flower' ? 2.2 : 1.4);
+      mesh.castShadow = true;
+      root.add(mesh);
+    });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(cols * 0.5, cols * 0.5).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#b8c890' }));
+    floor.receiveShadow = true;
+    root.add(floor);
+    this.scene.add(root);
+    this.staticRoot.visible = false;
+    this.rig.goal.set(0, 0, 0);
+    this.rig.target.set(0, 0, 0);
+    this.rig.dist = this.rig.goalDist = cols * 0.62;
+    return keys;
+  }
+
   // ---------------------------------------------------------------- quadro
 
   tick(dt: number) {
     this.renderer.info.reset();
     this.time += dt;
     this.lib.uniforms.uTime.value = this.time;
+    // O vento muda de direção devagar.
+    const wa = 0.65 + Math.sin(this.time * 0.05) * 0.5;
+    this.lib.uniforms.uWind.value.set(Math.cos(wa), Math.sin(wa));
+    this.stepSky(dt);
     this.rig.update(dt);
     this.rig.apply(this.camera);
 
     const fog = this.scene.fog as THREE.Fog;
     fog.near = this.rig.dist * 1.5;
     fog.far = this.rig.dist * 4.2;
-    this.voidMat.uniforms.uCenter.value.set(0, 0);
 
     // Sol acompanha o alvo; área da sombra acompanha o zoom.
     const t = this.rig.target;
-    const [sx, sy, sz] = this.theme.sunDir;
+    const sd = this.sky.sunDir;
     const ext = Math.min(28, this.rig.dist * 0.95 + 2);
     this.sun.target.position.copy(t);
-    this.sun.position.set(t.x + sx * 20, t.y + sy * 20, t.z + sz * 20);
+    this.sun.position.set(t.x + sd.x * 20, t.y + sd.y * 20, t.z + sd.z * 20);
     const cam = this.sun.shadow.camera;
     if (cam.right !== ext) {
       cam.left = -ext;
@@ -799,6 +1004,7 @@ export class World {
       g.position.y += (this.ghostTarget.y + Math.sin(this.time * 2.4) * 0.025 - g.position.y) * k;
       const inner = this.ghost.inner;
       inner.rotation.y += (-this.ghostAngle - inner.rotation.y) * (1 - Math.exp(-dt * 18));
+      for (let i = 0; i < 6; i++) if (this.markers[i].visible) this.markers[i].position.copy(g.position).add(this.markerLocal[i]);
     }
 
     // Peças caindo.
@@ -827,11 +1033,17 @@ export class World {
       if (d.t > fall + 0.55) {
         this.bake(d.placed, d.live.build);
         d.live.dispose();
+        if (this.board) this.life.sync(this.board);
         this.onBaked?.(d.placed);
       } else still.push(d);
     }
     this.drops = still;
 
+    // Nível de detalhe: de longe, metade das plantas basta (as parcelas já têm a cor da cultura).
+    const fine = this.rig.dist < 13;
+    for (const [k, p] of this.pools) if (k.endsWith('~')) p.mesh.visible = fine;
+
+    this.life.update(dt);
     this.spawnSmoke(dt);
     this.updateParticles(dt);
     this.slots.visible = this.slotCount > 0;
@@ -859,10 +1071,16 @@ export class World {
     const auto = r.autoClear;
     r.autoClear = false;
     r.clearDepth();
+    // A pilha usa sempre luz de dia, para a peça da vez ficar legível.
+    const u = this.lib.uniforms;
+    const night = u.uNight.value, clouds = u.uClouds.value;
+    u.uNight.value = 0;
+    u.uClouds.value = 0;
     r.render(this.previewScene, this.previewCam);
+    u.uNight.value = night;
+    u.uClouds.value = clouds;
     r.autoClear = auto;
     r.setScissorTest(false);
     r.setViewport(0, 0, this.size.x, this.size.y);
   }
 }
-

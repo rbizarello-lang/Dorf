@@ -12,6 +12,8 @@
   --font-display: 'Caprasimo', 'Georgia', 'Times New Roman', serif;
   --font-body: 'Nunito', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --gutter: 16px;
+  --gutter-l: calc(var(--gutter) + env(safe-area-inset-left, 0px));
+  --gutter-r: calc(var(--gutter) + env(safe-area-inset-right, 0px));
   color-scheme: light;
 }
 
@@ -24,6 +26,8 @@ body {
   height: 100%;
   margin: 0;
   overflow: hidden;
+  /* Sem zoom da página por pinça ou toque duplo; modais e menus ainda rolam. */
+  touch-action: pan-x pan-y;
 }
 
 body {
@@ -34,7 +38,6 @@ body {
   -webkit-font-smoothing: antialiased;
   user-select: none;
   -webkit-user-select: none;
-  touch-action: none;
 }
 
 #scene {
@@ -45,6 +48,7 @@ body {
   display: block;
   outline: none;
   cursor: default;
+  touch-action: none;
 }
 
 .layer {
@@ -58,6 +62,7 @@ button {
   font: inherit;
   color: inherit;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 button:focus-visible {
@@ -84,7 +89,7 @@ kbd {
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
-  padding: calc(env(safe-area-inset-top, 0px) + 14px) var(--gutter) 0;
+  padding: calc(env(safe-area-inset-top, 0px) + 14px) var(--gutter-r) 0 var(--gutter-l);
   pointer-events: none;
 }
 
@@ -153,6 +158,11 @@ kbd {
   padding: 0 12px;
 }
 
+.icon-btn .short {
+  display: none;
+  font-size: 16px;
+}
+
 .icon-btn[aria-pressed='false'] {
   opacity: 0.55;
   text-decoration: line-through;
@@ -175,7 +185,7 @@ kbd {
 .popover {
   position: fixed;
   top: calc(env(safe-area-inset-top, 0px) + 62px);
-  right: var(--gutter);
+  right: var(--gutter-r);
   width: min(360px, calc(100vw - 2 * var(--gutter)));
   max-height: calc(100% - 140px);
   overflow: auto;
@@ -188,10 +198,19 @@ kbd {
   z-index: 5;
 }
 
+.popover h3 {
+  margin: 10px 12px 2px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--soft);
+}
+
 .theme-opt {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 4px 12px;
+  gap: 2px 12px;
   align-items: center;
   text-align: left;
   padding: 10px 12px;
@@ -207,8 +226,8 @@ kbd {
 
 .theme-opt .swatch {
   grid-row: span 3;
-  width: 18px;
-  height: 58px;
+  width: 16px;
+  height: 44px;
   grid-auto-flow: row;
   border-radius: 9px;
 }
@@ -235,7 +254,7 @@ kbd {
 /* ---------- missões */
 .quests {
   position: fixed;
-  left: var(--gutter);
+  left: var(--gutter-l);
   bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
   display: grid;
   gap: 8px;
@@ -337,7 +356,7 @@ kbd {
 /* ---------- pilha */
 .stack {
   position: fixed;
-  right: var(--gutter);
+  right: var(--gutter-r);
   bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
   width: 170px;
   display: grid;
@@ -380,6 +399,10 @@ kbd {
 
 .stack-count.low output {
   color: var(--bad);
+}
+
+.stack-count.wide output {
+  font-size: 17px;
 }
 
 .stack-actions {
@@ -516,6 +539,12 @@ kbd {
 .floater.tiles {
   font-size: 18px;
   color: #bff5a8;
+}
+
+.floater.syn {
+  font-size: 17px;
+  color: #ffd66b;
+  -webkit-text-stroke: 4px var(--ink);
 }
 
 @keyframes float-up {
@@ -687,6 +716,27 @@ kbd {
   font-weight: 700;
 }
 
+.synergies {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 4px;
+  font-size: 13px;
+}
+
+.synergies span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.synergies i {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 25%, transparent);
+}
+
 .legend span {
   display: flex;
   align-items: center;
@@ -698,6 +748,7 @@ kbd {
   height: 12px;
   border-radius: 3px;
   flex: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 25%, transparent);
 }
 
 /* ---------- telas pequenas */
@@ -756,10 +807,35 @@ kbd {
     top: 76px;
   }
   .quests {
-    width: calc(100vw - 2 * var(--gutter) - 150px);
+    width: min(260px, calc(100vw - 2 * var(--gutter) - 150px));
+  }
+  .toasts {
+    top: calc(env(safe-area-inset-top, 0px) + 104px);
   }
   .tools .icon-btn#btn-quality {
     display: none;
+  }
+}
+
+@media (max-height: 480px) {
+  .quest:nth-child(n + 4) {
+    display: none;
+  }
+  .toasts {
+    top: calc(env(safe-area-inset-top, 0px) + 12px);
+  }
+}
+
+@media (max-width: 520px) {
+  .icon-btn .long {
+    display: none;
+  }
+  .icon-btn .short {
+    display: inline;
+  }
+  .icon-btn {
+    min-width: 34px;
+    padding: 0 8px;
   }
 }
 

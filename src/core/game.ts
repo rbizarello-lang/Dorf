@@ -19,6 +19,7 @@ export class Game {
   rot = 0;
   placedCount = 0;
   discarded = 0;
+  private drawn = 0;
 
   constructor(
     readonly seed: number,
@@ -42,10 +43,21 @@ export class Game {
     return this.current === null;
   }
 
+  /**
+   * Cada peça tem um gerador próprio (semente + índice) e sempre consome os mesmos
+   * sorteios. Assim, a mesma semente dá a mesma sequência de peças para qualquer
+   * jogador; só a presença da missão depende do estado da partida.
+   */
   private draw(): TileDef {
-    const active = this.board.activeQuests().length;
-    const withQuest = active < this.rules.maxQuests && this.rng() < this.rules.questChance;
-    return generateTile(this.rng, withQuest);
+    const rng = mulberry32((this.seed + Math.imul(++this.drawn, 0x9e3779b1)) >>> 0);
+    const roll = rng();
+    const def = generateTile(rng, true);
+    // Missões ainda na mão (atual e próxima) contam para o limite.
+    let pending = 0;
+    for (const t of new Set([this.current, this.next])) if (t?.quest) pending++;
+    const active = this.board.activeQuests().length + pending;
+    if (!(active < this.rules.maxQuests && roll < this.rules.questChance)) def.quest = null;
+    return def;
   }
 
   currentEdges() {
