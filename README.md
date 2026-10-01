@@ -59,7 +59,7 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 | Mover câmera | arrastar, `WASD` ou setas | arrastar |
 | Zoom | roda do mouse, `+` / `-` | pinça |
 | Girar câmera | `Q` / `E`, ou arrastar com o botão direito | — |
-| Dia, entardecer e noite | `L` ou botão ☀ | botão ☀ |
+| Amanhecer, dia, hora dourada, entardecer e noite | `L` ou botão ☀ | botão ☀ |
 | Som: música e efeitos, só efeitos, mudo | botão Som; `M` liga ou desliga a música | botão ♫ |
 | Ajuda, nova partida, estatísticas | `H`, `N`, `F` | botões no topo |
 
@@ -80,7 +80,7 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 |---|---|
 | `?theme=toscana` | tema inicial (ids em `src/themes/themes.ts` e `eras.ts`) |
 | `?seed=123` | partida reproduzível: a mesma semente dá a mesma sequência de peças |
-| `?time=night` | `day`, `dusk` ou `night` |
+| `?time=night` | `dawn`, `day`, `golden`, `dusk` ou `night` |
 | `?quality=high` | `auto`, `ultra`, `high`, `medium` ou `low` |
 | `?webgl` | força o WebGL2 em vez do WebGPU |
 | `?mode=zen` | modo inicial: `classico`, `zen`, `diario` ou `exploradores` |

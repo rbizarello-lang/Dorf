@@ -697,16 +697,17 @@ qualityBtn.addEventListener('click', () => {
   store.set('quality', next);
   hud.toast(`Qualidade: ${qualityLabel[next]}`);
 });
-const TIME_LABEL: Record<TimeOfDay, string> = { day: 'Dia', dusk: 'Tarde', night: 'Noite' };
-const TIME_ICON: Record<TimeOfDay, string> = { day: '☀', dusk: '◐', night: '☾' };
+const TIME_LABEL: Record<TimeOfDay, string> = { dawn: 'Amanhecer', day: 'Dia', golden: 'Hora dourada', dusk: 'Entardecer', night: 'Noite' };
+const TIME_ICON: Record<TimeOfDay, string> = { dawn: '◒', day: '☀', golden: '☼', dusk: '◐', night: '☾' };
+/** Ordem do botão e da tecla L: o dia passa uma hora por vez. */
+const TIME_ORDER: TimeOfDay[] = ['dawn', 'day', 'golden', 'dusk', 'night'];
 const setTimeLabel = (t: TimeOfDay) => {
   timeBtn.querySelector('.long')!.textContent = TIME_LABEL[t];
   timeBtn.querySelector('.short')!.textContent = TIME_ICON[t];
 };
 const timeBtn = document.getElementById('btn-time')!;
 function cycleTime() {
-  const order: TimeOfDay[] = ['day', 'dusk', 'night'];
-  const next = order[(order.indexOf(world.timeOfDay) + 1) % 3];
+  const next = TIME_ORDER[(TIME_ORDER.indexOf(world.timeOfDay) + 1) % TIME_ORDER.length];
   world.setTimeOfDay(next);
   setTimeLabel(next);
   sfx.setMood(next);

@@ -1282,6 +1282,7 @@ export class Lib {
   applyTheme(theme: Theme) {
     for (const g of this.geos.values()) g.dispose();
     this.geos.clear();
+    this.litKeys.clear();
     const set = (k: string, g: THREE.BufferGeometry | null) => g && this.geos.set(k, g);
     U.water.value.set(theme.water);
     U.sparkle.value.set(theme.sparkle);
@@ -1340,6 +1341,18 @@ export class Lib {
   }
 
   private domeKeys = new Set<string>();
+  private litKeys = new Map<string, boolean>();
+
+  /** O kit tem janela que acende à noite (brilho cheio)? Esses ganham lampião (groundMap.ts). */
+  lit(key: string) {
+    let v = this.litKeys.get(key);
+    if (v === undefined) {
+      const g = this.geos.get(key)?.getAttribute('glow');
+      v = !!g && Array.prototype.some.call(g.array, (x: number) => x > 0.9);
+      this.litKeys.set(key, v);
+    }
+    return v;
+  }
 
   /** Plantas e capim não projetam sombra (economia grande, quase invisível). */
   castsShadow(key: string) {
