@@ -80,6 +80,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?timescale=0.05` | desacelera o mundo (animações nas capturas por software) |
 | `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
 | `window.__ripple(idade)` | dispara a onda do chão no foco da câmera, já com essa idade em segundos |
+| `window.__celebrate()` | anel dourado e bando de pássaros no foco da câmera (efeitos de nova era) |
 | `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` | ver o `README.md` |
 | `window.__stats` | estatísticas do último quadro |
 | `window.__pools()` | relatório dos InstancedMesh |

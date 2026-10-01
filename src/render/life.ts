@@ -128,6 +128,9 @@ interface Flock {
   ang: number;
   n: number;
   retarget: number;
+  /** Bando de passagem (levantou voo num marco): sobe com `vh` e some quando `ttl` acaba. */
+  vh?: number;
+  ttl?: number;
 }
 
 export class Life {
@@ -208,7 +211,7 @@ export class Life {
         for (let k = have; k < want && this.movers.filter((m) => !m.boat).length < carsCap; k++) this.spawn(net, false);
       }
     }
-    if (th.period !== 'futuro' && !this.flocks.length && board.list.length >= 6) {
+    if (th.period !== 'futuro' && !this.flocks.some((f) => f.ttl === undefined) && board.list.length >= 6) {
       for (let f = 0; f < 3; f++) {
         const t = board.list[Math.floor(Math.random() * board.list.length)];
         const { x, z } = hexToWorld(t.q, t.r);
@@ -387,11 +390,26 @@ export class Life {
     car?.commit(ci);
   }
 
+  /** Um bando sai do chão em espiral e vai embora; temas sem pássaros (futuro) ficam sem. */
+  flush(x: number, z: number) {
+    if (!this.theme || this.theme.period === 'futuro') return;
+    if (this.flocks.filter((f) => f.ttl !== undefined).length >= 2) return;
+    const w = (Math.random() < 0.5 ? -1 : 1) * 0.9;
+    this.flocks.push({ cx: x, cz: z, tx: x + (Math.random() - 0.5) * 8, tz: z + (Math.random() - 0.5) * 8, r: 0.35, h: 0.25, w, ang: Math.random() * 6, n: 9, retarget: 99, vh: 0.55, ttl: 7 });
+  }
+
   private updateBirds(dt: number) {
     const bp = this.flocks.length ? this.pool('bird', false) : null;
     if (!bp) return;
+    this.flocks = this.flocks.filter((f) => f.ttl === undefined || f.ttl > 0);
     let i = 0;
     for (const f of this.flocks) {
+      if (f.ttl !== undefined) {
+        f.ttl -= dt;
+        f.h += f.vh! * dt;
+        f.r = Math.min(2.4, f.r + dt * 0.5);
+        f.w *= Math.exp(-dt * 0.15);
+      }
       f.ang += f.w * dt;
       f.retarget -= dt;
       if (f.retarget < 0 && this.board?.list.length) {
@@ -401,8 +419,9 @@ export class Life {
         f.tz = w.z;
         f.retarget = 15 + Math.random() * 25;
       }
-      f.cx += (f.tx - f.cx) * Math.min(1, dt * 0.05);
-      f.cz += (f.tz - f.cz) * Math.min(1, dt * 0.05);
+      const pull = f.ttl !== undefined ? 0.25 : 0.05;
+      f.cx += (f.tx - f.cx) * Math.min(1, dt * pull);
+      f.cz += (f.tz - f.cz) * Math.min(1, dt * pull);
       const x = f.cx + Math.cos(f.ang) * f.r;
       const z = f.cz + Math.sin(f.ang) * f.r;
       const heading = f.ang + (f.w > 0 ? Math.PI / 2 : -Math.PI / 2);
