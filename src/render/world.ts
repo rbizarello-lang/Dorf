@@ -262,6 +262,30 @@ interface Sky {
   night: number;
 }
 
+const tmpSnap = new THREE.Vector3();
+const axX = new THREE.Vector3();
+const axY = new THREE.Vector3();
+const axZ = new THREE.Vector3();
+
+/**
+ * Leva `p` ao ponto mais perto na grade de texels de uma sombra ortográfica que olha na direção
+ * `-dir` (os mesmos eixos do `lookAt` da câmera de sombra, com o "para cima" do mundo).
+ */
+function snapToTexel(p: THREE.Vector3, dir: THREE.Vector3, texel: number, out: THREE.Vector3) {
+  axZ.copy(dir).normalize();
+  axX.set(0, 1, 0).cross(axZ).normalize();
+  axY.copy(axZ).cross(axX);
+  const x = p.dot(axX);
+  const y = p.dot(axY);
+  return out.copy(p).addScaledVector(axX, Math.round(x / texel) * texel - x).addScaledVector(axY, Math.round(y / texel) * texel - y);
+}
+
+/** Matiz de uma cor (com a luminância normalizada em 1) aplicada com força `k`; `k` negativo dá o tom oposto. */
+function tintOf(c: THREE.Color, k: number, out: THREE.Color) {
+  const l = Math.max(1e-4, c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722);
+  return out.setRGB(1 + (c.r / l - 1) * k, 1 + (c.g / l - 1) * k, 1 + (c.b / l - 1) * k);
+}
+
 function skyFor(theme: Theme, tod: TimeOfDay): Sky {
   const C = (h: string) => new THREE.Color(h);
   const mix = (a: string, b: string, t: number) => C(a).lerp(C(b), t);
@@ -529,9 +553,10 @@ export class World {
       const rays = q === 'ultra' && (!this.fx || this.fx.includes('rays'));
       this.setRayLight(rays);
       this.post = q === 'low' ? null : buildPost(this.renderer, this.scene, this.camera, q, this.fx, rays ? this.rayLight : undefined);
-      // O vazio quase todo emissivo clarearia a luz indireta: ele não entra como cor difusa.
+      // O vazio quase todo emissivo clarearia a luz indireta: ele não entra como cor difusa,
+      // e o alfa 1 mantém a oclusão inteira nele, como nos materiais sem luz indireta separada.
       // Só vale com a saída `diffuse` na cena (sem ela, o mrtNode viraria a única saída).
-      const voidMrt = this.post?.gi ? mrt({ diffuse: vec4(0) }) : null;
+      const voidMrt = this.post?.gi ? mrt({ diffuse: vec4(0, 0, 0, 1) }) : null;
       if (this.voidMat.mrtNode !== voidMrt) {
         this.voidMat.mrtNode = voidMrt;
         this.voidMat.needsUpdate = true;
@@ -660,10 +685,11 @@ export class World {
     let p = this.pools.get(key);
     if (!p) {
       // Chave com "~" = metade "fina" de plantas e capim, escondida de longe (nível de detalhe).
-      const base = key.endsWith('~') ? key.slice(0, -1) : key;
+      const fine = key.endsWith('~');
+      const base = fine ? key.slice(0, -1) : key;
       const geo = this.lib.geo(base);
       if (!geo) return null;
-      p = new Pool(geo, this.lib.material(base), this.staticRoot, this.lib.castsShadow(base));
+      p = new Pool(geo, fine ? this.lib.fineMaterial(base) : this.lib.material(base), this.staticRoot, this.lib.castsShadow(base));
       this.pools.set(key, p);
     }
     return p;
@@ -974,11 +1000,17 @@ export class World {
     // Foco da profundidade de campo: o ponto que a câmera olha.
     P.focus.value = this.rig.dist;
     P.focalLength.value = this.rig.dist * 0.42;
+    // Gradação: realces na cor do sol e sombras no tom oposto (frias com o sol quente da tarde).
+    const day = 1 - this.sky.night;
+    tintOf(this.sky.sun, -0.14 * day, P.shade.value);
+    tintOf(this.sky.sun, 0.08 * day, P.light.value);
 
     // Sol acompanha o alvo; área da sombra acompanha o zoom.
-    const t = this.rig.target;
     const sd = this.sky.sunDir;
     const ext = Math.min(28, this.rig.dist * 0.95 + 2);
+    // Sem cascatas, o centro da sombra anda de texel em texel no plano da luz: as bordas não
+    // tremem quando a câmera desliza (as cascatas do Ultra já se prendem à grade sozinhas).
+    const t = this.csm ? this.rig.target : snapToTexel(this.rig.target, sd, (2 * ext) / this.sun.shadow.mapSize.x, tmpSnap);
     this.sun.target.position.copy(t);
     this.sun.position.set(t.x + sd.x * 20, t.y + sd.y * 20, t.z + sd.z * 20);
     if (this.csm) {
@@ -1086,8 +1118,10 @@ export class World {
     this.drops = still;
 
     // Nível de detalhe: de longe, metade das plantas basta (as parcelas já têm a cor da cultura).
-    const fine = this.rig.dist < 13;
-    for (const [k, p] of this.pools) if (k.endsWith('~')) p.mesh.visible = fine;
+    // Entre 11,5 e 14,5 de distância, cada planta dessa metade afunda no chão na sua vez.
+    const fine = 1 - THREE.MathUtils.smoothstep(this.rig.dist, 11.5, 14.5);
+    U.fine.value = fine;
+    for (const [k, p] of this.pools) if (k.endsWith('~')) p.mesh.visible = fine > 0;
 
     this.life.update(dt);
     this.life.wakes(this.rig.target.x, this.rig.target.z);

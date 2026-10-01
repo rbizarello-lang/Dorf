@@ -1333,6 +1333,12 @@ export class Lib {
     return this.mats.deco;
   }
 
+  /** Material da metade fina das plantas (chaves com "~"): o mesmo, afundando com `U.fine`. */
+  fineMaterial(key: string): THREE.Material {
+    const m = this.material(key);
+    return m === this.mats.crop ? this.mats.cropFine : m;
+  }
+
   private domeKeys = new Set<string>();
 
   /** Plantas e capim não projetam sombra (economia grande, quase invisível). */

@@ -23,6 +23,7 @@ import {
   hash,
   instanceIndex,
   length,
+  luminance,
   max,
   min,
   mix,
@@ -30,11 +31,13 @@ import {
   modelWorldMatrix,
   normalView,
   normalWorld,
+  output,
   positionGeometry,
   positionLocal,
   positionPrevious,
   positionViewDirection,
   positionWorld,
+  property,
   reference,
   refract,
   renderGroup,
@@ -80,6 +83,8 @@ export const U = {
   /** Direção (para o sol) e cor da luz do sol: o caminho do sol dentro da água e a luz de contorno dos kits. */
   sunDir: uniform(new THREE.Vector3(-0.5, 0.8, 0.3).normalize()),
   sun: uniform(new THREE.Color('#fff0d8')),
+  /** Quanto da metade fina das plantas aparece (1 = toda): o nível de detalhe muda aos poucos. */
+  fine: uniform(1),
 };
 
 export const noiseTex = makeNoiseTexture();
@@ -128,6 +133,43 @@ function displaced(extra?: (p: N, t: N, now: boolean) => N) {
   })();
 }
 
+// ---------------------------------------------------------------- luz indireta
+
+/**
+ * Luz indireta (o céu) que chega a cada pixel, gravada pelo modelo de luz dos materiais do
+ * jogo. A oclusão de ambiente (post.ts) escurece só essa parte da cor: o sol direto, as
+ * janelas acesas e o contorno das copas não ganham halo escuro nos cantos.
+ */
+const indirectLight = property('vec3', 'IndirectLight');
+const splitLit = new WeakSet<THREE.Material>();
+
+class SplitLighting extends THREE.PhysicalLightingModel {
+  finish(builder: N) {
+    super.finish(builder);
+    const { indirectDiffuse, indirectSpecular } = builder.context.reflectedLight;
+    indirectLight.assign(indirectDiffuse.add(indirectSpecular));
+  }
+}
+
+/** Material padrão dos kits, do chão e da água: o mesmo PBR, gravando a luz indireta. */
+class LitMaterial extends THREE.MeshStandardNodeMaterial {
+  constructor(params?: ConstructorParameters<typeof THREE.MeshStandardNodeMaterial>[0]) {
+    super(params);
+    splitLit.add(this);
+  }
+
+  setupLightingModel() {
+    return new SplitLighting();
+  }
+}
+
+/**
+ * Fração da cor final que é luz indireta (0 a 1), para uma saída do passe da cena. Os
+ * materiais sem o modelo acima (vazio, galeria) recebem a oclusão inteira, como antes.
+ */
+export const indirectShare = (m: THREE.Material | null | undefined): N =>
+  m && splitLit.has(m) ? luminance(indirectLight).div(luminance(output.rgb).max(1e-4)).min(1) : float(1);
+
 /** Recebe a sombra do sol e multiplica pelas nuvens (o tipo do three declara a função sem parâmetro). */
 const shadowWithClouds = Fn(([shadow]: [N]) => shadow.mul(cloudLight(positionWorld.xz))) as unknown as () => THREE.Node;
 
@@ -150,6 +192,8 @@ const cropBend = (p: N3, hgt: N, t: N) => {
 
 interface DecoOpts {
   sway?: 'tree' | 'crop';
+  /** Metade fina das plantas (chaves com "~"): cada instância afunda no chão quando `U.fine` cai. */
+  fade?: boolean;
   /** Fiadas de telha nas superfícies inclinadas tingidas (telhados), só de perto. */
   shingles?: boolean;
   /** Contorno luminoso nas bordas das copas, na cor do sol. */
@@ -163,7 +207,7 @@ interface DecoOpts {
 
 /** Material dos kits instanciados: cor por vértice × cor da instância (onde tint = 1), janelas acesas à noite. */
 function decoMaterial(o: DecoOpts) {
-  const m = new THREE.MeshStandardNodeMaterial({ roughness: o.roughness ?? 0.85, metalness: o.metalness ?? 0, flatShading: true, side: o.side ?? THREE.FrontSide });
+  const m = new LitMaterial({ roughness: o.roughness ?? 0.85, metalness: o.metalness ?? 0, flatShading: true, side: o.side ?? THREE.FrontSide });
   const tint = attribute('tint', 'float');
   const glow = attribute('glow', 'float');
   const iColor = attribute('iColor', 'vec3');
@@ -175,10 +219,12 @@ function decoMaterial(o: DecoOpts) {
   } else if (o.sway === 'crop') {
     const hgt = max(positionGeometry.y, 0);
     const sheen = varying(float(0), 'vSheen');
+    // Cada planta tem a sua vez de afundar (some sem pipocar); 0,2 cabe na espessura da peça.
+    const sink = o.fade ? float(1).sub(smoothstep(0, 0.25, U.fine.mul(1.25).sub(hash(instanceIndex)))).mul(0.2) : null;
     m.positionNode = displaced((p, t, now) => {
       const b = cropBend(p, hgt, t);
       if (now) sheen.assign(b.gust.mul(clamp(hgt.mul(14), 0, 1)));
-      return b.d;
+      return sink ? b.d.sub(vec3(0, sink, 0)) : b.d;
     });
     base = base.mul(sheen.mul(0.22).add(1));
   } else m.positionNode = displaced();
@@ -204,13 +250,14 @@ function decoMaterial(o: DecoOpts) {
   return m;
 }
 
-export type MatKey = 'deco' | 'foliage' | 'crop' | 'crystal' | 'glass';
+export type MatKey = 'deco' | 'foliage' | 'crop' | 'cropFine' | 'crystal' | 'glass';
 
 export function makeDecoMaterials(): Record<MatKey, THREE.MeshStandardNodeMaterial> {
   return {
     deco: decoMaterial({ shingles: true }),
     foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true }),
     crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide }),
+    cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true }),
     crystal: decoMaterial({ sway: 'tree', roughness: 0.25, metalness: 0.1, emissive: '#3a2a66', emissiveIntensity: 0.6 }),
     glass: decoMaterial({ roughness: 0.2, metalness: 0.2 }),
   };
@@ -227,7 +274,7 @@ export function makeDecoMaterials(): Record<MatKey, THREE.MeshStandardNodeMateri
  * estratos e pedras. Tudo em coordenadas de mundo, sem costura entre peças.
  */
 export function makeGroundMaterial() {
-  const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0, flatShading: true });
+  const m = new LitMaterial({ roughness: 0.95, metalness: 0, flatShading: true });
   m.positionNode = displaced();
   const p = positionWorld.xz;
   const sp = attribute('splat', 'vec4');
@@ -318,7 +365,7 @@ interface WaterShade {
  * molhada continua o barranco seco sem emenda; as cáusticas multiplicam só a luz direta,
  * e por isso somem na sombra e à noite.
  */
-class WaterLighting extends THREE.PhysicalLightingModel {
+class WaterLighting extends SplitLighting {
   private shade: WaterShade;
 
   constructor(shade: WaterShade) {
@@ -345,7 +392,7 @@ class WaterLighting extends THREE.PhysicalLightingModel {
   }
 }
 
-class WaterMaterial extends THREE.MeshStandardNodeMaterial {
+class WaterMaterial extends LitMaterial {
   shade!: WaterShade;
 
   setupSpecular() {
