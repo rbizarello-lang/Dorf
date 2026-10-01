@@ -2,6 +2,8 @@ import * as THREE from 'three/webgpu';
 import { Sfx } from './audio';
 import { DEFAULT_RULES, type PlaceResult, type Rules } from './core/board';
 import { Game } from './core/game';
+import { MODES, dailySeed, modeById, type Mode, type ModeId } from './core/modes';
+import { LOOKOUT_MOVES, SITE_REWARD, type SiteKind } from './core/sites';
 import { mulberry32 } from './core/rng';
 import { DIRS, hexToWorld, hkey, worldToHex } from './core/hex';
 import type { Quality, TimeOfDay } from './render/world';
@@ -15,15 +17,18 @@ import './ui/style.css';
 
 type QualityMode = 'auto' | Quality;
 type MoveRec = [number, number, number];
-/** v3: sequência de peças por índice e pontos de interação. Guarda a pontuação para conferir o replay. */
+/** v4: modos, eras, sítios e bônus por tema. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 3;
+  v: 4;
   seed: number;
   rulesId: string;
+  mode: ModeId;
   moves: MoveRec[];
+  /** Quantas vezes já desfez nesta partida (o limite vem do modo). */
+  undone: number;
   score: number;
 }
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -96,7 +101,18 @@ let overTimer = 0;
 let bestAtStart = 0;
 const special = params.has('stress') || params.has('auto') || params.has('demo');
 
-const rulesFor = (t: Theme): Rules => ({ ...DEFAULT_RULES, ...t.rules });
+// Regras: padrão ← tema ← modo. O desafio do dia ignora as regras do tema (é igual para todos).
+const rulesFor = (t: Theme, m: Mode = mode): Rules => ({ ...DEFAULT_RULES, ...(m.daily ? {} : t.rules), ...m.rules });
+let mode: Mode = modeById(params.get('mode') ?? store.get('mode'));
+let undone = 0;
+const ERA_NAMES = ['Aldeia', 'Vila', 'Burgo', 'Cidade'];
+const eraName = (i: number) => (theme.eras ?? ERA_NAMES)[i] ?? ERA_NAMES[ERA_NAMES.length - 1];
+const SITE_LABEL: Record<SiteKind, { name: string; icon: string }> = {
+  ruin: { name: 'Ruína', icon: '⌂' },
+  treasure: { name: 'Tesouro', icon: '◆' },
+  relic: { name: 'Relíquia', icon: '✦' },
+  lookout: { name: 'Mirante', icon: '◉' },
+};
 
 // ------------------------------------------------------------------ partida
 
@@ -107,10 +123,11 @@ const rulesFor = (t: Theme): Rules => ({ ...DEFAULT_RULES, ...t.rules });
  */
 const synTimers: number[] = [];
 
-function newGame(seed = 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number): boolean {
+function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number, undos = 0): boolean {
   clearTimeout(overTimer);
   for (const t of synTimers.splice(0)) clearTimeout(t);
   game = new Game(seed, rulesFor(rulesTheme));
+  undone = undos;
   moves = [];
   for (const [q, r, rot] of replay) {
     game.rot = rot;
@@ -142,14 +159,14 @@ function persist() {
 }
 
 function snapshot(): Save {
-  return { v: SAVE_VERSION, seed: game.seed, rulesId: rulesTheme.id, moves, score: game.board.score };
+  return { v: SAVE_VERSION, seed: game.seed, rulesId: rulesTheme.id, mode: mode.id, moves, undone, score: game.board.score };
 }
 
 /** Aceita só saves completos e da versão atual; qualquer outra coisa é descartada. */
 function validSave(raw: unknown): Save | null {
   const s = raw as Partial<Save> | null;
   const okMove = (m: unknown) => Array.isArray(m) && m.length === 3 && m.every(Number.isInteger) && m[2] >= 0 && m[2] < 6;
-  if (s && s.v === SAVE_VERSION && Number.isInteger(s.seed) && s.seed! > 0 && typeof s.rulesId === 'string' && Array.isArray(s.moves) && s.moves.every(okMove) && Number.isFinite(s.score)) return s as Save;
+  if (s && s.v === SAVE_VERSION && Number.isInteger(s.seed) && s.seed! > 0 && typeof s.rulesId === 'string' && MODES.some((m) => m.id === s.mode) && Number.isInteger(s.undone) && s.undone! >= 0 && Array.isArray(s.moves) && s.moves.every(okMove) && Number.isFinite(s.score)) return s as Save;
   return null;
 }
 
@@ -170,23 +187,34 @@ function readSave(): Save | null {
 
 /** Nova partida pedida pelo jogador: confirma se há uma partida em andamento. */
 function requestNewGame() {
-  if (game.over || moves.length < 3) {
-    startFresh();
-    return;
-  }
+  const warn = !game.over && moves.length >= 3 ? `<p class="muted">A partida atual (${moves.length} peças, ${game.board.score.toLocaleString('pt-BR')} pontos) será descartada.</p>` : '';
+  const cards = MODES.map(
+    (m) => `<button class="mode-card" type="button" data-act="mode" data-mode="${m.id}" aria-current="${m.id === mode.id}"><strong>${m.name}</strong><span>${m.tagline}</span></button>`,
+  ).join('');
   hud.showModal(`
-    <h2 id="modal-title">Começar outra partida?</h2>
-    <p>A partida atual (${moves.length} peças, ${game.board.score.toLocaleString('pt-BR')} pontos) será descartada.</p>
-    <div class="row">
-      <button class="primary" type="button" data-act="new">Nova partida</button>
-      <button class="secondary" type="button" data-act="close">Continuar jogando</button>
-    </div>`);
+    <h2 id="modal-title">Nova partida</h2>
+    <p>Escolha o modo. O tema continua: ${theme.name}.</p>
+    <div class="modes">${cards}</div>
+    ${warn}
+    <div class="row"><button class="secondary" type="button" data-act="close">Continuar jogando</button></div>`);
 }
 
-function startFresh() {
+function startFresh(m: Mode = mode) {
+  mode = m;
+  store.set('mode', m.id);
   rulesTheme = theme;
   newGame();
-  hud.toast(`Nova partida · ${theme.name}`);
+  hud.toast(m.daily ? `Desafio do dia ${dailySeed()} · ${m.name}` : `Nova partida · ${m.name} · ${theme.name}`);
+}
+
+/** Desfaz a última jogada: refaz a partida pelo replay sem ela (o mesmo caminho do save). */
+function undo() {
+  const left = mode.undos - undone;
+  if (left <= 0 || !moves.length || hud.modalOpen) return;
+  const keep = moves.slice(0, -1);
+  if (!newGame(game.seed, keep, undefined, undone + 1)) return;
+  sfx.rotate();
+  hud.toast(left - 1 > 0 && left - 1 < 99 ? `Jogada desfeita · restam ${left - 1}` : 'Jogada desfeita');
 }
 
 function frameCamera(instant: boolean) {
@@ -215,9 +243,13 @@ function frameCamera(instant: boolean) {
 
 function refreshHud(instant = false) {
   hud.setScore(game.board.score, Math.max(best, game.board.score), instant);
-  hud.setStack(game.stack);
+  hud.setStack(game.stack, game.rules.infinite);
+  const b = game.board, es = game.rules.eraScores;
+  const nextAt = es[b.era + 1];
+  hud.setEra(es.length > 1 ? `Era ${['I', 'II', 'III', 'IV', 'V', 'VI'][b.era] ?? b.era + 1} · ${eraName(b.era)} · ${mode.name}` : mode.name, nextAt === undefined ? null : Math.min(1, (b.score - es[b.era]) / (nextAt - es[b.era])));
+  hud.setUndo(Math.min(mode.undos - undone, moves.length ? 99 : 0));
   // Com 1 peça na pilha, a "próxima" só entraria se a jogada render peças: não mostra.
-  hud.renderNext(game.stack <= 1 ? null : game.next, theme);
+  hud.renderNext(game.stack <= 1 && !game.rules.infinite ? null : game.next, theme, game.board.lookout > 0 ? game.upcoming(3) : []);
   world.setPreview(game.current, rotSteps * (Math.PI / 3), game.stack);
   updateGhost();
 }
@@ -322,6 +354,25 @@ function announce(res: PlaceResult) {
     hud.toast(`Missão perdida: ${questLabel(q, theme)} (passou de ${q.target})`, 'bad');
   }
   if (res.newQuest) hud.toast(`Nova missão: ${questLabel(res.newQuest, theme)}`);
+  if (res.site) {
+    const r = SITE_REWARD[res.site.kind];
+    const what = [r.points ? `+${r.points} pontos` : '', r.tiles ? `+${r.tiles} peça${r.tiles > 1 ? 's' : ''}` : '', res.site.kind === 'lookout' ? `próximas peças à vista por ${LOOKOUT_MOVES} jogadas` : ''].filter(Boolean).join(' · ');
+    hud.toast(`${SITE_LABEL[res.site.kind].name} descoberta: ${what}`, 'good');
+    sfx.quest();
+    world.burst(x, z, 'sparkle', 46);
+  }
+  if (res.eraUp !== null) {
+    hud.toast(`Nova era: ${eraName(res.eraUp)} · +${game.rules.eraTiles} peças`, 'good');
+    sfx.perfect();
+    sfx.quest();
+    world.ripple(x, z, 2.2);
+    world.burst(x, z, 'sparkle', 60);
+    const el = document.getElementById('era')!;
+    el.classList.remove('up');
+    void el.offsetWidth;
+    el.classList.add('up');
+  }
+  if (res.leftoverBonus) hud.toast(`Todos os sítios achados! Peças que sobraram: +${res.leftoverBonus} pontos`, 'good');
   hud.renderQuests(game.board.quests, theme);
 }
 
@@ -342,6 +393,9 @@ function showHelp() {
     </ul>
     <div class="synergies">${synergyLegend()}</div>
     <ul>
+      <li><b>Eras</b>: com ${game.rules.eraScores.slice(1).map((v) => v.toLocaleString('pt-BR')).join(', ')} pontos a vila muda de era e ganha +${game.rules.eraTiles} peças.</li>
+      <li><b>Sítios</b>: carimbos no mapa marcam ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.</li>
+      <li><kbd>U</kbd> desfaz a última jogada (o número de vezes depende do modo).</li>
       <li>A partida acaba quando a pilha esvazia.</li>
     </ul>
     <p class="muted">Mouse: clique coloca, botão direito ou <kbd>R</kbd> gira a peça, arrastar move, roda dá zoom, <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera. Toque: toque num espaço para ver a peça, toque de novo (ou ✓) para colocar.</p>
@@ -359,14 +413,14 @@ function showGameOver() {
   const b = game.board;
   const record = b.score > bestAtStart && b.score > 0;
   hud.showModal(`
-    <h2 id="modal-title">${record ? 'Novo recorde!' : 'Pilha vazia'}</h2>
-    <p class="muted">${theme.name} · semente ${game.seed}</p>
+    <h2 id="modal-title">${record ? 'Novo recorde!' : b.sites.length && !b.sitesLeft() && game.rules.endOnSites ? 'Todos os sítios achados!' : 'Pilha vazia'}</h2>
+    <p class="muted">${mode.name} · ${theme.name} · semente ${game.seed}</p>
     <div class="final">
       <div><b>${b.score.toLocaleString('pt-BR')}</b><span>pontos</span></div>
       <div><b>${game.placedCount}</b><span>peças</span></div>
       <div><b>${b.questsCompleted}</b><span>missões</span></div>
     </div>
-    <p class="muted">${b.perfects} encaixes perfeitos, ${Object.values(b.synergyCount).reduce((a, c) => a + c, 0)} interações. Recorde: ${best.toLocaleString('pt-BR')}.</p>
+    <p class="muted">Era ${eraName(b.era)}, ${b.sites.filter((x) => x.found).length} de ${b.sites.length} sítios, ${b.perfects} encaixes perfeitos, ${Object.values(b.synergyCount).reduce((a, c) => a + c, 0)} interações. Recorde: ${best.toLocaleString('pt-BR')}.</p>
     <div class="row">
       <button class="primary" type="button" data-act="new">Jogar de novo</button>
       <button class="secondary" type="button" data-act="theme">Trocar tema</button>
@@ -381,6 +435,9 @@ hud.modal.addEventListener('click', (e) => {
   } else if (act === 'new') {
     hud.hideModal();
     startFresh();
+  } else if (act === 'mode') {
+    hud.hideModal();
+    startFresh(modeById((e.target as HTMLElement).closest('button')?.dataset.mode));
   } else if (act === 'theme') {
     hud.hideModal();
     hud.openThemeMenu(theme, pickTheme);
@@ -397,7 +454,7 @@ function pickTheme(t: Theme) {
   if (game.over) {
     rulesTheme = t;
     newGame();
-  } else if (JSON.stringify(rulesFor(t)) !== JSON.stringify(game.rules)) {
+  } else if (!mode.daily && JSON.stringify(rulesFor(t)) !== JSON.stringify(game.rules)) {
     hud.toast(`${t.ruleNote ?? 'Regras padrão.'} Vale a partir da próxima partida.`);
   }
 }
@@ -565,6 +622,7 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'l') cycleTime();
   else if (k === 'h' || k === '?') showHelp();
   else if (k === 'n') requestNewGame();
+  else if (k === 'u') undo();
   else if (k === '+' || k === '=') world.rig.zoom(0.85);
   else if (k === '-') world.rig.zoom(1.18);
   else held.add(k);
@@ -600,6 +658,7 @@ hud.confirm.addEventListener('click', () => {
 });
 document.getElementById('btn-help')!.addEventListener('click', showHelp);
 document.getElementById('btn-new')!.addEventListener('click', requestNewGame);
+document.getElementById('btn-undo')!.addEventListener('click', undo);
 hud.themeBtn.addEventListener('click', () => {
   if (hud.themeMenu.hidden) hud.openThemeMenu(theme, pickTheme);
   else hud.closeThemeMenu();
@@ -722,6 +781,11 @@ function step(now: number) {
     const s = screenOf(q.anchor.q, q.anchor.r, 0.55);
     markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: q.exact ? `=${q.target}` : `${q.target}+`, color: theme.terrainColors[q.terrain] });
   }
+  for (const st of game.board.sites) {
+    if (st.found) continue;
+    const s = screenOf(st.q, st.r, 0.05);
+    markers.push({ id: 100000 + st.q * 1000 + st.r, x: s.x, y: s.y + 30, visible: s.visible, text: SITE_LABEL[st.kind].icon, color: '#8a6a3a', kind: st.kind });
+  }
   hud.updateMarkers(markers);
   cpuAcc += performance.now() - c0;
   frames++;
@@ -763,7 +827,8 @@ function start(data: unknown) {
   let resumed = false;
   if (saved) {
     rulesTheme = themeById(saved.rulesId);
-    resumed = newGame(saved.seed, saved.moves, saved.score);
+    mode = modeById(saved.mode);
+    resumed = newGame(saved.seed, saved.moves, saved.score, saved.undone);
     if (resumed && saved.moves.length) hud.toast(`Partida retomada · ${saved.moves.length} peças`);
     else if (!resumed) hud.toast('A partida salva é de uma versão anterior e não pôde ser retomada. Começando outra.');
   }

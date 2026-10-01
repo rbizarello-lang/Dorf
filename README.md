@@ -24,6 +24,23 @@ npm run check      # typecheck + testes + build (o mesmo que a CI roda em cada p
 
 Coloque peças encostadas no mapa. Cada borda que combina com a vizinha vale 10 pontos. **Rio e estrada** precisam continuar: só encostam neles mesmos. Quando a peça encosta em 2 ou mais vizinhas e todas as bordas combinam, o encaixe é **perfeito**. Cercar uma peça com 6 vizinhas encaixadas devolve uma peça à pilha. **Missões** pedem grupos de certo tamanho ("9 ou mais", "exatamente 8") e dão peças extras. A partida acaba quando a pilha esvazia.
 
+**Eras da vila:** com 500, 1.500 e 3.000 pontos a vila muda de era (os nomes mudam por tema, como Borgo → Comune → Signoria → Rinascimento na Toscana) e ganha +3 peças.
+
+**Sítios escondidos:** carimbos no mapa marcam ruínas (+60 pontos), tesouros (+2 peças), relíquias (+100 pontos e +1 peça) e mirantes (+20 pontos e as próximas 3 peças à vista por 10 jogadas). Coloque uma peça em cima para descobrir. Ficam em anéis cada vez mais longe do centro.
+
+**Bônus de cada tema:** cada época tem uma regra curta, como a Dádiva do Nilo (borda de rio encaixada vale +5) no Egito ou os Moinhos de pôlder (+5 por moinho) na Holanda. Aparece no menu de temas.
+
+**Desfazer:** `U` ou o botão desfaz a última jogada (3 vezes no Clássico).
+
+**Modos:**
+
+| Modo | Como é |
+|---|---|
+| Clássico | missões, eras e sítios; acaba quando a pilha esvazia |
+| Zen | peças sem fim; pontos e eras por gosto |
+| Desafio do dia | semente do dia e regras padrão, iguais para todo mundo; sem desfazer |
+| Exploradores | 10 sítios e 50 peças; achar o último encerra, e cada peça que sobrou vale 20 pontos |
+
 **Interações:** algumas bordas diferentes também "conversam". Quando se encostam, rendem +5 e erguem uma construção na borda. A prévia acende em dourado antes de você colocar a peça.
 
 | Encontro | Construção (nome muda por tema) |
@@ -65,6 +82,7 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 | `?time=night` | `day`, `dusk` ou `night` |
 | `?quality=high` | `auto`, `ultra`, `high`, `medium` ou `low` |
 | `?webgl` | força o WebGL2 em vez do WebGPU |
+| `?mode=zen` | modo inicial: `classico`, `zen`, `diario` ou `exploradores` |
 | `?debug` | mostra FPS, draw calls, triângulos e instâncias |
 | `?auto=40` | a IA coloca 40 peças de uma vez (tabuleiro de exemplo) |
 | `?demo` | a IA joga sozinha, com animação |

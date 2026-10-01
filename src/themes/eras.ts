@@ -1,3 +1,4 @@
+import { T } from '../core/tiles';
 import type { Theme } from './types';
 
 // Temas históricos: cada um reinterpreta os 6 terrenos com a cultura de um país numa época.
@@ -71,8 +72,9 @@ export const ERA_THEMES: Theme[] = [
     sparkle: '#fff2b8',
     ui: { accent: '#94600f', panel: '#fbf5e6', ink: '#3a2a14', soft: '#7d6640' },
     synergy: { lumber: 'Oficina de palmeira', mill: 'Celeiro real', pasture: 'Curral de gado', apiary: 'Colmeias de barro' },
-    rules: { startTiles: 38, questChance: 0.28 },
-    ruleNote: 'Começa com 38 peças; o faraó pede obras com mais frequência.',
+    eras: ['Pré-dinástico', 'Antigo Império', 'Médio Império', 'Novo Império'],
+    rules: { startTiles: 38, questChance: 0.28, matchBonus: { [T.Water]: 5 } },
+    ruleNote: 'Dádiva do Nilo: cada borda de rio encaixada vale 5 pontos a mais. Começa com 38 peças, e o faraó pede obras com mais frequência.',
   },
 
   // ---------------------------------------------------------------- 2. Song
@@ -140,6 +142,9 @@ export const ERA_THEMES: Theme[] = [
     sparkle: '#f6fbe6',
     ui: { accent: '#b23a2e', panel: '#f6f8f2', ink: '#1e2624', soft: '#66756d' },
     synergy: { lumber: 'Oficina de bambu', mill: 'Celeiro de arroz', pasture: 'Curral de búfalos', apiary: 'Colmeias' },
+    eras: ['Aldeia', 'Vila de mercado', 'Cidade murada', 'Capital'],
+    rules: { matchBonus: { [T.Field]: 3 } },
+    ruleNote: 'Arroz Champa: cada borda de arrozal encaixada vale 3 pontos a mais.',
   },
 
   // ---------------------------------------------------------------- 3. Viking
@@ -206,6 +211,9 @@ export const ERA_THEMES: Theme[] = [
     sparkle: '#dff0ff',
     ui: { accent: '#2f6a5c', panel: '#f2f5f2', ink: '#1c2624', soft: '#5c6b66' },
     synergy: { lumber: 'Carpintaria naval', mill: 'Celeiro de cevada', pasture: 'Curral de ovelhas', apiary: 'Colmeias de hidromel' },
+    eras: ['Herdade', 'Povoado', 'Entreposto', 'Jarlado'],
+    rules: { synergyBonus: { lumber: 5 } },
+    ruleNote: 'Carpintaria naval (aldeia + pinhal) vale 5 pontos a mais.',
   },
 
   // ---------------------------------------------------------------- 4. Toscana
@@ -274,6 +282,9 @@ export const ERA_THEMES: Theme[] = [
     sparkle: '#ffe8b0',
     ui: { accent: '#8a2f3f', panel: '#fbf5ea', ink: '#33261a', soft: '#7f6a50' },
     synergy: { lumber: 'Marcenaria', mill: 'Celeiro da fattoria', pasture: 'Estábulo', apiary: 'Apiário do convento' },
+    eras: ['Borgo', 'Comune', 'Signoria', 'Rinascimento'],
+    rules: { matchBonus: { [T.Village]: 3 } },
+    ruleNote: 'Borghi: cada borda de borgo encaixada vale 3 pontos a mais.',
   },
 
   // ---------------------------------------------------------------- 5. Edo
@@ -341,6 +352,7 @@ export const ERA_THEMES: Theme[] = [
     sparkle: '#fff4e0',
     ui: { accent: '#34507a', panel: '#f6f3ea', ink: '#22201c', soft: '#6b665a' },
     synergy: { lumber: 'Oficina daiku', mill: 'Armazém kura', pasture: 'Cavalariça', apiary: 'Colmeias' },
+    eras: ['Mura', 'Shukuba', 'Jōkamachi', 'Edo'],
     rules: { perfectBonus: 25, questChance: 0.2 },
     ruleNote: 'Jardim sereno: encaixe perfeito vale 25 pontos e as missões são um pouco mais raras.',
   },
@@ -412,6 +424,9 @@ export const ERA_THEMES: Theme[] = [
     sparkle: '#fff2c0',
     ui: { accent: '#2f6ea8', panel: '#fbf8f0', ink: '#22303c', soft: '#5f6a70' },
     synergy: { lumber: 'Carpintaria', mill: 'Paiol', pasture: 'Pouso de tropa', apiary: 'Colmeias de jataí' },
+    eras: ['Arraial', 'Vila', 'Vila Rica', 'Capital da capitania'],
+    rules: { synergyBonus: { pasture: 5 } },
+    ruleNote: 'Tropeiros: o pouso de tropa (arraial + pasto) vale 5 pontos a mais.',
   },
 
   // ---------------------------------------------------------------- 7. Oeste
@@ -479,6 +494,7 @@ export const ERA_THEMES: Theme[] = [
     sparkle: '#ffe0a8',
     ui: { accent: '#9a4224', panel: '#fbf3e8', ink: '#33211a', soft: '#7a5a4a' },
     synergy: { lumber: 'Serraria', mill: 'Moinho de vento', pasture: 'Curral', apiary: 'Apiário' },
+    eras: ['Acampamento', 'Povoado', 'Cidade da ferrovia', 'Cidade do boom'],
     rules: { questChance: 0.3 },
     ruleNote: 'A ferrovia traz encomendas: as missões aparecem com mais frequência.',
   },
@@ -548,5 +564,8 @@ export const ERA_THEMES: Theme[] = [
     sparkle: '#fff2c0',
     ui: { accent: '#1a7480', panel: '#f6f5ee', ink: '#252a22', soft: '#69705c' },
     synergy: { lumber: 'Oficina de madeira', mill: 'Qollqa', pasture: 'Curral de lhamas', apiary: 'Horta de altitude' },
+    eras: ['Ayllu', 'Marka', 'Wamani', 'Tawantinsuyu'],
+    rules: { synergyBonus: { apiary: 5 } },
+    ruleNote: 'Andenes: a horta de altitude (andenes + puna) vale 5 pontos a mais.',
   },
 ];

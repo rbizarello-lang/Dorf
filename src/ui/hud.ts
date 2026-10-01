@@ -12,6 +12,8 @@ export interface MarkerView {
   visible: boolean;
   text: string;
   color: string;
+  /** Sítio escondido (estilo de carimbo), em vez de missão. */
+  kind?: string;
 }
 
 function esc(s: string) {
@@ -77,19 +79,29 @@ export class Hud {
     if (this.score.textContent !== text) this.score.textContent = text;
   }
 
-  setStack(n: number) {
-    this.stack.textContent = String(Math.max(0, n));
-    this.stack.parentElement!.classList.toggle('low', n <= 5);
-    this.stack.parentElement!.classList.toggle('wide', n >= 1000);
+  setStack(n: number, infinite = false) {
+    this.stack.textContent = infinite ? '∞' : String(Math.max(0, n));
+    this.stack.parentElement!.classList.toggle('low', !infinite && n <= 5);
+    this.stack.parentElement!.classList.toggle('wide', !infinite && n >= 1000);
   }
 
-  renderNext(def: TileDef | null, theme: Theme) {
-    const svg = $('next');
-    svg.parentElement!.hidden = !def;
-    if (!def) {
-      svg.innerHTML = '';
-      return;
-    }
+  /** Era da vila: nome e quanto falta para a próxima (0 a 1; null = última era). */
+  setEra(label: string, progress: number | null) {
+    const el = $('era');
+    el.hidden = !label;
+    (el.querySelector('.era-name') as HTMLElement).textContent = label;
+    const bar = el.querySelector('.era-bar') as HTMLElement;
+    bar.hidden = progress === null;
+    (bar.querySelector('i') as HTMLElement).style.width = `${Math.round((progress ?? 1) * 100)}%`;
+  }
+
+  setUndo(left: number) {
+    const b = $<HTMLButtonElement>('btn-undo');
+    b.hidden = left <= 0;
+    $('undo-n').textContent = left >= 99 ? '' : String(left);
+  }
+
+  private hexSvg(def: TileDef, theme: Theme) {
     let out = '';
     for (let i = 0; i < 6; i++) {
       const [ax, az] = corner(i);
@@ -97,7 +109,17 @@ export class Hud {
       out += `<polygon points="0,0 ${ax.toFixed(3)},${az.toFixed(3)} ${bx.toFixed(3)},${bz.toFixed(3)}" fill="${theme.terrainColors[def.edges[i]]}" stroke="${theme.ui.panel}" stroke-width="0.05" stroke-linejoin="round"/>`;
     }
     if (def.quest) out += `<circle r="0.28" fill="${theme.ui.panel}"/><text y="0.12" text-anchor="middle" font-size="0.36" font-weight="800" fill="${theme.ui.ink}">!</text>`;
-    svg.innerHTML = out;
+    return out;
+  }
+
+  /** A próxima peça e, com o mirante, as seguintes (menores). */
+  renderNext(def: TileDef | null, theme: Theme, upcoming: TileDef[] = []) {
+    const svg = $('next');
+    svg.parentElement!.hidden = !def;
+    svg.innerHTML = def ? this.hexSvg(def, theme) : '';
+    const up = $('upcoming');
+    up.hidden = !def || !upcoming.length;
+    up.innerHTML = upcoming.map((d) => `<svg viewBox="-1.1 -1.1 2.2 2.2" aria-hidden="true">${this.hexSvg(d, theme)}</svg>`).join('');
   }
 
   renderQuests(quests: Quest[], theme: Theme) {
@@ -133,7 +155,7 @@ export class Hud {
       let el = this.markerEls.get(m.id);
       if (!el) {
         el = document.createElement('div');
-        el.className = 'marker';
+        el.className = m.kind ? `marker site ${m.kind}` : 'marker';
         this.markers.appendChild(el);
         this.markerEls.set(m.id, el);
       }

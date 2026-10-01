@@ -1,6 +1,7 @@
 import { Board, type PlaceResult, type Rules } from './board';
 import { unkey } from './hex';
 import { mulberry32, type Rng } from './rng';
+import { generateSites } from './sites';
 import { T, generateTile, rotateEdges, type TileDef } from './tiles';
 
 export interface Move {
@@ -34,6 +35,7 @@ export class Game {
     };
     this.board.placeRaw(0, 0, starter, 0);
     this.board.computeGroups();
+    this.board.sites = generateSites(seed, rules.sites);
     this.stack = rules.startTiles;
     this.current = this.draw();
     this.next = this.draw();
@@ -60,6 +62,20 @@ export class Game {
     return def;
   }
 
+  /**
+   * As `n` peças depois da próxima, sem sorteá-las (o mirante as mostra). Só as bordas:
+   * a missão de cada uma depende do estado da partida quando ela for sorteada.
+   */
+  upcoming(n: number): TileDef[] {
+    const out: TileDef[] = [];
+    for (let k = 1; k <= n; k++) {
+      const rng = mulberry32((this.seed + Math.imul(this.drawn + k, 0x9e3779b1)) >>> 0);
+      rng();
+      out.push({ ...generateTile(rng, true), quest: null });
+    }
+    return out;
+  }
+
   currentEdges() {
     return this.current ? rotateEdges(this.current.edges, this.rot) : null;
   }
@@ -80,7 +96,15 @@ export class Game {
     if (!c?.valid) return null;
     const res = this.board.place(q, r, def, this.rot);
     this.placedCount++;
-    this.stack += res.tilesGained - 1;
+    if (!this.rules.infinite) this.stack += res.tilesGained - 1;
+    // Exploradores: achou o último sítio, a partida acaba e cada peça que sobrou vale pontos.
+    if (this.rules.endOnSites && this.board.sites.length && this.board.sitesLeft() === 0) {
+      const bonus = Math.max(0, this.stack) * this.rules.leftoverPoints;
+      this.board.score += bonus;
+      res.points += bonus;
+      res.leftoverBonus = bonus;
+      this.stack = 0;
+    }
     this.advance();
     return res;
   }
@@ -96,7 +120,7 @@ export class Game {
   discardIfStuck(): boolean {
     if (!this.current || this.hasAnyMove(this.current)) return false;
     this.discarded++;
-    this.stack -= 1;
+    if (!this.rules.infinite) this.stack -= 1;
     this.advance();
     return true;
   }

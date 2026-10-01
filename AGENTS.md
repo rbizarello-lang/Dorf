@@ -94,7 +94,9 @@ src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em
   tiles.ts       enum T (Prado, Floresta, Plantação, Vila, Rio, Estrada), rotateEdges, geração de peças
   board.ts       Rules/DEFAULT_RULES, Board: validação, pontuação, grupos, missões, interações
   synergy.ts     tabela das interações (vila×floresta, vila×plantação, vila×prado, plantação×prado)
-  game.ts        Game: semente, pilha, sorteio por peça, descarte, bestMove (IA gulosa)
+  game.ts        Game: semente, pilha, sorteio por peça, descarte, bestMove (IA gulosa), upcoming (mirante)
+  sites.ts       sítios escondidos (ruína, tesouro, relíquia, mirante), da semente por um gerador à parte
+  modes.ts       modos: Clássico, Zen, Desafio do dia, Exploradores (regras + desfazer)
   rng.ts         mulberry32 e utilitários de sorteio
 src/themes/      temas como DADOS
   types.ts       esquema Theme, com cada kit comentado: é a referência de tudo que um tema pode escolher
@@ -144,7 +146,7 @@ scripts/         capturas, teste de carga, conversão para página publicável
    Mude os três juntos ou nenhum.
 5. **Rio e estrada são estritos** (`isStrict`): só encostam neles mesmos. Os 4 terrenos comuns aceitam qualquer vizinho, mas só pontuam quando iguais. As interações pontuam pares diferentes.
 6. **Saves:**
-   - o formato é `{ v, seed, rulesId, moves, score }`, guardado em `localStorage` com o prefixo `retalhos.`;
+   - o formato é `{ v, seed, rulesId, mode, moves, undone, score }` (v4), guardado em `localStorage` com o prefixo `retalhos.`;
    - ao carregar, a partida é **reconstruída pelo replay** das jogadas e conferida contra a pontuação.
    - Se você mudar regras, pontuação ou geração de peças de um jeito que altere o replay, **aumente `SAVE_VERSION` em `main.ts`**. Saves antigos mostram um aviso e são descartados.
 7. **Os testes têm oráculos independentes.** Ao mudar a pontuação, atualize o oráculo em `tests/logic.ts` reimplementando a regra. Nunca faça o oráculo chamar o código que ele testa.
@@ -211,6 +213,7 @@ A lista priorizada de kits que faltam está no fim de `docs/TEMAS.md`.
 
 ## Estado atual e próximos passos
 
+- **Feito (v4, outubro de 2026):** renderização WebGPU/TSL com GTAO, TRAA, bloom e profundidade de campo; rios escavados com correnteza; céu procedural (IBL); chão com detalhe por terreno; clima por tema; vilas com trilhas; eras da vila, sítios, bônus por tema, desfazer e 4 modos. Ideias de Age of Empires ainda não feitas estão em `docs/IDEIAS_AOE.md` (Centro que evolui, arquitetura por era, aldeões, maravilha, terra incógnita).
 - **Feito (v3):** 14 temas, kits detalhados, 4 interações com prévia em dourado, mundo animado, dia/entardecer/noite, qualidade adaptativa, save v3 com replay, duas rodadas de revisão de código com correções. O histórico está em `docs/VIABILIDADE.md`, Apêndice A.
 - **Pendente:**
   - medir o FPS numa GPU real (`?stress=1000&debug`) no PC e no celular;

@@ -191,5 +191,7 @@ export interface Theme {
   /** Nomes das interações entre bordas neste tema. */
   synergy: { lumber: string; mill: string; pasture: string; apiary: string };
   rules?: Partial<Rules>;
+  /** Nomes das 4 eras da vila (padrão: Aldeia, Vila, Burgo, Cidade). */
+  eras?: [string, string, string, string];
   ruleNote?: string;
 }
