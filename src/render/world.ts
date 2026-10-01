@@ -28,6 +28,11 @@ const tmpM = new THREE.Matrix4();
 const tmpColor = new THREE.Color();
 /** Densidade do clima por qualidade. */
 const WEATHER: Record<Quality, number> = { ultra: 1, high: 1, medium: 0.5, low: 0 };
+// Teto de densidade de pixels e orçamento de pixels desenhados por qualidade. Sem o orçamento,
+// uma tela 4K renderiza 8 milhões de pixels em qualquer nível, e descer de Ultra para Alta
+// não alivia a GPU (o custo do GTAO, do TRAA e do desfoque cresce com a área).
+const DPR_MAX: Record<Quality, number> = { ultra: 2, high: 2, medium: 1.5, low: 1 };
+const PIXELS: Record<Quality, number> = { ultra: 3840 * 2160, high: 2560 * 1440, medium: 1920 * 1080, low: 1920 * 1080 };
 
 function tileMatrix(q: number, r: number, rot: number, y = 0, out = new THREE.Matrix4()) {
   const { x, z } = hexToWorld(q, r);
@@ -485,8 +490,6 @@ export class World {
     const detailChanged = DETAIL[q] !== DETAIL[this.quality];
     const postChanged = q !== this.quality || !this.post;
     this.quality = q;
-    const dpr = window.devicePixelRatio || 1;
-    this.renderer.setPixelRatio(q === 'ultra' || q === 'high' ? Math.min(dpr, 2) : q === 'medium' ? Math.min(dpr, 1.5) : 1);
     const shadows = q !== 'low';
     if (this.renderer.shadowMap.enabled !== shadows) {
       this.renderer.shadowMap.enabled = shadows;
@@ -519,6 +522,9 @@ export class World {
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
     this.size.set(w, h);
+    const q = this.quality;
+    const dpr = Math.min(window.devicePixelRatio || 1, DPR_MAX[q], Math.sqrt(PIXELS[q] / (w * h)));
+    this.renderer.setPixelRatio(Math.max(0.5, dpr));
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();

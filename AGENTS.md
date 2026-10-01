@@ -172,7 +172,7 @@ Medido com `RUNS=300:high node scripts/stress.mjs`, renderização por software:
 | 300 | alta | ~94 | ~1,37 milhão | ~4,3 ms |
 
 - **Regra prática:** uma mudança visual não deve subir triângulos ou draw calls em mais de ~10% sem justificativa escrita no commit.
-- **Qualidade:** Ultra (GTAO inteiro, TRAA, bloom, profundidade de campo, DPR até 2), Alta (GTAO em meia resolução), Média (MSAA, sem pós pesado) e Baixa (sem pós e sem sombras). A densidade de decoração é multiplicada por 1 (ultra e alta), 0,65 (média) ou 0,4 (baixa). O modo automático começa em Ultra no computador e em Média em telas de toque, e desce sozinho se o quadro passar de ~26 ms.
+- **Qualidade:** Ultra (GTAO inteiro, TRAA, bloom, profundidade de campo, DPR até 2), Alta (GTAO em meia resolução), Média (MSAA, sem pós pesado) e Baixa (sem pós e sem sombras). Cada nível tem um teto de pixels desenhados (Ultra 4K, Alta 1440p, Média e Baixa 1080p; `PIXELS` em `world.ts`): numa tela 4K, descer de nível também reduz a resolução interna. A densidade de decoração é multiplicada por 1 (ultra e alta), 0,65 (média) ou 0,4 (baixa). O modo automático começa em Ultra no computador e em Média em telas de toque, e desce sozinho se o quadro passar de ~26 ms.
 - **Ainda não foi medido:** o FPS numa GPU de verdade.
 
 ## Tarefas comuns
