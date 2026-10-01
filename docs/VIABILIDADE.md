@@ -348,6 +348,22 @@ Na lista priorizada do [TEMAS.md](TEMAS.md), burro/mula e búfalo já entraram (
 
 **Custo.** Com 300 peças em renderização por software: 106 draw calls (+11%) e 1,45 M de triângulos (+6%) no perfil Alta. A CPU por quadro medida no SwiftShader subiu, mas o profiler mostra quase tudo em escrita de buffers e envio de comandos disputando CPU com o rasterizador por software. **A medição em GPU real (`?stress=1000&debug`) continua sendo o próximo passo**; o modo Auto desce de Ultra para Alta, Média e Baixa se o quadro passar de ~26 ms.
 
+### Ultra além do PC de hoje (outubro de 2026)
+
+O Ultra deixou de ser medido pelo PC atual (RX 580, que fica em Média com 1.000 peças em 4K): o alvo é a máxima qualidade numa GPU melhor. Alta, Média e Baixa não mudaram, e o Auto continua descendo de nível sozinho.
+
+| Recurso (só no Ultra) | Como entrou |
+|---|---|
+| Sombras em cascata | `CSMShadowNode` com 3 cascatas de 4096², divididas em volta do alvo da câmera (que olha de cima: perto dela só há ar) |
+| Reflexos na água (SSR) | só onde a rugosidade é de água (< 0,1, no alfa da saída de normal); a normal do reflexo é acalmada para os raios não se espalharem nas ondas |
+| Luz indireta (SSGI) | substitui o GTAO: oclusão mais a cor que rebate das superfícies vizinhas; o vazio e as peças transparentes ficam fora da cor difusa |
+| Raios de luz (godrays) | percorrem o mapa de sombra de uma luz sem intensidade (as cascatas não têm mapa único); só aparecem com o sol baixo |
+| Vegetação mais densa | detalhe 1,35 (Alta segue em 1) |
+
+**Armadilha:** o WebGPU limita a 32 bytes por amostra o total das saídas da passada (cada RGBA8 conta 8). Cor, normal, difusa e velocidade já ocupam tudo, por isso a rugosidade vai no alfa da normal.
+
+**Custo.** Com 300 peças em renderização por software: Ultra com 193 draw calls e 3,05 M de triângulos, contra 111 e 1,53 M na Alta. O dobro de triângulos vem das passadas de sombra extras (3 cascatas mais a luz dos raios) e de 35% mais decoração. O custo real em GPU ainda precisa ser medido; `?fx=gi.ssr.rays.traa` liga os efeitos um a um.
+
 **Ainda não feito, do documento do AoE:** Centro que evolui com a era, arquitetura que muda por era, aldeões trabalhando, maravilha, vazio como mapa antigo, minimapa, trilha sonora por era.
 
 ## Apêndice A: revisão de código e QA pelo Sonnet
