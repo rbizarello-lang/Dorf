@@ -46,7 +46,7 @@ export const P = {
   focalLength: uniform(4),
   bokeh: uniform(1.2),
   bloomStrength: uniform(0.35),
-  giStrength: uniform(0.3),
+  giStrength: uniform(0.8),
   reflection: uniform(0.9),
   /** Intensidade dos raios de luz; world.ts aumenta no amanhecer e no entardecer. */
   rays: uniform(0.25),
@@ -80,6 +80,21 @@ const grade = Fn(([c]: [ReturnType<typeof vec4>]) => {
   return vec4(shoulder(mix(vec3(l), rgb, P.saturation)), c.a);
 });
 
+/**
+ * Normal da cena para GTAO, SSGI e SSR. O WebGPU limita a 32 bytes por amostra o total das
+ * saídas (cada RGBA8 conta 8): cor, normal, difusa e velocidade já ocupam tudo, então a
+ * rugosidade (máscara da água) vai no alfa. Materiais transparentes (partículas, casas vazias)
+ * saem com alfa 0: a mistura usa o alfa de cada saída e a normal de trás fica intacta; antes,
+ * cada partícula deixava um quadrado de normal errada na oclusão.
+ */
+const sceneNormal = (withRoughness: boolean) =>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  Fn((builder: any) => {
+    const m = builder.material as (THREE.Material & { roughness?: number }) | null;
+    if (m?.transparent) return vec4(0);
+    return vec4(packNormalToRGB(normalView), withRoughness && m?.roughness !== undefined ? roughness : float(1));
+  })();
+
 export interface Post {
   pipeline: THREE.RenderPipeline;
   /** A cena grava a cor difusa (saída `diffuse`) para a luz indireta. */
@@ -104,15 +119,18 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
   const scenePass = pass(scene, camera, { samples: cfg.aa === 'msaa' ? 4 : 0 });
   disposables.push(scenePass);
   const outputs: Record<string, unknown> = { output };
-  // O WebGPU limita a 32 bytes por amostra o total das saídas (cada RGBA8 conta 8):
-  // cor, normal, difusa e velocidade já ocupam tudo, então a rugosidade vai no alfa da normal.
-  if (cfg.ao || cfg.gi || cfg.ssr) outputs.normal = cfg.ssr ? vec4(packNormalToRGB(normalView), roughness) : packNormalToRGB(normalView);
-  // Alfa 0: peças transparentes (casas vazias, anel do cursor) misturam pelo alfa de cada
-  // saída e assim não sujam a cor difusa; as opacas gravam sem mistura.
+  if (cfg.ao || cfg.gi || cfg.ssr) outputs.normal = sceneNormal(cfg.ssr);
+  // Alfa 0 pelo mesmo motivo da normal (partículas, casas vazias); as opacas gravam sem mistura.
   if (cfg.gi) outputs.diffuse = vec4(diffuseColor.rgb, 0);
   if (cfg.aa === 'traa') outputs.velocity = velocity;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if (Object.keys(outputs).length > 1) scenePass.setMRT(mrt(outputs as any));
+  if (Object.keys(outputs).length > 1) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sceneMrt = mrt(outputs as any);
+    // Sem isto, só a saída `output` mistura: as outras são sobrescritas até por partículas.
+    // Com a mistura do material, o alfa 0 dos transparentes deixa a normal e a difusa intactas.
+    for (const k of ['normal', 'diffuse']) if (outputs[k]) sceneMrt.setBlendMode(k, new THREE.BlendMode(THREE.MaterialBlending));
+    scenePass.setMRT(sceneMrt);
+  }
   if (outputs.normal) scenePass.getTexture('normal').type = THREE.UnsignedByteType;
   if (cfg.gi) scenePass.getTexture('diffuse').type = THREE.UnsignedByteType;
   if (cfg.aa === 'traa') scenePass.getTexture('velocity').type = THREE.HalfFloatType;
@@ -138,7 +156,10 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
     disposables.push(g);
     const diffuse = scenePass.getTextureNode('diffuse');
     const occ = mix(float(1), g.a, P.aoStrength);
-    node = vec4(color.rgb.mul(occ).add(diffuse.rgb.mul(g.rgb).mul(P.giStrength)), color.a);
+    // A luz rebatida entra só onde há oclusão (sob as copas, junto às paredes). No chão
+    // aberto e ondulado, o SSGI soma o próprio chão iluminado e apagaria as sombras longas.
+    const bounce = diffuse.rgb.mul(g.rgb).mul(P.giStrength).mul(float(1).sub(g.a));
+    node = vec4(color.rgb.mul(occ).add(bounce), color.a);
   }
 
   if (cfg.ao && normalOf) {

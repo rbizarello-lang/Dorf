@@ -356,11 +356,13 @@ O Ultra deixou de ser medido pelo PC atual (RX 580, que fica em Média com 1.000
 |---|---|
 | Sombras em cascata | `CSMShadowNode` com 3 cascatas de 4096², divididas em volta do alvo da câmera (que olha de cima: perto dela só há ar) |
 | Reflexos na água (SSR) | só onde a rugosidade é de água (< 0,1, no alfa da saída de normal); a normal do reflexo é acalmada para os raios não se espalharem nas ondas |
-| Luz indireta (SSGI) | substitui o GTAO: oclusão mais a cor que rebate das superfícies vizinhas; o vazio e as peças transparentes ficam fora da cor difusa |
+| Luz indireta (SSGI) | substitui o GTAO: oclusão mais a cor que rebate das superfícies vizinhas, somada só onde há oclusão (no chão aberto e ondulado ela apagava as sombras longas do entardecer); o vazio fica fora da cor difusa |
 | Raios de luz (godrays) | percorrem o mapa de sombra de uma luz sem intensidade (as cascatas não têm mapa único); só aparecem com o sol baixo |
 | Vegetação mais densa | detalhe 1,35 (Alta segue em 1) |
 
-**Armadilha:** o WebGPU limita a 32 bytes por amostra o total das saídas da passada (cada RGBA8 conta 8). Cor, normal, difusa e velocidade já ocupam tudo, por isso a rugosidade vai no alfa da normal.
+**Armadilhas:**
+- O WebGPU limita a 32 bytes por amostra o total das saídas da passada (cada RGBA8 conta 8). Cor, normal, difusa e velocidade já ocupam tudo, por isso a rugosidade vai no alfa da normal.
+- Numa MRT, só a saída `output` usa a mistura do material; as outras são sobrescritas até por partículas transparentes, que deixavam quadrados na oclusão. A normal e a difusa usam `setBlendMode(..., MaterialBlending)`, e os materiais transparentes gravam nelas com alfa 0.
 
 **Custo.** Com 300 peças em renderização por software: Ultra com 193 draw calls e 3,05 M de triângulos, contra 111 e 1,53 M na Alta. O dobro de triângulos vem das passadas de sombra extras (3 cascatas mais a luz dos raios) e de 35% mais decoração. O custo real em GPU ainda precisa ser medido; `?fx=gi.ssr.rays.traa` liga os efeitos um a um.
 
