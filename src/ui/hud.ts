@@ -79,6 +79,33 @@ export class Hud {
     if (this.score.textContent !== text) this.score.textContent = text;
   }
 
+  /** Pulso no placar ao ganhar pontos; 'big' para encaixes especiais, 'record' ao passar do recorde. */
+  bumpScore(kind: '' | 'big' | 'record' = '') {
+    const el = this.score;
+    el.classList.remove('bump', 'big', 'record');
+    void el.offsetWidth; // reinicia a animação mesmo com pontos em sequência
+    el.classList.add('bump');
+    if (kind) el.classList.add(kind);
+  }
+
+  /** Anuncia ao leitor de tela; o placar em si não é região viva porque rola número a número. */
+  say(text: string) {
+    $('sr').textContent = text;
+  }
+
+  /** Número que sobe de 0 até o valor (placar final); sem animação se o sistema pede menos movimento. */
+  countUp(el: HTMLElement, to: number, ms = 1200) {
+    if (to <= 0 || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const t0 = performance.now();
+    const frame = (now: number) => {
+      const k = Math.min(1, (now - t0) / ms);
+      el.textContent = Math.round(to * (1 - Math.pow(1 - k, 3))).toLocaleString('pt-BR');
+      if (k < 1 && el.isConnected) requestAnimationFrame(frame);
+    };
+    el.textContent = '0';
+    requestAnimationFrame(frame);
+  }
+
   setStack(n: number, infinite = false) {
     this.stack.textContent = infinite ? '∞' : String(Math.max(0, n));
     this.stack.parentElement!.classList.toggle('low', !infinite && n <= 5);

@@ -60,6 +60,7 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 | Zoom | roda do mouse, `+` / `-` | pinça |
 | Girar câmera | `Q` / `E`, ou arrastar com o botão direito | — |
 | Dia, entardecer e noite | `L` ou botão ☀ | botão ☀ |
+| Som: música e efeitos, só efeitos, mudo | botão Som; `M` liga ou desliga a música | botão ♫ |
 | Ajuda, nova partida, estatísticas | `H`, `N`, `F` | botões no topo |
 
 ## Temas

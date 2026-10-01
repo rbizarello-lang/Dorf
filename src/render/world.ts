@@ -770,8 +770,10 @@ export class World {
     return this.ray.ray.intersectPlane(this.plane, out);
   }
 
+  // Chamado a cada quadro para cada marcador do HUD: reaproveita o vetor.
+  private projV = new THREE.Vector3();
   project(x: number, y: number, z: number) {
-    const v = new THREE.Vector3(x, y, z).project(this.camera);
+    const v = this.projV.set(x, y, z).project(this.camera);
     return { x: (v.x * 0.5 + 0.5) * this.size.x, y: (-v.y * 0.5 + 0.5) * this.size.y, visible: v.z < 1 && Math.abs(v.x) < 1.2 && Math.abs(v.y) < 1.2 };
   }
 
