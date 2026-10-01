@@ -184,8 +184,8 @@ function wallGeometry(k: HouseKind, win: Col) {
   const body = k.body === 'round' ? cyl(w / 2, w / 2, h, 12) : box(w, h, d);
   const parts: Part[] = [{ geo: body, color: '#ffffff', tint: 1 }, ...windowsFor(k.body, win, w, h, d)];
   if (k.trim) parts.push(...trimFor(k.body, k.trim, w, h, d));
-  // Soco (base) um pouco mais escuro dá peso à casa.
-  if (k.body !== 'round') parts.push({ geo: box(w + 0.004, 0.012, d + 0.004), color: '#8a7a6a' });
+  // Soco (base) escuro dá peso à casa e a separa do chão claro (legibilidade de longe).
+  if (k.body !== 'round') parts.push({ geo: box(w + 0.004, 0.018, d + 0.004), color: '#6a5d52' });
   return kit(parts);
 }
 
@@ -263,6 +263,8 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean): { ge
       g.scale(w + o * 2, rh / 1.5, (d + o * 2) / 1.732).translate(0, h + rh / 3, 0);
       parts.push({ geo: g, color: '#fff', tint: 1 });
       if (style === 'turf') parts.push({ geo: box(w + o * 2 + 0.004, 0.01, 0.01, 0, h + rh - 0.004), color: '#6a8a3a' });
+      // Beiral escuro: o telhado se destaca do chão mesmo quando tem a cor dele (neve).
+      for (const z of [d / 2 + o, -d / 2 - o]) parts.push({ geo: box(w + o * 2 + 0.003, 0.007, 0.008, 0, h - 0.005, z), color: '#3e3530' });
       top = h + rh;
     }
   }
@@ -845,7 +847,19 @@ function specialsFor(theme: Theme, walls: string, roofs: string) {
     { geo: box(0.05, 0.05, 0.04, 0.05, 0, 0), color: walls },
   ];
 
+  // Poço da praça: mureta de pedra, dois esteios, telhadinho e balde.
+  const well: Part[] = [
+    { geo: cyl(0.026, 0.028, 0.022, 9), color: theme.rock, grad: [0.8, 1.05, 0, 0.022] },
+    { geo: cyl(0.019, 0.019, 0.004, 9, 0, 0.019), color: '#2f3a44' },
+    { geo: box(0.004, 0.06, 0.004, 0.022, 0.0, 0), color: wood },
+    { geo: box(0.004, 0.06, 0.004, -0.022, 0.0, 0), color: wood },
+    { geo: cyl(0.003, 0.003, 0.05, 5).rotateZ(Math.PI / 2).translate(0, 0.05, 0), color: wood },
+    { geo: new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2).scale(0.058, 0.022, 0.05 / 1.732).translate(0, 0.068, 0), color: roofs },
+    { geo: cyl(0.006, 0.005, 0.009, 6, 0.008, 0.03, 0), color: '#6a4a32' },
+  ];
+
   return {
+    well: kit(well),
     logs: kit(logs),
     fence: kit(fence),
     apiary: kit(apiary),

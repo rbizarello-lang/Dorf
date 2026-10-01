@@ -134,6 +134,10 @@ const cropBend = (p: N3, hgt: N, t: N) => {
 
 interface DecoOpts {
   sway?: 'tree' | 'crop';
+  /** Fiadas de telha nas superfícies inclinadas tingidas (telhados), só de perto. */
+  shingles?: boolean;
+  /** Contorno luminoso nas bordas das copas, na cor do sol. */
+  rim?: boolean;
   roughness?: number;
   metalness?: number;
   emissive?: string;
@@ -162,11 +166,23 @@ function decoMaterial(o: DecoOpts) {
     });
     base = base.mul(sheen.mul(0.22).add(1));
   } else m.positionNode = displaced();
+  const toCam = cameraPosition.sub(positionWorld);
+  const camDist = length(toCam);
+  if (o.shingles) {
+    const roof = smoothstep(0.3, 0.45, normalWorld.y).mul(smoothstep(0.97, 0.9, normalWorld.y)).mul(tint);
+    const rows = smoothstep(0.25, 0.6, abs(fract(positionWorld.y.mul(72)).sub(0.5)).mul(2));
+    base = base.mul(mix(float(1), rows.mul(0.17).add(0.85), roof.mul(smoothstep(15, 6, camDist))));
+  }
   m.colorNode = base;
   // Cada janela acende num momento diferente do anoitecer.
   const lit = smoothstep(0, 0.25, U.night.mul(1.25).sub(hash(instanceIndex).mul(0.5)));
   let emissive: N3 = U.glow.mul(glow).mul(varying(lit, 'vLit')).mul(2.6);
   if (o.emissive) emissive = emissive.add(uniform(new THREE.Color(o.emissive)).mul(o.emissiveIntensity ?? 0.6));
+  if (o.rim) {
+    const v = toCam.div(camDist);
+    const rim = float(1).sub(max(dot(normalWorld, v), 0)).pow(3);
+    emissive = emissive.add(U.sun.mul(base).mul(rim.mul(0.35)).mul(float(1).sub(U.night)));
+  }
   m.emissiveNode = emissive;
   m.receivedShadowNode = shadowWithClouds;
   return m;
@@ -176,8 +192,8 @@ export type MatKey = 'deco' | 'foliage' | 'crop' | 'crystal' | 'glass';
 
 export function makeDecoMaterials(): Record<MatKey, THREE.MeshStandardNodeMaterial> {
   return {
-    deco: decoMaterial({}),
-    foliage: decoMaterial({ sway: 'tree', roughness: 0.9 }),
+    deco: decoMaterial({ shingles: true }),
+    foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true }),
     crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide }),
     crystal: decoMaterial({ sway: 'tree', roughness: 0.25, metalness: 0.1, emissive: '#3a2a66', emissiveIntensity: 0.6 }),
     glass: decoMaterial({ roughness: 0.2, metalness: 0.2 }),

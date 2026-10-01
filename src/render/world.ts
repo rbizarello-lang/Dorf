@@ -230,7 +230,13 @@ interface Drop {
   t: number;
   y0: number;
   landed: boolean;
+  /** Quanto tempo a peça fica viva depois de assentar (mais longo quando há obra). */
+  hold: number;
 }
+
+/** Construções de interação: sobem do chão depois que a peça assenta. */
+const BUILDS: ReadonlySet<string> = new Set(['logs', 'mill', 'sails', 'fence', 'apiary']);
+const easeOutBack = (x: number) => 1 + 2.4 * Math.pow(x - 1, 3) + 1.4 * Math.pow(x - 1, 2);
 
 /** Estado da iluminação: interpolado suavemente entre dia, entardecer e noite. */
 interface Sky {
@@ -652,7 +658,7 @@ export class World {
     live.group.position.set(x, y0, z);
     this.hoverRing.visible = false;
     for (const m of this.markers) m.visible = false;
-    this.drops.push({ live, placed: p, t: 0, y0, landed: false });
+    this.drops.push({ live, placed: p, t: 0, y0, landed: false, hold: live.has(BUILDS) ? 1.05 : 0.55 });
   }
 
   /** Coloca várias peças de uma vez, sem animação (modo automático / teste de carga). */
@@ -913,12 +919,19 @@ export class World {
         const u = (d.t - fall) / 0.32;
         g.scale.set(1 + Math.sin(Math.min(1, u) * Math.PI) * 0.03, 1 - Math.sin(Math.min(1, u) * Math.PI) * 0.08, 1 + Math.sin(Math.min(1, u) * Math.PI) * 0.03);
         const tt = d.t - fall;
-        d.live.setDecoScale((i, n) => {
+        d.live.setDecoScale((i, n, key) => {
+          if (BUILDS.has(key)) {
+            // Obra: sobe do chão com um leve passo além do ponto e assenta.
+            const b = Math.max(0, Math.min(1, (tt - 0.08) / 0.8));
+            const y = Math.max(0.02, easeOutBack(b));
+            const xz = 0.7 + 0.3 * Math.min(1, b * 1.6);
+            return [xz, y, xz];
+          }
           const local = Math.max(0, Math.min(1, (tt - (i / n) * 0.18) / 0.3));
           return 1 + Math.sin(local * Math.PI) * 0.18;
         });
       }
-      if (d.t > fall + 0.55) {
+      if (d.t > fall + d.hold) {
         this.bake(d.placed, d.live.build);
         d.live.dispose();
         if (this.board) {

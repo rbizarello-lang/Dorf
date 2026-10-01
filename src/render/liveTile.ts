@@ -58,18 +58,24 @@ export class LiveTile {
     }
   }
 
-  /** Escala da decoração (0 → 1) com atraso escalonado: árvores "brotam". */
-  setDecoScale(fn: (i: number, n: number) => number) {
+  /** Escala da decoração com atraso escalonado: árvores "brotam", construções sobem. */
+  setDecoScale(fn: (i: number, n: number, key: string) => number | [number, number, number]) {
     for (const { mesh, items } of this.meshes) {
       items.forEach((d, i) => {
-        const s = fn(i, items.length);
+        const s = fn(i, items.length, d.key);
         decoMatrix(d, tmpM);
-        tmpM2.makeScale(s, s, s);
+        if (typeof s === 'number') tmpM2.makeScale(s, s, s);
+        else tmpM2.makeScale(s[0], s[1], s[2]);
         tmpM.multiply(tmpM2);
         mesh.setMatrixAt(i, tmpM);
       });
       mesh.instanceMatrix.needsUpdate = true;
     }
+  }
+
+  /** Tem alguma das chaves? (construções de interação, para a animação de obra). */
+  has(keys: ReadonlySet<string>) {
+    return this.build.decos.some((d) => keys.has(d.key));
   }
 
   dispose() {

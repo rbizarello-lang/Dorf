@@ -77,6 +77,29 @@ export class Sfx {
     for (let i = 0; i < Math.min(matches, 6); i++) this.note(PENTA[i], 0.05 + i * 0.055, 0.35, 0.07);
   }
 
+  /** Três batidas de martelo (construção que sobe ao assentar a peça). */
+  hammer(at = 0) {
+    const ctx = this.ready();
+    if (!ctx) return;
+    for (let k = 0; k < 3; k++) {
+      const t = ctx.currentTime + at + k * 0.11;
+      const len = Math.floor(ctx.sampleRate * 0.035);
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 4);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const f = ctx.createBiquadFilter();
+      f.type = 'bandpass';
+      f.frequency.value = 1500 + Math.random() * 300;
+      f.Q.value = 2.5;
+      const g = ctx.createGain();
+      g.gain.value = 0.5 - k * 0.08;
+      src.connect(f).connect(g).connect(this.master!);
+      src.start(t);
+    }
+  }
+
   note(semi: number, at: number, dur = 0.5, vol = 0.1) {
     this.tone(523.25 * Math.pow(2, semi / 12), at, dur, 'triangle', vol, true);
   }

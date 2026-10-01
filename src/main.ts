@@ -304,6 +304,7 @@ function announce(res: PlaceResult) {
       sfx.note(7 + k * 2, 0, 0.5, 0.08);
     }, 250 + k * 160));
   });
+  if (res.synergies.length) sfx.hammer(0.3);
   for (const t of res.closed) {
     const p = screenOf(t.q, t.r);
     hud.floater(p.x, p.y - 20, '+1 peça', 'tiles');

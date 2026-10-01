@@ -107,9 +107,9 @@ class Buf {
     this.spl.push(...sa, ...sb, ...sc);
   }
 
-  quad(a: V3, b: V3, c: V3, d: V3, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, cd: THREE.Color, n: V3) {
-    this.tri(a, b, c, ca, cb, cc, n);
-    this.tri(a, c, d, ca, cc, cd, n);
+  quad(a: V3, b: V3, c: V3, d: V3, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, cd: THREE.Color, n: V3, sp: Splat = NO_SPLAT) {
+    this.tri(a, b, c, ca, cb, cc, n, sp);
+    this.tri(a, c, d, ca, cc, cd, n, sp);
   }
 }
 
@@ -323,7 +323,7 @@ class WaterBuf {
   }
 }
 
-function strip(buf: Buf, pts: V2[], hw: number, y: number, color: THREE.Color) {
+function strip(buf: Buf, pts: V2[], hw: number, y: number, color: THREE.Color, sp: Splat = NO_SPLAT) {
   const L: V3[] = [];
   const R: V3[] = [];
   for (let k = 0; k < pts.length; k++) {
@@ -337,14 +337,14 @@ function strip(buf: Buf, pts: V2[], hw: number, y: number, color: THREE.Color) {
     L.push([p[0] - tz * hw, y, p[1] + tx * hw]);
     R.push([p[0] + tz * hw, y, p[1] - tx * hw]);
   }
-  for (let k = 0; k < pts.length - 1; k++) buf.quad(L[k], R[k], R[k + 1], L[k + 1], color, color, color, color, UP);
+  for (let k = 0; k < pts.length - 1; k++) buf.quad(L[k], R[k], R[k + 1], L[k + 1], color, color, color, color, UP, sp);
 }
 
-function disc(buf: Buf, cx: number, cz: number, r: number, y: number, color: THREE.Color, seg = 12) {
+function disc(buf: Buf, cx: number, cz: number, r: number, y: number, color: THREE.Color, seg = 12, sp: Splat = NO_SPLAT) {
   for (let k = 0; k < seg; k++) {
     const a0 = (k / seg) * Math.PI * 2;
     const a1 = ((k + 1) / seg) * Math.PI * 2;
-    buf.tri([cx, y, cz], [cx + Math.cos(a0) * r, y, cz + Math.sin(a0) * r], [cx + Math.cos(a1) * r, y, cz + Math.sin(a1) * r], color, color, color, UP);
+    buf.tri([cx, y, cz], [cx + Math.cos(a0) * r, y, cz + Math.sin(a0) * r], [cx + Math.cos(a1) * r, y, cz + Math.sin(a1) * r], color, color, color, UP, sp);
   }
 }
 
@@ -831,7 +831,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     taken.push([x, z]);
   };
   const houseKinds = theme.houses.map((h, i) => [i, h.weight] as const);
-  const addHouse = (x: number, z: number, baseAng: number) => {
+  const houses: { x: number; z: number; s: number; sector: number }[] = [];
+  const addHouse = (x: number, z: number, baseAng: number, sector = -1) => {
     const i = weighted(rng, houseKinds);
     const kind = theme.houses[i];
     const meta = opts.houses[i];
@@ -846,6 +847,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       chimneys.push(x + (cx * c + cz * sn) * s, cy * s * sy, z + (-cx * sn + cz * c) * s);
     }
     taken.push([x, z]);
+    houses.push({ x, z, s, sector });
   };
 
   const grassN = Math.round(randInt(rng, 9, 15) * detail);
@@ -869,7 +871,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       for (let k = 0, tries = 0; k < n && tries < n * 6; tries++) {
         const p = samplePoint(rng, i, 0.14, 0.13);
         if (!p || !free(p[0], p[1], 0.22) || distToPaths(p[0], p[1], allPaths) < 0.14) continue;
-        addHouse(p[0], p[1], sectorAng);
+        addHouse(p[0], p[1], sectorAng, i);
         k++;
       }
       for (let k = Math.round(3 * detail); k > 0; k--) {
@@ -916,6 +918,51 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const [top, n] = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
     if (n >= 3 && top === T.Forest && free(0, 0, 0.09)) addTree((rng() - 0.5) * 0.05, (rng() - 0.5) * 0.05);
     if (n >= 3 && top === T.Village && free(0, 0, 0.2)) addHouse(0, 0, rng() * 6);
+  }
+
+  // --- Vida na vila: pegada de terra batida sob as casas, trilhas até uma pracinha e,
+  // nas vilas com 3 ou mais casas, um poço. Sem sorteio: sai das posições das casas.
+  if (houses.length) {
+    const vg = tc(theme.ground[T.Village]);
+    const dirt = vg.clone().lerp(tc(theme.roadBed), 0.45).multiplyScalar(0.8);
+    const trail = vg.clone().lerp(tc(theme.roadBed), 0.2).multiplyScalar(1.14);
+    const VILLAGE: Splat = [0, 0, 0, 1];
+    // Trechos contíguos de setores de vila (a casa do centro vai para o maior).
+    const runs: number[][] = [];
+    const start = edges.findIndex((e, i) => e === T.Village && edges[(i + 5) % 6] !== T.Village);
+    if (start < 0) runs.push([0, 1, 2, 3, 4, 5]);
+    else {
+      for (let k = 0; k < 6; k++) {
+        const i = (start + k) % 6;
+        if (edges[i] !== T.Village) continue;
+        if (edges[(i + 5) % 6] === T.Village && runs.length) runs[runs.length - 1].push(i);
+        else runs.push([i]);
+      }
+    }
+    runs.sort((a, b) => b.length - a.length);
+    for (const run of runs) {
+      const hs = houses.filter((h) => run.includes(h.sector) || (h.sector < 0 && run === runs[0]));
+      for (const h of hs) disc(g, h.x, h.z, 0.075 * h.s, 0.004, dirt, 8, VILLAGE);
+      if (hs.length < 2) continue;
+      let px = hs.reduce((a, h) => a + h.x, 0) / hs.length, pz = hs.reduce((a, h) => a + h.z, 0) / hs.length;
+      // A praça não pode cair dentro de uma casa: escorrega em direção ao centro da peça.
+      for (let k = 0; k < 6 && hs.some((h) => Math.hypot(h.x - px, h.z - pz) < 0.1); k++) {
+        px *= 0.82;
+        pz *= 0.82;
+      }
+      for (const h of hs) {
+        // Trilha com uma leve curva (para um lado ou outro, conforme a posição da casa).
+        const mx = (h.x + px) / 2, mz = (h.z + pz) / 2;
+        const dx = px - h.x, dz = pz - h.z, l = Math.hypot(dx, dz) || 1;
+        const bend = Math.sin(h.x * 37.1 + h.z * 19.7) * 0.18 * l;
+        strip(g, bezier([h.x, h.z], [mx - (dz / l) * bend, mz + (dx / l) * bend], [px, pz], 6), 0.024, 0.0045, trail, VILLAGE);
+      }
+      disc(g, px, pz, 0.065, 0.005, trail, 10, VILLAGE);
+      if (hs.length >= 3 && free(px, pz, 0.05) && distToPaths(px, pz, allPaths) > 0.08) {
+        D('well', px, 0, pz, Math.atan2(pz, px), 1, WHITE);
+        taken.push([px, pz]);
+      }
+    }
   }
 
   return {
