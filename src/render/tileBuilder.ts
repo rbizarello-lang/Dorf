@@ -445,6 +445,9 @@ function insidePoly(x: number, z: number, pts: V2[]) {
   return inside;
 }
 
+/** Marcos de planta larga: as casas guardam mais distância deles. */
+const WIDE_LANDMARKS: ReadonlySet<string> = new Set(['pyramid', 'pylon', 'kancha', 'hall']);
+
 /** Ângulo de rotação em y que leva o eixo x local para a direção (dx, dz). */
 const yawTo = (dx: number, dz: number) => Math.atan2(-dz, dx);
 
@@ -657,6 +660,14 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       D('station', sx, BED_Y, sz, yawTo(ux, uz), 1, WHITE);
       reserved.push([sx, sz, 0.15]);
     }
+    // Portal sobre a via, na primeira borda de linha que encosta num setor de vila.
+    const gi = theme.gate ? road.idx.find((i) => edges[(i + 1) % 6] === T.Village || edges[(i + 5) % 6] === T.Village) : undefined;
+    if (gi !== undefined) {
+      const [mx, mz] = edgeMid(gi);
+      const n = nearestOnPaths(mx * 0.7, mz * 0.7, road.paths);
+      D('gate', n.p[0], BED_Y, n.p[1], yawTo(-n.t[1], n.t[0]), 1, WHITE);
+      reserved.push([n.p[0], n.p[1], 0.17]);
+    }
   }
 
   // --- Interações nas bordas: reservam um lugar perto da borda do setor.
@@ -674,13 +685,16 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       D('fence', x, 0, z, ry, 1, WHITE);
       for (let a = 0; a < 3; a++) D('animal', x + (rng() - 0.5) * 0.1, 0, z + (rng() - 0.5) * 0.1, rng() * 6, randRange(rng, 0.9, 1.15), vary(rng, tc(pick(rng, theme.animals.colors)), 0.05), 'wander');
     } else if (s.kind === 'mill') {
-      const sc = theme.mill === 'windmill' ? 1.1 : 1.2;
+      const sc = theme.mill === 'windmill' ? 1.1 : theme.mill === 'windpump' ? 1 : 1.2;
       const face = Math.atan2(-mx, -mz); // +z local (porta e pás) voltado para o centro da peça
       D('mill', x, 0, z, face, sc, WHITE);
       if (theme.mill === 'windmill') {
         // Cubo das pás: à frente do capuz, na direção +z local do moinho.
         const fx = Math.sin(face) * 0.078 * sc, fz = Math.cos(face) * 0.078 * sc;
         D('sails', x + fx, 0.255 * sc, z + fz, face, sc, WHITE, 'spin-z');
+      } else if (theme.mill === 'windpump') {
+        const fx = Math.sin(face) * 0.022 * sc, fz = Math.cos(face) * 0.022 * sc;
+        D('rotor', x + fx, groundY(x, z) + 0.318 * sc, z + fz, face, sc, WHITE, 'spin-z');
       }
     }
   }
@@ -735,6 +749,26 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     }
   }
 
+  // --- Ponte: rio de duas bordas com vila numa margem e terra na outra. Sem sorteio,
+  // para não mudar o resto da peça.
+  if (theme.bridge && water.idx.length === 2) {
+    const [a, b] = water.idx;
+    const sideA = edges.slice(a + 1, b), sideB = [...edges.slice(b + 1), ...edges.slice(0, a)];
+    if (sideA.length && sideB.length && (sideA.includes(T.Village) || sideB.includes(T.Village))) {
+      const pts = water.paths[0].pts;
+      const m = pts.length >> 1;
+      const [px, pz] = pts[m];
+      const tx = pts[m + 1][0] - pts[m - 1][0], tz = pts[m + 1][1] - pts[m - 1][1];
+      const l = Math.hypot(tx, tz) || 1;
+      const ex = (-tz / l) * 0.3, ez = (tx / l) * 0.3;
+      if (free(px + ex, pz + ez, 0.06) && free(px - ex, pz - ez, 0.06)) {
+        // y explícito: com 0 a ponte iria para o fundo do leito.
+        D('bridge', px, 0.001, pz, yawTo(ex, ez), 1, WHITE);
+        reserved.push([px + ex, pz + ez, 0.1], [px - ex, pz - ez, 0.1]);
+      }
+    }
+  }
+
   // --- Marco no centro das vilas grandes.
   const villageCount = edges.filter((e) => e === T.Village).length;
   const landmarkRoll = rng();
@@ -745,7 +779,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const fx = Math.sin(ry) * 0.078, fz = Math.cos(ry) * 0.078;
       D('sails', fx, 0.255, fz, ry, 1, WHITE, 'spin-z');
     }
-    reserved.push([0, 0, theme.landmark === 'pyramid' ? 0.3 : 0.2]);
+    reserved.push([0, 0, WIDE_LANDMARKS.has(theme.landmark) ? 0.3 : 0.2]);
   }
 
   // --- Plantações: parcelas de terra com fileiras de plantas.
