@@ -320,6 +320,36 @@ Na lista priorizada do [TEMAS.md](TEMAS.md), burro/mula e búfalo já entraram (
 
 ---
 
+---
+
+## 14. Evolução v4: polimento visual máximo e mecânicas novas
+
+**Pedido:** testar o máximo de polimento visual possível (animação, serrilhado, qualidade de pixel, gráficos), mesmo migrando de tecnologia, e ter liberdade para mudar, aprofundar e criar versões alternativas das regras. Um agente em paralelo pesquisou Age of Empires em busca de ideias ([IDEIAS_AOE.md](IDEIAS_AOE.md)).
+
+**Decisão de tecnologia.** Migramos do `WebGLRenderer` para o **`WebGPURenderer` do three.js r186**, com materiais em TSL. Onde o navegador não tem WebGPU, o three usa WebGL2 sozinho, com os mesmos materiais. Trocar de engine (Unity, Godot, Babylon) não traria um teto visual maior para arte procedural e perderia o HTML único. O que o WebGPU destrava:
+
+| Recurso | Como entrou |
+|---|---|
+| Oclusão ambiente (GTAO) | normais na mesma passada (MRT), filtro de ruído que respeita profundidade |
+| Antisserrilhado temporal (TRAA) | vetores de movimento corretos inclusive para o vento nas plantas (`positionPrevious`) |
+| Profundidade de campo real | foco no ponto que a câmera olha: efeito maquete sem a faixa fixa do tilt-shift antigo |
+| Bloom | janelas acesas, cintilar do sol na água, faíscas |
+| Luz por imagem (IBL) | céu procedural refeito quando a hora do dia muda |
+| Sombras suaves | filtro próprio 4×4 com comparação bilinear (o PCF padrão deixava ruído fixo) |
+
+**Visual novo:**
+- rios com leito escavado, margens inclinadas e onduladas, cor por profundidade, espuma, correnteza que desce de peça em peça e cintilar do sol;
+- chão com detalhe por terreno (manchas no prado, folhas na mata, sulcos na terra, pedrinhas na vila), laterais com estratos;
+- vilas com terra batida, trilhas até uma praça e poço; telhados com fiadas de telha e beiral;
+- clima por tema no shader (neve, pétalas, folhas, poeira, pólen), vaga-lumes à noite, fumaça e poeira em sprites macios;
+- onda no chão quando a peça assenta, quique, fantasma que inclina, construções de interação que sobem com som de martelo.
+
+**Mecânicas novas** (todas com oráculo independente nos testes): eras da vila (+3 peças por era), sítios escondidos (ruína, tesouro, relíquia, mirante), bônus de "civilização" por tema, desfazer e quatro modos (Clássico, Zen, Desafio do dia, Exploradores). Save v4.
+
+**Custo.** Com 300 peças em renderização por software: 106 draw calls (+11%) e 1,45 M de triângulos (+6%) no perfil Alta. A CPU por quadro medida no SwiftShader subiu, mas o profiler mostra quase tudo em escrita de buffers e envio de comandos disputando CPU com o rasterizador por software. **A medição em GPU real (`?stress=1000&debug`) continua sendo o próximo passo**; o modo Auto desce de Ultra para Alta, Média e Baixa se o quadro passar de ~26 ms.
+
+**Ainda não feito, do documento do AoE:** Centro que evolui com a era, arquitetura que muda por era, aldeões trabalhando, maravilha, vazio como mapa antigo, minimapa, trilha sonora por era.
+
 ## Apêndice A: revisão de código e QA pelo Sonnet
 
 Um segundo agente (Sonnet) revisou o código sem editá-lo, escreveu testes próprios e reportou achados com cenário de falha e correção sugerida. Todas as correções foram aplicadas e **conferidas de novo com os próprios testes do revisor**.
