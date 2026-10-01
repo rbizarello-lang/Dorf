@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
-import { vec3 } from 'three/tsl';
+import { mrt, vec3, vec4 } from 'three/tsl';
+import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import type { Board, Check, Placed } from '../core/board';
 import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey } from '../core/hex';
 import type { SynHit, SynKind } from '../core/synergy';
@@ -23,7 +24,11 @@ export type TimeOfDay = 'day' | 'dusk' | 'night';
 const CHUNK = 8;
 /** O alto do céu um pouco mais azul que a cor "do céu" do tema (que é quase branca). */
 const ZENITH_TINT = new THREE.Color(0.86, 0.93, 1.08);
-const DETAIL: Record<Quality, number> = { ultra: 1, high: 1, medium: 0.65, low: 0.4 };
+// Ultra passa de 1: mais árvores, capim e plantações de perto (alvo: GPUs acima da atual).
+const DETAIL: Record<Quality, number> = { ultra: 1.35, high: 1, medium: 0.65, low: 0.4 };
+/** Mapa de sombra por nível. No Ultra, cada uma das cascatas tem esse tamanho. */
+const SHADOW_MAP: Record<Quality, number> = { ultra: 4096, high: 2048, medium: 1024, low: 1024 };
+const CASCADES = 3;
 const tmpM = new THREE.Matrix4();
 const tmpColor = new THREE.Color();
 /** Densidade do clima por qualidade. */
@@ -316,11 +321,19 @@ export class World {
   private board: Board | null = null;
   private chimneys: number[] = [];
   private sun = new THREE.DirectionalLight();
+  /** Sombras em cascata do sol (só no Ultra): nítidas perto da câmera, cobrindo até a névoa. */
+  private csm: CSMShadowNode | null = null;
+  /**
+   * Luz sem intensidade que só existe para os raios de luz (Ultra): o pós-processamento
+   * percorre o mapa de sombra dela, já que as cascatas não têm um mapa único.
+   */
+  private rayLight = new THREE.DirectionalLight('#ffffff', 0);
   /** Luz de ambiente: céu procedural (IBL) no lugar da antiga luz hemisférica. */
   private env = new SkyEnv();
   private sky!: Sky;
   private skyTarget!: Sky;
   private voidU: ReturnType<typeof makeVoidMaterial>['u'];
+  private voidMat: THREE.MeshStandardNodeMaterial;
   private slots: THREE.InstancedMesh;
   private slotMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.55, depthWrite: false, fog: false });
   private slotCount = 0;
@@ -385,11 +398,16 @@ export class World {
     this.sun.shadow.radius = 1.6;
     (this.sun.shadow as THREE.LightShadow & { filterNode?: unknown }).filterNode = softShadowFilter;
     this.scene.add(this.sun, this.sun.target);
+    this.rayLight.castShadow = false;
+    this.rayLight.shadow.mapSize.set(1024, 1024);
+    this.rayLight.shadow.camera.near = 1;
+    this.rayLight.shadow.camera.far = 60;
     this.scene.environment = this.env.texture;
 
     // Vazio com a grade hexagonal que desbota longe do tabuleiro.
     const voidM = makeVoidMaterial();
     this.voidU = voidM.u;
+    this.voidMat = voidM.material;
     const voidMesh = new THREE.Mesh(new THREE.PlaneGeometry(600, 600).rotateX(-Math.PI / 2), voidM.material);
     voidMesh.position.y = -TILE_T - 0.03;
     voidMesh.renderOrder = -1;
@@ -494,28 +512,77 @@ export class World {
     if (this.renderer.shadowMap.enabled !== shadows) {
       this.renderer.shadowMap.enabled = shadows;
       // Materiais precisam recompilar quando sombras ligam/desligam.
-      this.scene.traverse((o) => {
-        const m = (o as THREE.Mesh).material as THREE.Material | undefined;
-        if (m) m.needsUpdate = true;
-      });
+      this.recompile();
     }
     this.sun.castShadow = shadows;
-    const map = q === 'ultra' || q === 'high' ? 2048 : 1024;
+    const map = SHADOW_MAP[q];
     if (this.sun.shadow.mapSize.x !== map) {
       this.sun.shadow.mapSize.set(map, map);
       this.sun.shadow.map?.dispose();
       this.sun.shadow.map = null;
     }
+    this.setCascades(q === 'ultra');
     this.weather.setDetail(WEATHER[q]);
     if (postChanged) {
       this.post?.dispose();
-      this.post = q === 'low' ? null : buildPost(this.renderer, this.scene, this.camera, q, this.fx);
+      const rays = q === 'ultra' && (!this.fx || this.fx.includes('rays'));
+      this.setRayLight(rays);
+      this.post = q === 'low' ? null : buildPost(this.renderer, this.scene, this.camera, q, this.fx, rays ? this.rayLight : undefined);
+      // O vazio quase todo emissivo clarearia a luz indireta: ele não entra como cor difusa.
+      // Só vale com a saída `diffuse` na cena (sem ela, o mrtNode viraria a única saída).
+      const voidMrt = this.post?.gi ? mrt({ diffuse: vec4(0) }) : null;
+      if (this.voidMat.mrtNode !== voidMrt) {
+        this.voidMat.mrtNode = voidMrt;
+        this.voidMat.needsUpdate = true;
+      }
     }
     if (detailChanged && this.board && this.theme) {
       this.dropGhost();
       this.rebuild(this.board);
     }
     this.resize();
+  }
+
+  /** Liga ou desliga as cascatas; os materiais recompilam para trocar o nó de sombra. */
+  private setCascades(on: boolean) {
+    if (on === !!this.csm) return;
+    if (on) {
+      // A cascata nasce como cópia da sombra do sol (filtro, viés), então vem depois do mapSize.
+      this.sun.shadow.camera.near = 1;
+      this.sun.shadow.camera.far = 200;
+      // A câmera orbita olhando para baixo: perto dela só há ar. As divisões se concentram
+      // em volta do alvo (frações de maxFar, que world.tick mantém em ~4,7× a distância).
+      this.csm = new CSMShadowNode(this.sun, {
+        cascades: CASCADES,
+        maxFar: 60,
+        mode: 'custom',
+        lightMargin: 40,
+        customSplitsCallback: (_n: number, _near: number, _far: number, out: number[]) => out.push(0.3, 0.5, 1),
+      });
+      this.csm.fade = true;
+      (this.sun.shadow as THREE.LightShadow & { shadowNode?: unknown }).shadowNode = this.csm;
+    } else {
+      (this.sun.shadow as THREE.LightShadow & { shadowNode?: unknown }).shadowNode = undefined;
+      this.csm?.dispose();
+      this.csm = null;
+      this.sun.shadow.camera.far = 60;
+    }
+    this.recompile();
+  }
+
+  private setRayLight(on: boolean) {
+    if (on === !!this.rayLight.parent) return;
+    this.rayLight.castShadow = on;
+    if (on) this.scene.add(this.rayLight, this.rayLight.target);
+    else this.scene.remove(this.rayLight, this.rayLight.target);
+    this.recompile();
+  }
+
+  private recompile() {
+    this.scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | undefined;
+      if (m) m.needsUpdate = true;
+    });
   }
 
   resize() {
@@ -873,8 +940,32 @@ export class World {
     const ext = Math.min(28, this.rig.dist * 0.95 + 2);
     this.sun.target.position.copy(t);
     this.sun.position.set(t.x + sd.x * 20, t.y + sd.y * 20, t.z + sd.z * 20);
+    if (this.csm) {
+      // As cascatas vão da câmera até onde a névoa fecha; acompanham o zoom.
+      const far = Math.round(this.rig.dist * 4.7 * 4) / 4;
+      if (this.csm.maxFar !== far && this.csm.camera) {
+        this.csm.maxFar = far;
+        this.csm.updateFrustums();
+      }
+    }
+    if (this.rayLight.parent) {
+      this.rayLight.target.position.copy(t);
+      this.rayLight.position.copy(this.sun.position);
+      const rc = this.rayLight.shadow.camera;
+      if (rc.right !== ext) {
+        rc.left = -ext;
+        rc.right = ext;
+        rc.top = ext;
+        rc.bottom = -ext;
+        rc.updateProjectionMatrix();
+      }
+      // Feixes só com o sol baixo (entardecer): ao meio-dia viram um véu branco sem forma.
+      const low = 1 - THREE.MathUtils.clamp(sd.y / Math.max(1e-3, Math.hypot(sd.x, sd.y, sd.z)), 0, 1);
+      P.rays.value = THREE.MathUtils.clamp((low - 0.25) / 0.4, 0, 1) * 0.4 * (1 - this.sky.night) * Math.min(1, this.sky.sunI);
+      P.rayColor.value.copy(this.sky.sun);
+    }
     const cam = this.sun.shadow.camera;
-    if (cam.right !== ext) {
+    if (!this.csm && cam.right !== ext) {
       cam.left = -ext;
       cam.right = ext;
       cam.top = ext;
