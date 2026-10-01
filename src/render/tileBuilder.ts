@@ -46,6 +46,8 @@ export interface Deco {
 export interface TileBuild {
   pos: Float32Array;
   col: Float32Array;
+  /** Por vértice do chão: pesos de detalhe [prado, floresta, plantação, vila] (0 nas laterais). */
+  splat: Float32Array;
   water: Float32Array;
   /** Por vértice da água: correnteza (x, z, em unidades/s relativas) e distância ao centro do canal (0) até a margem (1). */
   wflow: Float32Array;
@@ -81,21 +83,28 @@ export function tc(hex: string): THREE.Color {
   return c;
 }
 
+/** Pesos de detalhe do chão por vértice: [prado, floresta, plantação, vila]. */
+type Splat = readonly [number, number, number, number];
+const NO_SPLAT: Splat = [0, 0, 0, 0];
+
 class Buf {
   pos: number[] = [];
   col: number[] = [];
+  spl: number[] = [];
   constructor(readonly withColor: boolean) {}
 
-  tri(a: V3, b: V3, c: V3, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, n: V3) {
+  tri(a: V3, b: V3, c: V3, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, n: V3, sa: Splat = NO_SPLAT, sb: Splat = sa, sc: Splat = sa) {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
     const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     if (nx * n[0] + ny * n[1] + nz * n[2] < 0) {
       [b, c] = [c, b];
       [cb, cc] = [cc, cb];
+      [sb, sc] = [sc, sb];
     }
     this.pos.push(...a, ...b, ...c);
     if (this.withColor) this.col.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b, cc.r, cc.g, cc.b);
+    this.spl.push(...sa, ...sb, ...sc);
   }
 
   quad(a: V3, b: V3, c: V3, d: V3, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, cd: THREE.Color, n: V3) {
@@ -471,33 +480,47 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const center = new THREE.Color(0, 0, 0);
   for (const c of groundCols) center.add(c);
   center.multiplyScalar(1 / 6);
-  const topColor = (i: number, a: number, b: number, x: number, z: number) => {
+  // Rio e estrada têm chão de prado para o detalhe do shader.
+  const landOf = (t: T) => (t === T.Forest ? 1 : t === T.Field ? 2 : t === T.Village ? 3 : 0);
+  const oneHot = (t: T): number[] => [0, 1, 2, 3].map((k) => (k === landOf(t) ? 1 : 0));
+  const centerSplat = [0, 0, 0, 0];
+  for (const e of edges) oneHot(e).forEach((v, k) => (centerSplat[k] += v / 6));
+  const topColor = (i: number, a: number, b: number, x: number, z: number): { c: THREE.Color; s: Splat } => {
     const own = groundCols[i];
     const c = own.clone();
+    let sp = oneHot(edges[i]);
+    const mixS = (o: number[], t: number) => (sp = sp.map((v, k) => v + (o[k] - v) * t));
     const sum = a + b;
     if (sum > 0) {
       const sAng = b / sum; // 0 no lado do canto i, 1 no lado do canto i+1
-      c.lerp(groundCols[(i + 5) % 6], 0.5 * (1 - smooth(0, 0.3, sAng)));
-      c.lerp(groundCols[(i + 1) % 6], 0.5 * (1 - smooth(0, 0.3, 1 - sAng)));
+      const tA = 0.5 * (1 - smooth(0, 0.3, sAng)), tB = 0.5 * (1 - smooth(0, 0.3, 1 - sAng));
+      c.lerp(groundCols[(i + 5) % 6], tA);
+      mixS(oneHot(edges[(i + 5) % 6]), tA);
+      c.lerp(groundCols[(i + 1) % 6], tB);
+      mixS(oneHot(edges[(i + 1) % 6]), tB);
     }
-    c.lerp(center, 1 - smooth(0, 0.3, sum / N));
+    const tC = 1 - smooth(0, 0.3, sum / N);
+    c.lerp(center, tC);
+    mixS(centerSplat, tC);
     if (field) {
       const e = field.e(x, z);
-      c.lerp(bank, 1 - smooth(0.03, 0.085, e));
+      const sand = 1 - smooth(0.03, 0.085, e);
+      c.lerp(bank, sand);
       c.multiplyScalar(1 - 0.3 * (1 - smooth(0.004, 0.03, e)));
+      sp = sp.map((v) => v * (1 - sand));
     }
-    return c;
+    return { c, s: sp as unknown as Splat };
   };
   for (let i = 0; i < 6; i++) {
     const A = corner(i);
     const B = corner((i + 1) % 6);
-    const vs = new Map<number, { p: V3; c: THREE.Color }>();
+    const vs = new Map<number, { p: V3; c: THREE.Color; s: Splat }>();
     const V = (a: number, b: number) => {
       const k = a * 64 + b;
       let v = vs.get(k);
       if (!v) {
         const x = (a / N) * A[0] + (b / N) * B[0], z = (a / N) * A[1] + (b / N) * B[1];
-        v = { p: [x, groundY(x, z), z], c: topColor(i, a, b, x, z) };
+        v = { p: [x, groundY(x, z), z], ...topColor(i, a, b, x, z) };
         vs.set(k, v);
       }
       return v;
@@ -505,10 +528,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     for (let a = 0; a < N; a++) {
       for (let b = 0; b < N - a; b++) {
         const p0 = V(a, b), p1 = V(a + 1, b), p2 = V(a, b + 1);
-        g.tri(p0.p, p1.p, p2.p, p0.c, p1.c, p2.c, UP);
+        g.tri(p0.p, p1.p, p2.p, p0.c, p1.c, p2.c, UP, p0.s, p1.s, p2.s);
         if (a + b < N - 1) {
           const p3 = V(a + 1, b + 1);
-          g.tri(p1.p, p3.p, p2.p, p1.c, p3.c, p2.c, UP);
+          g.tri(p1.p, p3.p, p2.p, p1.c, p3.c, p2.c, UP, p1.s, p3.s, p2.s);
         }
       }
     }
@@ -898,6 +921,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   return {
     pos: new Float32Array(g.pos),
     col: new Float32Array(g.col),
+    splat: new Float32Array(g.spl),
     water: new Float32Array(wb?.pos ?? []),
     wflow: new Float32Array(wb?.flow ?? []),
     wedge: new Float32Array(wb?.edge ?? []),

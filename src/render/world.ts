@@ -9,8 +9,9 @@ import { CameraRig } from './cameraRig';
 import { createRenderer, type Backend } from './gpu';
 import { Lib, instGeometry, setInstColor } from './lib';
 import { Life } from './life';
-import { U, makeVoidMaterial } from './materials';
+import { U, makeVoidMaterial, softShadowFilter } from './materials';
 import { P, buildPost, type Post, type Quality } from './post';
+import { SkyEnv } from './sky';
 import { LiveTile } from './liveTile';
 import { PreviewView } from './preview';
 import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, type TileBuild } from './tileBuilder';
@@ -19,6 +20,8 @@ export type { Quality };
 export type TimeOfDay = 'day' | 'dusk' | 'night';
 
 const CHUNK = 8;
+/** O alto do céu um pouco mais azul que a cor "do céu" do tema (que é quase branca). */
+const ZENITH_TINT = new THREE.Color(0.86, 0.93, 1.08);
 const DETAIL: Record<Quality, number> = { ultra: 1, high: 1, medium: 0.65, low: 0.4 };
 const tmpM = new THREE.Matrix4();
 
@@ -96,6 +99,7 @@ class Chunk {
   readonly water: THREE.Mesh;
   private gPos = new Float32Array(0);
   private gCol = new Float32Array(0);
+  private gSpl = new Float32Array(0);
   private wPos = new Float32Array(0);
   private wFlow = new Float32Array(0);
   private wEdge = new Float32Array(0);
@@ -124,11 +128,15 @@ class Chunk {
       p.set(this.gPos.subarray(0, this.gN * 3));
       const c = new Float32Array(cap * 3);
       c.set(this.gCol.subarray(0, this.gN * 3));
+      const sp = new Float32Array(cap * 4);
+      sp.set(this.gSpl.subarray(0, this.gN * 4));
       this.gPos = p;
       this.gCol = c;
+      this.gSpl = sp;
       this.ground.geometry.dispose();
       this.ground.geometry.setAttribute('position', new THREE.BufferAttribute(p, 3));
       this.ground.geometry.setAttribute('color', new THREE.BufferAttribute(c, 3));
+      this.ground.geometry.setAttribute('splat', new THREE.BufferAttribute(sp, 4));
     }
     if (growW) {
       const cap = Math.max(1024, (this.wN + wAdd) * 2);
@@ -157,14 +165,16 @@ class Chunk {
     };
     xf(b.pos, this.gPos, this.gN * 3);
     this.gCol.set(b.col, this.gN * 3);
-    const gp = this.ground.geometry.getAttribute('position') as THREE.BufferAttribute;
-    const gc = this.ground.geometry.getAttribute('color') as THREE.BufferAttribute;
-    if (!growG) {
-      gp.addUpdateRange(this.gN * 3, gAdd * 3);
-      gc.addUpdateRange(this.gN * 3, gAdd * 3);
+    this.gSpl.set(b.splat, this.gN * 4);
+    for (const [name, size] of [
+      ['position', 3],
+      ['color', 3],
+      ['splat', 4],
+    ] as const) {
+      const a = this.ground.geometry.getAttribute(name) as THREE.BufferAttribute;
+      if (!growG) a.addUpdateRange(this.gN * size, gAdd * size);
+      a.needsUpdate = true;
     }
-    gp.needsUpdate = true;
-    gc.needsUpdate = true;
     this.gN += gAdd;
     this.ground.geometry.setDrawRange(0, this.gN);
     if (wAdd) {
@@ -305,7 +315,8 @@ export class World {
   private board: Board | null = null;
   private chimneys: number[] = [];
   private sun = new THREE.DirectionalLight();
-  private hemi = new THREE.HemisphereLight();
+  /** Luz de ambiente: céu procedural (IBL) no lugar da antiga luz hemisférica. */
+  private env = new SkyEnv();
   private sky!: Sky;
   private skyTarget!: Sky;
   private voidU: ReturnType<typeof makeVoidMaterial>['u'];
@@ -366,8 +377,10 @@ export class World {
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.02;
-    this.sun.shadow.radius = 3;
-    this.scene.add(this.sun, this.sun.target, this.hemi);
+    this.sun.shadow.radius = 1.6;
+    (this.sun.shadow as THREE.LightShadow & { filterNode?: unknown }).filterNode = softShadowFilter;
+    this.scene.add(this.sun, this.sun.target);
+    this.scene.environment = this.env.texture;
 
     // Vazio com a grade hexagonal que desbota longe do tabuleiro.
     const voidM = makeVoidMaterial();
@@ -443,11 +456,17 @@ export class World {
     this.sun.intensity = s.sunI;
     U.sun.value.copy(s.sun);
     U.sunDir.value.copy(s.sunDir).normalize();
-    this.hemi.color.copy(s.hemiSky);
-    this.hemi.groundColor.copy(s.hemiGround);
-    this.hemi.intensity = s.hemiI;
+    this.envColors.zenith.copy(s.hemiSky).multiply(ZENITH_TINT);
+    this.envColors.horizon.copy(s.hemiSky).lerp(s.bg, 0.45);
+    this.envColors.ground.copy(s.hemiGround);
+    this.envColors.sun.copy(s.sun).multiplyScalar(s.sunI * 0.12);
+    this.envColors.sunDir.copy(s.sunDir);
+    this.envColors.intensity = s.hemiI;
+    this.env.update(this.envColors);
     U.night.value = s.night;
   }
+
+  private envColors = { zenith: new THREE.Color(), horizon: new THREE.Color(), ground: new THREE.Color(), sun: new THREE.Color(), sunDir: new THREE.Vector3(), intensity: 1 };
 
   private stepSky(dt: number) {
     const a = this.sky, b = this.skyTarget;

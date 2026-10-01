@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { Fn, dot, float, length, mix, mrt, normalView, output, packNormalToRGB, pass, renderOutput, sample, screenUV, smoothstep, uniform, unpackRGBToNormal, vec2, vec3, vec4, velocity } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { fxaa } from 'three/addons/tsl/display/FXAANode.js';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
@@ -91,14 +92,23 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
   if (cfg.ao) {
     const nrm = scenePass.getTextureNode('normal');
     const aoNode = ao(depth, sample((uv) => unpackRGBToNormal(nrm.sample(uv))), camera);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     aoNode.resolutionScale = cfg.ao;
     aoNode.radius.value = 0.22;
     aoNode.thickness.value = 0.6;
     aoNode.distanceExponent.value = 1.4;
     aoNode.scale.value = 1.1;
     aoNode.samples.value = q === 'ultra' ? 16 : 12;
+    // Com TRAA, o ruído do GTAO gira a cada quadro e a média temporal o apaga.
+    aoNode.useTemporalFiltering = cfg.aa === 'traa';
     disposables.push(aoNode);
-    const occ = aoNode.getTextureNode().sample(screenUV).r;
+    // Filtro de ruído que respeita profundidade e normal: a oclusão sai limpa já no
+    // primeiro quadro, sem depender da média temporal.
+    const normalOf = sample((uv) => unpackRGBToNormal(nrm.sample(uv)));
+    const clean = denoise(aoNode.getTextureNode(), depth, normalOf, camera);
+    clean.radius.value = 6;
+    disposables.push(clean);
+    const occ = (clean as unknown as { r: ReturnType<typeof float> }).r;
     node = vec4(color.rgb.mul(mix(float(1), occ, P.aoStrength)), color.a);
   }
 

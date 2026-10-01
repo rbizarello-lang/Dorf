@@ -25,6 +25,7 @@ export class LiveTile {
     this.groundGeo = new THREE.BufferGeometry();
     this.groundGeo.setAttribute('position', new THREE.BufferAttribute(build.pos, 3));
     this.groundGeo.setAttribute('color', new THREE.BufferAttribute(build.col, 3));
+    this.groundGeo.setAttribute('splat', new THREE.BufferAttribute(build.splat, 4));
     const ground = new THREE.Mesh(this.groundGeo, lib.ground);
     ground.castShadow = shadows;
     ground.receiveShadow = true;

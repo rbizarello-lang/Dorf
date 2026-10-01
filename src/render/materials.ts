@@ -17,10 +17,14 @@ import {
   max,
   mix,
   modelWorldMatrix,
+  normalView,
+  normalWorld,
   positionGeometry,
   positionLocal,
   positionPrevious,
   positionWorld,
+  reference,
+  renderGroup,
   select,
   sin,
   smoothstep,
@@ -152,12 +156,48 @@ export function makeDecoMaterials(): Record<MatKey, THREE.MeshStandardNodeMateri
   };
 }
 
-/** Chão das peças: cor por vértice com manchas de "pincelada" em coordenadas de mundo. */
+/**
+ * Chão das peças. Cor por vértice (a paleta do tema) × detalhe procedural por tipo de
+ * terreno, com pesos por vértice em `splat` = [prado, floresta, plantação, vila]:
+ *   prado: manchas grandes claras e escuras (mais amarelas no claro) e textura fina;
+ *   floresta: chão de mata mais escuro, musgo e folhas secas;
+ *   plantação: terra arada com sulcos suaves;
+ *   vila: terra batida com pedrinhas.
+ * O topo ganha uma leve ondulação de normal (a luz rasante revela o relevo); as laterais,
+ * estratos e pedras. Tudo em coordenadas de mundo, sem costura entre peças.
+ */
 export function makeGroundMaterial() {
   const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0, flatShading: true });
   const p = positionWorld.xz;
-  const n = texture(noiseTex, p.div(3.5)).g.mul(0.6).add(texture(noiseTex, vec2(p.x.mul(2).add(p.y.mul(0.6)), p.y.mul(0.9)).div(3.5)).b.mul(0.4));
-  m.colorNode = vertexColor().rgb.mul(n.mul(0.2).add(0.9));
+  const sp = attribute('splat', 'vec4');
+  const blot = texture(noiseTex, p.div(2.6)).g;
+  const blot2 = texture(noiseTex, p.div(1.1).add(vec2(0.31, 0.77))).r;
+  const fine = texture(noiseTex, p.mul(0.85)).b;
+  const grain = texture(noiseTex, p.mul(2.9).add(vec2(0.5, 0.2))).b;
+  // Fatores multiplicativos por terreno (preservam a cor do tema).
+  const warm = vec3(1.07, 1.03, 0.86);
+  const cool = vec3(0.9, 0.97, 1.04);
+  const grass = mix(cool, warm, blot).mul(blot2.mul(0.18).add(0.86)).mul(fine.sub(0.5).mul(0.14).add(1));
+  const litter = smoothstep(0.62, 0.8, grain);
+  const forest = mix(vec3(0.74, 0.8, 0.74), vec3(0.98, 0.96, 0.9), blot.mul(0.7).add(blot2.mul(0.3))).mul(mix(vec3(1), vec3(1.25, 1.02, 0.7), litter.mul(0.55)));
+  const furrow = sin(p.x.mul(31).add(p.y.mul(17)).add(blot.mul(6))).mul(0.5).add(0.5);
+  const field = vec3(furrow.mul(0.1).add(0.93)).mul(blot2.mul(0.14).add(0.93));
+  const pebble = smoothstep(0.7, 0.86, grain);
+  const village = vec3(blot.mul(0.2).add(0.88)).mul(mix(vec3(1), vec3(1.16, 1.12, 1.06), pebble.mul(0.6)));
+  const rest = float(1).sub(sp.x.add(sp.y).add(sp.z).add(sp.w)).max(0);
+  const plain = vec3(texture(noiseTex, p.div(3.5)).g.mul(0.2).add(0.9));
+  const detail = grass.mul(sp.x).add(forest.mul(sp.y)).add(field.mul(sp.z)).add(village.mul(sp.w)).add(plain.mul(rest));
+  // Topo × lateral (normal plana de cada triângulo).
+  const top = smoothstep(0.55, 0.9, normalWorld.y);
+  const sideP = positionWorld.x.add(positionWorld.z);
+  const strata = texture(noiseTex, vec2(sideP.mul(0.9), positionWorld.y.mul(7))).g;
+  const stones = smoothstep(0.66, 0.8, texture(noiseTex, vec2(sideP.mul(3.1), positionWorld.y.mul(9))).b);
+  const sideF = vec3(strata.mul(0.32).add(0.8)).mul(mix(vec3(1), vec3(1.22, 1.18, 1.1), stones.mul(0.8)));
+  m.colorNode = vertexColor().rgb.mul(mix(sideF, detail, top));
+  // Relevo fino do prado e da mata: inclina a normal com o mapa de declive da água.
+  const slope = texture(waterTex, p.mul(0.45)).rg.sub(0.5).mul(sp.x.add(sp.y).mul(0.5).add(0.12));
+  const nW = vec3(slope.x.negate(), 1, slope.y.negate()).normalize();
+  m.normalNode = mix(normalView, cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize(), top);
   m.receivedShadowNode = shadowWithClouds;
   return m;
 }
@@ -229,8 +269,11 @@ export function makeVoidMaterial() {
     center: uniform(new THREE.Vector2()),
     radius: uniform(6),
   };
-  const m = new THREE.MeshBasicNodeMaterial();
-  m.colorNode = Fn(() => {
+  // Parte iluminada (recebe a sombra do tabuleiro e a oclusão) e parte emissiva (a cor
+  // do tema se mantém igual ao fundo e à névoa, que não são iluminados).
+  const m = new THREE.MeshStandardNodeMaterial({ roughness: 1, metalness: 0 });
+  m.envMapIntensity = 0;
+  const grid = Fn(() => {
     const p = positionWorld.xz;
     const qf = p.x.mul(2 / 3);
     const rf = p.x.div(-3).add(p.y.mul(0.57735027));
@@ -252,6 +295,29 @@ export function makeVoidMaterial() {
     const col = mix(u.bg, u.fill, inner.mul(fade).mul(0.9));
     return mix(col, u.line, lineW.mul(fade));
   })();
+  const LIT = 0.4;
+  m.colorNode = grid.mul(LIT);
+  m.emissiveNode = grid.mul(1 - LIT * 0.95);
   m.fog = true;
   return { material: m, u };
 }
+
+/**
+ * Filtro de sombra suave: grade de 4×4 amostras com comparação bilinear do hardware
+ * (cada uma já filtra 2×2), sem ruído. O PCF padrão do three gira 5 amostras por um
+ * ruído fixo por pixel, que o antisserrilhado temporal não consegue suavizar.
+ * O espalhamento usa `shadow.radius` (em texels).
+ */
+export const softShadowFilter = Fn(({ depthTexture, shadowCoord, shadow, depthLayer }: { depthTexture: THREE.DepthTexture; shadowCoord: N; shadow: THREE.LightShadow; depthLayer: N }) => {
+  const mapSize = (reference('mapSize', 'vec2', shadow) as N).setGroup(renderGroup);
+  const radius = (reference('radius', 'float', shadow) as N).setGroup(renderGroup);
+  const step = vec2(1).div(mapSize).mul(radius);
+  const tap = (ox: number, oy: number) => {
+    let t: N = texture(depthTexture, shadowCoord.xy.add(vec2(ox, oy).mul(step)));
+    if ((depthTexture as unknown as { isArrayTexture?: boolean }).isArrayTexture) t = t.depth(depthLayer);
+    return t.compare(shadowCoord.z);
+  };
+  let sum: N = float(0);
+  for (const oy of [-1.5, -0.5, 0.5, 1.5]) for (const ox of [-1.5, -0.5, 0.5, 1.5]) sum = sum.add(tap(ox, oy));
+  return sum.div(16);
+});
