@@ -7,15 +7,17 @@ Puzzle relaxante de peças hexagonais, no gênero de Dorfromantik, com **14 tema
 - **Estudo de viabilidade:** [docs/VIABILIDADE.md](docs/VIABILIDADE.md)
 - **Pesquisa de mecânicas, stacks, mercado e aspectos legais:** [docs/PESQUISA.md](docs/PESQUISA.md)
 - **Pesquisa dos temas históricos:** [docs/TEMAS.md](docs/TEMAS.md)
+- **Para agentes de IA e quem vai mexer no código:** [AGENTS.md](AGENTS.md) (arquitetura, invariantes, como estender e verificar)
 
 ## Rodar
 
 ```bash
-npm install
+npm install        # Node 22.12 ou mais novo
 npm run dev        # servidor de desenvolvimento
 npm run build      # gera dist/index.html (arquivo único)
 npm run typecheck
 npm test           # simula 600 partidas e confere regras, interações, missões e replay
+npm run check      # typecheck + testes + build (o mesmo que a CI roda em cada pull request)
 ```
 
 ## Como jogar
@@ -102,4 +104,4 @@ node scripts/screenshots.mjs   # docs/screens/*.png (SHOTS=egito,noite para esco
 node scripts/stress.mjs        # tabela de desempenho (RUNS=300:high para um caso)
 ```
 
-Os scripts usam o Chromium com renderização por software. Para medir FPS de verdade, abra `?stress=1000&debug` num navegador com GPU.
+Os scripts usam o Chromium com renderização por software. Para medir FPS de verdade, abra `?stress=1000&debug` num navegador com GPU. Para escolher o navegador, defina `CHROMIUM_PATH`; sem ele, os scripts usam o Chromium do Playwright (`npx playwright-core install chromium`).

@@ -1,6 +1,6 @@
 // Captura telas e métricas do protótipo com o Chromium headless.
 // Uso: npm run build && node scripts/screenshots.mjs [baseUrl]
-import { chromium } from 'playwright-core';
+import { launch } from './browser.mjs';
 import fs from 'node:fs';
 
 const base = process.argv[2] ?? 'http://127.0.0.1:4173/';
@@ -34,10 +34,7 @@ const all = [
 ];
 const list = shots.length ? all.filter((s) => shots.includes(s.name)) : all;
 
-const browser = await chromium.launch({
-  executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-  args: ['--ignore-certificate-errors', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
-});
+const browser = await launch(['--ignore-gpu-blocklist']);
 for (const s of list) {
   const ctx = await browser.newContext(
     s.mobile ? { viewport: { width: 390, height: 780 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true } : { viewport: { width: 1440, height: 860 } },

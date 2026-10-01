@@ -1,6 +1,6 @@
 // Teste de carga: coloca N peças com a IA gulosa e mede custo de CPU e volume de desenho.
 // Uso: npm run build && node scripts/stress.mjs [baseUrl]
-import { chromium } from 'playwright-core';
+import { launch } from './browser.mjs';
 
 const base = process.argv[2] ?? 'http://127.0.0.1:4173/';
 const all = [
@@ -13,10 +13,7 @@ const all = [
 // o render por software divide a CPU e distorce a medida de CPU por quadro.
 const only = (process.env.RUNS ?? '').split(',').filter(Boolean);
 const runs = only.length ? all.filter((r) => only.includes(`${r.n}:${r.quality}`)) : all;
-const browser = await chromium.launch({
-  executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-  args: ['--ignore-certificate-errors', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
-});
+const browser = await launch();
 console.log('peças | qualidade | lógica (ms) | montagem (ms) | draw calls | triângulos | instâncias | CPU JS/quadro (ms) | heap JS (MB)');
 for (const r of runs) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });

@@ -1,0 +1,199 @@
+# AGENTS.md: guia para agentes de IA
+
+> **Resumo em inglês:** *Retalhos* is a relaxing hex-tile puzzle in the Dorfromantik genre, with 14 historical/regional themes. Stack: TypeScript, three.js r186 and Vite, with procedural geometry and no art assets. The build is a single HTML file. Before every commit, run `npm run check`, which does the typecheck, simulates 600 games and builds. UI text, docs, code comments and commit messages are in Brazilian Portuguese.
+
+Este arquivo existe para que qualquer agente (Claude Code, Codex, Cursor, Copilot, Gemini etc.) entenda o projeto e trabalhe nele sem quebrar o que já funciona. O `README.md` é o manual de quem joga e roda o projeto. Este arquivo é o manual de quem mexe no código.
+
+## O projeto em uma tela
+
+- **O que é:** um protótipo jogável (v3) de puzzle de peças hexagonais. Cada peça tem 6 bordas de terreno, e quem joga encaixa a peça no mapa buscando bordas iguais.
+- **O que a v3 tem:**
+  - 14 temas de países e épocas;
+  - interações entre bordas diferentes, que dão pontos e erguem construções;
+  - mundo animado: trigo ao vento, barcos, trens, moinhos, animais;
+  - ciclo de dia, entardecer e noite.
+- **Sem arquivos de arte:** casas, árvores, plantações, animais, barcos e sons são gerados em código. Não existe pasta de assets e não deve passar a existir sem uma decisão explícita.
+- **Saída:** `npm run build` gera `dist/index.html`, um arquivo único com JS e CSS embutidos.
+- **Documentos:**
+
+| Arquivo | Para que serve |
+|---|---|
+| `README.md` | regras do jogo, controles, temas, parâmetros de URL |
+| `docs/VIABILIDADE.md` | decisões de arquitetura, medições de desempenho, histórico das revisões de código, riscos |
+| `docs/TEMAS.md` | pesquisa histórica dos 8 temas de época e a **lista priorizada de kits a adicionar** |
+| `docs/PESQUISA.md` | mecânicas do original, stacks, mercado e aspectos legais |
+| `docs/screens/*.png` | capturas de referência, uma por tema e por situação |
+
+## Idioma e convenções
+
+- **Português do Brasil** em toda a interface, nos comentários, na documentação e nas mensagens de commit. Os identificadores do código ficam em inglês (`Board`, `buildTile`, `synergy`).
+- **Mensagens de commit:** primeira linha curta no indicativo, como `Corrige…`, `Adiciona…`, `Temas por país e época…`. Explique o porquê no corpo quando não for óbvio.
+- **TypeScript estrito** (`strict`, `noUnusedLocals`, `noUnusedParameters`). Não há ESLint nem Prettier. Siga o estilo do arquivo: 2 espaços, aspas simples, ponto e vírgula, linhas longas aceitas.
+- **Comentários** explicam a intenção ou uma armadilha, nunca o óbvio. Mantenha a densidade de comentários do arquivo que estiver editando.
+
+## Comandos
+
+```bash
+npm install          # Node >= 22.12 (ver .nvmrc)
+npm run dev          # servidor de desenvolvimento (Vite)
+npm run check        # typecheck + testes + build: rode antes de todo commit
+npm run typecheck    # tsc --noEmit
+npm test             # 600 partidas simuladas com oráculos independentes + cenários sintéticos
+npm run build        # dist/index.html (arquivo único)
+node scripts/artifact.mjs   # depois do build: dist/artifact/retalhos.html (formato de página publicável)
+```
+
+A CI (`.github/workflows/ci.yml`) roda typecheck, testes e build em todo pull request e em todo push na `main`. No Claude Code na web, o hook `.claude/hooks/session-start.sh` roda `npm install` no início da sessão.
+
+### Verificação visual (Playwright, sem GPU)
+
+Teste de lógica não pega erro visual. **Depois de qualquer mudança em `src/render/`, gere as capturas e olhe as imagens.**
+
+```bash
+npm run build
+(cd dist && python3 -m http.server 4173) &
+SHOTS=vale,noite,interacoes node scripts/screenshots.mjs   # grava docs/screens/<nome>.png e imprime estatísticas e erros do console
+RUNS=300:high node scripts/stress.mjs                      # tabela de desempenho
+```
+
+- **Navegador:** `scripts/browser.mjs` procura o Chromium nesta ordem:
+  1. a variável `CHROMIUM_PATH`;
+  2. `/opt/pw-browsers/chromium`, que existe nos contêineres do Claude Code;
+  3. o Chromium do Playwright. Se não houver nenhum, instale com `npx playwright-core install chromium`.
+- **Renderização por software (SwiftShader):** o FPS medido assim não vale nada. Compare triângulos, draw calls e CPU por quadro.
+- **Capturas:** só faça commit das PNGs de `docs/screens/` quando a mudança visual for intencional. Se gerou capturas apenas para conferir, desfaça com `git checkout docs/screens/`.
+- **Rede:** o Chromium tenta acessar domínios do Google. Em ambiente com proxy, essas falhas de conexão são esperadas e inofensivas.
+
+### Ganchos de depuração no navegador
+
+| Gancho | O que faz |
+|---|---|
+| `?debug` | mostra FPS, draw calls, triângulos e instâncias |
+| `?gallery&theme=<id>` | mostra todos os kits do tema lado a lado; `window.__gallery` lista as chaves |
+| `?auto=40` | a IA gulosa coloca 40 peças |
+| `?stress=1000` | teste de carga; o resultado fica em `window.__load` |
+| `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` | ver o `README.md` |
+| `window.__stats` | estatísticas do último quadro |
+| `window.__pools()` | relatório dos InstancedMesh |
+| `window.__ghostBest()` | põe o fantasma na melhor jogada |
+| `window.__ghostSynergy()` | põe o fantasma numa jogada com interação e devolve quantas |
+
+## Mapa do código
+
+```
+src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em Node)
+  hex.ts         grade hexagonal flat-top, coordenadas axiais (q, r), DIRS, hkey/unkey
+  tiles.ts       enum T (Prado, Floresta, Plantação, Vila, Rio, Estrada), rotateEdges, geração de peças
+  board.ts       Rules/DEFAULT_RULES, Board: validação, pontuação, grupos, missões, interações
+  synergy.ts     tabela das interações (vila×floresta, vila×plantação, vila×prado, plantação×prado)
+  game.ts        Game: semente, pilha, sorteio por peça, descarte, bestMove (IA gulosa)
+  rng.ts         mulberry32 e utilitários de sorteio
+src/themes/      temas como DADOS
+  types.ts       esquema Theme, com cada kit comentado: é a referência de tudo que um tema pode escolher
+  themes.ts      6 temas base, THEMES, PERIOD_LABEL/ORDER, themeById
+  eras.ts        8 temas históricos (Egito, Song, Vikings, Toscana, Edo, Colonial, Oeste, Andes)
+src/render/
+  lib.ts         geometria dos kits (casas, árvores, plantações, animais, barcos, veículos, marcos),
+                 materiais e shaders (patch via onBeforeCompile), classe Lib
+  tileBuilder.ts buildTile: monta UMA peça (chão, rios, estradas, decoração) a partir de bordas + semente + tema
+  world.ts       World: cena, luz, céu e hora do dia, blocos estáticos, pools instanciados, fantasma, animações de queda
+  life.ts        Life: barcos, veículos, animais, moinhos e pássaros que se movem
+  cameraRig.ts   câmera orbital
+src/ui/          HUD em HTML/CSS (hud.ts, style.css); a página é o index.html
+src/audio.ts     sons sintetizados com WebAudio
+src/main.ts      entrada: fluxo da partida, entrada de mouse/toque/teclado, salvamento, parâmetros de URL, ganchos de depuração
+tests/logic.ts      simulação de partidas contra oráculos independentes (grupos por BFS, pontuação recalculada, replay)
+tests/synthetic.ts  cenários montados à mão (peça travada, descarte, fim de jogo, semente → sequência)
+scripts/         capturas, teste de carga, conversão para página publicável
+```
+
+**Fluxo de uma jogada:**
+1. `main.ts` chama `Game.place(q, r)`, que chama `Board.place`. O resultado, `PlaceResult`, traz os pontos, os encaixes, as interações e as missões.
+2. Em seguida chama `World.placeAnimated(...)`.
+3. O `World` chama `buildTile(edges, seed, theme, { detail, synergies, houses })`, que devolve a geometria do chão e uma lista de decorações.
+4. Quando a peça pousa, o chão vai para o **bloco estático** da região (8×8 peças), as decorações para os **pools** de `InstancedMesh` (um por chave de kit), e o que se move vai para o `Life`.
+
+## Invariantes: não quebre
+
+1. **`src/core` é puro e determinístico.** Nada de three.js, DOM ou `Math.random`. A única exceção é `Game.bestMove`, que usa `Math.random` de propósito para não mexer na sequência de peças.
+2. **A sequência de peças depende só da semente e do índice** (`Game.draw`). A mesma semente dá as mesmas peças para qualquer jogador. Só a presença da missão depende do estado da partida.
+3. **A aparência de uma peça depende só de `(edges, def.seed, theme, opts)`.** `buildTile` usa `mulberry32(seed)`, então fantasma, queda e mapa mostram a mesma peça. `Math.random` no render é aceitável só em efeitos passageiros, como partículas.
+4. **Rotação:**
+   - lógica: `rotateEdges` faz `out[(i + rot) % 6] = base[i]`;
+   - render: `rotation.y = -rot · π/3`;
+   - a borda `i` encosta no vizinho `DIRS[i]`, e o lado oposto é `(i + 3) % 6`.
+
+   Mude os três juntos ou nenhum.
+5. **Rio e estrada são estritos** (`isStrict`): só encostam neles mesmos. Os 4 terrenos comuns aceitam qualquer vizinho, mas só pontuam quando iguais. As interações pontuam pares diferentes.
+6. **Saves:**
+   - o formato é `{ v, seed, rulesId, moves, score }`, guardado em `localStorage` com o prefixo `retalhos.`;
+   - ao carregar, a partida é **reconstruída pelo replay** das jogadas e conferida contra a pontuação.
+   - Se você mudar regras, pontuação ou geração de peças de um jeito que altere o replay, **aumente `SAVE_VERSION` em `main.ts`**. Saves antigos mostram um aviso e são descartados.
+7. **Os testes têm oráculos independentes.** Ao mudar a pontuação, atualize o oráculo em `tests/logic.ts` reimplementando a regra. Nunca faça o oráculo chamar o código que ele testa.
+8. **Tema é só dado.** O renderizador sabe desenhar cada kit; o tema escolhe e colore. Não ponha `if (theme.id === '...')` no render. Crie ou parametrize um kit.
+9. **Shaders (three r186):** o `patch()` de `lib.ts` injeta código via `onBeforeCompile`.
+   - `vColor` é **vec4** nesta versão: atribua `.rgb`.
+   - Os atributos por vértice são `color`, `tint` (quanto a cor da instância tinge) e `glow` (janelas que acendem com `uNight`).
+   - Uniformes: `uTime`, `uWind`, `uNight`, `uClouds`, `uSparkle`, `uGlow`.
+   - Se o shader falhar ao compilar, o erro aparece no console das capturas.
+10. **Blocos estáticos só crescem** (append-only). Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim, escondida quando `rig.dist >= 13` (nível de detalhe). Quem consulta geometria pela chave precisa tirar o `~`.
+11. **Construções internas não pontuam.** A roda d'água (vila na beira do rio), a irrigação, a estação e o silo (junto à ferrovia) são só visuais. Pontos de interação vêm apenas de `synergy.ts` × `Rules.synergyPoints`.
+12. **Parâmetros de URL e valores salvos são validados** contra listas fixas (ver `pickQ` e o uso de `Object.hasOwn` para `time`). Mantenha esse padrão ao criar um parâmetro novo.
+
+## Orçamento de desempenho
+
+Medido com `RUNS=300:high node scripts/stress.mjs`, renderização por software:
+
+| Peças | Qualidade | Draw calls | Triângulos | CPU JS/quadro |
+|---|---|---|---|---|
+| 300 | alta | ~94 | ~1,37 milhão | ~4,3 ms |
+
+- **Regra prática:** uma mudança visual não deve subir triângulos ou draw calls em mais de ~10% sem justificativa escrita no commit.
+- **Qualidade:** a densidade de decoração é multiplicada por 1 (alta), 0,65 (média) ou 0,4 (baixa). Em telas de toque, o modo automático começa em "média".
+- **Ainda não foi medido:** o FPS numa GPU de verdade.
+
+## Tarefas comuns
+
+### Novo tema
+
+1. Copie um tema de `src/themes/eras.ts`.
+2. Troque `id`, nomes, cores e kits. Os campos estão comentados em `types.ts`.
+3. Confira as formas com `?gallery&theme=<id>`.
+4. Adicione o tema em `scripts/screenshots.mjs` e gere a captura.
+
+O menu agrupa os temas pelo campo `period` sem nenhuma outra mudança. Os testes já rodam as regras de todos os temas (`THEMES`). Se o tema tiver `rules` próprias, rode `npm test`.
+
+### Novo kit (árvore, casa, telhado, marco, plantação, animal, barco, veículo, estilo de estrada)
+
+1. Acrescente o valor ao tipo de união em `src/themes/types.ts`, com um comentário de uma linha.
+2. Desenhe o kit no `switch` correspondente de `src/render/lib.ts`: `treeGeometry`, `roofGeometry`, `landmarkGeometry`, `cropGeometry`, `animalGeometry`, `boatGeometry`, `vehicleGeometry`. Em `BODY` e em `CROP_LAYOUT`, que são `Record`, o compilador já cobra a entrada.
+3. Use `kit()` com cores por vértice. Use `tint` só nas partes que devem receber a cor do tema.
+4. Mantenha poucos triângulos: veja o orçamento acima.
+5. Use o kit em algum tema. Gere a galeria e as capturas.
+
+A lista priorizada de kits que faltam está no fim de `docs/TEMAS.md`.
+
+### Nova interação entre bordas
+
+1. Acrescente o par em `src/core/synergy.ts`: o tipo `SynKind`, `SYN_KINDS` e `synergyOf`.
+2. Acrescente o nome do par em `Theme.synergy` (`types.ts`) em **todos** os temas.
+3. Desenhe a construção em `tileBuilder.ts`, no trecho que trata `opts.synergies`, perto do meio da borda.
+4. Acrescente a geometria em `specialsFor` (`lib.ts`).
+5. Atualize o oráculo `SYN_PAIRS` em `tests/logic.ts` e a legenda de ajuda em `main.ts`.
+
+### Mudar regra ou pontuação
+
+1. Edite `Rules`/`DEFAULT_RULES` e `Board`.
+2. Atualize o oráculo em `tests/logic.ts`.
+3. Aumente `SAVE_VERSION` se o replay mudar.
+4. Atualize a seção "Como jogar" do `README.md`.
+
+## Estado atual e próximos passos
+
+- **Feito (v3):** 14 temas, kits detalhados, 4 interações com prévia em dourado, mundo animado, dia/entardecer/noite, qualidade adaptativa, save v3 com replay, duas rodadas de revisão de código com correções. O histórico está em `docs/VIABILIDADE.md`, Apêndice A.
+- **Pendente:**
+  - medir o FPS numa GPU real (`?stress=1000&debug`) no PC e no celular;
+  - kits de fidelidade histórica (`docs/TEMAS.md`): ponte em arco, portais (torii, paifang), torre d'água, templos por cultura, armazém sobre estacas, batata, linho e amoreira, salgueiro e pinheiro-manso, barcos do Nilo e a vapor;
+  - funções de jogo: bandeiras, desfazer, mostrar as 3 próximas peças, peças especiais (`docs/VIABILIDADE.md` §12);
+  - otimizações com folga conhecida: culling por super-bloco, sombra em cache, renderizar sob demanda (`docs/VIABILIDADE.md` §5).
+- **Publicação:** o build de página única (`scripts/artifact.mjs`) é o que vai para o link público do protótipo.
