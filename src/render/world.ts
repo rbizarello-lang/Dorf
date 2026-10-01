@@ -240,7 +240,7 @@ interface Drop {
 }
 
 /** Construções de interação: sobem do chão depois que a peça assenta. */
-const BUILDS: ReadonlySet<string> = new Set(['logs', 'mill', 'sails', 'fence', 'apiary']);
+const BUILDS: ReadonlySet<string> = new Set(['logs', 'mill', 'sails', 'rotor', 'fence', 'apiary']);
 const easeOutBack = (x: number) => 1 + 2.4 * Math.pow(x - 1, 3) + 1.4 * Math.pow(x - 1, 2);
 
 /** Estado da iluminação: interpolado suavemente entre dia, entardecer e noite. */

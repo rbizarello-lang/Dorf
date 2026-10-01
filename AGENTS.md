@@ -196,6 +196,10 @@ O menu agrupa os temas pelo campo `period` sem nenhuma outra mudança. Os testes
 
 A lista priorizada de kits que faltam está no fim de `docs/TEMAS.md`.
 
+### Portal e ponte
+
+São opcionais no tema (`gate`, `bridge`) e não pontuam. O `buildTile` decide onde entram sem sorteio: o portal na primeira borda de estrada vizinha de vila, a ponte no meio de um rio de 2 bordas com vila numa margem. Para um tema novo, basta escolher o estilo e as duas cores.
+
 ### Nova interação entre bordas
 
 1. Acrescente o par em `src/core/synergy.ts`: o tipo `SynKind`, `SYN_KINDS` e `synergyOf`.
@@ -217,7 +221,7 @@ A lista priorizada de kits que faltam está no fim de `docs/TEMAS.md`.
 - **Feito (v3):** 14 temas, kits detalhados, 4 interações com prévia em dourado, mundo animado, dia/entardecer/noite, qualidade adaptativa, save v3 com replay, duas rodadas de revisão de código com correções. O histórico está em `docs/VIABILIDADE.md`, Apêndice A.
 - **Pendente:**
   - medir o FPS numa GPU real (`?stress=1000&debug`) no PC e no celular;
-  - kits de fidelidade histórica (`docs/TEMAS.md`): ponte em arco, portais (torii, paifang), torre d'água, templos por cultura, armazém sobre estacas, batata, linho e amoreira, salgueiro e pinheiro-manso, barcos do Nilo e a vapor;
+  - kits de fidelidade histórica que ainda faltam (`docs/TEMAS.md`, fim): roda-d'água como `MillStyle`, cipreste em alameda, estação de fim de linha por tema;
   - funções de jogo: bandeiras, desfazer, mostrar as 3 próximas peças, peças especiais (`docs/VIABILIDADE.md` §12);
   - otimizações com folga conhecida: culling por super-bloco, sombra em cache, renderizar sob demanda (`docs/VIABILIDADE.md` §5).
 - **Publicação:** o build de página única (`scripts/artifact.mjs`) é o que vai para o link público do protótipo.

@@ -80,7 +80,7 @@ class AnimPool {
 }
 
 interface Spinner {
-  pool: 'sails' | 'wheel';
+  pool: 'sails' | 'wheel' | 'rotor';
   base: THREE.Matrix4;
   axis: THREE.Vector3;
   speed: number;
@@ -173,9 +173,9 @@ export class Life {
   }
 
   addSpinner(key: string, world: THREE.Matrix4, axis: 'x' | 'z') {
-    if (key !== 'sails' && key !== 'wheel') return;
+    if (key !== 'sails' && key !== 'wheel' && key !== 'rotor') return;
     if (!this.pool(key)) return;
-    this.spinners.push({ pool: key, base: world.clone(), axis: axis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1), speed: key === 'sails' ? 0.9 + Math.random() * 0.4 : 1.4, phase: Math.random() * 6 });
+    this.spinners.push({ pool: key, base: world.clone(), axis: axis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1), speed: key === 'sails' ? 0.9 + Math.random() * 0.4 : key === 'rotor' ? 2.2 + Math.random() * 0.6 : 1.4, phase: Math.random() * 6 });
   }
 
   addAnimal(world: THREE.Matrix4, color: THREE.Color) {
