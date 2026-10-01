@@ -109,8 +109,11 @@ export class Game {
     return false;
   }
 
-  /** Jogada gulosa (modo demonstração e teste de carga). Usa Math.random para não mexer na sequência de peças. */
-  bestMove(): Move | null {
+  /**
+   * Jogada gulosa (modo demonstração e teste de carga). O desempate usa um gerador à parte
+   * (Math.random por padrão), para não mexer na sequência de peças.
+   */
+  bestMove(rand: () => number = Math.random): Move | null {
     const def = this.current;
     if (!def) return null;
     let best: Move | null = null;
@@ -119,7 +122,7 @@ export class Game {
       for (let rot = 0; rot < 6; rot++) {
         const c = this.board.check(q, r, rotateEdges(def.edges, rot));
         if (!c.valid) continue;
-        const score = c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) + Math.random() * 0.5;
+        const score = c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) + rand() * 0.5;
         if (!best || score > best.score) best = { q, r, rot, score };
       }
     }

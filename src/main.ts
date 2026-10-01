@@ -1,9 +1,11 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 import { Sfx } from './audio';
 import { DEFAULT_RULES, type PlaceResult, type Rules } from './core/board';
 import { Game } from './core/game';
+import { mulberry32 } from './core/rng';
 import { DIRS, hexToWorld, hkey, worldToHex } from './core/hex';
 import type { Quality, TimeOfDay } from './render/world';
+import { FX_FLAGS } from './render/post';
 import { World } from './render/world';
 import { themeById, type Theme } from './themes/themes';
 import { Hud, questLabel } from './ui/hud';
@@ -59,18 +61,25 @@ const store = {
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
 const hud = new Hud();
 const sfx = new Sfx();
-function createWorld(): World {
+async function createWorld(): Promise<World> {
   try {
-    return new World(canvas);
+    // ?webgl força o backend WebGL2 (para comparar com o WebGPU).
+    return await World.create(canvas, params.has('webgl'));
   } catch (err) {
     document.body.insertAdjacentHTML(
       'beforeend',
-      `<div class="modal"><div class="sheet" role="alertdialog" aria-labelledby="no-gl"><h2 id="no-gl">Sem gráficos 3D</h2><p>O navegador não conseguiu iniciar o WebGL, que o jogo usa para desenhar o mapa. Atualize o navegador ou ative a aceleração por hardware nas configurações e recarregue a página.</p></div></div>`,
+      `<div class="modal"><div class="sheet" role="alertdialog" aria-labelledby="no-gl"><h2 id="no-gl">Sem gráficos 3D</h2><p>O navegador não conseguiu iniciar o WebGPU nem o WebGL2, que o jogo usa para desenhar o mapa. Atualize o navegador ou ative a aceleração por hardware nas configurações e recarregue a página.</p></div></div>`,
     );
     throw err;
   }
 }
-const world = createWorld();
+const world = await createWorld();
+{
+  // ?fx=ao.traa.bloom.dof liga os efeitos um a um (medir custo); só nomes conhecidos.
+  const fx = params.get('fx');
+  if (fx !== null) world.fx = fx.split('.').filter((f) => (FX_FLAGS as readonly string[]).includes(f));
+}
+hud.preview.appendChild(world.preview.canvas);
 
 let theme: Theme = themeById(params.get('theme') ?? store.get('theme'));
 let rulesTheme: Theme = theme;
@@ -79,7 +88,7 @@ let moves: MoveRec[] = [];
 let rotSteps = 0;
 let hover: { q: number; r: number } | null = null;
 let best = Number(store.get('best')) || 0;
-const QUALITIES: QualityMode[] = ['auto', 'high', 'medium', 'low'];
+const QUALITIES: QualityMode[] = ['auto', 'ultra', 'high', 'medium', 'low'];
 const pickQ = (v: string | null) => (v && (QUALITIES as string[]).includes(v) ? (v as QualityMode) : null);
 let qualityMode: QualityMode = pickQ(params.get('quality')) ?? pickQ(store.get('quality')) ?? 'auto';
 let gameOverShown = false;
@@ -394,12 +403,13 @@ function pickTheme(t: Theme) {
 
 // ------------------------------------------------------------------ qualidade
 
-const qualityLabel: Record<QualityMode, string> = { auto: 'Auto', high: 'Alta', medium: 'Média', low: 'Baixa' };
+const qualityLabel: Record<QualityMode, string> = { auto: 'Auto', ultra: 'Ultra', high: 'Alta', medium: 'Média', low: 'Baixa' };
 const qualityBtn = document.getElementById('btn-quality')!;
 
-// Em telas de toque (celular/tablet) o modo Auto começa em Média.
+// Em telas de toque (celular/tablet) o modo Auto começa em Média; no computador, em Ultra.
 const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-const autoStart: Quality = coarsePointer ? 'medium' : 'high';
+const autoStart: Quality = coarsePointer ? 'medium' : 'ultra';
+const LOWER: Record<Quality, Quality> = { ultra: 'high', high: 'medium', medium: 'low', low: 'low' };
 let autoLevel: Quality = autoStart;
 
 function applyQuality(mode: QualityMode) {
@@ -419,7 +429,7 @@ function adaptQuality(dt: number) {
   const median = frameTimes[75];
   frameTimes.length = 0;
   if (median > 1 / 38 && autoLevel !== 'low') {
-    autoLevel = autoLevel === 'high' ? 'medium' : 'low';
+    autoLevel = LOWER[autoLevel];
     world.setQuality(autoLevel);
     hud.toast(`Qualidade ajustada para ${qualityLabel[autoLevel]} para manter a fluidez.`);
   }
@@ -594,8 +604,7 @@ hud.themeBtn.addEventListener('click', () => {
   else hud.closeThemeMenu();
 });
 qualityBtn.addEventListener('click', () => {
-  const order: QualityMode[] = ['auto', 'high', 'medium', 'low'];
-  const next = order[(order.indexOf(qualityMode) + 1) % order.length];
+  const next = QUALITIES[(QUALITIES.indexOf(qualityMode) + 1) % QUALITIES.length];
   applyQuality(next);
   store.set('quality', next);
   hud.toast(`Qualidade: ${qualityLabel[next]}`);
@@ -644,8 +653,10 @@ function autoPlace(n: number, infinite: boolean) {
   if (infinite) game.stack = n + 10;
   const t0 = performance.now();
   const placed = [];
+  // Gerador próprio: com ?seed, o tabuleiro de exemplo sai igual a cada carga (capturas comparáveis).
+  const rand = mulberry32(game.seed ^ 0x5eed);
   for (let i = 0; i < n && game.current; i++) {
-    const m = game.bestMove();
+    const m = game.bestMove(rand);
     if (!m) break;
     game.rot = m.rot;
     const res = game.place(m.q, m.r);
@@ -699,7 +710,6 @@ function step(now: number) {
   const c0 = performance.now();
   keyboardCamera(dt);
   if (params.has('demo')) demoStep(dt);
-  world.previewRect = hud.preview.getBoundingClientRect();
   world.tick(dt);
   hud.tick(dt);
   const markers = [];
@@ -768,6 +778,7 @@ function start(data: unknown) {
   if (params.has('gallery')) (window as unknown as { __gallery: string[] }).__gallery = world.showGallery();
   if (params.has('yaw')) world.rig.yaw = world.rig.goalYaw = Number(params.get('yaw'));
   if (params.has('zoom')) world.rig.dist = world.rig.goalDist = Number(params.get('zoom'));
+  if (params.has('focus')) (window as unknown as { __focus: (t: number) => boolean }).__focus(Number(params.get('focus')));
   if (!special && !store.get('seenHelp') && !(resumed && moves.length)) showHelp();
   requestAnimationFrame((t) => {
     last = t;
@@ -784,6 +795,21 @@ function start(data: unknown) {
   updateGhost();
   const { x, z } = hexToWorld(m.q, m.r);
   world.rig.goal.set(x, 0, z);
+};
+
+// Centraliza a câmera na peça com mais bordas de um terreno (?focus=4 para rios, nas capturas).
+(window as unknown as { __focus: (t: number, zoom?: number) => boolean }).__focus = (t, zoom) => {
+  let best: { q: number; r: number; n: number } | null = null;
+  for (const p of game.board.list) {
+    const n = p.edges.filter((e) => e === t).length;
+    if (n && (!best || n > best.n)) best = { q: p.q, r: p.r, n };
+  }
+  if (!best) return false;
+  const { x, z } = hexToWorld(best.q, best.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
 };
 
 // Idem, escolhendo a jogada com mais interações (para ver as construções).

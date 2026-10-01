@@ -1,10 +1,10 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 import type { Board, Placed } from '../core/board';
 import { DIRS, edgeMid, hexToWorld, hkey, opposite } from '../core/hex';
 import { T } from '../core/tiles';
 import type { Theme } from '../themes/types';
-import type { Lib } from './lib';
-import { ROAD_Y } from './tileBuilder';
+import { instGeometry, setInstColor, type Lib } from './lib';
+import { ROAD_Y, WATER_Y } from './tileBuilder';
 
 // Vida do mapa: tudo que se move depois de assentado.
 // - pás de moinho e rodas d'água girando
@@ -36,9 +36,8 @@ class AnimPool {
     this.mesh = this.make(cap);
   }
 
-  private make(cap: number) {
-    const m = new THREE.InstancedMesh(this.geo, this.mat, cap);
-    m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
+  private make(cap: number, colors?: Float32Array) {
+    const m = new THREE.InstancedMesh(instGeometry(this.geo, cap, colors), this.mat, cap);
     m.count = 0;
     m.frustumCulled = false;
     m.castShadow = this.shadows;
@@ -52,17 +51,17 @@ class AnimPool {
     if (i < this.cap) return;
     const old = this.mesh;
     while (this.cap <= i) this.cap *= 2;
-    this.mesh = this.make(this.cap);
+    this.mesh = this.make(this.cap, old.geometry.getAttribute('iColor').array as Float32Array);
     (this.mesh.instanceMatrix.array as Float32Array).set(old.instanceMatrix.array as Float32Array);
-    (this.mesh.instanceColor!.array as Float32Array).set(old.instanceColor!.array as Float32Array);
     this.parent.remove(old);
+    old.geometry.dispose();
     old.dispose();
   }
 
   set(i: number, m: THREE.Matrix4, c?: THREE.Color) {
     this.ensure(i);
     this.mesh.setMatrixAt(i, m);
-    if (c) this.mesh.setColorAt(i, c);
+    if (c) setInstColor(this.mesh, i, c);
     if (i >= this.count) this.count = i + 1;
   }
 
@@ -70,11 +69,12 @@ class AnimPool {
     this.count = count;
     this.mesh.count = count;
     this.mesh.instanceMatrix.needsUpdate = true;
-    this.mesh.instanceColor!.needsUpdate = true;
+    this.mesh.geometry.getAttribute('iColor').needsUpdate = true;
   }
 
   dispose() {
     this.parent.remove(this.mesh);
+    this.mesh.geometry.dispose();
     this.mesh.dispose();
   }
 }
@@ -358,7 +358,7 @@ export class Life {
       if (m.boat) {
         const bob = Math.sin(this.time * 2 + m.speed * 40) * 0.003;
         q4.setFromAxisAngle(UP, -m.heading);
-        m4.compose(v3.set(m.x, 0.012 + bob, m.z), q4, s3.setScalar(1));
+        m4.compose(v3.set(m.x, WATER_Y - 0.001 + bob, m.z), q4, s3.setScalar(1));
         m4.multiply(m4b.makeRotationX(Math.sin(this.time * 1.6 + m.speed * 30) * 0.05));
         boats?.set(bi++, m4);
         continue;

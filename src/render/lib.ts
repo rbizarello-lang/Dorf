@@ -1,5 +1,6 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
 import type { AnimalKind, BoatKind, BodyStyle, CropStyle, HouseKind, Landmark, RoofStyle, Theme, TreeGeo, VehicleKind } from '../themes/types';
 
 // Biblioteca de "kits": geometrias low-poly com cor por vértice, montadas por tema.
@@ -855,167 +856,45 @@ function specialsFor(theme: Theme, walls: string, roofs: string) {
   };
 }
 
-// ---------------------------------------------------------------- materiais
+// ---------------------------------------------------------------- instâncias
 
-export interface Uniforms {
-  uTime: { value: number };
-  uSparkle: { value: THREE.Color };
-  uWind: { value: THREE.Vector2 };
-  uNight: { value: number };
-  uGlow: { value: THREE.Color };
-  uClouds: { value: number };
+/**
+ * Geometria para um InstancedMesh: compartilha os atributos do kit e acrescenta
+ * `iColor`, a cor de cada instância (a mesma geometria base serve a vários meshes).
+ */
+export function instGeometry(base: THREE.BufferGeometry, cap: number, colors?: Float32Array) {
+  const g = new THREE.BufferGeometry();
+  for (const [k, a] of Object.entries(base.attributes)) g.setAttribute(k, a);
+  if (base.index) g.setIndex(base.index);
+  const arr = new Float32Array(cap * 3).fill(1);
+  if (colors) arr.set(colors.subarray(0, Math.min(colors.length, arr.length)));
+  g.setAttribute('iColor', new THREE.InstancedBufferAttribute(arr, 3));
+  g.boundingSphere = base.boundingSphere;
+  return g;
 }
 
-const NOISE = `
-float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
-float vnoise(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); f = f*f*(3.0-2.0*f);
-  return mix(mix(h21(i), h21(i+vec2(1,0)), f.x), mix(h21(i+vec2(0,1)), h21(i+vec2(1,1)), f.x), f.y); }
-float cloudShade(vec2 p, float t){
-  vec2 q = p * 0.085 + t * vec2(0.011, 0.006);
-  float n = vnoise(q) * 0.65 + vnoise(q * 2.3 + 7.1) * 0.35;
-  return smoothstep(0.5, 0.74, n);
-}`;
-
-interface PatchOpts {
-  key: string;
-  tint?: boolean;
-  glow?: boolean;
-  sway?: 'tree' | 'crop';
-  clouds?: boolean;
-  groundNoise?: boolean;
-  water?: boolean;
+/** Cor da instância i (a geometria precisa ter vindo de `instGeometry`). */
+export function setInstColor(mesh: THREE.InstancedMesh, i: number, c: THREE.Color) {
+  const a = mesh.geometry.getAttribute('iColor') as THREE.InstancedBufferAttribute;
+  a.setXYZ(i, c.r, c.g, c.b);
 }
-
-/** Injeta nos shaders padrão do three.js os efeitos do jogo (vento, nuvens, janelas...). */
-function patch(mat: THREE.Material, u: Uniforms, o: PatchOpts) {
-  mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, u);
-    let vs = shader.vertexShader;
-    let fs = shader.fragmentShader;
-    const common = `#include <common>
-uniform float uTime; uniform vec2 uWind; varying vec3 vWPos; varying float vGlow; varying float vSheen;
-${o.tint || o.glow ? 'attribute float tint; attribute float glow;' : ''}`;
-    vs = vs.replace('#include <common>', common);
-    if (o.tint || o.glow) {
-      vs = vs.replace(
-        '#include <color_vertex>',
-        `#if defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
-  vColor = vec4(1.0);
-#endif
-#ifdef USE_COLOR
-  vColor.rgb *= color.rgb;
-#endif
-#ifdef USE_INSTANCING_COLOR
-  vColor.rgb *= mix(vec3(1.0), instanceColor.rgb, tint);
-#endif
-vGlow = glow;`,
-      );
-    } else vs = vs.replace('#include <color_vertex>', '#include <color_vertex>\nvGlow = 0.0;');
-    let move = '';
-    if (o.sway === 'tree') {
-      move = `
-#ifdef USE_INSTANCING
-  vec3 ip = instanceMatrix[3].xyz;
-  float ph = ip.x * 1.7 + ip.z * 1.3;
-  float bend = max(transformed.y - 0.08, 0.0);
-  float gust = 0.6 + 0.4 * sin(dot(ip.xz, uWind) * 0.8 - uTime * 0.9);
-  transformed.x += sin(uTime * 1.6 + ph) * 0.05 * bend * gust;
-  transformed.z += cos(uTime * 1.3 + ph * 1.2) * 0.04 * bend * gust;
-#endif`;
-    } else if (o.sway === 'crop') {
-      move = `
-#ifdef USE_INSTANCING
-  vec3 ip = instanceMatrix[3].xyz;
-  float hgt = max(transformed.y, 0.0);
-  float wave = sin(dot(ip.xz, uWind) * 2.4 - uTime * 2.2) * 0.5 + 0.5;
-  float gust = wave * wave;
-  vec3 lw = transpose(mat3(instanceMatrix)) * vec3(uWind.x, 0.0, uWind.y);
-  vec2 ld = normalize(lw.xz + 1e-5);
-  float bend = hgt * hgt * (1.2 + 3.8 * gust);
-  transformed.xz += ld * bend + vec2(sin(uTime * 3.1 + ip.x * 9.0), cos(uTime * 2.7 + ip.z * 7.0)) * hgt * 0.06;
-  transformed.y -= bend * 0.45;
-  vSheen = gust * clamp(hgt * 14.0, 0.0, 1.0);
-#endif`;
-    }
-    vs = vs.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
-vSheen = 0.0;
-${move}
-#ifdef USE_INSTANCING
-  vWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
-#else
-  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
-#endif`,
-    );
-    fs = fs.replace('#include <common>', `#include <common>\nuniform float uTime; uniform vec3 uSparkle; uniform float uNight; uniform vec3 uGlow; uniform float uClouds;\nvarying vec3 vWPos; varying float vGlow; varying float vSheen;\n${NOISE}`);
-    let color = '';
-    if (o.groundNoise) {
-      color += `{ vec2 p = vWPos.xz; float n = vnoise(p * 2.3) * 0.6 + vnoise(vec2(p.x * 7.0 + p.y * 2.0, p.y * 3.0)) * 0.4; diffuseColor.rgb *= 0.9 + 0.2 * n; }`;
-    }
-    if (o.water) {
-      color += `{ vec2 p = vWPos.xz;
-  float w = sin(p.x * 5.0 + uTime * 1.1 + sin(p.y * 3.0)) * sin(p.y * 6.0 - uTime * 0.9 + sin(p.x * 2.0));
-  diffuseColor.rgb *= 0.94 + 0.08 * w;
-  float s = smoothstep(0.93, 1.0, sin(p.x * 11.0 + uTime * 1.7) * sin(p.y * 13.0 - uTime * 1.3 + p.x));
-  diffuseColor.rgb = mix(diffuseColor.rgb, uSparkle, s * 0.55 * (1.0 - uNight * 0.7)); }`;
-    }
-    if (o.sway === 'crop') color += `diffuseColor.rgb *= 1.0 + vSheen * 0.22;`;
-    if (o.clouds) color += `diffuseColor.rgb *= 1.0 - uClouds * cloudShade(vWPos.xz, uTime);`;
-    fs = fs.replace('#include <color_fragment>', `#include <color_fragment>\n${color}`);
-    if (o.glow) fs = fs.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += uGlow * vGlow * uNight * 2.4;');
-    shader.vertexShader = vs;
-    shader.fragmentShader = fs;
-  };
-  mat.customProgramCacheKey = () => o.key;
-}
-
-export type MatKey = 'deco' | 'foliage' | 'crop' | 'crystal' | 'glass';
 
 export class Lib {
-  readonly uniforms: Uniforms = {
-    uTime: { value: 0 },
-    uSparkle: { value: new THREE.Color('#ffffff') },
-    uWind: { value: new THREE.Vector2(0.8, 0.6).normalize() },
-    uNight: { value: 0 },
-    uGlow: { value: new THREE.Color('#ffd98a') },
-    uClouds: { value: 0.16 },
-  };
-  readonly ground: THREE.MeshStandardMaterial;
-  readonly water: THREE.MeshStandardMaterial;
-  readonly mats: Record<MatKey, THREE.MeshStandardMaterial>;
+  readonly ground = makeGroundMaterial();
+  readonly water = makeWaterMaterial();
+  readonly mats: Record<MatKey, THREE.MeshStandardNodeMaterial> = makeDecoMaterials();
   readonly geos = new Map<string, THREE.BufferGeometry>();
   houseMeta: HouseMeta[] = [];
   landmarkMeta: { sails: [number, number, number] | null } = { sails: null };
-
-  constructor() {
-    const u = this.uniforms;
-    this.ground = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0 });
-    patch(this.ground, u, { key: 'ground', groundNoise: true, clouds: true });
-    this.water = new THREE.MeshStandardMaterial({ color: '#63b1dc', roughness: 0.3, metalness: 0.05 });
-    patch(this.water, u, { key: 'water', water: true, clouds: true });
-    const std = (extra: THREE.MeshStandardMaterialParameters = {}) => new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.85, metalness: 0, ...extra });
-    this.mats = {
-      deco: std(),
-      foliage: std({ roughness: 0.9 }),
-      crop: std({ roughness: 0.9, side: THREE.DoubleSide }),
-      crystal: std({ roughness: 0.25, metalness: 0.1, emissive: '#3a2a66', emissiveIntensity: 0.6 }),
-      glass: std({ roughness: 0.2, metalness: 0.2 }),
-    };
-    patch(this.mats.deco, u, { key: 'deco', tint: true, glow: true, clouds: true });
-    patch(this.mats.foliage, u, { key: 'foliage', tint: true, glow: true, sway: 'tree', clouds: true });
-    patch(this.mats.crop, u, { key: 'crop', tint: true, glow: true, sway: 'crop', clouds: true });
-    patch(this.mats.crystal, u, { key: 'crystal', tint: true, glow: true, sway: 'tree' });
-    patch(this.mats.glass, u, { key: 'glass', tint: true, glow: true });
-  }
 
   applyTheme(theme: Theme) {
     for (const g of this.geos.values()) g.dispose();
     this.geos.clear();
     const set = (k: string, g: THREE.BufferGeometry | null) => g && this.geos.set(k, g);
-    this.water.color.set(theme.water);
-    this.uniforms.uSparkle.value.set(theme.sparkle);
-    this.uniforms.uGlow.value.set(theme.window);
+    U.water.value.set(theme.water);
+    U.bank.value.set(theme.bank);
+    U.sparkle.value.set(theme.sparkle);
+    U.glow.value.set(theme.window);
 
     for (const f of theme.forest) if (!this.geos.has(`tree:${f.geo}`)) set(`tree:${f.geo}`, treeGeometry(f.geo, theme.trunk));
     this.domeKeys.clear();

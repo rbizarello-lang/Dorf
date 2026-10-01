@@ -1,6 +1,6 @@
 # Retalhos
 
-Puzzle relaxante de peças hexagonais, no gênero de Dorfromantik, com **14 temas de países e épocas**, **interações entre tipos de borda** e um mundo que se mexe: trigo ondulando ao vento, barcos descendo os rios, trens e caravanas nas estradas, moinhos girando, animais pastando e janelas que acendem à noite. Feito com Three.js, TypeScript e Vite, sem nenhum arquivo de arte: peças, casas, plantações, animais e sons são gerados em código.
+Puzzle relaxante de peças hexagonais, no gênero de Dorfromantik, com **14 temas de países e épocas**, **interações entre tipos de borda** e um mundo que se mexe: trigo ondulando ao vento, barcos descendo os rios, trens e caravanas nas estradas, moinhos girando, animais pastando e janelas que acendem à noite. Feito com Three.js (WebGPU, com WebGL2 automático onde não houver WebGPU), TypeScript e Vite, sem nenhum arquivo de arte: peças, casas, plantações, animais e sons são gerados em código.
 
 ![Toscana Renascentista](docs/screens/toscana.png)
 
@@ -63,7 +63,8 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 | `?theme=toscana` | tema inicial (ids em `src/themes/themes.ts` e `eras.ts`) |
 | `?seed=123` | partida reproduzível: a mesma semente dá a mesma sequência de peças |
 | `?time=night` | `day`, `dusk` ou `night` |
-| `?quality=high` | `auto`, `high`, `medium` ou `low` |
+| `?quality=high` | `auto`, `ultra`, `high`, `medium` ou `low` |
+| `?webgl` | força o WebGL2 em vez do WebGPU |
 | `?debug` | mostra FPS, draw calls, triângulos e instâncias |
 | `?auto=40` | a IA coloca 40 peças de uma vez (tabuleiro de exemplo) |
 | `?demo` | a IA joga sozinha, com animação |
