@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { bakeAO } from './bakeAO';
 import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
 import type { AnimalKind, BoatKind, BodyStyle, BridgeStyle, CropStyle, GateStyle, HouseKind, Landmark, RoofStyle, Theme, TreeGeo, VehicleKind } from '../themes/types';
 
@@ -22,7 +23,8 @@ interface Part {
 
 const tmpC = new THREE.Color();
 
-function kit(parts: Part[]): THREE.BufferGeometry {
+/** `ground`: o chão em y = 0 escurece a base na oclusão assada (falso para o que voa ou gira no ar). */
+function kit(parts: Part[], ground = true): THREE.BufferGeometry {
   const geos = parts.map((p) => {
     const g = p.geo.index ? p.geo.toNonIndexed() : p.geo.clone();
     for (const k of Object.keys(g.attributes)) if (k !== 'position') g.deleteAttribute(k);
@@ -50,6 +52,7 @@ function kit(parts: Part[]): THREE.BufferGeometry {
   });
   const out = mergeGeometries(geos)!;
   out.computeVertexNormals();
+  bakeAO(out, ground);
   return out;
 }
 
@@ -820,7 +823,7 @@ function sailsGeometry(det: Col, sail: Col) {
     const cloth = box(0.034, 0.11, 0.003, 0.022, 0.05, 0.004).rotateZ(a);
     parts.push({ geo: arm, color: det }, { geo: cloth, color: sail });
   }
-  return kit(parts);
+  return kit(parts, false);
 }
 
 /** Roda d'água: gira em torno do eixo x. */
@@ -833,7 +836,7 @@ function wheelGeometry(wood: Col) {
   }
   parts.push({ geo: new THREE.TorusGeometry(0.06, 0.005, 4, 12).rotateY(Math.PI / 2).translate(0.014, 0, 0), color: '#5a4032' });
   parts.push({ geo: new THREE.TorusGeometry(0.06, 0.005, 4, 12).rotateY(Math.PI / 2).translate(-0.014, 0, 0), color: '#5a4032' });
-  return kit(parts);
+  return kit(parts, false);
 }
 
 // ---------------------------------------------------------------- portais e pontes
@@ -991,7 +994,7 @@ function rotorGeometry() {
     parts.push({ geo: new THREE.BoxGeometry(0.012, 0.05, 0.002).rotateY(0.35).translate(0, 0.04, 0).rotateZ(a), color: '#c9ccd2' });
   }
   parts.push({ geo: new THREE.TorusGeometry(0.06, 0.002, 3, 14), color: '#8a8f96' });
-  return kit(parts);
+  return kit(parts, false);
 }
 
 /** Armazém sobre estacas (estabur): pés de madeira com pedras, sótão em balanço, escada. */
@@ -1162,7 +1165,7 @@ function birdGeometry() {
     { geo: tri([0, 0, 0], [0.012, 0, 0], [-0.01, 0.004, -0.03]), color: '#3a3634' },
     { geo: tri([-0.01, 0.004, 0.03], [0, 0, 0], [0.012, 0, 0]), color: '#3a3634' },
     { geo: tri([0.012, 0, 0], [0, 0, 0], [-0.01, 0.004, -0.03]), color: '#3a3634' },
-  ]);
+  ], false);
 }
 
 // ---------------------------------------------------------------- estruturas das interações
