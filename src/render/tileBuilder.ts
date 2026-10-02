@@ -870,19 +870,22 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const s = randRange(rng, 0.9, 1.4) * (kind.geo === 'crystal' ? 1.4 : kind.geo === 'cactus' ? 1.1 : 1);
     D(`tree:${kind.geo}`, x, 0, z, rng() * Math.PI * 2, [s, s * randRange(rng, 0.9, 1.15), s], vary(rng, tc(pick(rng, kind.colors))));
     taken.push([x, z]);
+    trees.push([x, z, s]);
   };
+  const trees: [number, number, number][] = [];
   const houseKinds = theme.houses.map((h, i) => [i, h.weight] as const);
   const houses: { x: number; z: number; s: number; sector: number }[] = [];
   const addHouse = (x: number, z: number, baseAng: number, sector = -1) => {
     const i = weighted(rng, houseKinds);
     const kind = theme.houses[i];
     const meta = opts.houses[i];
-    const s = randRange(rng, 1.15, 1.45) * (kind.body === 'long' ? 0.9 : 1);
+    // Poucas casas grandes, alinhadas à borda: de longe cada uma se lê sozinha.
+    const s = randRange(rng, 1.5, 1.8) * (kind.body === 'long' ? 0.9 : 1);
     const sy = randRange(rng, 0.92, 1.12);
-    const ry = baseAng + (rng() < 0.5 ? 0 : Math.PI / 2) + (rng() - 0.5) * 0.4;
+    const ry = baseAng + (rng() < 0.5 ? 0 : Math.PI / 2) + (rng() - 0.5) * 0.12;
     D(`wall:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(pick(rng, kind.walls)), 0.04));
     D(`roof:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(pick(rng, kind.roofs)), 0.05));
-    if (meta?.chimney && rng() < 0.7) {
+    if (meta?.chimney && rng() < 0.85) {
       const [cx, cy, cz] = meta.chimney;
       const c = Math.cos(ry), sn = Math.sin(ry);
       chimneys.push(x + (cx * c + cz * sn) * s, cy * s * sy, z + (-cx * sn + cz * c) * s);
@@ -908,10 +911,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         if (p && distToPaths(p[0], p[1], allPaths) > 0.03 && free(p[0], p[1], 0.03)) D('grass', p[0], 0, p[1], rng() * 6, randRange(rng, 0.9, 1.4), shade(tc(pick(rng, theme.grass)), 0.8));
       }
     } else if (terr === T.Village) {
-      const n = randInt(rng, 2, 3);
+      const n = randInt(rng, 1, 2);
       for (let k = 0, tries = 0; k < n && tries < n * 6; tries++) {
-        const p = samplePoint(rng, i, 0.14, 0.13);
-        if (!p || !free(p[0], p[1], 0.22) || distToPaths(p[0], p[1], allPaths) < 0.14) continue;
+        const p = samplePoint(rng, i, 0.15, 0.13);
+        if (!p || !free(p[0], p[1], 0.27) || distToPaths(p[0], p[1], allPaths) < 0.16) continue;
         addHouse(p[0], p[1], sectorAng, i);
         k++;
       }
@@ -950,6 +953,12 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         }
       }
     }
+  }
+
+  // Chão de mata sob cada árvore: terra escura que assenta a copa no chão (Dorfromantik).
+  if (trees.length) {
+    const floor = tc(theme.ground[T.Forest]).clone().lerp(tc(theme.trunk), 0.35).multiplyScalar(0.72);
+    for (const [x, z, s] of trees) disc(g, x, z, 0.055 * s, 0.0025, floor, 7, [0, 1, 0, 0]);
   }
 
   // Centro: segue o terreno dominante, quando não há rio, estrada ou marco.
