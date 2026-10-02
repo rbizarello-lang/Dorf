@@ -1,14 +1,16 @@
 import * as THREE from 'three/webgpu';
 import { mrt, vec3, vec4 } from 'three/tsl';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Board, Check, PlaceResult, Placed } from '../core/board';
 import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey } from '../core/hex';
+import type { SiteKind } from '../core/sites';
 import type { SynHit, SynKind } from '../core/synergy';
 import { T, rotateEdges, type TileDef } from '../core/tiles';
 import type { Theme } from '../themes/types';
 import { CameraRig } from './cameraRig';
 import { createRenderer, type Backend } from './gpu';
-import { Lib, instGeometry, setInstColor } from './lib';
+import { Lib, instGeometry, setInstColor, stampGeometry } from './lib';
 import { Life } from './life';
 import { U, makeVoidMaterial, softShadowFilter } from './materials';
 import { A, fogNode } from './atmosphere';
@@ -424,6 +426,12 @@ export class World {
   private skyTarget!: Sky;
   private voidU: ReturnType<typeof makeVoidMaterial>['u'];
   private voidMat: THREE.MeshStandardNodeMaterial;
+  /** Raio explorado que o vazio persegue (terra incógnita). */
+  private voidGoal = 6;
+  /** Carimbos dos sítios ainda escondidos, no plano do vazio. */
+  private stamps: THREE.Mesh;
+  private stampSig = '';
+  private stampMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.8, depthWrite: false, fog: false, side: THREE.DoubleSide });
   private slots: THREE.InstancedMesh;
   private slotMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.55, depthWrite: false, fog: false });
   private slotCount = 0;
@@ -520,6 +528,12 @@ export class World {
     voidMesh.receiveShadow = true;
     this.scene.add(voidMesh);
 
+    this.stamps = new THREE.Mesh(new THREE.BufferGeometry(), this.stampMat);
+    this.stamps.position.y = -0.115;
+    this.stamps.renderOrder = 1;
+    this.stamps.frustumCulled = false;
+    this.scene.add(this.stamps);
+
     const hex = new THREE.CircleGeometry(0.9, 6).rotateX(-Math.PI / 2);
     this.slots = new THREE.InstancedMesh(hex, this.slotMat, 512);
     this.slots.count = 0;
@@ -601,6 +615,8 @@ export class World {
     this.voidU.fill.value.copy(s.fill);
     this.voidU.line.value.copy(s.line);
     this.slotMat.color.copy(s.line);
+    // Nanquim dos carimbos: a tinta do tema diluída no papel.
+    if (this.theme) this.stampMat.color.set(this.theme.ui.ink).lerp(s.fill, 0.5);
     this.slotMat.opacity = 0.55 - s.night * 0.3;
     this.sun.color.copy(s.sun);
     this.sun.intensity = s.sunI;
@@ -764,13 +780,13 @@ export class World {
 
   // ---------------------------------------------------------------- mapa
 
-  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number }) {
+  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind }) {
     return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, ...extra });
   }
 
   /** Peça do mapa já colocada: a inicial reserva o Centro, e a do marco o ergue. */
   private buildPlaced(p: Placed) {
-    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark });
+    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site });
   }
 
   /**
@@ -953,15 +969,44 @@ export class World {
     this.slotCount = i;
     this.slots.count = i;
     this.slots.instanceMatrix.needsUpdate = true;
-    this.voidU.radius.value = maxR + 1;
+    this.voidGoal = maxR + 1;
+    this.updateStamps(board);
     this.rig.bounds = maxR;
+  }
+
+  /** O batedor sai do Centro na direção do sítio mais perto, olha da beira da peça e volta. */
+  scout(board: Board) {
+    let best: { x: number; z: number } | null = null;
+    for (const st of board.sites) {
+      if (st.found) continue;
+      const w = hexToWorld(st.q, st.r);
+      if (!best || Math.hypot(w.x, w.z) < Math.hypot(best.x, best.z)) best = w;
+    }
+    if (!best) return;
+    const l = Math.hypot(best.x, best.z) || 1;
+    const ux = best.x / l, uz = best.z / l;
+    this.life.scout(ux * 0.3, uz * 0.3, ux * 0.72, uz * 0.72);
+  }
+
+  private updateStamps(board: Board) {
+    const left = board.sites.filter((s) => !s.found);
+    const sig = left.map((s) => `${s.q},${s.r},${s.kind}`).join('|');
+    if (sig === this.stampSig) return;
+    this.stampSig = sig;
+    const geos = left.map((s) => {
+      const { x, z } = hexToWorld(s.q, s.r);
+      // Cada carimbo um pouco torto, como batido à mão (sem sorteio: vem da posição).
+      return stampGeometry(s.kind).rotateY(Math.sin(s.q * 12.9898 + s.r * 78.233) * 0.25).translate(x, 0, z);
+    });
+    this.stamps.geometry.dispose();
+    this.stamps.geometry = geos.length ? mergeGeometries(geos)! : new THREE.BufferGeometry();
   }
 
   /** Coloca com animação: a peça assenta, levanta poeira e depois é "cozida" no bloco. */
   placeAnimated(p: Placed) {
     const syn = synBase(p.synergies, p.rot);
     const flow = this.settleFlow(p);
-    const sig = `${synSig(syn)}|${flow.join('')}|${p.eraMark ?? ''}`;
+    const sig = `${synSig(syn)}|${flow.join('')}|${p.eraMark ?? ''}|${p.site ?? ''}`;
     let live: LiveTile;
     let y0 = 1.2;
     if (this.ghost && this.ghost.def === p.def && this.ghost.sig === sig) {
@@ -970,7 +1015,7 @@ export class World {
       this.ghost = null;
       this.ghostKey = '';
     } else {
-      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark }), sig, this.lib, this.quality !== 'low');
+      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site }), sig, this.lib, this.quality !== 'low');
       this.scene.add(live.group);
       this.dropGhost();
     }
@@ -998,11 +1043,12 @@ export class World {
     const flow = flowBase(this.flowAt(q, r, rotateEdges(def.edges, rot)), rot);
     // O fantasma já mostra o marco da era que a peça ergueria.
     const mark = check.valid ? (check.eraMark ?? undefined) : undefined;
-    const sig = `${synSig(syn)}|${flow.join('')}|${mark ?? ''}`;
+    const site = check.valid ? check.site?.kind : undefined;
+    const sig = `${synSig(syn)}|${flow.join('')}|${mark ?? ''}|${site ?? ''}`;
     const key = `${def.seed}:${this.theme.id}:${sig}`;
     if (!this.ghost || this.ghostKey !== key) {
       const old = this.ghost;
-      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark }), sig, this.lib, this.quality !== 'low');
+      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site }), sig, this.lib, this.quality !== 'low');
       this.ghostKey = key;
       this.scene.add(this.ghost.group);
       if (old && old.def === def) {
@@ -1248,6 +1294,7 @@ export class World {
     const wa = 0.65 + Math.sin(this.time * 0.05) * 0.5;
     U.wind.value.set(Math.cos(wa), Math.sin(wa));
     this.stepSky(realDt);
+    this.voidU.radius.value += (this.voidGoal - this.voidU.radius.value) * Math.min(1, realDt / 1.2);
     this.rig.update(realDt);
     this.rig.apply(this.camera);
 

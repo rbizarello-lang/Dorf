@@ -101,6 +101,7 @@ let game: Game;
 let moves: MoveRec[] = [];
 let rotSteps = 0;
 let hover: { q: number; r: number } | null = null;
+let scoutPending = false;
 let best = Number(store.get('best')) || 0;
 const QUALITIES: QualityMode[] = ['auto', 'cinema', 'ultra', 'high', 'medium', 'low'];
 const pickQ = (v: string | null) => (v && (QUALITIES as string[]).includes(v) ? (v as QualityMode) : null);
@@ -128,6 +129,11 @@ const SITE_LABEL: Record<SiteKind, { name: string; icon: string }> = {
   treasure: { name: 'Tesouro', icon: '◆' },
   relic: { name: 'Relíquia', icon: '✦' },
   lookout: { name: 'Mirante', icon: '◉' },
+};
+
+const siteReward = (kind: SiteKind) => {
+  const r = SITE_REWARD[kind];
+  return [r.points ? `+${r.points} pontos` : '', r.tiles ? `+${r.tiles} peça${r.tiles > 1 ? 's' : ''}` : '', kind === 'lookout' ? `próximas peças à vista por ${LOOKOUT_MOVES} jogadas` : ''].filter(Boolean).join(' · ');
 };
 
 // ------------------------------------------------------------------ partida
@@ -166,6 +172,8 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   hud.applyTheme(theme);
   hud.renderQuests(game.board.quests, theme);
   frameCamera(true);
+  // Partida nova: o batedor mostra para onde fica o sítio mais perto (quando a ajuda fechar).
+  scoutPending = !replay.length;
   refreshHud(true);
   persist();
   return true;
@@ -391,9 +399,7 @@ function announce(res: PlaceResult) {
   }
   if (res.newQuest) hud.toast(`Nova missão: ${questLabel(res.newQuest, theme)}`);
   if (res.site) {
-    const r = SITE_REWARD[res.site.kind];
-    const what = [r.points ? `+${r.points} pontos` : '', r.tiles ? `+${r.tiles} peça${r.tiles > 1 ? 's' : ''}` : '', res.site.kind === 'lookout' ? `próximas peças à vista por ${LOOKOUT_MOVES} jogadas` : ''].filter(Boolean).join(' · ');
-    hud.toast(`${SITE_LABEL[res.site.kind].name} descoberta: ${what}`, 'good');
+    hud.toast(`${SITE_LABEL[res.site.kind].name} descoberta: ${siteReward(res.site.kind)}`, 'good');
     sfx.quest();
   }
   if (res.eraUp !== null) {
@@ -1241,6 +1247,10 @@ function step(now: number) {
   const c0 = performance.now();
   keyboardCamera(dt);
   if (params.has('demo')) demoStep(dt);
+  if (scoutPending && !hud.modalOpen) {
+    scoutPending = false;
+    world.scout(game.board);
+  }
   world.tick(dt);
   if (take && !take.frame(realDt, { x: world.rig.target.x, z: world.rig.target.z, dist: world.rig.dist, yaw: world.rig.yaw })) stopTake('A gravação chegou a 2 minutos.');
   hud.tick(dt);
@@ -1250,10 +1260,11 @@ function step(now: number) {
     const s = screenOf(q.anchor.q, q.anchor.r, 0.55);
     markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: q.exact ? `=${q.target}` : `${q.target}+`, color: theme.terrainColors[q.terrain] });
   }
-  for (const st of game.board.sites) {
-    if (st.found) continue;
+  // Os sítios são carimbos no mapa (World); a etiqueta com a recompensa só aparece com o fantasma em cima.
+  const st = hover && game.current ? game.board.siteAt(hover.q, hover.r) : null;
+  if (st) {
     const s = screenOf(st.q, st.r, 0.05);
-    markers.push({ id: 100000 + st.q * 1000 + st.r, x: s.x, y: s.y + 30, visible: s.visible, text: SITE_LABEL[st.kind].icon, color: '#8a6a3a', kind: st.kind });
+    markers.push({ id: 100000 + st.q * 1000 + st.r, x: s.x, y: s.y + 30, visible: s.visible, text: `${SITE_LABEL[st.kind].icon} ${SITE_LABEL[st.kind].name}: ${siteReward(st.kind)}`, color: '#8a6a3a', kind: st.kind });
   }
   hud.updateMarkers(markers);
   cpuAcc += performance.now() - c0;
@@ -1381,6 +1392,16 @@ function start(data: unknown) {
 };
 
 // Centraliza a câmera num barco andando (capturas das esteiras na água).
+(window as unknown as { __site: (zoom?: number) => string | null }).__site = (zoom) => {
+  const found = [...game.board.list].reverse().find((p) => p.site);
+  const st = found ?? game.board.sites.find((x) => !x.found);
+  if (!st) return null;
+  const { x, z } = hexToWorld(st.q, st.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return found ? `achado:${found.site}` : `escondido:${(st as { kind: string }).kind}`;
+};
 (window as unknown as { __folk: (i?: number, zoom?: number) => boolean }).__folk = (i = 0, zoom) => {
   const f = world.life.workerPos(i);
   if (!f) return false;

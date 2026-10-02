@@ -2,7 +2,8 @@ import * as THREE from 'three/webgpu';
 import { corner, edgeMid, INR } from '../core/hex';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
 import type { SynKind } from '../core/synergy';
-import { T } from '../core/tiles';
+import type { SiteKind } from '../core/sites';
+import { isStrict, T } from '../core/tiles';
 import type { CropKind, Theme } from '../themes/types';
 import { CROP_LAYOUT, type HouseMeta } from './lib';
 
@@ -77,6 +78,8 @@ export interface BuildOpts {
   center?: boolean;
   /** Marco da era erguido nesta peça (índice da era: uma flâmula por era). */
   eraMark?: number;
+  /** Sítio descoberto nesta peça: ruína, baú, relicário ou torre de vigia. */
+  site?: SiteKind;
 }
 
 type V2 = [number, number];
@@ -713,6 +716,22 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       }
       reserved.push([x, z, R + 0.05]);
     }
+  }
+
+  // --- Sítio descoberto: no meio da peça ou no meio de um setor sem rio nem estrada (sem sorteio).
+  if (opts.site) {
+    const spots: [number, number][] = [[0, 0]];
+    for (let i = 0; i < 6; i++) {
+      if (isStrict(edges[i])) continue;
+      const [mx, mz] = edgeMid(i);
+      spots.push([mx * 0.5, mz * 0.5]);
+    }
+    const spot = spots.find(([x, z]) => distToPaths(x, z, allPaths) > 0.17 && free(x, z, 0.16)) ?? spots[spots.length - 1];
+    const [x, z] = spot;
+    const ry = x === 0 && z === 0 ? 0.4 : yawTo(-x, -z);
+    disc(g, x, z, 0.15, 0.004, shade(tc(theme.ground[T.Village]), 0.9), 14);
+    D(`site:${opts.site}`, x, 0.004, z, ry, 1, opts.site === 'treasure' ? tc(theme.animals.colors[0]) : WHITE);
+    reserved.push([x, z, 0.17]);
   }
 
   // --- Construções internas (sem pontos): moinho d'água, estação, silo, irrigação.
