@@ -1284,7 +1284,6 @@ export class Lib {
     this.geos.clear();
     const set = (k: string, g: THREE.BufferGeometry | null) => g && this.geos.set(k, g);
     U.water.value.set(theme.water);
-    U.bank.value.set(theme.bank);
     U.sparkle.value.set(theme.sparkle);
     U.glow.value.set(theme.window);
 

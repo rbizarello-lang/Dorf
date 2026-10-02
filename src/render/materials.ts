@@ -1,43 +1,62 @@
 import * as THREE from 'three/webgpu';
 import {
+  BRDF_GGX,
+  BRDF_Lambert,
+  F_Schlick,
   Fn,
+  Loop,
   abs,
   attribute,
   cameraPosition,
   cameraViewMatrix,
   clamp,
   cos,
+  dFdx,
+  dFdy,
+  diffuseContribution,
   dot,
   exp,
   float,
+  floor,
   fract,
   fwidth,
   hash,
   instanceIndex,
   length,
   max,
+  min,
   mix,
+  mod,
   modelWorldMatrix,
   normalView,
   normalWorld,
   positionGeometry,
   positionLocal,
   positionPrevious,
+  positionViewDirection,
   positionWorld,
   reference,
+  refract,
   renderGroup,
+  roughness,
   select,
+  sign,
   sin,
   smoothstep,
+  specularColor,
+  specularColorBlended,
+  specularF90,
+  step,
   texture,
   uniform,
+  uniformArray,
   varying,
   vec2,
   vec3,
   vec4,
   vertexColor,
 } from 'three/tsl';
-import { makeNoiseTexture, makeWaterTexture } from './noise';
+import { CAUSTIC_FRAMES, CAUSTIC_SIZE, makeCausticTexture, makeNoiseTexture, makeWaterTexture } from './noise';
 
 // Materiais do jogo em TSL (nós do three.js), que compilam tanto para WebGPU
 // quanto para WebGL2. Atributos por vértice dos kits (ver lib.ts):
@@ -56,12 +75,9 @@ export const U = {
   sparkle: uniform(new THREE.Color('#ffffff')),
   glow: uniform(new THREE.Color('#ffd98a')),
   water: uniform(new THREE.Color('#63b1dc')),
-  bank: uniform(new THREE.Color('#d9e3a2')),
-  /** Cor do céu refletida na água (acompanha a hora do dia). */
-  sky: uniform(new THREE.Color('#fff4f0')),
   /** Onda no chão quando uma peça assenta: (x, z, instante inicial, força). */
   ripple: uniform(new THREE.Vector4(0, 0, -100, 0)),
-  /** Direção (para o sol) e cor da luz do sol, para o cintilar da água. */
+  /** Direção (para o sol) e cor da luz do sol: o caminho do sol dentro da água e a luz de contorno dos kits. */
   sunDir: uniform(new THREE.Vector3(-0.5, 0.8, 0.3).normalize()),
   sun: uniform(new THREE.Color('#fff0d8')),
 };
@@ -247,23 +263,189 @@ export function makeGroundMaterial() {
   return m;
 }
 
+// ---------------------------------------------------------------- água
+
+/** Índice de refração da água e a refletância de frente de um dielétrico com ele. */
+const IOR = 1.333;
+const WATER_F0 = ((IOR - 1) / (IOR + 1)) ** 2;
+/** Coluna d'água mais funda (tileBuilder: do leito escavado até a superfície). */
+const DEPTH_MAX = 0.028;
 /**
- * Água dos rios e lagos. Atributos por vértice (tileBuilder): `wflow` = correnteza no
- * plano (0 a 1) e `wedge` = 0 no meio do canal, 1 na beira.
- *   - ondulação que desce o rio (mapa de fluxo em duas fases que se alternam);
- *   - cor por profundidade (rasa e clara na beira, funda e escura no meio);
- *   - espuma na beira e rastros onde a água corre;
- *   - normal ondulada para o brilho do sol e um reflexo do céu nos ângulos rasantes.
+ * Absorção por canal, medida em colunas inteiras: uma turbidez igual nos três canais e um
+ * extra para os canais fracos na cor da água do tema (numa água azul, o vermelho some antes).
+ */
+const ABS_BASE = 0.65;
+const ABS_HUE = 0.5;
+/** Ganho do reflexo do céu: o ambiente do jogo é bem mais escuro que um céu de verdade (sky.ts). */
+const SKY_GAIN = 2.2;
+/** Cáusticas: lado do ladrilho no mundo, duração do ciclo (s) e força. */
+const CAUSTIC_TILE = 0.6;
+const CAUSTIC_LOOP = 7;
+const CAUSTIC_GAIN = 0.8;
+
+export const causticTex = makeCausticTexture();
+
+/** Esteiras dos barcos, preenchidas pelo life.ts: (x, z, rumo × força), os mais perto da câmera. */
+export const WAKE_MAX = 8;
+export const WAKES = uniformArray(Array.from({ length: WAKE_MAX }, () => new THREE.Vector4()), 'vec4');
+export const WAKE_N = uniform(0, 'int');
+
+/**
+ * Máscara do reflexo de tela (post.ts) gravada por material no lugar da rugosidade. A da
+ * água varia com a distância (filtro abaixo) e deixou de servir de assinatura.
+ */
+export const ssrMask = new WeakMap<THREE.Material, N>();
+
+/** Fresnel exato de um dielétrico (luz não polarizada), do ar para a água. */
+const fresnelWater = (cosI: N) => {
+  const c = cosI.clamp(0, 1);
+  const cosT = float(1).sub(float(1).sub(c.mul(c)).div(IOR * IOR)).max(0).sqrt();
+  const rs = c.sub(cosT.mul(IOR)).div(c.add(cosT.mul(IOR)));
+  const rp = c.mul(IOR).sub(cosT).div(c.mul(IOR).add(cosT));
+  return rs.mul(rs).add(rp.mul(rp)).mul(0.5);
+};
+
+interface WaterShade {
+  /** Normal do leito (espaço de câmera): a luz difusa vem de baixo, não das ondas. */
+  bedN: N;
+  /** Refletância difusa sob a luz direta: leito com cáusticas, água turva e espuma. */
+  lit: N;
+}
+
+/**
+ * Luz da água. A superfície só reflete: o sol pelo GGX e o céu com o Fresnel exato. O que
+ * vem de baixo (leito e água turva) é difuso e iluminado como o chão do leito, então a beira
+ * molhada continua o barranco seco sem emenda; as cáusticas multiplicam só a luz direta,
+ * e por isso somem na sombra e à noite.
+ */
+class WaterLighting extends THREE.PhysicalLightingModel {
+  private shade: WaterShade;
+
+  constructor(shade: WaterShade) {
+    super();
+    this.shade = shade;
+  }
+
+  direct({ lightDirection, lightColor, reflectedLight }: N) {
+    const v = positionViewDirection;
+    const dotVH = v.dot(lightDirection.add(v).normalize()).clamp();
+    const F = (F_Schlick as N)({ f0: specularColor, f90: specularF90, dotVH });
+    const bedNL = this.shade.bedN.dot(lightDirection).clamp();
+    reflectedLight.directDiffuse.addAssign(lightColor.mul(bedNL).mul((BRDF_Lambert as N)({ diffuseColor: this.shade.lit })).mul(F.oneMinus()));
+    const dotNL = normalView.dot(lightDirection).clamp();
+    const spec = (BRDF_GGX as N)({ lightDirection, f0: specularColorBlended, f90: float(1), roughness });
+    reflectedLight.directSpecular.addAssign(lightColor.mul(dotNL).mul(spec).mul(this.multiScatteringCompensation as N));
+  }
+
+  indirectSpecular(builder: N) {
+    const { radiance, iblIrradiance, reflectedLight } = builder.context;
+    const F = fresnelWater(normalView.dot(positionViewDirection)).toVar();
+    reflectedLight.indirectSpecular.addAssign(radiance.mul(F).mul(SKY_GAIN));
+    reflectedLight.indirectDiffuse.addAssign(diffuseContribution.mul(iblIrradiance).mul(1 / Math.PI).mul(F.oneMinus()));
+  }
+}
+
+class WaterMaterial extends THREE.MeshStandardNodeMaterial {
+  shade!: WaterShade;
+
+  setupSpecular() {
+    specularColor.assign(vec3(WATER_F0));
+    specularColorBlended.assign(vec3(WATER_F0));
+    specularF90.assign(1);
+  }
+
+  setupLightingModel() {
+    return new WaterLighting(this.shade);
+  }
+}
+
+/**
+ * Ondinhas que não vêm do mapa de ondas: esteiras dos barcos (o V de Kelvin e as ondas
+ * transversais), anéis de peixe (uma célula sorteada por hash, de tempos em tempos) e a
+ * onda de quando uma peça assenta. Devolve (inclinação x, inclinação z, espuma).
+ */
+const ripples = (p: N, depth: N) =>
+  Fn(() => {
+    const t = U.time;
+    const slope = vec2(0).toVar();
+    const foam = float(0).toVar();
+    Loop(WAKE_N, ({ i }: { i: N }) => {
+      const b = WAKES.element(i) as N;
+      const rel = p.sub(b.xy);
+      const s = length(b.zw);
+      const dir = b.zw.div(s.max(1e-4));
+      const side = vec2(dir.y.negate(), dir.x);
+      const ahead = dot(rel, dir);
+      const back = ahead.negate().max(0);
+      const across = dot(rel, side);
+      const decay = exp(back.mul(-2.5)).mul(smoothstep(0.03, -0.03, ahead)).mul(s);
+      // Braços do V (ângulo de Kelvin, ~19,5°): uma crista de cada lado, que alarga e some
+      // a uns 3 comprimentos de barco. A inclinação não cai com a largura, senão some de longe.
+      const off = abs(across).sub(back.mul(0.354));
+      const x = off.div(back.mul(0.035).add(0.004));
+      const arm = exp(x.pow2().negate()).mul(decay);
+      const dOff = side.mul(sign(across)).add(dir.mul(0.354));
+      slope.addAssign(dOff.mul(x.mul(arm).mul(-1.05)));
+      // Ondas transversais dentro do V, paradas em relação ao barco.
+      const inV = smoothstep(0.36, 0.18, abs(across).div(back.max(0.01))).mul(decay);
+      slope.addAssign(dir.mul(cos(back.mul(120))).mul(inV.mul(-0.18)));
+      // Espuma: o contorno do casco (elipse do tamanho médio dos barcos, mais forte na proa)
+      // e o começo dos braços.
+      const hull = length(vec2(ahead.div(0.085), across.div(0.03)));
+      const bow = smoothstep(-0.04, 0.07, ahead).mul(0.4).add(0.6);
+      foam.addAssign(arm.mul(smoothstep(0.24, 0.05, back)).mul(0.6).add(exp(hull.sub(1).pow2().mul(-30)).mul(bow).mul(s).mul(0.55)));
+    });
+    // Peixes: em metade das células de 0,9, um anel duplo nasce a cada 5 a 10 s e se abre.
+    const CELL = 0.9;
+    const cell = floor(p.div(CELL)) as N;
+    const seed = cell.x.add(512).add(cell.y.add(512).mul(1024)).mul(8);
+    const h = (k: number) => hash(seed.add(k));
+    const period = h(0).mul(5).add(5);
+    const age = fract(t.div(period).add(h(1))).mul(period);
+    const rel = p.sub(cell.add(vec2(h(2), h(3)).mul(0.6).add(0.2)).mul(CELL));
+    const r = length(rel).max(1e-4);
+    const R = age.mul(0.07);
+    const env = exp(age.mul(-1.1)).mul(smoothstep(0, 0.25, age)).mul(step(h(4), 0.5)).mul(smoothstep(0.003, 0.01, depth));
+    const x1 = r.sub(R), x2 = r.sub(R.mul(0.6));
+    const g1 = exp(x1.div(0.007).pow2().negate());
+    const g2 = exp(x2.div(0.005).pow2().negate());
+    const dh = x1.mul(-2 / 0.007 ** 2).mul(g1).add(x2.mul((-2 * 0.6) / 0.005 ** 2).mul(g2)).mul(env).mul(0.0009);
+    slope.addAssign(rel.div(r).mul(dh));
+    foam.addAssign(g1.mul(env).mul(smoothstep(0.8, 0, age)).mul(0.35));
+    // Peça que assenta: a inclinação da onda de `rippleY` (que já sobe e desce os vértices)
+    // e uma franja de ondinhas finas atrás da frente.
+    const rd = length(p.sub(U.ripple.xy)).max(1e-4);
+    const rage = t.sub(U.ripple.z).max(0);
+    const fx = rd.sub(rage.mul(3.2).add(0.75));
+    const renv = exp(rage.mul(-1.9)).mul(smoothstep(0.6, 0.95, rd)).mul(U.ripple.w);
+    const main = cos(fx.mul(10)).mul(10).sub(fx.mul(28).mul(sin(fx.mul(10)))).mul(exp(fx.mul(fx).mul(-14))).mul(0.042);
+    const fine = cos(fx.mul(90)).mul(exp(fx.mul(fx).mul(-60))).mul(0.06);
+    slope.addAssign(p.sub(U.ripple.xy).div(rd).mul(main.add(fine).mul(renv)));
+    return vec3(slope, foam);
+  })();
+
+/**
+ * Água dos rios e lagos, com coluna d'água. Atributos por vértice (tileBuilder): `wflow` =
+ * correnteza no plano; `wbed` = cor do leito e profundidade exata (a malha da água repete a
+ * do leito, então a profundidade chega a zero exatamente onde o barranco corta a água).
+ *   - ondulação que desce o rio (mapa de fluxo em duas fases), esteiras e anéis;
+ *   - o olhar refrata, atravessa a coluna e encontra o leito; cada canal é absorvido conforme
+ *     a cor da água do tema, e a água turva que sobra ganha a cor funda do tema;
+ *   - cáusticas no leito (volume pré-calculado em noise.ts), só na luz direta;
+ *   - reflexo com Fresnel exato; o brilho do sol é o GGX da luz, com a rugosidade alargada
+ *     pela variação das ondas dentro do pixel: de longe vira um caminho de luz estável;
+ *   - espuma rendada na beira, rastros na correnteza e espuma das esteiras.
  */
 export function makeWaterMaterial() {
-  const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.08, metalness: 0 });
+  const m = new WaterMaterial({ roughness: 0.05, metalness: 0 });
   m.positionNode = displaced();
   const p = positionWorld.xz;
   const t = U.time;
   // Correnteza em coordenadas de mundo (o bloco estático já vem girado; a peça viva não).
   const fl = attribute('wflow', 'vec2');
   const f = modelWorldMatrix.mul(vec4(fl.x, 0, fl.y, 0)).xz;
-  const w = attribute('wedge', 'float');
+  const bed = attribute('wbed', 'vec4');
+  const depth = bed.w.max(0);
   const speed = length(f);
   const CYCLE = 2.6;
   const ph0 = fract(t.div(CYCLE));
@@ -279,29 +461,73 @@ export function makeWaterMaterial() {
   const nB = texture(waterTex, uvB);
   const nn = mix(nB, nA, wA);
   const big = texture(waterTex, p.mul(0.23).add(vec2(t.mul(-0.004), t.mul(0.006))));
-  const slope = nn.rg.sub(0.5).mul(2).mul(0.55).add(big.rg.sub(0.5).mul(0.5));
-  const nW = vec3(slope.x.negate(), 1, slope.y.negate()).normalize();
+  const extra = ripples(p, depth).toVar();
+  const slope = nn.rg.sub(0.5).mul(2).mul(0.55).add(big.rg.sub(0.5).mul(0.5)).add(extra.xy);
+  const nW = vec3(slope.x.negate(), 1, slope.y.negate()).normalize().toVar();
   m.normalNode = cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize();
 
-  const shallow = mix(U.water, U.bank, 0.22).mul(vec3(1.0, 1.12, 1.1));
-  const deep = (U.water as N).mul(vec3(0.36, 0.52, 0.72));
-  const depth = smoothstep(0.05, 1.0, w);
-  let col: N3 = mix(deep, shallow, depth.mul(depth.mul(-0.5).add(1.5)).clamp(0, 1));
-  // Reflexo do céu: mais forte quando o olhar é rasante e nas cristas.
+  // O olhar refrata na superfície e desce até o leito; o sol faz o mesmo caminho na descida.
   const view = cameraPosition.sub(positionWorld).normalize();
-  const fres = float(1).sub(view.y.clamp(0, 1)).pow(3).mul(0.45).add(nn.b.sub(0.5).mul(0.1));
-  col = mix(col, U.sky, fres.clamp(0, 0.4));
-  // Espuma: na beira, quebrada pelo ruído, e rastros finos onde a água corre.
-  const shore = smoothstep(0.8, 0.97, w.add(big.b.sub(0.5).mul(0.35)).add(nn.b.sub(0.5).mul(0.12)));
-  const streak = nn.a.mul(smoothstep(0.25, 0.9, speed)).mul(smoothstep(0.15, 0.6, w)).mul(0.55);
-  const foam = shore.mul(0.75).add(streak).clamp(0, 1);
-  col = mix(col, vec3(0.97, 0.98, 1) as N3, foam.mul(float(1).sub(U.night.mul(0.5))));
-  m.colorNode = col;
-  m.roughnessNode = mix(float(0.07), float(0.6), foam);
-  // Cintilar do sol nas cristas (emissivo, para o bloom pegar).
-  const refl = nW.mul(-2).mul(dot(view, nW)).add(view).negate().normalize();
-  const glint = max(dot(refl, U.sunDir), 0).pow(220).mul(smoothstep(0.35, 0.9, nn.a.add(big.a.mul(0.5))));
-  m.emissiveNode = U.sun.mul(glint.mul(5).mul(float(1).sub(U.night)).mul(float(1).sub(foam)));
+  const tr = refract(view.negate(), nW, 1 / IOR);
+  const pathV = depth.div(tr.y.negate().max(0.3));
+  const pBed = p.add(tr.xz.mul(pathV));
+  const sunCosT = float(1).sub(float(1).sub(U.sunDir.y.mul(U.sunDir.y)).div(IOR * IOR)).sqrt();
+  const pathS = depth.div(sunCosT);
+  // Absorção por canal a partir da cor da água do tema.
+  const wc = U.water as N;
+  const hue = wc.div(max(max(wc.r, wc.g), wc.b).max(1e-3)).max(0.02);
+  const sigma = hue.log().negate().mul(ABS_HUE).add(ABS_BASE).div(DEPTH_MAX);
+  const tView = exp(sigma.mul(pathV).negate());
+  const tBed = exp(sigma.mul(pathV.add(pathS)).negate());
+
+  // Leito: a cor dos vértices do chão logo abaixo, com o mesmo detalhe "liso" do material do
+  // chão (na beira os dois casam) e pedrinhas que só aparecem com alguma água por cima.
+  const plain = texture(noiseTex, pBed.div(3.5)).g.mul(0.2).add(0.9);
+  const grain = texture(noiseTex, pBed.mul(2.9).add(vec2(0.5, 0.2))).b;
+  const pebbles = smoothstep(0.62, 0.8, grain).mul(0.2).sub(smoothstep(0.38, 0.2, grain).mul(0.14)).mul(smoothstep(0.004, 0.014, depth));
+  const seen = bed.rgb.mul(plain).mul(pebbles.add(1)).mul(tBed);
+  const murk = wc.mul(vec3(0.42, 0.62, 0.88)).mul(tView.oneMinus());
+
+  // Cáusticas: duas fases da correnteza, misturadas sem perder contraste (são padrões
+  // independentes); somem no raso (a luz ainda não focou) e quando o ladrilho fica menor
+  // que o pixel.
+  const caus = (uv: N, frame: N) => {
+    const f0 = floor(frame);
+    const a = texture(causticTex, uv).depth(mod(f0, CAUSTIC_FRAMES).toInt()).r;
+    const b = texture(causticTex, uv).depth(mod(f0.add(1), CAUSTIC_FRAMES).toInt()).r;
+    return mix(a, b, frame.sub(f0));
+  };
+  const cz = t.mul(CAUSTIC_FRAMES / CAUSTIC_LOOP);
+  const cA = caus(pBed.sub(drift.mul(ph0)).div(CAUSTIC_TILE), cz);
+  const cB = caus(pBed.sub(drift.mul(ph1)).div(CAUSTIC_TILE).add(vec2(0.31, 0.57)), cz.add(11.7));
+  const cMix = mix(cB, cA, wA).mul(4 / 0.94).sub(1).div(wA.mul(wA).add(wA.oneMinus().pow2()).sqrt()).add(1);
+  const texPerPx = length(fwidth(pBed)).mul(CAUSTIC_SIZE / CAUSTIC_TILE);
+  const cK = smoothstep(0.002, 0.012, depth).mul(float(1).sub(smoothstep(0.9, 2.6, texPerPx))).mul(CAUSTIC_GAIN);
+  const caustic = cMix.sub(1).mul(cK).add(1).max(0);
+
+  // Espuma: uma linha fina que lambe a beira, a renda (onde dois ruídos se cruzam) no raso,
+  // os rastros onde a água corre e a das esteiras.
+  const lap = sin(t.mul(1.1).add(big.b.mul(9))).mul(0.0011);
+  const edgeLine = float(1).sub(smoothstep(0, float(0.0026).add(lap), depth));
+  const n1 = texture(waterTex, p.mul(1.9).add(vec2(t.mul(0.021), t.mul(-0.013)))).b;
+  const n2 = texture(waterTex, p.mul(2.6).add(vec2(t.mul(-0.017), t.mul(0.019))).add(0.5)).b;
+  const lace = smoothstep(0.07, 0, abs(n1.sub(n2))).mul(float(1).sub(smoothstep(0.002, 0.016, depth)));
+  const streak = nn.a.mul(smoothstep(0.4, 1, speed)).mul(smoothstep(0.004, 0.014, depth)).mul(0.12);
+  const foam = max(edgeLine, lace).mul(0.85).add(streak).add(extra.z).clamp(0, 1).toVar();
+  const foamCol = vec3(0.97, 0.98, 1).mul(float(1).sub(U.night.mul(0.5)));
+  m.colorNode = mix(seen.add(murk), foamCol, foam);
+  // Normal do leito: a mesma do chão (quase "para cima", com o relevo fino do material do chão).
+  const bedSlope = texture(waterTex, pBed.mul(0.45)).rg.sub(0.5).mul(0.12);
+  const bedW = vec3(bedSlope.x.negate(), 1, bedSlope.y.negate()).normalize();
+  m.shade = { bedN: cameraViewMatrix.mul(vec4(bedW, 0)).xyz.normalize(), lit: mix(seen.mul(caustic).add(murk), foamCol, foam) };
+
+  // Rugosidade com o filtro de Kaplanyan: a variação da normal dentro do pixel vira
+  // rugosidade (α² += 2σ²), então o brilho do sol não pisca quando as ondas ficam menores
+  // que o pixel. Espuma é fosca e apaga o reflexo de tela.
+  const dnx = dFdx(nW), dny = dFdy(nW);
+  const kernel = min(dot(dnx, dnx).add(dot(dny, dny)).mul(0.5), 0.18);
+  m.roughnessNode = mix(float(0.05 ** 4).add(kernel).sqrt().sqrt(), float(0.6), foam);
+  ssrMask.set(m, mix(float(0.065), float(0.2), foam));
   m.receivedShadowNode = shadowWithClouds;
   return m;
 }

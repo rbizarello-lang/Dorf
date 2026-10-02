@@ -355,7 +355,7 @@ O Ultra deixou de ser medido pelo PC atual (RX 580, que fica em Média com 1.000
 | Recurso (só no Ultra) | Como entrou |
 |---|---|
 | Sombras em cascata | `CSMShadowNode` com 3 cascatas de 4096², divididas em volta do alvo da câmera (que olha de cima: perto dela só há ar) |
-| Reflexos na água (SSR) | só onde a rugosidade é de água (< 0,1, no alfa da saída de normal); a normal do reflexo é acalmada para os raios não se espalharem nas ondas |
+| Reflexos na água (SSR) | só onde a água grava a máscara própria (`ssrMask`, no alfa da saída de normal, onde os outros materiais gravam a rugosidade); a normal do reflexo é acalmada para os raios não se espalharem nas ondas |
 | Luz indireta (SSGI) | substitui o GTAO: oclusão mais a cor que rebate das superfícies vizinhas, somada só onde há oclusão (no chão aberto e ondulado ela apagava as sombras longas do entardecer); o vazio fica fora da cor difusa |
 | Raios de luz (godrays) | percorrem o mapa de sombra de uma luz sem intensidade (as cascatas não têm mapa único); só aparecem com o sol baixo |
 | Vegetação mais densa | detalhe 1,35 (Alta segue em 1) |
@@ -365,6 +365,25 @@ O Ultra deixou de ser medido pelo PC atual (RX 580, que fica em Média com 1.000
 - Numa MRT, só a saída `output` usa a mistura do material; as outras são sobrescritas até por partículas transparentes, que deixavam quadrados na oclusão. A normal e a difusa usam `setBlendMode(..., MaterialBlending)`, e os materiais transparentes gravam nelas com alfa 0.
 
 **Custo.** Com 300 peças em renderização por software: Ultra com 193 draw calls e 3,05 M de triângulos, contra 111 e 1,53 M na Alta. O dobro de triângulos vem das passadas de sombra extras (3 cascatas mais a luz dos raios) e de 35% mais decoração. O custo real em GPU ainda precisa ser medido; `?fx=gi.ssr.rays.traa` liga os efeitos um a um.
+
+### Água física (outubro de 2026)
+
+A água deixou de ser uma faixa pintada sobre o leito e virou uma coluna d'água: o olhar atravessa a superfície e vê o fundo. Vale em todos os níveis de qualidade; o reflexo de tela continua só no Ultra.
+
+| Recurso | Como entrou |
+|---|---|
+| Leito visível | a malha da água repete os triângulos do leito que ficam abaixo da linha d'água, com a cor e a profundidade exata de cada vértice (`wbed`); a beira fica onde a profundidade zera, sem a faixa de espuma que escondia a emenda |
+| Cor por absorção | o olhar refrata (n = 1,333) e cada canal é absorvido no caminho do sol até o leito e na volta; a absorção vem da cor da água do tema, então cada tema mantém a sua água, e o que a coluna absorve vira a cor turva da água funda |
+| Cáusticas | 32 quadros de 128² (512 KB) calculados por traçado de fótons num Web Worker, periódicos no espaço e no tempo; o shader interpola os quadros e mistura duas fases da correnteza sem perder contraste; multiplicam só a luz direta, então somem na sombra e à noite |
+| Reflexo estável | Fresnel exato de dielétrico para o céu; o brilho do sol é o GGX da própria luz, com a rugosidade alargada pela variação das ondas dentro do pixel (filtro de Kaplanyan e Tokuyoshi): de longe vira um caminho de luz que não pisca |
+| Esteiras e anéis | barcos andando deixam os braços do V de Kelvin, ondas transversais e espuma no casco (até 8, os mais perto do foco da câmera); peixes abrem anéis de tempos em tempos; a peça que assenta faz ondinhas na água |
+
+**Armadilhas:**
+- O Dawn (testado com SwiftShader) recusa o envio fatia por fatia de uma textura 3D ("TextureViewDimension e2D not compatible with e3D"). As cáusticas usam uma textura em camadas (`DataArrayTexture`) e o shader interpola entre duas camadas.
+- O cálculo das cáusticas leva ~150 ms; na thread principal, sob render por software, ele travava a abertura. Vai num Web Worker criado do texto da própria função, que por isso não pode depender de nada de fora. Sem worker (uma política de conteúdo que bloqueie `blob:`), roda na thread principal logo depois da abertura.
+- O SSR reconhecia a água pela rugosidade baixa. Com o filtro de Kaplanyan, a rugosidade da água sobe com a distância, então a água grava uma máscara própria no lugar dela.
+
+**Custo.** Com 300 peças em renderização por software, os draw calls não mudam (193 no Ultra, 111 na Alta) e os triângulos sobem 0,3% no Ultra (3,06 M) e 0,7% na Alta (1,54 M), porque a água agora segue a grade do leito. A montagem das peças fica ~15% mais lenta, já que a correnteza é calculada em mais vértices. A CPU por quadro ficou dentro do ruído do SwiftShader, que dá picos de ~1 s nos dois builds. O shader da água ficou mais pesado (12 leituras de textura por pixel de água, contra 3); esse custo só uma GPU de verdade mede.
 
 **Ainda não feito, do documento do AoE:** Centro que evolui com a era, arquitetura que muda por era, aldeões trabalhando, maravilha, vazio como mapa antigo, minimapa, trilha sonora por era.
 

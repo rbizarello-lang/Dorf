@@ -81,6 +81,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
 | `window.__ripple(idade)` | dispara a onda do chão no foco da câmera, já com essa idade em segundos |
 | `window.__celebrate()` | anel dourado e bando de pássaros no foco da câmera (efeitos de nova era) |
+| `window.__boat(zoom?)` | centraliza a câmera num barco andando (esteiras na água) |
 | `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` | ver o `README.md` |
 | `window.__stats` | estatísticas do último quadro |
 | `window.__pools()` | relatório dos InstancedMesh |
@@ -156,9 +157,9 @@ scripts/         capturas, teste de carga, conversão para página publicável
 9. **Materiais em TSL (three r186, `three/webgpu` e `three/tsl`):** nada de `onBeforeCompile` nem GLSL; o mesmo nó compila para WebGPU e WebGL2.
    - Importe sempre de `three/webgpu` (não de `three`), para o bundle não levar o WebGLRenderer.
    - Atributos por vértice dos kits: `color`, `tint` (quanto a cor da instância tinge) e `glow` (janelas que acendem com `U.night`). A cor da instância é o atributo `iColor` da geometria criada por `instGeometry()`; não use `mesh.instanceColor`, que o three multiplicaria de novo.
-   - Uniformes globais em `U` (`materials.ts`): `time`, `dt`, `wind`, `night`, `clouds`, `sparkle`, `glow`, `water`, `bank`, `sky`, `sun`, `sunDir`.
+   - Uniformes globais em `U` (`materials.ts`): `time`, `dt`, `wind`, `night`, `clouds`, `sparkle`, `glow`, `water`, `sun`, `sunDir`.
    - No r186 a instância é aplicada **antes** do `positionNode`: ali `positionLocal` já está no espaço do mundo (pools) e `positionGeometry` é o vértice original. Quem desloca vértices (vento) também ajusta `positionPrevious`, senão o antisserrilhado temporal deixa rastro.
-   - A água usa os atributos `wflow` (correnteza) e `wedge` (0 no meio do canal, 1 na beira). A correnteza de cada peça herda das vizinhas (`World.flowAt` + `resolveFlow`) e gira junto com a peça no bloco.
+   - A água usa os atributos `wflow` (correnteza) e `wbed` (cor do leito e profundidade da coluna): a malha da água repete os triângulos do leito abaixo da linha d'água, então a beira fica exatamente onde a profundidade zera. A correnteza de cada peça herda das vizinhas (`World.flowAt` + `resolveFlow`) e gira junto com a peça no bloco.
    - Sem tone mapping do renderizador: o pós-processamento aplica um ombro suave que preserva as paletas dos temas.
    - Se um nó falhar ao compilar, o erro aparece no console das capturas.
 10. **Blocos estáticos só crescem** (append-only). Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim, escondida quando `rig.dist >= 13` (nível de detalhe). Quem consulta geometria pela chave precisa tirar o `~`.

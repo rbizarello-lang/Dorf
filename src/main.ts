@@ -938,6 +938,16 @@ function start(data: unknown) {
 };
 (window as unknown as { __ripple: (age: number) => void }).__ripple = (age) => world.ripple(world.rig.target.x, world.rig.target.z, 1, age);
 
+// Centraliza a câmera num barco andando (capturas das esteiras na água).
+(window as unknown as { __boat: (zoom?: number) => boolean }).__boat = (zoom) => {
+  const b = world.life.boatPos();
+  if (!b) return false;
+  world.rig.goal.set(b.x, 0, b.z);
+  world.rig.target.set(b.x, 0, b.z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
+
 // Coloca a peça atual na melhor posição, com animação (capturas da queda e da onda).
 (window as unknown as { __placeBest: () => boolean }).__placeBest = () => {
   const m = game.bestMove();
