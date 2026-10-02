@@ -76,7 +76,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?stress=1000` | teste de carga; o resultado fica em `window.__load` |
 | `?focus=4` | centraliza a câmera na peça com mais bordas do terreno (4 = rio); `window.__focus(t, zoom)` |
 | `?webgl` | força o backend WebGL2 (o padrão é WebGPU quando o navegador oferece) |
-| `?fx=ao.gi.ssr.rays.traa.bloom.dof.ink` | liga os efeitos de pós um a um (medir custo); `?fx=` desliga todos |
+| `?fx=ao.gi.ssr.rays.traa.bloom.dof.ink.film` | liga os efeitos de pós um a um (medir custo; `film` é o acabamento do Cinema: mais amostras, grão e aberração); `?fx=` desliga todos |
 | `?timescale=0.05` | desacelera o mundo (animações nas capturas por software) |
 | `?silhueta` | decorações pretas sobre chão branco: confere se vilas, construções e marcos leem de longe |
 | `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
@@ -90,6 +90,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__pools()` | relatório dos InstancedMesh |
 | `window.__ghostBest()` | põe o fantasma na melhor jogada |
 | `window.__ghostSynergy(colocar?)` | põe o fantasma numa jogada com interação e devolve quantas; com `true`, coloca a peça (obra com andaime) |
+| `window.__video({ kind, height, quality })` | exporta sem o diálogo o filme da partida (`film`) ou a gravação em andamento (`take`, tecla `V`) e devolve `{ bytes, ms, b64 }`: o MP4 em base64, para conferir com o `ffprobe` |
 
 ## Mapa do código
 
@@ -128,12 +129,22 @@ src/render/
   preview.ts     a peça da vez sobre a pilha, com canvas e renderizador próprios
   life.ts        Life: barcos, veículos, animais, moinhos e pássaros que se movem
   cameraRig.ts   câmera orbital
+  gpuTier.ts     nível inicial do Auto pelo nome da placa de vídeo (puro)
+  dynres.ts      resolução dinâmica do Auto: degraus de resolução antes de descer o nível (puro)
+src/video/       foto e vídeo (o modo foto fica no main.ts)
+  take.ts        gravação: a pose da câmera a cada quadro e os eventos (jogadas, hora, fantasma), até 2 min
+  path.ts        poses reamostradas a 60 quadros por segundo e suavizadas por um filtro gaussiano sem atraso
+  film.ts        plano do filme da partida: quando cada peça cai e por onde a câmera passa
+  render.ts      desenha o vídeo quadro a quadro, com world.tick(1/60), e entrega ao codificador
+  encoder.ts     WebCodecs: escolhe H.264 ou VP9 e guarda os quadros codificados em Blobs
+  mp4.ts         cabeçalho MP4 (ftyp, moov, mdat) escrito à mão, sem biblioteca
 src/ui/          HUD em HTML/CSS (hud.ts, style.css); a página é o index.html
 src/audio.ts     sons sintetizados com WebAudio
 src/main.ts      entrada: fluxo da partida, entrada de mouse/toque/teclado, salvamento, parâmetros de URL, ganchos de depuração
 tests/logic.ts      simulação de partidas contra oráculos independentes (grupos por BFS, pontuação recalculada, replay)
 tests/synthetic.ts  cenários montados à mão (peça travada, descarte, fim de jogo, semente → sequência)
 tests/legibility.ts telhados e paredes contra o chão da vila (ΔE em CIELAB, ponderado pelo peso das casas)
+tests/video.ts      MP4 conferido por um leitor de caixas próprio, resolução dinâmica, nível por placa, câmera e filme
 scripts/         capturas, teste de carga, conversão para página publicável
 ```
 
@@ -176,6 +187,11 @@ scripts/         capturas, teste de carga, conversão para página publicável
 10. **Blocos estáticos só crescem** (append-only), e o mapa do chão (`groundMap.ts`) também: cada peça pinta a sua parte quando assenta. Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim (nível de detalhe): entre `rig.dist` 11,5 e 14,5 cada planta dessa metade afunda no chão na sua vez (`U.fine`, material `cropFine`), e mais longe o pool fica escondido. Quem consulta geometria pela chave precisa tirar o `~`.
 11. **Construções internas não pontuam.** A roda d'água (vila na beira do rio), a irrigação, a estação e o silo (junto à ferrovia) são só visuais. Pontos de interação vêm apenas de `synergy.ts` × `Rules.synergyPoints`.
 12. **Parâmetros de URL e valores salvos são validados** contra listas fixas (ver `pickQ` e o uso de `Object.hasOwn` para `time`). Mantenha esse padrão ao criar um parâmetro novo.
+13. **O mundo anda pelo `dt` do `World.tick`.** O vídeo é desenhado depois da gravação, quadro a quadro, cada um com `world.tick(1/60)`, e o modo foto congela o mundo com `world.timeScale = 0`.
+    - Animação nova usa o `dt` que o `tick` calcula (já multiplicado por `timeScale`) ou `U.time`. Nunca `performance.now()` nem o `time` embutido do TSL: no vídeo ela saltaria e na foto não pararia.
+    - A câmera, o fantasma e a troca de hora seguem o tempo real (`realDt`), para responderem no modo foto com o mundo parado.
+    - Efeito de jogada que o vídeo também deve mostrar vai em `World.placeFx`, que o jogo e o vídeo chamam do mesmo jeito.
+    - Foto e vídeo copiam o canvas logo depois do `tick`, no mesmo passo do desenho.
 
 ## Orçamento de desempenho
 
@@ -186,7 +202,8 @@ Medido com `RUNS=300:high node scripts/stress.mjs`, renderização por software:
 | 300 | alta | ~94 | ~1,37 milhão | ~4,3 ms |
 
 - **Regra prática:** uma mudança visual não deve subir triângulos ou draw calls em mais de ~10% sem justificativa escrita no commit.
-- **Qualidade:** Ultra (pensado para GPUs acima da RX 580: sombras em 3 cascatas de 4096, luz indireta SSGI, reflexos na água, raios de luz no entardecer, TRAA, bloom, profundidade de campo, DPR até 2 e 35% mais vegetação), Alta (GTAO em meia resolução, sombra única de 2048), Média (MSAA, sem pós pesado) e Baixa (sem pós e sem sombras). Cada nível tem um teto de pixels desenhados (Ultra 4K, Alta 1440p, Média e Baixa 1080p; `PIXELS` em `world.ts`): numa tela 4K, descer de nível também reduz a resolução interna. A densidade de decoração é multiplicada por 1,35 (ultra), 1 (alta), 0,65 (média) ou 0,4 (baixa). O modo automático começa em Ultra no computador e em Média em telas de toque, e desce sozinho se o quadro passar de ~26 ms.
+- **Qualidade:** Cinema (placas de topo, fotos e vídeos: desenha 1,5× acima da tela e reduz, SSGI e reflexos com mais amostras, 4 cascatas de sombra, 60% mais vegetação, grão de filme e aberração de lente), Ultra (pensado para GPUs acima da RX 580: sombras em 3 cascatas de 4096, luz indireta SSGI, reflexos na água, raios de luz no entardecer, TRAA, bloom, profundidade de campo, DPR até 2 e 35% mais vegetação), Alta (GTAO em meia resolução, sombra única de 2048), Média (MSAA, sem pós pesado) e Baixa (sem pós e sem sombras). Cada nível tem um teto de pixels desenhados (Cinema 4K × 2,25, Ultra 4K, Alta 1440p, Média e Baixa 1080p; `PIXELS` em `world.ts`): numa tela 4K, descer de nível também reduz a resolução interna. A densidade de decoração é multiplicada por 1,6 (cinema), 1,35 (ultra), 1 (alta), 0,65 (média) ou 0,4 (baixa).
+- **Modo automático:** começa pelo nome da placa de vídeo (`gpuTier.ts`: Alta na RX 580, Ultra da RTX 3060 e da RX 6600 para cima, Média no Iris Xe e nos celulares); sem um nome conhecido, começa em Ultra no computador e em Média nas telas de toque. Nunca escolhe o Cinema. Se o quadro passar de ~26 ms, primeiro baixa a resolução interna em degraus de 10% até 60% (`dynres.ts`) e só no último degrau desce de nível.
 - **Ainda não foi medido:** o FPS numa GPU de verdade.
 
 ## Tarefas comuns
@@ -231,7 +248,7 @@ São opcionais no tema (`gate`, `bridge`) e não pontuam. O `buildTile` decide o
 
 ## Estado atual e próximos passos
 
-- **Feito (outubro de 2026, depois da v4):** água física (leito visível, cáusticas, esteiras); acabamento (oclusão só na luz indireta, nitidez, cor por hora, sombra firme); luz e céu (amanhecer e hora dourada, névoa por altura, lampiões, luz rebatida do chão, nuvens volumétricas). Detalhes em `docs/VIABILIDADE.md`.
+- **Feito (outubro de 2026, depois da v4):** água física (leito visível, cáusticas, esteiras); acabamento (oclusão só na luz indireta, nitidez, cor por hora, sombra firme); luz e céu (amanhecer e hora dourada, névoa por altura, lampiões, luz rebatida do chão, nuvens volumétricas); cinema e vídeo (nível Cinema, Auto pela placa com resolução dinâmica, modo foto, gravação e filme da partida em MP4). Detalhes em `docs/VIABILIDADE.md`.
 - **Feito (v4, outubro de 2026):** renderização WebGPU/TSL com GTAO, TRAA, bloom e profundidade de campo; rios escavados com correnteza; céu procedural (IBL); chão com detalhe por terreno; clima por tema; vilas com trilhas; eras da vila, sítios, bônus por tema, desfazer e 4 modos. Ideias de Age of Empires ainda não feitas estão em `docs/IDEIAS_AOE.md` (Centro que evolui, arquitetura por era, aldeões, maravilha, terra incógnita).
 - **Feito (v3):** 14 temas, kits detalhados, 4 interações com prévia em dourado, mundo animado, dia/entardecer/noite, qualidade adaptativa, save v3 com replay, duas rodadas de revisão de código com correções. O histórico está em `docs/VIABILIDADE.md`, Apêndice A.
 - **Pendente:**

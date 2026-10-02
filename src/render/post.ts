@@ -14,15 +14,17 @@ import { traa } from 'three/addons/tsl/display/TRAANode.js';
 import { indirectShare, ssrMask } from './materials';
 
 // Pós-processamento por perfil de qualidade, montado como um grafo de nós (RenderPipeline).
+//   cinema: o Ultra com mais amostras na luz indireta e nos raios, reflexo em resolução cheia,
+//          aberração cromática da lente e grão de filme (a supersamplagem vem de world.ts)
 //   ultra: iluminação indireta com oclusão (SSGI) + reflexos na água (SSR) + raios de luz
 //          (godrays) + bloom + profundidade de campo + antisserrilhado temporal (TRAA)
 //   high:  GTAO em meia resolução + bloom + profundidade de campo + TRAA
 //          (GTAO lê a profundidade, que no WebGPU não pode ser multiamostrada: por isso TRAA, não MSAA)
-//   (ultra e high também desenham o traço de tinta, o contorno dos objetos)
+//   (cinema, ultra e high também desenham o traço de tinta, o contorno dos objetos)
 //   medium: MSAA 4× + gradação e vinheta (um passe barato)
 //   low:   sem pipeline (desenho direto, com o MSAA do canvas)
 
-export type Quality = 'ultra' | 'high' | 'medium' | 'low';
+export type Quality = 'cinema' | 'ultra' | 'high' | 'medium' | 'low';
 
 interface Config {
   ao: number; // 0 = desligado; senão, escala de resolução
@@ -34,9 +36,12 @@ interface Config {
   /** Traço de tinta (contorno); precisa ler a profundidade, então não combina com MSAA. */
   ink: boolean;
   aa: 'traa' | 'msaa' | 'fxaa';
+  /** Acabamento de cinema: mais amostras, reflexo em resolução cheia, aberração e grão. */
+  film?: boolean;
 }
 
 const CONFIG: Record<Exclude<Quality, 'low'>, Config> = {
+  cinema: { ao: 0, gi: true, ssr: true, rays: true, bloom: true, dof: true, ink: true, aa: 'traa', film: true },
   ultra: { ao: 0, gi: true, ssr: true, rays: true, bloom: true, dof: true, ink: true, aa: 'traa' },
   high: { ao: 0.5, gi: false, ssr: false, rays: false, bloom: true, dof: true, ink: true, aa: 'traa' },
   medium: { ao: 0, gi: false, ssr: false, rays: false, bloom: false, dof: false, ink: false, aa: 'msaa' },
@@ -61,6 +66,13 @@ export const P = {
   /** Gradação por hora (world.ts): os realces puxam para a cor do sol e as sombras para o tom oposto. */
   shade: uniform(new THREE.Color(1, 1, 1)),
   light: uniform(new THREE.Color(1, 1, 1)),
+  /** Cinema: deslocamento das cores nos cantos da tela (fração da tela) e força do grão. */
+  aberration: uniform(0.0028),
+  grain: uniform(0.032),
+  /** Muda a cada quadro (world.ts): o grão não fica parado na tela. */
+  grainSeed: uniform(0),
+  /** Pixels do desenho por pixel da tela: o grão tem o tamanho de um pixel da tela, com ou sem supersamplagem. */
+  grainCell: uniform(1),
   /** Traço de tinta: força (0 = sem contorno) e a cor da tinta (linear). */
   ink: uniform(0.9),
   inkColor: uniform(new THREE.Color(0.045, 0.03, 0.022)),
@@ -101,6 +113,30 @@ const grade = Fn(([c]: [ReturnType<typeof vec4>]) => {
   const rgb = lit.mul(mix(vec3(1), P.shade, smoothstep(0.3, 0.02, l))).mul(mix(vec3(1), P.light, smoothstep(0.35, 0.85, l)));
   const sat = P.saturation.mul(smoothstep(0, 0.06, l).mul(0.12).add(0.88));
   return vec4(shoulder(mix(vec3(l), rgb, sat)), c.a);
+});
+
+/**
+ * Aberração cromática lateral, como numa lente: o vermelho abre e o azul fecha em direção às
+ * bordas, com o deslocamento crescendo com o quadrado da distância ao centro (nada no meio).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const aberration = (tex: any) =>
+  Fn(() => {
+    const d = screenUV.sub(0.5);
+    const k = dot(d, d).mul(P.aberration).mul(2);
+    const c = tex.sample(screenUV);
+    return vec4(tex.sample(screenUV.add(d.mul(k))).r, c.g, tex.sample(screenUV.sub(d.mul(k))).b, c.a);
+  })();
+
+/**
+ * Grão de filme em sRGB, mais forte nos meios-tons (some no preto e no branco), com o tamanho
+ * de um pixel da tela e um padrão novo a cada quadro.
+ */
+const grain = Fn(([c]: [ReturnType<typeof vec4>]) => {
+  const px = screenCoordinate.xy.div(P.grainCell).floor();
+  const n = hash(px.x.add(px.y.mul(4096)).add(P.grainSeed)).sub(0.5);
+  const l = dot(c.rgb, vec3(0.299, 0.587, 0.114)).clamp(0, 1);
+  return vec4(c.rgb.add(n.mul(P.grain).mul(l.mul(float(1).sub(l)).mul(4))), c.a);
 });
 
 /** Ruído triangular de ±1 nível de 8 bits, depois da conversão para sRGB: tira as faixas do céu e da névoa. */
@@ -195,8 +231,8 @@ export interface Post {
   dispose(): void;
 }
 
-/** Efeitos que `?fx=` pode ligar um a um (depuração de custo): ao, gi, ssr, rays, traa, msaa, bloom, dof, ink. */
-export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'dof', 'ink'] as const;
+/** Efeitos que `?fx=` pode ligar um a um (depuração de custo): ao, gi, ssr, rays, traa, msaa, bloom, dof, ink, film. */
+export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'dof', 'ink', 'film'] as const;
 
 /**
  * `rayLight` é a luz cujo mapa de sombra os raios percorrem. Precisa ser uma DirectionalLight
@@ -205,8 +241,8 @@ export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'do
  */
 export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, q: Exclude<Quality, 'low'>, fx?: string[], rayLight?: THREE.DirectionalLight, clouds?: THREE.Scene): Post {
   const cfg: Config = fx
-    ? { ao: fx.includes('ao') ? CONFIG[q].ao || 0.5 : 0, gi: fx.includes('gi'), ssr: fx.includes('ssr'), rays: fx.includes('rays'), bloom: fx.includes('bloom'), dof: fx.includes('dof'), ink: fx.includes('ink') && !fx.includes('msaa'), aa: fx.includes('traa') ? 'traa' : fx.includes('msaa') ? 'msaa' : 'fxaa' }
-    : CONFIG[q];
+    ? { ao: fx.includes('ao') ? CONFIG[q].ao || 0.5 : 0, gi: fx.includes('gi'), ssr: fx.includes('ssr'), rays: fx.includes('rays'), bloom: fx.includes('bloom'), dof: fx.includes('dof'), ink: fx.includes('ink') && !fx.includes('msaa'), aa: fx.includes('traa') ? 'traa' : fx.includes('msaa') ? 'msaa' : 'fxaa', film: fx.includes('film') }
+    : { ...CONFIG[q] };
   if (!rayLight) cfg.rays = false;
   const disposables: { dispose(): void }[] = [];
   const pipeline = new THREE.RenderPipeline(renderer);
@@ -246,8 +282,9 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
     // Luz indireta: a cor das superfícies vizinhas tinge as sombras (grama sob as casas,
     // telhado colorido sobre a parede). O canal alfa traz a oclusão.
     const g = ssgi(color, depth, normalOf, camera);
-    g.sliceCount.value = 2;
-    g.stepCount.value = 12;
+    // No Cinema, mais direções e passos: menos ruído para o TRAA limpar.
+    g.sliceCount.value = cfg.film ? 3 : 2;
+    g.stepCount.value = cfg.film ? 16 : 12;
     g.radius.value = 3;
     g.thickness.value = 0.35;
     g.giIntensity.value = 4;
@@ -299,7 +336,7 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
     r.maxDistance.value = 12;
     r.thickness.value = 0.6;
     r.quality.value = 1;
-    r.resolutionScale = 0.5;
+    r.resolutionScale = cfg.film ? 1 : 0.5;
     disposables.push(r);
     node = vec4(node.rgb.add(r.rgb.mul(P.reflection)), node.a);
   }
@@ -307,7 +344,7 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
   if (cfg.rays && rayLight) {
     // Raios de luz: o mapa de sombra percorrido pelo ar dá os feixes entre árvores e telhados.
     const gr = godrays(depth, camera, rayLight);
-    gr.raymarchSteps.value = 48;
+    gr.raymarchSteps.value = cfg.film ? 64 : 48;
     gr.density.value = 0.5;
     gr.maxDensity.value = 0.5;
     gr.distanceAttenuation.value = 1.2;
@@ -357,11 +394,17 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
     node = d;
   }
 
+  if (cfg.film) {
+    const tex = convertToTexture(node);
+    disposables.push(tex);
+    node = aberration(tex);
+  }
+
   // A conversão para sRGB fica aqui, e não no fim do pipeline, para o dither vir depois dela.
   pipeline.outputColorTransform = false;
   node = renderOutput(grade(node));
   if (cfg.aa === 'fxaa') node = fxaa(node);
-  pipeline.outputNode = dither(node);
+  pipeline.outputNode = dither(cfg.film ? grain(node) : node);
   return {
     pipeline,
     gi: cfg.gi,

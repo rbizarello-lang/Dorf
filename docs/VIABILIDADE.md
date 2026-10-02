@@ -435,6 +435,30 @@ O terceiro pacote do estudo da Lagoa e do Threetopia: luz que não vem do sol, h
 
 **Ainda não feito, do documento do AoE:** Centro que evolui com a era, arquitetura que muda por era, aldeões trabalhando, maravilha, vazio como mapa antigo, minimapa, trilha sonora por era.
 
+### Cinema e vídeo (outubro de 2026)
+
+O quarto pacote do estudo da Lagoa e do Threetopia: um nível acima do Ultra, um Auto que conhece a placa de vídeo, e foto e vídeo para mostrar o jogo.
+
+| Recurso | Como entrou |
+|---|---|
+| Nível Cinema | desenha 1,5× acima da densidade da tela em cada eixo e reduz (no máximo 4K × 2,25 pixels e 8.192 no lado maior). O SSGI usa 3 fatias e 16 passos (o Ultra, 2 e 12), os reflexos têm resolução cheia (o Ultra, metade), os raios de luz têm 64 passos (o Ultra, 48), a sombra do sol tem 4 cascatas de 4096², com mais faixas perto do alvo, e a vegetação é 1,6× (o Ultra, 1,35). No fim entram um grão de filme por luminância (some no preto e no branco, do tamanho de um pixel da tela ou do vídeo) e uma aberração cromática lateral, que cresce com o quadrado da distância ao centro. Os dois vêm depois do TRAA, para a média temporal não apagá-los |
+| Auto pela placa | o nome da placa vem do WebGL (`WEBGL_debug_renderer_info`, por um contexto descartável quando o jogo roda em WebGPU) e a arquitetura vem do WebGPU (`adapterInfo`). Regras por fabricante e série (`gpuTier.ts`) dão o nível de partida: Alta na RX 580, Ultra da RTX 3060 e da RX 6600 para cima, Média no Iris Xe e nos celulares, Baixa no SwiftShader. O título do botão mostra o nível escolhido e a placa |
+| Resolução dinâmica | antes de descer de nível, o Auto baixa a resolução interna em degraus de 10% até 60% (`dynres.ts`), pela mediana de janelas de 40 quadros: acima de 26 ms desce, abaixo de 20 ms sobe. Numa tela de 60 Hz o tempo do quadro só mostra múltiplos de 16,7 ms, e subir um degrau pode dar quadros de 33 ms logo em seguida. O degrau que falha assim fica proibido por 60 s, o dobro a cada nova falha, até 10 min, e a resolução não fica oscilando |
+| Modo foto | `P` esconde a interface, Espaço pausa o mundo (a câmera, a luz e a troca de hora continuam respondendo) e `L` muda a hora. A foto sai em PNG no tamanho da tela, em 4K ou em 8K: o canvas vai para o tamanho da foto, 24 quadros parados deixam o TRAA assentar, e a cópia sai logo depois do último desenho |
+| Gravação | `V` grava até 2 min. O jogo anota só a pose da câmera a cada quadro e os eventos (jogadas, hora, peça flutuando); nada é desenhado a mais durante o jogo |
+| Exportação | o mapa do começo da gravação é refeito numa partida à parte. As poses são reamostradas a 60 quadros por segundo e suavizadas por um filtro gaussiano simétrico (sem atraso; o zoom em escala logarítmica), e cada quadro é desenhado com `world.tick(1/60)`. Como nada depende do relógio real, o vídeo sai liso mesmo que cada quadro leve um segundo. No fim, o jogo volta como estava: mapa, câmera, hora e nível |
+| Filme da partida | o mesmo caminho, sem gravação: as jogadas caem uma a uma, de 0,1 a 0,6 s entre elas (a parte das jogadas mira 100 s), e a câmera se afasta conforme o mapa cresce, girando devagar em volta dele, com 6 s no mapa pronto no fim |
+| MP4 sem biblioteca | o WebCodecs codifica em H.264 High (nível 4.2, 5.1 ou 5.2, pelo tamanho) ou, sem ele, em VP9, a ~0,13 bit por pixel (≈16 Mbit/s em 1080p60, ≈65 Mbit/s em 4K60). Os quadros codificados vão para Blobs, que o navegador pode guardar em disco, e `mp4.ts` escreve o cabeçalho: ftyp, moov (com `ctts` e lista de edição quando há quadros B) e mdat, com tamanho de 64 bits acima de 4 GB |
+
+**Armadilhas:**
+- Os nós de efeito do three r186 (SSGI, GTAO, SSR, raios, TRAA, bloom, nitidez) tomam o tamanho do buffer de desenho do renderizador, não o do passe da cena. Por isso a resolução dinâmica muda a densidade de pixels do canvas, e não a escala do passe: um TAAU com o passe menor não aliviaria o SSGI, que não tem escala própria.
+- O `ChromaticAberrationNode` do three também escala a imagem inteira e borra o centro. A aberração do Cinema é uma conta própria, que só afasta o vermelho e o azul do centro.
+- O `hash` do TSL converte a semente para inteiro: a semente do grão fica abaixo de 2²⁴, senão o float arredonda e o grão para.
+- No Chromium com WebGPU, a primeira cópia do canvas (`drawImage`) depois da troca de tamanho saiu de uma cor só, e os 4 primeiros quadros do filme saíam verdes. O aquecimento (30 quadros com o mundo parado, para os shaders compilarem e o TRAA assentar) agora também copia o canvas, e a exportação espera um quadro da tela antes de começar.
+- O Chromium sem GPU destes contêineres não tem codificador H.264, só VP9 e AV1: o teste de ponta a ponta sai em VP9. O caminho do H.264, com quadros B, é conferido pelo leitor de caixas de `tests/video.ts`.
+
+**Custo.** O Cinema é um nível novo; os outros quatro não mudam. Com 300 peças em renderização por software, o Cinema tem 221 draw calls e 3,62 M de triângulos, contra 196 e 3,06 M no Ultra: são a quarta cascata de sombra e a vegetação 1,6×. Na GPU, o Cinema desenha 2,25× os pixels do Ultra na mesma tela, e o SSGI e os reflexos custam mais por pixel; numa tela 4K, são 18,7 milhões de pixels por quadro. É um nível para placas de topo e para exportar vídeo, que não precisa de tempo real. A gravação não pesa no jogo; a exportação leva o tempo que a placa levar (no SwiftShader, o filme de 11 s em 256×144 na Alta levou 2 min).
+
 ## Apêndice A: revisão de código e QA pelo Sonnet
 
 Um segundo agente (Sonnet) revisou o código sem editá-lo, escreveu testes próprios e reportou achados com cenário de falha e correção sugerida. Todas as correções foram aplicadas e **conferidas de novo com os próprios testes do revisor**.

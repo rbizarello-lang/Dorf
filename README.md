@@ -62,6 +62,25 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 | Amanhecer, dia, hora dourada, entardecer e noite | `L` ou botão ☀ | botão ☀ |
 | Som: música e efeitos, só efeitos, mudo | botão Som; `M` liga ou desliga a música | botão ♫ |
 | Ajuda, nova partida, estatísticas | `H`, `N`, `F` | botões no topo |
+| Foto sem a interface | `P` (Espaço pausa, `L` muda a hora, Enter salva, Esc sai) | botão Câmera |
+| Gravar vídeo (até 2 minutos) | `V` começa e para | botão Câmera |
+
+## Foto e vídeo
+
+O botão **Câmera** abre três opções:
+
+- **Foto** (`P`): a interface some, o mundo pode ficar parado ou continuar animado, e a imagem sai em PNG no tamanho da tela, em 4K ou em 8K.
+- **Gravar vídeo** (`V`): grava até 2 minutos do que você fizer. Ao parar, você escolhe o tamanho (1080p, 1440p ou 4K), a qualidade (Cinema, Ultra ou Alta) e a câmera: como foi gravada, suave ou cinematográfica.
+- **Filme da partida**: a partida inteira refeita peça por peça, com a câmera se afastando conforme o mapa cresce, na hora do dia que você escolher.
+
+Durante a gravação, o jogo anota só a câmera e as jogadas, então não fica mais pesado. O vídeo é desenhado depois, quadro a quadro, a 60 quadros por segundo, e sai em MP4 (H.264, ou VP9 onde não houver H.264). Por isso ele sai liso mesmo numa placa que não roda o Cinema em tempo real; só demora mais para exportar. Precisa de um navegador com WebCodecs, como o Chrome e o Edge; nos outros, o jogo avisa.
+
+## Qualidade gráfica
+
+O botão de qualidade abre a lista: **Auto**, **Cinema**, **Ultra**, **Alta**, **Média** e **Baixa**, cada uma com uma linha dizendo para que placa serve.
+
+- **Auto** escolhe o começo pelo nome da placa de vídeo (por exemplo, Alta numa RX 580 e Ultra numa RTX 3060). Se o quadro ficar lento, primeiro baixa a resolução interna, em degraus até 60%, e só depois desce de nível. O nome da placa e o nível escolhido aparecem no título do botão.
+- **Cinema** é para placas de topo e para fotos e vídeos: desenha 1,5× acima da tela, com mais amostras de luz e de reflexo, sombras mais finas, mais vegetação, grão de filme e uma leve aberração de lente. O Auto nunca escolhe o Cinema.
 
 ## Temas
 
@@ -81,7 +100,7 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 | `?theme=toscana` | tema inicial (ids em `src/themes/themes.ts` e `eras.ts`) |
 | `?seed=123` | partida reproduzível: a mesma semente dá a mesma sequência de peças |
 | `?time=night` | `dawn`, `day`, `golden`, `dusk` ou `night` |
-| `?quality=high` | `auto`, `ultra`, `high`, `medium` ou `low` |
+| `?quality=high` | `auto`, `cinema`, `ultra`, `high`, `medium` ou `low` |
 | `?webgl` | força o WebGL2 em vez do WebGPU |
 | `?mode=zen` | modo inicial: `classico`, `zen`, `diario` ou `exploradores` |
 | `?debug` | mostra FPS, draw calls, triângulos e instâncias |
@@ -97,6 +116,7 @@ src/core/      regras puras (não importa three.js): hex, peças, tabuleiro, mis
 src/themes/    temas como dados: types.ts (esquema), themes.ts (base), eras.ts (históricos)
 src/render/    lib.ts (kits e shaders), tileBuilder.ts (peça procedural), world.ts (cena, luz,
                blocos estáticos, fantasma), life.ts (barcos, veículos, animais, moinhos, pássaros)
+src/video/     gravação, filme da partida e exportação em MP4 (WebCodecs)
 src/ui/        HUD em HTML/CSS
 src/main.ts    entrada, fluxo da partida, salvamento, modos de teste
 scripts/       capturas de tela e teste de carga com Playwright
