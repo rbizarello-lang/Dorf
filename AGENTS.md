@@ -85,6 +85,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__era(era, idade?, zoom?)` | centraliza no Centro da vila e o mostra na era (0 a 3); com `idade`, a onda dourada já com essa idade em segundos |
 | `window.__mark(zoom?)` | centraliza a câmera no último marco de era erguido |
 | `window.__boat(zoom?)` | centraliza a câmera num barco andando (esteiras na água) |
+| `window.__folk(i?, zoom?)` | centraliza a câmera no i-ésimo aldeão de construção |
 | `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` | ver o `README.md` |
 | `window.__stats` | estatísticas do último quadro |
 | `window.__pools()` | relatório dos InstancedMesh |
@@ -126,7 +127,7 @@ src/render/
   fx.ts          partículas em sprites: poeira, fumaça e brilhos (CPU); clima do tema e vaga-lumes (no shader)
   sky.ts         céu procedural para a luz de ambiente (IBL)
   preview.ts     a peça da vez sobre a pilha, com canvas e renderizador próprios
-  life.ts        Life: barcos, veículos, animais, moinhos e pássaros que se movem
+  life.ts        Life: barcos, veículos, animais, aldeões, moinhos e pássaros que se movem
   cameraRig.ts   câmera orbital
 src/ui/          HUD em HTML/CSS (hud.ts, style.css); a página é o index.html
 src/audio.ts     sons sintetizados com WebAudio

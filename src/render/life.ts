@@ -12,6 +12,7 @@ import { ROAD_Y, WATER_Y } from './tileBuilder';
 // - animais pastando (passeio aleatório perto de "casa")
 // - barcos percorrendo a rede de rios e veículos a rede de estradas/trilhos
 // - bandos de pássaros circulando
+// - aldeões trabalhando nas construções e andando pelas estradas (só de perto e de dia)
 // Cada tipo é um InstancedMesh cujas matrizes são reescritas a cada quadro (poucas centenas).
 
 const m4 = new THREE.Matrix4();
@@ -102,8 +103,22 @@ interface Animal {
   phase: number;
 }
 
+interface Worker {
+  key: 'folk:axe' | 'folk:hoe' | 'folk:sack';
+  anim: 'chop' | 'tend' | 'carry';
+  base: THREE.Matrix4;
+  color: THREE.Color;
+  phase: number;
+}
+
+/** Teto de aldeões (nas construções e nas estradas). */
+const FOLK_MAX = 120;
+
 interface Mover {
   boat: boolean;
+  /** Aldeão a pé na estrada (anda na beira, devagar), com a cor da camisa. */
+  folk?: boolean;
+  shirt?: THREE.Color;
   tile: Placed;
   /** Borda de entrada (-1 = centro) e de saída (-1 = centro). */
   a: number;
@@ -144,6 +159,12 @@ export class Life {
   private movers: Mover[] = [];
   private wakeList: Mover[] = [];
   private flocks: Flock[] = [];
+  private workers: Worker[] = [];
+  /** Os aldeões só aparecem de perto (`World` atualiza a cada quadro). */
+  folkNear = true;
+  /** 1 de dia; vai a 0 em ~1 s quando a noite passa de 0,6 (os aldeões "vão para casa"). */
+  private home = 1;
+  night = 0;
   private board: Board | null = null;
   private theme!: Theme;
   /** Cor dos animais de carroça/caravana (as partes de locomotiva ignoram a tinta). */
@@ -164,6 +185,7 @@ export class Life {
     this.animals = [];
     this.movers = [];
     this.flocks = [];
+    this.workers = [];
     this.theme = theme;
     this.beast.set(theme.animals.colors[0]);
   }
@@ -192,6 +214,18 @@ export class Life {
     this.animals.push({ x: p.x, z: p.z, y: p.y, hx: p.x, hz: p.z, heading: Math.random() * Math.PI * 2, speed: 0, pause: Math.random() * 3, s, color: color.clone(), phase: Math.random() * 6 });
   }
 
+  addWorker(key: string, world: THREE.Matrix4, color: THREE.Color, anim: 'chop' | 'tend' | 'carry') {
+    if (key !== 'folk:axe' && key !== 'folk:hoe' && key !== 'folk:sack') return;
+    if (this.folkCount() >= FOLK_MAX || !this.pool(key)) return;
+    this.workers.push({ key, anim, base: world.clone(), color: color.clone(), phase: Math.random() * 20 });
+  }
+
+  private folkCount() {
+    let n = this.workers.length;
+    for (const m of this.movers) if (m.folk) n++;
+    return n;
+  }
+
   /** Recalcula as redes de rio/estrada e cria barcos, veículos e pássaros que faltam. */
   sync(board: Board) {
     this.board = board;
@@ -210,9 +244,18 @@ export class Life {
       for (const net of networks(board, T.Rail)) {
         if (net.length < 3) continue;
         const keys = new Set(net.map((p) => p.key));
-        const have = this.movers.filter((m) => !m.boat && keys.has(m.tile.key)).length;
+        const have = this.movers.filter((m) => !m.boat && !m.folk && keys.has(m.tile.key)).length;
         const want = Math.min(2, 1 + Math.floor(net.length / 10));
-        for (let k = have; k < want && this.movers.filter((m) => !m.boat).length < carsCap; k++) this.spawn(net, false);
+        for (let k = have; k < want && this.movers.filter((m) => !m.boat && !m.folk).length < carsCap; k++) this.spawn(net, false);
+      }
+    }
+    if (this.lib.geo('folk:sack')) {
+      for (const net of networks(board, T.Rail)) {
+        if (net.length < 3) continue;
+        const keys = new Set(net.map((p) => p.key));
+        const have = this.movers.filter((m) => m.folk && keys.has(m.tile.key)).length;
+        const want = Math.min(3, 1 + Math.floor(net.length / 8));
+        for (let k = have; k < want && this.folkCount() < FOLK_MAX; k++) this.spawn(net, false, true);
       }
     }
     if (th.period !== 'futuro' && !this.flocks.some((f) => f.ttl === undefined) && board.list.length >= 6) {
@@ -224,7 +267,7 @@ export class Life {
     }
   }
 
-  private spawn(net: Placed[], boat: boolean) {
+  private spawn(net: Placed[], boat: boolean, folk = false) {
     const terr = boat ? T.Water : T.Rail;
     const tile = net[Math.floor(Math.random() * net.length)];
     const exits = strictEdges(tile, terr);
@@ -234,9 +277,11 @@ export class Life {
     const others = exits.filter((e) => e !== b);
     const a = others.length ? others[Math.floor(Math.random() * others.length)] : -1;
     const th = this.theme;
-    const speed = boat ? 0.16 + Math.random() * 0.06 : th.vehicle === 'maglev' ? 0.7 : th.vehicle === 'steam' ? 0.42 : 0.17;
+    const speed = folk ? 0.045 + Math.random() * 0.015 : boat ? 0.16 + Math.random() * 0.06 : th.vehicle === 'maglev' ? 0.7 : th.vehicle === 'steam' ? 0.42 : 0.17;
     const { x, z } = hexToWorld(tile.q, tile.r);
-    const m: Mover = { boat, tile, a, b, t: Math.random() * 0.5, len: a < 0 ? 0.87 : Math.abs(a - b) === 3 ? 1.73 : 1.45, speed, wait: 0, trail: [], x, z, heading: 0, wake: 0 };
+    const roofs = th.houses.flatMap((h) => h.roofs);
+    const shirt = folk ? new THREE.Color(roofs[Math.floor(Math.random() * roofs.length)]) : undefined;
+    const m: Mover = { boat, folk, shirt, tile, a, b, t: Math.random() * 0.5, len: a < 0 ? 0.87 : Math.abs(a - b) === 3 ? 1.73 : 1.45, speed, wait: 0, trail: [], x, z, heading: 0, wake: 0 };
     this.movers.push(m);
   }
 
@@ -281,7 +326,60 @@ export class Life {
     }
 
     this.updateMovers(dt);
+    this.updateFolk(dt);
     this.updateBirds(dt);
+  }
+
+  private updateFolk(dt: number) {
+    this.home = THREE.MathUtils.clamp(this.home + (this.night > 0.6 ? -dt : dt), 0, 1);
+    const show = this.folkNear && this.home > 0;
+    const pools = { 'folk:axe': this.pools.get('folk:axe'), 'folk:hoe': this.pools.get('folk:hoe'), 'folk:sack': this.pools.get('folk:sack') };
+    for (const p of Object.values(pools)) if (p) p.mesh.visible = show;
+    if (!show) return;
+    const n = { 'folk:axe': 0, 'folk:hoe': 0, 'folk:sack': 0 };
+    const s = this.home;
+    const t = this.time;
+    for (const w of this.workers) {
+      const p = pools[w.key];
+      if (!p) continue;
+      if (w.anim === 'chop') {
+        // Quatro golpes a 1,4 Hz, depois 1 s de pausa.
+        const cyc = (t + w.phase) % (4 / 1.4 + 1);
+        const a = cyc < 4 / 1.4 ? Math.pow(Math.sin(Math.PI * ((cyc * 1.4) % 1)), 2) * 0.7 : 0;
+        m4.copy(w.base).multiply(m4b.makeRotationZ(-a));
+      } else if (w.anim === 'tend') {
+        const y = 1 - 0.15 * Math.max(0, Math.sin((t + w.phase) * 1.6));
+        m4.copy(w.base).multiply(m4b.makeScale(1, y, 1));
+      } else {
+        // Vai e volta 0,12 a 0,05 unidade/s, com uma parada em cada ponta.
+        const per = (0.12 / 0.05) * 2 + 2;
+        const c = (t + w.phase) % per;
+        const half = per / 2;
+        const k = c < half ? c : c - half;
+        const d = Math.min(1, Math.max(0, (k - 0.5) / (half - 1))) * 0.12;
+        const back = c >= half;
+        const walking = k > 0.5 && k < half - 0.5;
+        m4.copy(w.base).multiply(m4b.makeTranslation(back ? 0.12 - d : d, walking ? Math.abs(Math.sin((t + w.phase) * 9)) * 0.003 : 0, 0));
+        if (back) m4.multiply(m4b.makeRotationY(Math.PI));
+      }
+      if (s < 1) m4.multiply(m4b.makeScale(s, s, s));
+      p.set(n[w.key]++, m4, w.color);
+    }
+    const sack = pools['folk:sack'];
+    if (sack) {
+      const roadY = ROAD_Y[this.theme.road];
+      for (const m of this.movers) {
+        if (!m.folk) continue;
+        // Anda pela beira direita da estrada.
+        const side = 0.045;
+        const ox = -Math.sin(m.heading) * side, oz = Math.cos(m.heading) * side;
+        const bob = m.wait > 0 ? 0 : Math.abs(Math.sin(t * 9 + m.speed * 50)) * 0.003;
+        q4.setFromAxisAngle(UP, -m.heading);
+        m4.compose(v3.set(m.x + ox, roadY + bob, m.z + oz), q4, s3.setScalar(s));
+        sack.set(n['folk:sack']++, m4, m.shirt);
+      }
+    }
+    for (const [k, c] of Object.entries(n)) pools[k as keyof typeof n]?.commit(c);
   }
 
   private pathPos(m: Mover, t: number, out: { x: number; z: number }) {
@@ -310,6 +408,12 @@ export class Life {
     return m ? { x: m.x, z: m.z } : null;
   }
 
+  /** Posição do i-ésimo aldeão de construção, ou null (capturas). */
+  workerPos(i: number): { x: number; z: number } | null {
+    const w = this.workers[i];
+    return w ? { x: w.base.elements[12], z: w.base.elements[14] } : null;
+  }
+
   /** Esteiras para o shader da água: os barcos andando mais perto de (x, z). */
   wakes(x: number, z: number) {
     const near = this.wakeList;
@@ -332,7 +436,7 @@ export class Life {
       // Chegou ao centro de um beco (lago, estação): volta por onde veio.
       m.b = m.a;
       m.a = -1;
-      m.wait = m.boat ? 0.5 : 1.8;
+      m.wait = m.boat ? 0.5 : m.folk ? 3 : 1.8;
     } else {
       const [dq, dr] = DIRS[m.b];
       const n = board.tiles.get(hkey(m.tile.q + dq, m.tile.r + dr));
@@ -347,7 +451,7 @@ export class Life {
         const a = m.a;
         m.a = m.b;
         m.b = a;
-        m.wait = m.boat ? 0.4 : 1.2;
+        m.wait = m.boat ? 0.4 : m.folk ? 2.5 : 1.2;
       }
     }
     m.t = 0;
@@ -383,6 +487,7 @@ export class Life {
       if (Math.hypot(ahead.x - pos.x, ahead.z - pos.z) > 1e-5) m.heading = Math.atan2(ahead.z - pos.z, ahead.x - pos.x);
       m.x = pos.x;
       m.z = pos.z;
+      if (m.folk) continue;
       if (m.boat) {
         m.wake += ((m.wait > 0 ? 0 : 1) - m.wake) * Math.min(1, dt * 1.5);
         const bob = Math.sin(this.time * 2 + m.speed * 40) * 0.003;
@@ -468,7 +573,8 @@ export class Life {
   counts() {
     return {
       boats: this.movers.filter((m) => m.boat).length,
-      vehicles: this.movers.filter((m) => !m.boat).length,
+      vehicles: this.movers.filter((m) => !m.boat && !m.folk).length,
+      folk: this.folkCount(),
       animals: this.animals.length,
       spinners: this.spinners.length,
       birds: this.flocks.reduce((a, f) => a + f.n, 0),

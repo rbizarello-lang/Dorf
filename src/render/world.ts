@@ -874,6 +874,7 @@ export class World {
       }
       if (d.anim === 'spin-z' || d.anim === 'spin-x') this.life.addSpinner(d.key, tmpM, d.anim === 'spin-x' ? 'x' : 'z');
       else if (d.anim === 'wander') this.life.addAnimal(tmpM, d.color);
+      else if (d.anim === 'chop' || d.anim === 'tend' || d.anim === 'carry') this.life.addWorker(d.key, tmpM, d.color, d.anim);
       else this.pool(this.isLod(d.key) && this.lodFlip++ % 2 ? `${d.key}~` : d.key)?.add(tmpM, d.color);
     }
     const v = new THREE.Vector3();
@@ -1309,6 +1310,9 @@ export class World {
     U.fine.value = fine;
     for (const [k, p] of this.pools) if (k.endsWith('~')) p.mesh.visible = fine > 0;
 
+    // Aldeões só de perto, com o mesmo limiar da metade fina das plantas.
+    this.life.folkNear = this.rig.dist < 13;
+    this.life.night = U.night.value;
     this.life.update(dt);
     this.life.wakes(this.rig.target.x, this.rig.target.z);
     this.spawnSmoke(dt);

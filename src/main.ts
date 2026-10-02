@@ -969,6 +969,14 @@ function start(data: unknown) {
 };
 
 // Centraliza a câmera num barco andando (capturas das esteiras na água).
+(window as unknown as { __folk: (i?: number, zoom?: number) => boolean }).__folk = (i = 0, zoom) => {
+  const f = world.life.workerPos(i);
+  if (!f) return false;
+  world.rig.goal.set(f.x, 0, f.z);
+  world.rig.target.set(f.x, 0, f.z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
 (window as unknown as { __boat: (zoom?: number) => boolean }).__boat = (zoom) => {
   const b = world.life.boatPos();
   if (!b) return false;

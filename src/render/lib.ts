@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
-import type { AnimalKind, BoatKind, BodyStyle, BridgeStyle, CenterCrown, CropStyle, GateStyle, HouseKind, Landmark, RoofStyle, Theme, TreeGeo, VehicleKind } from '../themes/types';
+import type { AnimalKind, BoatKind, BodyStyle, BridgeStyle, CenterCrown, CropStyle, GateStyle, HatStyle, HouseKind, Landmark, RoofStyle, Theme, TreeGeo, VehicleKind } from '../themes/types';
 
 // Biblioteca de "kits": geometrias low-poly com cor por vértice, montadas por tema.
 // Cada chave vira um InstancedMesh (1 draw call para milhares de cópias).
@@ -1166,6 +1166,38 @@ function birdGeometry() {
   ]);
 }
 
+// ---------------------------------------------------------------- aldeões
+
+/**
+ * Aldeão de 0,05 de altura (0,07 depois da escala), olhando para +x, com o pé na origem: calça, camisa (cor da
+ * instância), cabeça, chapéu do tema e a ferramenta do ofício.
+ */
+function folkGeometry(tool: 'axe' | 'hoe' | 'sack', folk: { skin: string; hat: HatStyle; hatColor: string }, wood: Col) {
+  const { skin, hat, hatColor } = folk;
+  const parts: Part[] = [
+    { geo: box(0.009, 0.01, 0.013), color: '#4a3f36' },
+    { geo: cyl(0.0085, 0.011, 0.024, 6, 0, 0.009), color: '#ffffff', tint: 1, grad: [0.85, 1.05, 0.009, 0.033] },
+    { geo: ico(0.0075).translate(0, 0.04, 0), color: skin },
+  ];
+  if (hat === 'straw') parts.push({ geo: cone(0.017, 0.009, 8, 0, 0.044), color: hatColor });
+  else if (hat === 'cap') parts.push({ geo: cyl(0.0068, 0.0082, 0.006, 6, 0, 0.0445), color: hatColor });
+  else if (hat === 'scarf') parts.push({ geo: cyl(0.0078, 0.0085, 0.008, 6, 0, 0.041), color: hatColor }, { geo: box(0.004, 0.012, 0.006, -0.008, 0.03), color: hatColor });
+  else if (hat === 'hood') parts.push({ geo: cone(0.0095, 0.018, 6, 0, 0.037), color: hatColor });
+  else if (hat === 'helmet') parts.push({ geo: ico(0.0105, 1).translate(0, 0.041, 0), color: hatColor });
+  if (tool === 'axe') {
+    // Machado erguido à frente: o golpe é o corpo inteiro inclinando para a frente.
+    parts.push({ geo: strut([0.007, 0.026, 0.009], [0.016, 0.058, 0.009], 0.0025), color: wood });
+    parts.push({ geo: box(0.008, 0.009, 0.002, 0.018, 0.05, 0.009), color: '#8a8f96' });
+  } else if (tool === 'hoe') {
+    parts.push({ geo: strut([0.006, 0.028, 0.009], [0.03, 0.002, 0.009], 0.0022), color: wood });
+    parts.push({ geo: box(0.004, 0.003, 0.01, 0.031, 0, 0.009), color: '#8a8f96' });
+  } else {
+    parts.push({ geo: box(0.012, 0.014, 0.013, -0.01, 0.024), color: '#c8b088', grad: [0.85, 1.05, 0.024, 0.038] });
+  }
+  // Um pouco maior que a escala das casas, para ser lido de longe (~0,07 de altura).
+  return kit(parts).scale(1.4, 1.4, 1.4);
+}
+
 // ---------------------------------------------------------------- Centro da vila e marco da era
 
 const GOLD = '#d9b44a';
@@ -1525,6 +1557,8 @@ export class Lib {
     for (let e = 0; e < 4; e++) set(`center:${e}`, centerGeometry(e, theme));
     set('pennant', pennantGeometry(theme.trunk));
     set('scaffold', scaffoldGeometry(theme.trunk));
+    const folk = theme.folk ?? { skin: '#c99a72', hat: 'none', hatColor: '#000' };
+    for (const t of ['axe', 'hoe', 'sack'] as const) set(`folk:${t}`, folkGeometry(t, folk, theme.trunk));
   }
 
   geo(key: string) {
