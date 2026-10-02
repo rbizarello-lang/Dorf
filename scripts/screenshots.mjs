@@ -27,8 +27,9 @@ const all = [
   { name: 'tarde', q: 'theme=toscana&seed=10&auto=32&quality=high&time=dusk', wait: 14000 },
   { name: 'amanhecer', q: 'theme=vale&seed=7&auto=32&quality=high&time=dawn', wait: 14000 },
   { name: 'dourada', q: 'theme=toscana&seed=10&auto=32&quality=high&time=golden', wait: 14000 },
-  // Cinema: cada quadro leva ~30 s no SwiftShader; o mundo bem devagar e uns 8 quadros para o TRAA assentar.
-  { name: 'cinema', q: 'theme=toscana&seed=10&auto=32&quality=cinema&time=golden&timescale=0.05', wait: 240000 },
+  // Cinema: cada quadro leva ~30 s no SwiftShader. A espera dá uns 6 quadros para o TRAA assentar, e a
+  // captura em si leva mais uns 3 minutos.
+  { name: 'cinema', q: 'theme=toscana&seed=10&auto=32&quality=cinema&time=golden', wait: 240000, timeout: 600000 },
   { name: 'nuvens', q: 'theme=vale&seed=7&auto=60&quality=high&zoom=44', wait: 14000 },
   { name: 'close', q: 'theme=vale&seed=7&auto=32&quality=high&zoom=4.5', wait: 12000 },
   { name: 'trigo', q: 'theme=vale&seed=21&auto=40&quality=high&zoom=3.6', wait: 12000 },
@@ -59,7 +60,7 @@ for (const s of list) {
     console.log('interações na prévia:', n);
     await page.waitForTimeout(8000);
   }
-  await page.screenshot({ path: `${out}/${s.name}.png`, timeout: 120000 });
+  await page.screenshot({ path: `${out}/${s.name}.png`, timeout: s.timeout ?? 120000 });
   const stats = await page.evaluate(() => window.__stats);
   console.log(s.name, JSON.stringify(stats), errors.length ? `ERR ${errors.join(' | ')}` : '');
   await ctx.close();
