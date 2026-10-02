@@ -60,6 +60,7 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 | Zoom | roda do mouse, `+` / `-` | pinça |
 | Girar câmera | `Q` / `E`, ou arrastar com o botão direito | — |
 | Dia, entardecer e noite | `L` ou botão ☀ | botão ☀ |
+| Som: música e efeitos, só efeitos, mudo | botão Som; `M` liga ou desliga a música | botão ♫ |
 | Ajuda, nova partida, estatísticas | `H`, `N`, `F` | botões no topo |
 
 ## Temas
@@ -107,9 +108,10 @@ tests/         simulação de partidas com oráculos independentes
 Um tema é um objeto de dados (`Theme`, em `src/themes/types.ts`, com comentários em cada campo). Copie um tema de `eras.ts` e troque:
 
 - **nomes e cores** dos 6 terrenos, do chão, da água, do fundo e da luz;
-- **floresta:** formas de árvore (`conifer`, `oak`, `cypress`, `olive`, `palm`, `bamboo`, `araucaria`, `cactus`, `birch`, `blossom`, `round`, `crystal`) com peso e cores;
-- **vila:** tipos de casa (corpo `cottage`/`long`/`cube`/`tall`/`round` + telhado `gable`/`hip`/`flat`/`dome`/`pagoda`/`thatch`/`turf`/`stepgable`/`cone`, com enxaimel e chaminé opcionais) e um marco (`church`, `baroque`, `tower`, `pagoda`, `pyramid`, `obelisk`, `windmill`, `temple`, `stave`, `dome`);
-- **plantações:** `wheat`, `barley`, `corn`, `rice`, `tulip`, `lavender`, `sunflower`, `vineyard`, `sugarcane`, `papyrus`, `tea`, `coffee`, `cotton`, `quinoa`, `hydro`;
+- **floresta:** formas de árvore (`conifer`, `oak`, `cypress`, `olive`, `palm`, `bamboo`, `araucaria`, `cactus`, `birch`, `blossom`, `round`, `willow`, `umbrella`, `waxpalm`, `crystal`) com peso e cores;
+- **vila:** tipos de casa (corpo `cottage`/`long`/`cube`/`tall`/`round` + telhado `gable`/`hip`/`flat`/`dome`/`pagoda`/`thatch`/`turf`/`stepgable`/`cone`, com enxaimel e chaminé opcionais) e um marco (`church`, `baroque`, `tower`, `pagoda`, `pyramid`, `obelisk`, `windmill`, `temple`, `stave`, `hall`, `pylon`, `kancha`, `watertower`, `dome`);
+- **construções opcionais:** a da interação vila + plantação (`windmill`, `granary`, `windpump`, `stilt`), um portal sobre a estrada na entrada da vila (`torii`, `paifang`, `inca`) e uma ponte sobre o rio (`stone`, `wood`, `rope`);
+- **plantações:** `wheat`, `barley`, `corn`, `rice`, `tulip`, `lavender`, `sunflower`, `vineyard`, `sugarcane`, `papyrus`, `tea`, `coffee`, `cotton`, `quinoa`, `potato`, `flax`, `mulberry`, `hydro`;
 - **animais, barco, estilo de estrada e veículo**, nomes das interações e, se quiser, regras próprias (`rules`).
 
 O tema aparece sozinho no menu, agrupado pela época. Para conferir as formas, abra `?gallery&theme=<id>`.

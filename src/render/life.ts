@@ -4,6 +4,7 @@ import { DIRS, edgeMid, hexToWorld, hkey, opposite } from '../core/hex';
 import { T } from '../core/tiles';
 import type { Theme } from '../themes/types';
 import { instGeometry, setInstColor, type Lib } from './lib';
+import { WAKES, WAKE_MAX, WAKE_N } from './materials';
 import { ROAD_Y, WATER_Y } from './tileBuilder';
 
 // Vida do mapa: tudo que se move depois de assentado.
@@ -80,7 +81,7 @@ class AnimPool {
 }
 
 interface Spinner {
-  pool: 'sails' | 'wheel';
+  pool: 'sails' | 'wheel' | 'rotor';
   base: THREE.Matrix4;
   axis: THREE.Vector3;
   speed: number;
@@ -115,6 +116,8 @@ interface Mover {
   x: number;
   z: number;
   heading: number;
+  /** Força da esteira (0 parado, 1 andando), suavizada para nascer e sumir devagar. */
+  wake: number;
 }
 
 interface Flock {
@@ -128,6 +131,9 @@ interface Flock {
   ang: number;
   n: number;
   retarget: number;
+  /** Bando de passagem (levantou voo num marco): sobe com `vh` e some quando `ttl` acaba. */
+  vh?: number;
+  ttl?: number;
 }
 
 export class Life {
@@ -136,6 +142,7 @@ export class Life {
   private spinners: Spinner[] = [];
   private animals: Animal[] = [];
   private movers: Mover[] = [];
+  private wakeList: Mover[] = [];
   private flocks: Flock[] = [];
   private board: Board | null = null;
   private theme!: Theme;
@@ -173,9 +180,9 @@ export class Life {
   }
 
   addSpinner(key: string, world: THREE.Matrix4, axis: 'x' | 'z') {
-    if (key !== 'sails' && key !== 'wheel') return;
+    if (key !== 'sails' && key !== 'wheel' && key !== 'rotor') return;
     if (!this.pool(key)) return;
-    this.spinners.push({ pool: key, base: world.clone(), axis: axis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1), speed: key === 'sails' ? 0.9 + Math.random() * 0.4 : 1.4, phase: Math.random() * 6 });
+    this.spinners.push({ pool: key, base: world.clone(), axis: axis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1), speed: key === 'sails' ? 0.9 + Math.random() * 0.4 : key === 'rotor' ? 2.2 + Math.random() * 0.6 : 1.4, phase: Math.random() * 6 });
   }
 
   addAnimal(world: THREE.Matrix4, color: THREE.Color) {
@@ -208,7 +215,7 @@ export class Life {
         for (let k = have; k < want && this.movers.filter((m) => !m.boat).length < carsCap; k++) this.spawn(net, false);
       }
     }
-    if (th.period !== 'futuro' && !this.flocks.length && board.list.length >= 6) {
+    if (th.period !== 'futuro' && !this.flocks.some((f) => f.ttl === undefined) && board.list.length >= 6) {
       for (let f = 0; f < 3; f++) {
         const t = board.list[Math.floor(Math.random() * board.list.length)];
         const { x, z } = hexToWorld(t.q, t.r);
@@ -229,7 +236,7 @@ export class Life {
     const th = this.theme;
     const speed = boat ? 0.16 + Math.random() * 0.06 : th.vehicle === 'maglev' ? 0.7 : th.vehicle === 'steam' ? 0.42 : 0.17;
     const { x, z } = hexToWorld(tile.q, tile.r);
-    const m: Mover = { boat, tile, a, b, t: Math.random() * 0.5, len: a < 0 ? 0.87 : Math.abs(a - b) === 3 ? 1.73 : 1.45, speed, wait: 0, trail: [], x, z, heading: 0 };
+    const m: Mover = { boat, tile, a, b, t: Math.random() * 0.5, len: a < 0 ? 0.87 : Math.abs(a - b) === 3 ? 1.73 : 1.45, speed, wait: 0, trail: [], x, z, heading: 0, wake: 0 };
     this.movers.push(m);
   }
 
@@ -297,6 +304,27 @@ export class Life {
     }
   }
 
+  /** Posição de um barco andando, ou null (capturas das esteiras). */
+  boatPos(): { x: number; z: number } | null {
+    const m = this.movers.find((m) => m.boat && m.wait <= 0);
+    return m ? { x: m.x, z: m.z } : null;
+  }
+
+  /** Esteiras para o shader da água: os barcos andando mais perto de (x, z). */
+  wakes(x: number, z: number) {
+    const near = this.wakeList;
+    near.length = 0;
+    for (const m of this.movers) if (m.boat && m.wake > 0.01) near.push(m);
+    const d2 = (m: Mover) => (m.x - x) ** 2 + (m.z - z) ** 2;
+    if (near.length > WAKE_MAX) near.sort((a, b) => d2(a) - d2(b));
+    const n = Math.min(WAKE_MAX, near.length);
+    for (let i = 0; i < n; i++) {
+      const m = near[i];
+      (WAKES.array[i] as THREE.Vector4).set(m.x, m.z, Math.cos(m.heading) * m.wake, Math.sin(m.heading) * m.wake);
+    }
+    WAKE_N.value = n;
+  }
+
   private advance(m: Mover) {
     const board = this.board!;
     const terr = m.boat ? T.Water : T.Rail;
@@ -356,6 +384,7 @@ export class Life {
       m.x = pos.x;
       m.z = pos.z;
       if (m.boat) {
+        m.wake += ((m.wait > 0 ? 0 : 1) - m.wake) * Math.min(1, dt * 1.5);
         const bob = Math.sin(this.time * 2 + m.speed * 40) * 0.003;
         q4.setFromAxisAngle(UP, -m.heading);
         m4.compose(v3.set(m.x, WATER_Y - 0.001 + bob, m.z), q4, s3.setScalar(1));
@@ -387,11 +416,26 @@ export class Life {
     car?.commit(ci);
   }
 
+  /** Um bando sai do chão em espiral e vai embora; temas sem pássaros (futuro) ficam sem. */
+  flush(x: number, z: number) {
+    if (!this.theme || this.theme.period === 'futuro') return;
+    if (this.flocks.filter((f) => f.ttl !== undefined).length >= 2) return;
+    const w = (Math.random() < 0.5 ? -1 : 1) * 0.9;
+    this.flocks.push({ cx: x, cz: z, tx: x + (Math.random() - 0.5) * 8, tz: z + (Math.random() - 0.5) * 8, r: 0.35, h: 0.25, w, ang: Math.random() * 6, n: 9, retarget: 99, vh: 0.55, ttl: 7 });
+  }
+
   private updateBirds(dt: number) {
     const bp = this.flocks.length ? this.pool('bird', false) : null;
     if (!bp) return;
+    this.flocks = this.flocks.filter((f) => f.ttl === undefined || f.ttl > 0);
     let i = 0;
     for (const f of this.flocks) {
+      if (f.ttl !== undefined) {
+        f.ttl -= dt;
+        f.h += f.vh! * dt;
+        f.r = Math.min(2.4, f.r + dt * 0.5);
+        f.w *= Math.exp(-dt * 0.15);
+      }
       f.ang += f.w * dt;
       f.retarget -= dt;
       if (f.retarget < 0 && this.board?.list.length) {
@@ -401,8 +445,9 @@ export class Life {
         f.tz = w.z;
         f.retarget = 15 + Math.random() * 25;
       }
-      f.cx += (f.tx - f.cx) * Math.min(1, dt * 0.05);
-      f.cz += (f.tz - f.cz) * Math.min(1, dt * 0.05);
+      const pull = f.ttl !== undefined ? 0.25 : 0.05;
+      f.cx += (f.tx - f.cx) * Math.min(1, dt * pull);
+      f.cz += (f.tz - f.cz) * Math.min(1, dt * pull);
       const x = f.cx + Math.cos(f.ang) * f.r;
       const z = f.cz + Math.sin(f.ang) * f.r;
       const heading = f.ang + (f.w > 0 ? Math.PI / 2 : -Math.PI / 2);

@@ -348,6 +348,62 @@ Na lista priorizada do [TEMAS.md](TEMAS.md), burro/mula e búfalo já entraram (
 
 **Custo.** Com 300 peças em renderização por software: 106 draw calls (+11%) e 1,45 M de triângulos (+6%) no perfil Alta. A CPU por quadro medida no SwiftShader subiu, mas o profiler mostra quase tudo em escrita de buffers e envio de comandos disputando CPU com o rasterizador por software. **A medição em GPU real (`?stress=1000&debug`) continua sendo o próximo passo**; o modo Auto desce de Ultra para Alta, Média e Baixa se o quadro passar de ~26 ms.
 
+### Ultra além do PC de hoje (outubro de 2026)
+
+O Ultra deixou de ser medido pelo PC atual (RX 580, que fica em Média com 1.000 peças em 4K): o alvo é a máxima qualidade numa GPU melhor. Alta, Média e Baixa não mudaram, e o Auto continua descendo de nível sozinho.
+
+| Recurso (só no Ultra) | Como entrou |
+|---|---|
+| Sombras em cascata | `CSMShadowNode` com 3 cascatas de 4096², divididas em volta do alvo da câmera (que olha de cima: perto dela só há ar) |
+| Reflexos na água (SSR) | só onde a água grava a máscara própria (`ssrMask`, no alfa da saída de normal, onde os outros materiais gravam a rugosidade); a normal do reflexo é acalmada para os raios não se espalharem nas ondas |
+| Luz indireta (SSGI) | substitui o GTAO: oclusão mais a cor que rebate das superfícies vizinhas, somada só onde há oclusão (no chão aberto e ondulado ela apagava as sombras longas do entardecer); o vazio fica fora da cor difusa |
+| Raios de luz (godrays) | percorrem o mapa de sombra de uma luz sem intensidade (as cascatas não têm mapa único); só aparecem com o sol baixo |
+| Vegetação mais densa | detalhe 1,35 (Alta segue em 1) |
+
+**Armadilhas:**
+- O WebGPU limita a 32 bytes por amostra o total das saídas da passada (cada RGBA8 conta 8). Cor, normal, difusa e velocidade já ocupam tudo, por isso a rugosidade vai no alfa da normal.
+- Numa MRT, só a saída `output` usa a mistura do material; as outras são sobrescritas até por partículas transparentes, que deixavam quadrados na oclusão. A normal e a difusa usam `setBlendMode(..., MaterialBlending)`, e os materiais transparentes gravam nelas com alfa 0.
+
+**Custo.** Com 300 peças em renderização por software: Ultra com 193 draw calls e 3,05 M de triângulos, contra 111 e 1,53 M na Alta. O dobro de triângulos vem das passadas de sombra extras (3 cascatas mais a luz dos raios) e de 35% mais decoração. O custo real em GPU ainda precisa ser medido; `?fx=gi.ssr.rays.traa` liga os efeitos um a um.
+
+### Água física (outubro de 2026)
+
+A água deixou de ser uma faixa pintada sobre o leito e virou uma coluna d'água: o olhar atravessa a superfície e vê o fundo. Vale em todos os níveis de qualidade; o reflexo de tela continua só no Ultra.
+
+| Recurso | Como entrou |
+|---|---|
+| Leito visível | a malha da água repete os triângulos do leito que ficam abaixo da linha d'água, com a cor e a profundidade exata de cada vértice (`wbed`); a beira fica onde a profundidade zera, sem a faixa de espuma que escondia a emenda |
+| Cor por absorção | o olhar refrata (n = 1,333) e cada canal é absorvido no caminho do sol até o leito e na volta; a absorção vem da cor da água do tema, então cada tema mantém a sua água, e o que a coluna absorve vira a cor turva da água funda |
+| Cáusticas | 32 quadros de 128² (512 KB) calculados por traçado de fótons num Web Worker, periódicos no espaço e no tempo; o shader interpola os quadros e mistura duas fases da correnteza sem perder contraste; multiplicam só a luz direta, então somem na sombra e à noite |
+| Reflexo estável | Fresnel exato de dielétrico para o céu; o brilho do sol é o GGX da própria luz, com a rugosidade alargada pela variação das ondas dentro do pixel (filtro de Kaplanyan e Tokuyoshi): de longe vira um caminho de luz que não pisca |
+| Esteiras e anéis | barcos andando deixam os braços do V de Kelvin, ondas transversais e espuma no casco (até 8, os mais perto do foco da câmera); peixes abrem anéis de tempos em tempos; a peça que assenta faz ondinhas na água |
+
+**Armadilhas:**
+- O Dawn (testado com SwiftShader) recusa o envio fatia por fatia de uma textura 3D ("TextureViewDimension e2D not compatible with e3D"). As cáusticas usam uma textura em camadas (`DataArrayTexture`) e o shader interpola entre duas camadas.
+- O cálculo das cáusticas leva ~150 ms; na thread principal, sob render por software, ele travava a abertura. Vai num Web Worker criado do texto da própria função, que por isso não pode depender de nada de fora. Sem worker (uma política de conteúdo que bloqueie `blob:`), roda na thread principal logo depois da abertura.
+- O SSR reconhecia a água pela rugosidade baixa. Com o filtro de Kaplanyan, a rugosidade da água sobe com a distância, então a água grava uma máscara própria no lugar dela.
+
+**Custo.** Com 300 peças em renderização por software, os draw calls não mudam (193 no Ultra, 111 na Alta) e os triângulos sobem 0,3% no Ultra (3,06 M) e 0,7% na Alta (1,54 M), porque a água agora segue a grade do leito. A montagem das peças fica ~15% mais lenta, já que a correnteza é calculada em mais vértices. A CPU por quadro ficou dentro do ruído do SwiftShader, que dá picos de ~1 s nos dois builds. O shader da água ficou mais pesado (12 leituras de textura por pixel de água, contra 3); esse custo só uma GPU de verdade mede.
+
+### Acabamento (outubro de 2026)
+
+Cinco ajustes de imagem do estudo da Lagoa e do Threetopia, quase sem custo na placa.
+
+| Recurso | Como entrou |
+|---|---|
+| Oclusão só na luz indireta | os materiais do jogo (`LitMaterial`: kits, chão e água) gravam no passe da cena a parte da cor que veio do céu (`indirectShare`), e o pós escurece só essa parte. O sol direto, as janelas acesas, o contorno das copas e a névoa não ganham mais halo escuro. Na Alta, o GTAO ganha o rebatimento colorido de Jimenez (2016): o pé da grama fica verde-escuro, não cinza. No Ultra, o próprio SSGI já traz a luz rebatida |
+| Nitidez e faixas | o RCAS (`SharpenNode`) depois do TRAA devolve o detalhe que a média temporal amolece, sem realçar o ruído do SSGI; um dither triangular de ±1 nível, depois da conversão para sRGB, tira as faixas do céu e da névoa |
+| Cor por hora | a gradação puxa os realces para a cor do sol e as sombras para o tom oposto: quase nada ao meio-dia, realce dourado e sombra azulada no entardecer, nada à noite. O tom sai da cor do sol de cada tema, sem regra por tema |
+| Sombra firme | sem cascatas (Alta e abaixo), o centro da sombra anda de texel em texel no plano da luz, e as bordas não tremem quando a câmera desliza; as cascatas do Ultra já faziam isso |
+| Capim sem pipocar | a metade fina das plantas (chaves `~`) não some mais de uma vez em `rig.dist` 13: entre 11,5 e 14,5, cada planta afunda no chão na sua vez (material `cropFine`, sem `discard`) |
+
+**Armadilhas:**
+- O `builtinAOContext` do three aplica a oclusão dentro do material, mas pede um pré-passe de profundidade e normal, o que dobra os draw calls. Gravar a parte indireta numa saída do passe da cena dá o mesmo resultado sem passe extra. Ela vai no alfa da saída `diffuse` (Ultra) ou da `normal` (Alta, que não grava a máscara do reflexo).
+- Com SSGI, o vazio grava a cor difusa zerada, para não tingir a luz rebatida. O alfa dessa saída precisa ser 1; com 0, o vazio perde a oclusão e o fundo entre as peças clareia.
+- O dither precisa vir depois da conversão para sRGB, então o pipeline faz a conversão no próprio grafo (`outputColorTransform = false` e `renderOutput`).
+
+**Custo.** Com 300 peças em renderização por software, os níveis com TRAA ganham 2 draw calls (o RCAS e uma cópia da saída do TRAA): 195 no Ultra e 113 na Alta. Os triângulos não mudam. A CPU por quadro fica dentro do ruído; os picos de ~0,7 s aparecem nos dois builds e vêm de shaders compilados tarde, dentro da janela da medida. Na GPU, entra uma passada de tela cheia (5 leituras por pixel) e algumas contas no pós.
+
 **Ainda não feito, do documento do AoE:** Centro que evolui com a era, arquitetura que muda por era, aldeões trabalhando, maravilha, vazio como mapa antigo, minimapa, trilha sonora por era.
 
 ## Apêndice A: revisão de código e QA pelo Sonnet

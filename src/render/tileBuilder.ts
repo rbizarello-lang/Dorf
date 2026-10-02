@@ -22,8 +22,6 @@ const BANK_EXTRA = 0.055;
 /** Profundidade do leito e largura da margem inclinada (a partir da linha d'água nominal). */
 const BED_DEPTH = 0.048;
 const BANK_W = 0.075;
-/** Folga da superfície da água além da margem: o encontro com o talude desenha a beira. */
-const WATER_PAD = 0.05;
 export const ROAD_HW = 0.1;
 /** Altura em que veículos andam (maglev flutua sobre a via). */
 export const ROAD_Y = { rail: 0.03, dirt: 0.006, stone: 0.008, sand: 0.006, maglev: 0.075 } as const;
@@ -49,9 +47,13 @@ export interface TileBuild {
   /** Por vértice do chão: pesos de detalhe [prado, floresta, plantação, vila] (0 nas laterais). */
   splat: Float32Array;
   water: Float32Array;
-  /** Por vértice da água: correnteza (x, z, em unidades/s relativas) e distância ao centro do canal (0) até a margem (1). */
+  /** Por vértice da água: correnteza (x, z, em unidades/s relativas). */
   wflow: Float32Array;
-  wedge: Float32Array;
+  /**
+   * Por vértice da água: cor do leito logo abaixo (r, g, b) e profundidade da coluna
+   * (superfície menos leito; negativa onde o barranco já saiu da água).
+   */
+  wbed: Float32Array;
   decos: Deco[];
   /** Pontos (x, y, z) de onde sai fumaça de chaminé. */
   chimneys: number[];
@@ -257,8 +259,8 @@ function waterField(water: { paths: Path[]; idx: number[] }, flow: readonly numb
     const d = e(x, z);
     return d >= BANK_W ? 0 : -BED_DEPTH * smooth(BANK_W, -0.05, d);
   };
-  /** [fx, fz, wedge] num ponto da superfície. */
-  const at = (x: number, z: number): [number, number, number] => {
+  /** Correnteza [fx, fz] num ponto da superfície. */
+  const at = (x: number, z: number): [number, number] => {
     let best: ReturnType<typeof nearestParam> | null = null;
     let bi = 0;
     water.paths.forEach((p, i) => {
@@ -269,7 +271,7 @@ function waterField(water: { paths: Path[]; idx: number[] }, flow: readonly numb
       }
     });
     const b = best as ReturnType<typeof nearestParam> | null;
-    if (!b) return [0, 0, 1];
+    if (!b) return [0, 0];
     let dir = 1, speed = 1;
     if (n === 2) {
       const sa = flow[water.idx[0]], sb = flow[water.idx[1]];
@@ -286,21 +288,22 @@ function waterField(water: { paths: Path[]; idx: number[] }, flow: readonly numb
       speed = smooth(0, 0.5, 1 - b.t);
       if (n === 1) speed *= smooth(LAKE_R * 0.5, LAKE_R * 1.25, Math.hypot(x, z));
     }
-    let w = b.d / (RIVER_HW + 0.015);
-    if (discR) w = Math.min(w, Math.hypot(x, z) / (discR + 0.015));
-    // A espuma da beira acompanha a margem ondulada.
-    w += wiggle(x, z) * 2.2;
-    return [b.tx * dir * speed, b.tz * dir * speed, Math.max(0, Math.min(1.2, w))];
+    return [b.tx * dir * speed, b.tz * dir * speed];
   };
   return { e, ground, at };
 }
 
-/** Superfície da água com atributos por vértice (correnteza e distância à margem). */
+/**
+ * Superfície da água: os mesmos triângulos do leito que ficam abaixo da linha d'água,
+ * achatados em WATER_Y. Assim a profundidade interpolada em cada pixel é exatamente a
+ * do chão de baixo (zero na beira, onde o barranco corta a água) e a cor do leito
+ * acompanha a do barranco.
+ */
 class WaterBuf {
   pos: number[] = [];
   flow: number[] = [];
-  edge: number[] = [];
-  private cache = new Map<string, [number, number, number]>();
+  bed: number[] = [];
+  private cache = new Map<string, [number, number]>();
   constructor(private field: ReturnType<typeof waterField>) {}
 
   private attr(x: number, z: number) {
@@ -310,15 +313,16 @@ class WaterBuf {
     return v;
   }
 
-  tri(a: V2, b: V2, c: V2) {
+  tri(a: { p: V3; c: THREE.Color }, b: { p: V3; c: THREE.Color }, c: { p: V3; c: THREE.Color }) {
+    if (Math.min(a.p[1], b.p[1], c.p[1]) > WATER_Y - 1e-4) return;
     // Sempre virado para cima.
-    const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-    const vs = cross > 0 ? [a, c, b] : [a, b, c];
-    for (const [x, z] of vs) {
-      const [fx, fz, w] = this.attr(x, z);
+    const cross = (b.p[0] - a.p[0]) * (c.p[2] - a.p[2]) - (b.p[2] - a.p[2]) * (c.p[0] - a.p[0]);
+    for (const v of cross > 0 ? [a, c, b] : [a, b, c]) {
+      const [x, y, z] = v.p;
+      const [fx, fz] = this.attr(x, z);
       this.pos.push(x, WATER_Y, z);
       this.flow.push(fx, fz);
-      this.edge.push(w);
+      this.bed.push(v.c.r, v.c.g, v.c.b, WATER_Y - y);
     }
   }
 }
@@ -345,40 +349,6 @@ function disc(buf: Buf, cx: number, cz: number, r: number, y: number, color: THR
     const a0 = (k / seg) * Math.PI * 2;
     const a1 = ((k + 1) / seg) * Math.PI * 2;
     buf.tri([cx, y, cz], [cx + Math.cos(a0) * r, y, cz + Math.sin(a0) * r], [cx + Math.cos(a1) * r, y, cz + Math.sin(a1) * r], color, color, color, UP, sp);
-  }
-}
-
-/** Faixa de água ao longo de um caminho: 3 vértices na seção (margem, centro, margem). */
-function waterStrip(wb: WaterBuf, pts: V2[], hw: number) {
-  const L: V2[] = [], R: V2[] = [];
-  for (let k = 0; k < pts.length; k++) {
-    const p = pts[k];
-    const a = pts[Math.max(0, k - 1)];
-    const b = pts[Math.min(pts.length - 1, k + 1)];
-    let tx = b[0] - a[0], tz = b[1] - a[1];
-    const l = Math.hypot(tx, tz) || 1;
-    tx /= l;
-    tz /= l;
-    L.push([p[0] - tz * hw, p[1] + tx * hw]);
-    R.push([p[0] + tz * hw, p[1] - tx * hw]);
-  }
-  for (let k = 0; k < pts.length - 1; k++) {
-    wb.tri(L[k], pts[k], pts[k + 1]);
-    wb.tri(L[k], pts[k + 1], L[k + 1]);
-    wb.tri(pts[k], R[k], R[k + 1]);
-    wb.tri(pts[k], R[k + 1], pts[k + 1]);
-  }
-}
-
-/** Disco de água no centro (lago ou junção), em anéis para o gradiente de profundidade. */
-function waterDisc(wb: WaterBuf, r: number, seg: number) {
-  const rings = [0, r * 0.5, r];
-  for (let k = 0; k < seg; k++) {
-    const a0 = (k / seg) * Math.PI * 2, a1 = ((k + 1) / seg) * Math.PI * 2;
-    const P = (rr: number, a: number): V2 => [Math.cos(a) * rr, Math.sin(a) * rr];
-    wb.tri([0, 0], P(rings[1], a0), P(rings[1], a1));
-    wb.tri(P(rings[1], a0), P(rings[2], a0), P(rings[2], a1));
-    wb.tri(P(rings[1], a0), P(rings[2], a1), P(rings[1], a1));
   }
 }
 
@@ -445,6 +415,9 @@ function insidePoly(x: number, z: number, pts: V2[]) {
   return inside;
 }
 
+/** Marcos de planta larga: as casas guardam mais distância deles. */
+const WIDE_LANDMARKS: ReadonlySet<string> = new Set(['pyramid', 'pylon', 'kancha', 'hall']);
+
 /** Ângulo de rotação em y que leva o eixo x local para a direção (dx, dz). */
 const yawTo = (dx: number, dz: number) => Math.atan2(-dz, dx);
 
@@ -473,6 +446,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const bank = tc(theme.bank);
   const waterSide = tc(theme.water).clone().lerp(bank, 0.25);
   const waterDeep = shade(tc(theme.water), 0.55);
+  const wb = field ? new WaterBuf(field) : null;
 
   // --- Topo: 6 setores subdivididos, com cores misturadas nas divisas. Peças com rio
   // usam uma malha mais fina para o leito e as margens inclinadas.
@@ -529,9 +503,11 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       for (let b = 0; b < N - a; b++) {
         const p0 = V(a, b), p1 = V(a + 1, b), p2 = V(a, b + 1);
         g.tri(p0.p, p1.p, p2.p, p0.c, p1.c, p2.c, UP, p0.s, p1.s, p2.s);
+        wb?.tri(p0, p1, p2);
         if (a + b < N - 1) {
           const p3 = V(a + 1, b + 1);
           g.tri(p1.p, p3.p, p2.p, p1.c, p3.c, p2.c, UP, p1.s, p3.s, p2.s);
+          wb?.tri(p1, p3, p2);
         }
       }
     }
@@ -567,23 +543,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     return true;
   };
 
-  // --- Rios e lagos: superfície da água sobre o leito, com correnteza.
-  const wb = field ? new WaterBuf(field) : null;
-  if (wb && field) {
+  // --- Rios e lagos: plantas na água e na margem (a superfície já saiu com o leito).
+  if (field) {
     const n = water.idx.length;
-    for (const p of water.paths) waterStrip(wb, p.pts, p.hw + WATER_PAD);
-    if (n === 1 || n >= 3) waterDisc(wb, (n === 1 ? LAKE_R : RIVER_HW) + WATER_PAD, n === 1 ? 20 : 14);
-    if (n >= 3) {
-      for (let i = 0; i < 6; i++) {
-        const j = (i + 1) % 6;
-        if (edges[i] !== T.Water || edges[j] !== T.Water) continue;
-        const [mx, mz] = edgeMid(i);
-        const [cx, cz] = corner(j);
-        const [nx, nz] = edgeMid(j);
-        wb.tri([0, 0], [mx, mz], [cx, cz]);
-        wb.tri([0, 0], [cx, cz], [nx, nz]);
-      }
-    }
     // Vitórias-régias e juncos na margem.
     for (let k = randInt(rng, 0, n >= 3 ? 3 : 1); k > 0; k--) {
       const p = pick(rng, water.paths);
@@ -657,6 +619,14 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       D('station', sx, BED_Y, sz, yawTo(ux, uz), 1, WHITE);
       reserved.push([sx, sz, 0.15]);
     }
+    // Portal sobre a via, na primeira borda de linha que encosta num setor de vila.
+    const gi = theme.gate ? road.idx.find((i) => edges[(i + 1) % 6] === T.Village || edges[(i + 5) % 6] === T.Village) : undefined;
+    if (gi !== undefined) {
+      const [mx, mz] = edgeMid(gi);
+      const n = nearestOnPaths(mx * 0.7, mz * 0.7, road.paths);
+      D('gate', n.p[0], BED_Y, n.p[1], yawTo(-n.t[1], n.t[0]), 1, WHITE);
+      reserved.push([n.p[0], n.p[1], 0.17]);
+    }
   }
 
   // --- Interações nas bordas: reservam um lugar perto da borda do setor.
@@ -674,13 +644,16 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       D('fence', x, 0, z, ry, 1, WHITE);
       for (let a = 0; a < 3; a++) D('animal', x + (rng() - 0.5) * 0.1, 0, z + (rng() - 0.5) * 0.1, rng() * 6, randRange(rng, 0.9, 1.15), vary(rng, tc(pick(rng, theme.animals.colors)), 0.05), 'wander');
     } else if (s.kind === 'mill') {
-      const sc = theme.mill === 'windmill' ? 1.1 : 1.2;
+      const sc = theme.mill === 'windmill' ? 1.1 : theme.mill === 'windpump' ? 1 : 1.2;
       const face = Math.atan2(-mx, -mz); // +z local (porta e pás) voltado para o centro da peça
       D('mill', x, 0, z, face, sc, WHITE);
       if (theme.mill === 'windmill') {
         // Cubo das pás: à frente do capuz, na direção +z local do moinho.
         const fx = Math.sin(face) * 0.078 * sc, fz = Math.cos(face) * 0.078 * sc;
         D('sails', x + fx, 0.255 * sc, z + fz, face, sc, WHITE, 'spin-z');
+      } else if (theme.mill === 'windpump') {
+        const fx = Math.sin(face) * 0.022 * sc, fz = Math.cos(face) * 0.022 * sc;
+        D('rotor', x + fx, groundY(x, z) + 0.318 * sc, z + fz, face, sc, WHITE, 'spin-z');
       }
     }
   }
@@ -735,6 +708,26 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     }
   }
 
+  // --- Ponte: rio de duas bordas com vila numa margem e terra na outra. Sem sorteio,
+  // para não mudar o resto da peça.
+  if (theme.bridge && water.idx.length === 2) {
+    const [a, b] = water.idx;
+    const sideA = edges.slice(a + 1, b), sideB = [...edges.slice(b + 1), ...edges.slice(0, a)];
+    if (sideA.length && sideB.length && (sideA.includes(T.Village) || sideB.includes(T.Village))) {
+      const pts = water.paths[0].pts;
+      const m = pts.length >> 1;
+      const [px, pz] = pts[m];
+      const tx = pts[m + 1][0] - pts[m - 1][0], tz = pts[m + 1][1] - pts[m - 1][1];
+      const l = Math.hypot(tx, tz) || 1;
+      const ex = (-tz / l) * 0.3, ez = (tx / l) * 0.3;
+      if (free(px + ex, pz + ez, 0.06) && free(px - ex, pz - ez, 0.06)) {
+        // y explícito: com 0 a ponte iria para o fundo do leito.
+        D('bridge', px, 0.001, pz, yawTo(ex, ez), 1, WHITE);
+        reserved.push([px + ex, pz + ez, 0.1], [px - ex, pz - ez, 0.1]);
+      }
+    }
+  }
+
   // --- Marco no centro das vilas grandes.
   const villageCount = edges.filter((e) => e === T.Village).length;
   const landmarkRoll = rng();
@@ -745,7 +738,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const fx = Math.sin(ry) * 0.078, fz = Math.cos(ry) * 0.078;
       D('sails', fx, 0.255, fz, ry, 1, WHITE, 'spin-z');
     }
-    reserved.push([0, 0, theme.landmark === 'pyramid' ? 0.3 : 0.2]);
+    reserved.push([0, 0, WIDE_LANDMARKS.has(theme.landmark) ? 0.3 : 0.2]);
   }
 
   // --- Plantações: parcelas de terra com fileiras de plantas.
@@ -971,7 +964,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     splat: new Float32Array(g.spl),
     water: new Float32Array(wb?.pos ?? []),
     wflow: new Float32Array(wb?.flow ?? []),
-    wedge: new Float32Array(wb?.edge ?? []),
+    wbed: new Float32Array(wb?.bed ?? []),
     decos,
     chimneys,
   };

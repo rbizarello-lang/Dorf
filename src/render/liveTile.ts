@@ -32,7 +32,7 @@ export class LiveTile {
     this.waterGeo = new THREE.BufferGeometry();
     this.waterGeo.setAttribute('position', new THREE.BufferAttribute(build.water, 3));
     this.waterGeo.setAttribute('wflow', new THREE.BufferAttribute(build.wflow, 2));
-    this.waterGeo.setAttribute('wedge', new THREE.BufferAttribute(build.wedge, 1));
+    this.waterGeo.setAttribute('wbed', new THREE.BufferAttribute(build.wbed, 4));
     this.waterGeo.computeVertexNormals();
     const water = new THREE.Mesh(this.waterGeo, lib.water);
     this.inner.add(ground, water);

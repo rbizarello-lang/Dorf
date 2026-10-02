@@ -76,10 +76,12 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?stress=1000` | teste de carga; o resultado fica em `window.__load` |
 | `?focus=4` | centraliza a câmera na peça com mais bordas do terreno (4 = rio); `window.__focus(t, zoom)` |
 | `?webgl` | força o backend WebGL2 (o padrão é WebGPU quando o navegador oferece) |
-| `?fx=ao.traa.bloom.dof` | liga os efeitos de pós um a um (medir custo); `?fx=` desliga todos |
+| `?fx=ao.gi.ssr.rays.traa.bloom.dof` | liga os efeitos de pós um a um (medir custo); `?fx=` desliga todos |
 | `?timescale=0.05` | desacelera o mundo (animações nas capturas por software) |
 | `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
 | `window.__ripple(idade)` | dispara a onda do chão no foco da câmera, já com essa idade em segundos |
+| `window.__celebrate()` | anel dourado e bando de pássaros no foco da câmera (efeitos de nova era) |
+| `window.__boat(zoom?)` | centraliza a câmera num barco andando (esteiras na água) |
 | `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` | ver o `README.md` |
 | `window.__stats` | estatísticas do último quadro |
 | `window.__pools()` | relatório dos InstancedMesh |
@@ -106,7 +108,8 @@ src/render/
   gpu.ts         cria o WebGPURenderer (WebGPU ou WebGL2)
   materials.ts   materiais em TSL: chão, água, kits instanciados (vento, plantações, janelas), grade do vazio; uniformes U
   noise.ts       texturas de ruído periódicas geradas em código (nuvens, chão, ondulação da água)
-  post.ts        pós-processamento por perfil: GTAO, TRAA, bloom, profundidade de campo, vinheta, ombro de tons
+  post.ts        pós-processamento por perfil: SSGI ou GTAO, reflexos (SSR), raios de luz, TRAA, bloom,
+                 profundidade de campo, vinheta, ombro de tons
   lib.ts         geometria dos kits (casas, árvores, plantações, animais, barcos, veículos, marcos), classe Lib,
                  instGeometry (atributo de cor por instância)
   tileBuilder.ts buildTile: monta UMA peça (chão com leito de rio, água com correnteza, estradas, decoração)
@@ -154,12 +157,13 @@ scripts/         capturas, teste de carga, conversão para página publicável
 9. **Materiais em TSL (three r186, `three/webgpu` e `three/tsl`):** nada de `onBeforeCompile` nem GLSL; o mesmo nó compila para WebGPU e WebGL2.
    - Importe sempre de `three/webgpu` (não de `three`), para o bundle não levar o WebGLRenderer.
    - Atributos por vértice dos kits: `color`, `tint` (quanto a cor da instância tinge) e `glow` (janelas que acendem com `U.night`). A cor da instância é o atributo `iColor` da geometria criada por `instGeometry()`; não use `mesh.instanceColor`, que o three multiplicaria de novo.
-   - Uniformes globais em `U` (`materials.ts`): `time`, `dt`, `wind`, `night`, `clouds`, `sparkle`, `glow`, `water`, `bank`, `sky`, `sun`, `sunDir`.
+   - Uniformes globais em `U` (`materials.ts`): `time`, `dt`, `wind`, `night`, `clouds`, `sparkle`, `glow`, `water`, `sun`, `sunDir`, `fine`.
    - No r186 a instância é aplicada **antes** do `positionNode`: ali `positionLocal` já está no espaço do mundo (pools) e `positionGeometry` é o vértice original. Quem desloca vértices (vento) também ajusta `positionPrevious`, senão o antisserrilhado temporal deixa rastro.
-   - A água usa os atributos `wflow` (correnteza) e `wedge` (0 no meio do canal, 1 na beira). A correnteza de cada peça herda das vizinhas (`World.flowAt` + `resolveFlow`) e gira junto com a peça no bloco.
+   - A água usa os atributos `wflow` (correnteza) e `wbed` (cor do leito e profundidade da coluna): a malha da água repete os triângulos do leito abaixo da linha d'água, então a beira fica exatamente onde a profundidade zera. A correnteza de cada peça herda das vizinhas (`World.flowAt` + `resolveFlow`) e gira junto com a peça no bloco.
+   - Os materiais iluminados do jogo (kits, chão, água) são `LitMaterial`: gravam a parte da cor que veio do céu, e a oclusão de ambiente do pós só escurece essa parte (o sol direto e as janelas acesas ficam de fora). Um material iluminado novo que não seja `LitMaterial` recebe a oclusão inteira, como o vazio.
    - Sem tone mapping do renderizador: o pós-processamento aplica um ombro suave que preserva as paletas dos temas.
    - Se um nó falhar ao compilar, o erro aparece no console das capturas.
-10. **Blocos estáticos só crescem** (append-only). Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim, escondida quando `rig.dist >= 13` (nível de detalhe). Quem consulta geometria pela chave precisa tirar o `~`.
+10. **Blocos estáticos só crescem** (append-only). Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim (nível de detalhe): entre `rig.dist` 11,5 e 14,5 cada planta dessa metade afunda no chão na sua vez (`U.fine`, material `cropFine`), e mais longe o pool fica escondido. Quem consulta geometria pela chave precisa tirar o `~`.
 11. **Construções internas não pontuam.** A roda d'água (vila na beira do rio), a irrigação, a estação e o silo (junto à ferrovia) são só visuais. Pontos de interação vêm apenas de `synergy.ts` × `Rules.synergyPoints`.
 12. **Parâmetros de URL e valores salvos são validados** contra listas fixas (ver `pickQ` e o uso de `Object.hasOwn` para `time`). Mantenha esse padrão ao criar um parâmetro novo.
 
@@ -172,7 +176,7 @@ Medido com `RUNS=300:high node scripts/stress.mjs`, renderização por software:
 | 300 | alta | ~94 | ~1,37 milhão | ~4,3 ms |
 
 - **Regra prática:** uma mudança visual não deve subir triângulos ou draw calls em mais de ~10% sem justificativa escrita no commit.
-- **Qualidade:** Ultra (GTAO inteiro, TRAA, bloom, profundidade de campo, DPR até 2), Alta (GTAO em meia resolução), Média (MSAA, sem pós pesado) e Baixa (sem pós e sem sombras). Cada nível tem um teto de pixels desenhados (Ultra 4K, Alta 1440p, Média e Baixa 1080p; `PIXELS` em `world.ts`): numa tela 4K, descer de nível também reduz a resolução interna. A densidade de decoração é multiplicada por 1 (ultra e alta), 0,65 (média) ou 0,4 (baixa). O modo automático começa em Ultra no computador e em Média em telas de toque, e desce sozinho se o quadro passar de ~26 ms.
+- **Qualidade:** Ultra (pensado para GPUs acima da RX 580: sombras em 3 cascatas de 4096, luz indireta SSGI, reflexos na água, raios de luz no entardecer, TRAA, bloom, profundidade de campo, DPR até 2 e 35% mais vegetação), Alta (GTAO em meia resolução, sombra única de 2048), Média (MSAA, sem pós pesado) e Baixa (sem pós e sem sombras). Cada nível tem um teto de pixels desenhados (Ultra 4K, Alta 1440p, Média e Baixa 1080p; `PIXELS` em `world.ts`): numa tela 4K, descer de nível também reduz a resolução interna. A densidade de decoração é multiplicada por 1,35 (ultra), 1 (alta), 0,65 (média) ou 0,4 (baixa). O modo automático começa em Ultra no computador e em Média em telas de toque, e desce sozinho se o quadro passar de ~26 ms.
 - **Ainda não foi medido:** o FPS numa GPU de verdade.
 
 ## Tarefas comuns
@@ -196,6 +200,10 @@ O menu agrupa os temas pelo campo `period` sem nenhuma outra mudança. Os testes
 
 A lista priorizada de kits que faltam está no fim de `docs/TEMAS.md`.
 
+### Portal e ponte
+
+São opcionais no tema (`gate`, `bridge`) e não pontuam. O `buildTile` decide onde entram sem sorteio: o portal na primeira borda de estrada vizinha de vila, a ponte no meio de um rio de 2 bordas com vila numa margem. Para um tema novo, basta escolher o estilo e as duas cores.
+
 ### Nova interação entre bordas
 
 1. Acrescente o par em `src/core/synergy.ts`: o tipo `SynKind`, `SYN_KINDS` e `synergyOf`.
@@ -217,7 +225,7 @@ A lista priorizada de kits que faltam está no fim de `docs/TEMAS.md`.
 - **Feito (v3):** 14 temas, kits detalhados, 4 interações com prévia em dourado, mundo animado, dia/entardecer/noite, qualidade adaptativa, save v3 com replay, duas rodadas de revisão de código com correções. O histórico está em `docs/VIABILIDADE.md`, Apêndice A.
 - **Pendente:**
   - medir o FPS numa GPU real (`?stress=1000&debug`) no PC e no celular;
-  - kits de fidelidade histórica (`docs/TEMAS.md`): ponte em arco, portais (torii, paifang), torre d'água, templos por cultura, armazém sobre estacas, batata, linho e amoreira, salgueiro e pinheiro-manso, barcos do Nilo e a vapor;
+  - kits de fidelidade histórica que ainda faltam (`docs/TEMAS.md`, fim): roda-d'água como `MillStyle`, cipreste em alameda, estação de fim de linha por tema;
   - funções de jogo: bandeiras e peças especiais (`docs/VIABILIDADE.md` §12). Desfazer e as 3 próximas peças já existem na v4: as próximas peças aparecem como recompensa do mirante;
   - otimizações com folga conhecida: culling por super-bloco, sombra em cache, renderizar sob demanda (`docs/VIABILIDADE.md` §5).
 - **Publicação:** o build de página única (`scripts/artifact.mjs`) é o que vai para o link público do protótipo.
