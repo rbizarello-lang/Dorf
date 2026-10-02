@@ -81,6 +81,8 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
 | `window.__ripple(idade)` | dispara a onda do chão no foco da câmera, já com essa idade em segundos |
 | `window.__celebrate()` | anel dourado e bando de pássaros no foco da câmera (efeitos de nova era) |
+| `window.__era(era, idade?, zoom?)` | centraliza no Centro da vila e o mostra na era (0 a 3); com `idade`, a onda dourada já com essa idade em segundos |
+| `window.__mark(zoom?)` | centraliza a câmera no último marco de era erguido |
 | `window.__boat(zoom?)` | centraliza a câmera num barco andando (esteiras na água) |
 | `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` | ver o `README.md` |
 | `window.__stats` | estatísticas do último quadro |
@@ -233,6 +235,6 @@ São opcionais no tema (`gate`, `bridge`) e não pontuam. O `buildTile` decide o
 - **Pendente:**
   - medir o FPS numa GPU real (`?stress=1000&debug`) no PC e no celular;
   - kits de fidelidade histórica que ainda faltam (`docs/TEMAS.md`, fim): roda-d'água como `MillStyle`, cipreste em alameda, estação de fim de linha por tema;
-  - funções de jogo: bandeiras, desfazer, mostrar as 3 próximas peças, peças especiais (`docs/VIABILIDADE.md` §12);
+  - funções de jogo: bandeiras e peças especiais (`docs/VIABILIDADE.md` §12). Desfazer e as 3 próximas peças já existem na v4: as próximas peças aparecem como recompensa do mirante;
   - otimizações com folga conhecida: culling por super-bloco, sombra em cache, renderizar sob demanda (`docs/VIABILIDADE.md` §5).
 - **Publicação:** o build de página única (`scripts/artifact.mjs`) é o que vai para o link público do protótipo.

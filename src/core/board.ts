@@ -62,6 +62,8 @@ export interface Placed {
   closed: boolean;
   /** Interações criadas quando a peça foi colocada (construções nas bordas). */
   synergies: SynHit[];
+  /** Era cujo marco foi erguido nesta peça (a primeira peça com vila depois do avanço). */
+  eraMark?: number;
 }
 
 export interface Quest {
@@ -86,6 +88,8 @@ export interface Check {
   synergies: SynHit[];
   /** Sítio ainda escondido nesta posição (a prévia mostra a recompensa). */
   site: Site | null;
+  /** Era cujo marco esta peça ergueria (o fantasma já mostra), ou null. */
+  eraMark: number | null;
 }
 
 export interface PlaceResult {
@@ -119,6 +123,8 @@ export class Board {
   readonly synergyCount: Record<SynKind, number> = { lumber: 0, mill: 0, pasture: 0, apiary: 0 };
   /** Era atual da vila (0 = primeira). */
   era = 0;
+  /** Era cujo marco espera a próxima peça com vila, ou null. */
+  markPending: number | null = null;
   /** Sítios do mapa (preenchidos pelo Game a partir da semente). */
   sites: Site[] = [];
   /** Jogadas restantes em que o mirante mostra as próximas peças. */
@@ -163,7 +169,7 @@ export class Board {
         if (kind) synergies.push({ edge: i, kind });
       }
     }
-    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, synergies, site: this.siteAt(q, r) };
+    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, synergies, site: this.siteAt(q, r), eraMark: this.markPending !== null && edges.includes(T.Village) ? this.markPending : null };
   }
 
   /** Sítio ainda não descoberto em (q, r). */
@@ -202,6 +208,10 @@ export class Board {
       this.perfects++;
     }
     placed.synergies = c.synergies;
+    if (c.eraMark !== null) {
+      placed.eraMark = c.eraMark;
+      this.markPending = null;
+    }
     points += c.synergies.length * R.synergyPoints;
     for (const h of c.synergies) {
       this.synergyCount[h.kind]++;
@@ -279,6 +289,7 @@ export class Board {
       this.era++;
       tilesGained += R.eraTiles;
       eraUp = this.era;
+      this.markPending = this.era;
     }
     return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp };
   }

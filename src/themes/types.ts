@@ -57,6 +57,15 @@ export interface HouseKind {
   chimney?: boolean;
 }
 
+/** Remate do palácio no Centro da vila, na última era. */
+export type CenterCrown =
+  | 'spire' // torre quadrada com flecha
+  | 'dome' // tambor e cúpula
+  | 'pagoda' // três beirais empilhados
+  | 'pyramid' // pirâmide com piramídio dourado
+  | 'stepped' // plataforma em degraus com disco do sol
+  | 'hall'; // salão de telhado íngreme com tábuas cruzadas
+
 export type Landmark =
   | 'church' // igreja com torre e agulha
   | 'baroque' // igreja barroca de duas torres (colonial)
@@ -233,5 +242,7 @@ export interface Theme {
   rules?: Partial<Rules>;
   /** Nomes das 4 eras da vila (padrão: Aldeia, Vila, Burgo, Cidade). */
   eras?: [string, string, string, string];
+  /** Remate do Centro da vila na última era (padrão: 'spire'). */
+  center?: CenterCrown;
   ruleNote?: string;
 }
