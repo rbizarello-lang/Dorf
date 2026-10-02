@@ -58,6 +58,15 @@ export interface HouseKind {
 }
 
 /** Remate do palácio no Centro da vila, na última era. */
+/** Chapéu dos aldeões. */
+export type HatStyle =
+  | 'straw' // palha de aba larga
+  | 'cap' // barrete ou boné baixo
+  | 'scarf' // lenço amarrado na cabeça
+  | 'hood' // capuz pontudo
+  | 'helmet' // capacete de vidro
+  | 'none';
+
 export type CenterCrown =
   | 'spire' // torre quadrada com flecha
   | 'dome' // tambor e cúpula
@@ -244,5 +253,7 @@ export interface Theme {
   eras?: [string, string, string, string];
   /** Remate do Centro da vila na última era (padrão: 'spire'). */
   center?: CenterCrown;
+  /** Aldeões: cor da pele, chapéu e cor do chapéu (padrão: sem chapéu). A camisa usa as cores dos telhados. */
+  folk?: { skin: string; hat: HatStyle; hatColor: string };
   ruleNote?: string;
 }

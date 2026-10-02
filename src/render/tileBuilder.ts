@@ -26,7 +26,8 @@ export const ROAD_HW = 0.1;
 /** Altura em que veículos andam (maglev flutua sobre a via). */
 export const ROAD_Y = { rail: 0.03, dirt: 0.006, stone: 0.008, sand: 0.006, maglev: 0.075 } as const;
 
-export type Anim = 'spin-z' | 'spin-x' | 'wander';
+/** spin: pás e rodas; wander: animais; chop/tend/carry: aldeões (golpe de machado, capina, vai e vem). */
+export type Anim = 'spin-z' | 'spin-x' | 'wander' | 'chop' | 'tend' | 'carry';
 
 export interface Deco {
   key: string;
@@ -641,12 +642,20 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     }
   }
 
+  // Camisas dos aldeões: as cores dos telhados do tema, escolhidas pela semente (sem gastar o rng).
+  const shirts = theme.houses.flatMap((h) => h.roofs);
+  const shirt = (k: number) => tc(shirts[((seed >>> 0) + k * 7) % shirts.length]);
+
   // --- Interações nas bordas: reservam um lugar perto da borda do setor.
   for (const s of opts.synergies ?? []) {
     const [mx, mz] = edgeMid(s.sector);
     const x = mx * 0.64, z = mz * 0.64;
     reserved.push([x, z, 0.15]);
     const ry = yawTo(mx, mz) + Math.PI / 2;
+    // Aldeão do ofício, dentro da área reservada, entre a construção e o meio da peça (sem sorteio).
+    const wx = x - mx * 0.13 - mz * 0.06, wz = z - mz * 0.13 + mx * 0.06;
+    if (s.kind === 'mill') D('folk:sack', wx, 0, wz, yawTo(-mx, -mz), 1, shirt(s.sector), 'carry');
+    else D(s.kind === 'lumber' ? 'folk:axe' : 'folk:hoe', wx, 0, wz, yawTo(x - wx, z - wz), 1, shirt(s.sector), s.kind === 'lumber' ? 'chop' : 'tend');
     if (s.kind === 'lumber') {
       D('logs', x, 0, z, ry, 1.25, WHITE);
       scaffold(x, z, ry, 0.2, 0.1);
@@ -1019,6 +1028,14 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         taken.push([px, pz]);
       }
     }
+  }
+
+  // Uma peça de vila em cada quatro tem um aldeão levando um saco da primeira casa ao meio da peça.
+  const home = houses.find((h) => h.sector >= 0);
+  if (home && (seed >>> 0) % 4 === 0) {
+    const l = Math.hypot(home.x, home.z) || 1;
+    const wx = home.x - (home.x / l) * 0.07, wz = home.z - (home.z / l) * 0.07;
+    D('folk:sack', wx, 0, wz, yawTo(-home.x, -home.z), 1, shirt(6), 'carry');
   }
 
   return {
