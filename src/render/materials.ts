@@ -80,6 +80,8 @@ export const U = {
   water: uniform(new THREE.Color('#63b1dc')),
   /** Onda no chão quando uma peça assenta: (x, z, instante inicial, força). */
   ripple: uniform(new THREE.Vector4(0, 0, -100, 0)),
+  /** Onda dourada do avanço de era: (x, z, instante inicial, força). */
+  eraWave: uniform(new THREE.Vector4(0, 0, -100, 0)),
   /** Direção (para o sol) e cor da luz do sol: o caminho do sol dentro da água e a luz de contorno dos kits. */
   sunDir: uniform(new THREE.Vector3(-0.5, 0.8, 0.3).normalize()),
   sun: uniform(new THREE.Color('#fff0d8')),
@@ -116,14 +118,34 @@ const rippleY = (pw: N, t: N) => {
   return wave.mul(exp(age.mul(-1.9))).mul(smoothstep(0.6, 0.95, d)).mul(U.ripple.w).mul(0.042);
 };
 
-/** Desloca `positionLocal` (e `positionPrevious`, para o TRAA) pela onda e por um extra opcional. */
-function displaced(extra?: (p: N, t: N, now: boolean) => N) {
+/**
+ * Faixa dourada do avanço de era (0 a 1): ~0,8 de largura, corre a 6 unidades/s a partir do
+ * Centro e se apaga devagar enquanto atravessa o mapa.
+ */
+const eraBand = (pw: N, t: N) => {
+  const d = length(pw.xz.sub(U.eraWave.xy));
+  const age = t.sub(U.eraWave.z).max(0);
+  const x = d.sub(age.mul(6)).div(0.4);
+  return exp(x.mul(x).negate()).mul(exp(age.mul(-0.35))).mul(U.eraWave.w);
+};
+const ERA_GOLD = vec3(1, 0.74, 0.3);
+
+/**
+ * Desloca `positionLocal` (e `positionPrevious`, para o TRAA) pela onda e por um extra opcional.
+ * Com `lift`, a faixa da era estica as construções em y (+15% a partir do chão).
+ */
+function displaced(extra?: (p: N, t: N, now: boolean) => N, lift = false) {
   return Fn(() => {
     const now = modelWorldMatrix.mul(vec4(positionLocal, 1)).xyz;
     const prev = modelWorldMatrix.mul(vec4(positionPrevious, 1)).xyz;
     const tPrev = U.time.sub(U.dt);
     let dNow: N = vec3(0, rippleY(now, U.time), 0);
     let dPrev: N = vec3(0, rippleY(prev, tPrev), 0);
+    if (lift) {
+      const h = max(positionGeometry.y, 0).mul(0.15);
+      dNow = dNow.add(vec3(0, h.mul(eraBand(now, U.time)), 0));
+      dPrev = dPrev.add(vec3(0, h.mul(eraBand(prev, tPrev)), 0));
+    }
     if (extra) {
       dNow = dNow.add(extra(positionLocal, U.time, true));
       dPrev = dPrev.add(extra(positionPrevious, tPrev, false));
@@ -227,7 +249,7 @@ function decoMaterial(o: DecoOpts) {
       return sink ? b.d.sub(vec3(0, sink, 0)) : b.d;
     });
     base = base.mul(sheen.mul(0.22).add(1));
-  } else m.positionNode = displaced();
+  } else m.positionNode = displaced(undefined, true);
   const toCam = cameraPosition.sub(positionWorld);
   const camDist = length(toCam);
   if (o.shingles) {
@@ -245,6 +267,7 @@ function decoMaterial(o: DecoOpts) {
     const rim = float(1).sub(max(dot(normalWorld, v), 0)).pow(3);
     emissive = emissive.add(U.sun.mul(base).mul(rim.mul(0.35)).mul(float(1).sub(U.night)));
   }
+  emissive = emissive.add(ERA_GOLD.mul(eraBand(positionWorld, U.time)).mul(2));
   m.emissiveNode = emissive;
   m.receivedShadowNode = shadowWithClouds;
   return m;
@@ -306,6 +329,7 @@ export function makeGroundMaterial() {
   const slope = texture(waterTex, p.mul(0.45)).rg.sub(0.5).mul(sp.x.add(sp.y).mul(0.5).add(0.12));
   const nW = vec3(slope.x.negate(), 1, slope.y.negate()).normalize();
   m.normalNode = mix(normalView, cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize(), top);
+  m.emissiveNode = ERA_GOLD.mul(eraBand(positionWorld, U.time));
   m.receivedShadowNode = shadowWithClouds;
   return m;
 }

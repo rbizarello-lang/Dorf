@@ -357,7 +357,12 @@ function announce(res: PlaceResult) {
       sfx.note(7 + k * 2, 0, 0.5, 0.08);
     }, 250 + k * 160));
   });
-  if (res.synergies.length) sfx.hammer(0.3);
+  if (res.synergies.length || res.placed.eraMark !== undefined) sfx.hammer(0.3);
+  if (res.placed.eraMark !== undefined) {
+    hud.toast(`Marco da era erguido: ${eraName(res.placed.eraMark)}`, 'good');
+    world.burst(x, z, 'sparkle', 30, 0.3);
+    world.halo(x, z, 1.5);
+  }
   for (const t of res.closed) {
     const p = screenOf(t.q, t.r);
     hud.floater(p.x, p.y - 20, '+1 peça', 'tiles');
@@ -383,9 +388,11 @@ function announce(res: PlaceResult) {
     world.burst(x, z, 'sparkle', 46);
   }
   if (res.eraUp !== null) {
-    hud.toast(`Nova era: ${eraName(res.eraUp)} · +${game.rules.eraTiles} peças`, 'good');
+    hud.toast(`Nova era: ${eraName(res.eraUp)} · +${game.rules.eraTiles} peças · a próxima vila ergue o marco`, 'good');
     sfx.perfect();
     sfx.quest();
+    sfx.hammer(0.45);
+    world.eraUp(res.eraUp);
     world.ripple(x, z, 2.2);
     world.burst(x, z, 'sparkle', 60);
     world.halo(x, z, 2);
@@ -416,7 +423,7 @@ function showHelp() {
     </ul>
     <div class="synergies">${synergyLegend()}</div>
     <ul>
-      <li><b>Eras</b>: com ${game.rules.eraScores.slice(1).map((v) => v.toLocaleString('pt-BR')).join(', ')} pontos a vila muda de era e ganha +${game.rules.eraTiles} peças.</li>
+      <li><b>Eras</b>: com ${game.rules.eraScores.slice(1).map((v) => v.toLocaleString('pt-BR')).join(', ')} pontos a vila muda de era e ganha +${game.rules.eraTiles} peças. O Centro, no meio da primeira peça, muda de forma, e a próxima peça com vila ergue o marco da era.</li>
       <li><b>Sítios</b>: carimbos no mapa marcam ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.</li>
       <li><kbd>U</kbd> desfaz a última jogada (o número de vezes depende do modo).</li>
       <li>O botão de som alterna entre música e efeitos, só efeitos e mudo; <kbd>M</kbd> liga ou desliga a música.</li>
@@ -937,6 +944,25 @@ function start(data: unknown) {
   world.flushBirds(world.rig.target.x, world.rig.target.z);
 };
 (window as unknown as { __ripple: (age: number) => void }).__ripple = (age) => world.ripple(world.rig.target.x, world.rig.target.z, 1, age);
+
+// Centraliza a câmera no Centro e o mostra numa era (0 a 3); com `age`, a onda dourada já com essa idade em segundos.
+(window as unknown as { __era: (era: number, age?: number, zoom?: number) => void }).__era = (era, age, zoom) => {
+  world.showEra(era, age ?? -1);
+  world.rig.goal.set(0, 0, 0);
+  world.rig.target.set(0, 0, 0);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+};
+
+// Centraliza a câmera no último marco de era erguido (capturas do marco).
+(window as unknown as { __mark: (zoom?: number) => boolean }).__mark = (zoom) => {
+  const p = game.board.list.filter((t) => t.eraMark !== undefined).pop();
+  if (!p) return false;
+  const { x, z } = hexToWorld(p.q, p.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
 
 // Centraliza a câmera num barco andando (capturas das esteiras na água).
 (window as unknown as { __boat: (zoom?: number) => boolean }).__boat = (zoom) => {

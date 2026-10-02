@@ -245,7 +245,7 @@ interface Drop {
 }
 
 /** Construções de interação: sobem do chão depois que a peça assenta. */
-const BUILDS: ReadonlySet<string> = new Set(['logs', 'mill', 'sails', 'rotor', 'fence', 'apiary']);
+const BUILDS: ReadonlySet<string> = new Set(['logs', 'mill', 'sails', 'rotor', 'fence', 'apiary', 'landmark', 'pennant']);
 const easeOutBack = (x: number) => 1 + 2.4 * Math.pow(x - 1, 3) + 1.4 * Math.pow(x - 1, 2);
 
 /** Estado da iluminação: interpolado suavemente entre dia, entardecer e noite. */
@@ -625,8 +625,13 @@ export class World {
 
   // ---------------------------------------------------------------- mapa
 
-  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[]) {
-    return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow });
+  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number }) {
+    return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, ...extra });
+  }
+
+  /** Peça do mapa já colocada: a inicial reserva o Centro, e a do marco o ergue. */
+  private buildPlaced(p: Placed) {
+    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark });
   }
 
   /**
@@ -664,11 +669,78 @@ export class World {
     this.sprites.clear();
     this.life.reset(this.theme);
     this.flows.clear();
-    for (const p of board.list) this.bake(p, this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p)), false);
+    for (const p of board.list) this.bake(p, this.buildPlaced(p), false);
     for (const pool of this.pools.values()) pool.flush();
     this.updateFrontier(board);
     this.life.sync(board);
     this.fireflies.sync(board);
+    this.centerAnim = -1;
+    this.setCenter(board.era);
+  }
+
+  // ---------------------------------------------------------------- Centro da vila
+
+  private center: THREE.InstancedMesh | null = null;
+  private centerEra = -1;
+  /** Tempo desde o avanço de era (-1 = parado) e a era que o Centro vai mostrar. */
+  private centerAnim = -1;
+  private centerNext = 0;
+
+  /** O Centro é um objeto avulso sobre a peça inicial, fora dos pools: trocar de era não reconstrói nada. */
+  private setCenter(era: number) {
+    if (this.center) {
+      this.staticRoot.remove(this.center);
+      this.center.geometry.dispose();
+      this.center.dispose();
+      this.center = null;
+    }
+    this.centerEra = era;
+    const geo = this.lib.geo(`center:${era}`);
+    if (!geo) return;
+    const m = new THREE.InstancedMesh(instGeometry(geo, 1), this.lib.material('center'), 1);
+    m.setMatrixAt(0, tmpM.identity());
+    m.castShadow = this.quality !== 'low';
+    m.receiveShadow = true;
+    m.computeBoundingSphere();
+    this.staticRoot.add(m);
+    this.center = m;
+  }
+
+  /**
+   * Avanço de era: o Centro afunda, volta na forma nova (com poeira), e uma onda dourada
+   * corre pelo mapa a partir dele.
+   */
+  eraUp(era: number) {
+    this.centerNext = era;
+    this.centerAnim = 0;
+    U.eraWave.value.set(0, 0, this.time, 1);
+  }
+
+  /** Depuração: o Centro numa era, parado, e a onda dourada já com `waveAge` segundos (negativo = sem onda). */
+  showEra(era: number, waveAge = -1) {
+    this.centerAnim = -1;
+    this.setCenter(era);
+    if (waveAge >= 0) U.eraWave.value.set(0, 0, this.time - waveAge, 1);
+  }
+
+  private stepCenter(dt: number) {
+    if (this.centerAnim < 0 || !this.center) return;
+    const t = (this.centerAnim += dt);
+    const SINK = 0.22, RISE = 0.9;
+    let xz = 1, y = 1;
+    if (t < SINK) y = Math.max(0.02, 1 - (t / SINK) ** 2);
+    else {
+      if (this.centerEra !== this.centerNext) {
+        this.setCenter(this.centerNext);
+        this.burst(0, 0, 'dust', 34);
+      }
+      const b = Math.min(1, (t - SINK) / RISE);
+      y = Math.max(0.02, easeOutBack(b));
+      xz = 0.7 + 0.3 * Math.min(1, b * 1.6);
+      if (b >= 1) this.centerAnim = -1;
+    }
+    this.center?.setMatrixAt(0, tmpM.makeScale(xz, y, xz));
+    if (this.center) this.center.instanceMatrix.needsUpdate = true;
   }
 
   private chunkFor(q: number, r: number) {
@@ -740,7 +812,7 @@ export class World {
   placeAnimated(p: Placed) {
     const syn = synBase(p.synergies, p.rot);
     const flow = this.settleFlow(p);
-    const sig = `${synSig(syn)}|${flow.join('')}`;
+    const sig = `${synSig(syn)}|${flow.join('')}|${p.eraMark ?? ''}`;
     let live: LiveTile;
     let y0 = 1.2;
     if (this.ghost && this.ghost.def === p.def && this.ghost.sig === sig) {
@@ -749,7 +821,7 @@ export class World {
       this.ghost = null;
       this.ghostKey = '';
     } else {
-      live = new LiveTile(p.def, this.build(p.def, syn, flow), sig, this.lib, this.quality !== 'low');
+      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark }), sig, this.lib, this.quality !== 'low');
       this.scene.add(live.group);
       this.dropGhost();
     }
@@ -763,7 +835,7 @@ export class World {
 
   /** Coloca várias peças de uma vez, sem animação (modo automático / teste de carga). */
   placeInstant(list: Placed[], board: Board) {
-    for (const p of list) this.bake(p, this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p)), false);
+    for (const p of list) this.bake(p, this.buildPlaced(p), false);
     for (const pool of this.pools.values()) pool.flush();
     this.updateFrontier(board);
     this.life.sync(board);
@@ -775,11 +847,13 @@ export class World {
   setGhost(def: TileDef, rot: number, angle: number, q: number, r: number, check: Check) {
     const syn = check.valid ? synBase(check.synergies, rot) : [];
     const flow = flowBase(this.flowAt(q, r, rotateEdges(def.edges, rot)), rot);
-    const sig = `${synSig(syn)}|${flow.join('')}`;
+    // O fantasma já mostra o marco da era que a peça ergueria.
+    const mark = check.valid ? (check.eraMark ?? undefined) : undefined;
+    const sig = `${synSig(syn)}|${flow.join('')}|${mark ?? ''}`;
     const key = `${def.seed}:${this.theme.id}:${sig}`;
     if (!this.ghost || this.ghostKey !== key) {
       const old = this.ghost;
-      this.ghost = new LiveTile(def, this.build(def, syn, flow), sig, this.lib, this.quality !== 'low');
+      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark }), sig, this.lib, this.quality !== 'low');
       this.ghostKey = key;
       this.scene.add(this.ghost.group);
       if (old && old.def === def) {
@@ -1068,6 +1142,7 @@ export class World {
     }
 
     this.stepHalos(dt);
+    this.stepCenter(dt);
 
     // Peças caindo.
     const still: Drop[] = [];

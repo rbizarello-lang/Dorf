@@ -161,6 +161,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
   // Zen não acaba: a simulação para num teto de jogadas.
   const maxMoves = rules.infinite ? 70 : Infinity;
   let expectedEra = 0;
+  let pendingMark: number | null = null;
   const game = new Game(seed, rules);
   const b = game.board;
   const log: GameLog = { seed, themeId: theme.id, rules, moves: [], snapshots: [], finalScore: 0, finalStack: 0, placed: 0, discarded: 0 };
@@ -191,6 +192,8 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       break;
     }
     const edges = rotateEdges(cur.edges, m.rot);
+    // Marco da era: a primeira peça com vila depois de um avanço.
+    const expectedMark = pendingMark !== null && edges.some((e) => e === T.Village) ? pendingMark : null;
     assert(oracleValid(b, m.q, m.r, edges), `seed ${seed}: bestMove inválida pelo oráculo`);
     // Estado prévio para o oráyculo de pontuação
     const closedBefore = new Set(b.list.filter((t) => oracleClosed(b, t)).map((t) => t.index));
@@ -313,6 +316,12 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     }
     gained += eraUps * rules.eraTiles;
     if (eraUps) inc('eras');
+    if (expectedMark !== null) {
+      pendingMark = null;
+      inc('marcos_de_era');
+    }
+    if (eraUps) pendingMark = expectedEra;
+    assert((res.placed.eraMark ?? null) === expectedMark, `seed ${seed}: marco da era ${res.placed.eraMark} != oráculo ${expectedMark}`);
     assert(b.era === expectedEra, `seed ${seed}: era ${b.era} != oráculo ${expectedEra}`);
     assert((res.eraUp !== null) === eraUps > 0, `seed ${seed}: eraUp ${res.eraUp} sem avanço esperado`);
 
