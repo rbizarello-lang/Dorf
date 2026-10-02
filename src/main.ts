@@ -169,6 +169,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   hud.hint.style.opacity = moves.length >= 6 ? '0' : '';
   world.dropGhost();
   world.setTheme(theme, game.board);
+  sfx.setStyle(theme.music, game.board.era);
   hud.applyTheme(theme);
   hud.renderQuests(game.board.quests, theme);
   frameCamera(true);
@@ -404,8 +405,7 @@ function announce(res: PlaceResult) {
   }
   if (res.eraUp !== null) {
     hud.toast(`Nova era: ${eraName(res.eraUp)} · +${game.rules.eraTiles} peças · a próxima vila ergue o marco`, 'good');
-    sfx.perfect();
-    sfx.quest();
+    sfx.eraFanfare(res.eraUp);
     sfx.hammer(0.45);
     const el = document.getElementById('era')!;
     el.classList.remove('up');
@@ -499,6 +499,7 @@ function pickTheme(t: Theme) {
   store.set('theme', t.id);
   hud.applyTheme(t);
   world.setTheme(t, game.board);
+  sfx.setStyle(t.music, game.board.era);
   hud.renderQuests(game.board.quests, t);
   refreshHud(true);
   if (game.over) {

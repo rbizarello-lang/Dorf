@@ -58,6 +58,14 @@ export interface HouseKind {
 }
 
 /** Remate do palácio no Centro da vila, na última era. */
+/** Timbre da melodia do tema (sintetizado em src/audio.ts). */
+export type MusicTimbre =
+  | 'flute' // seno com sopro (padrão)
+  | 'reed' // palheta: dente-de-serra abafado
+  | 'pluck' // corda dedilhada (Karplus-Strong)
+  | 'bell' // sino ou carrilhão: parciais inarmônicas
+  | 'glass'; // vidro: seno com parcial aguda
+
 /** Chapéu dos aldeões. */
 export type HatStyle =
   | 'straw' // palha de aba larga
@@ -253,6 +261,8 @@ export interface Theme {
   eras?: [string, string, string, string];
   /** Remate do Centro da vila na última era (padrão: 'spire'). */
   center?: CenterCrown;
+  /** Escala da música (semitons a partir da tônica, em ordem) e timbre da melodia; a fanfarra de era também usa. */
+  music?: { scale: number[]; timbre: MusicTimbre };
   /** Aldeões: cor da pele, chapéu e cor do chapéu (padrão: sem chapéu). A camisa usa as cores dos telhados. */
   folk?: { skin: string; hat: HatStyle; hatColor: string };
   ruleNote?: string;

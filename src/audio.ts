@@ -14,6 +14,12 @@ const MOODS: Record<Mood, { scale: number[]; beat: number; density: number; root
 };
 const PAD_BEATS = 16;
 
+/** Estilo musical do tema (Theme.music). Sem ele, a escala da hora do dia e a flauta. */
+export interface MusicStyle {
+  scale: number[];
+  timbre: 'flute' | 'reed' | 'pluck' | 'bell' | 'glass';
+}
+
 export class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -23,6 +29,10 @@ export class Sfx {
   private beat = 0;
   private lastDeg = 2;
   private mood: Mood = 'day';
+  private style: MusicStyle | null = null;
+  /** Era da vila (0 a 3): a música ganha bordão, cordas e sinos, como a trilha do AoE IV. */
+  private era = 0;
+  private plucks = new Map<number, AudioBuffer>();
   enabled = true;
   /** Música ambiente ligada (só toca com `enabled`). */
   music = true;
@@ -73,6 +83,22 @@ export class Sfx {
     this.mood = m;
   }
 
+  /** Escala e timbre do tema, e a era atual (as camadas da música). */
+  setStyle(style: MusicStyle | undefined, era: number) {
+    this.style = style ?? null;
+    this.era = era;
+  }
+
+  /** Escala em uso: a do tema ou a da hora do dia. */
+  private scale(m: (typeof MOODS)[Mood]) {
+    return this.style?.scale ?? m.scale;
+  }
+
+  /** Grau da escala (pode passar do tamanho dela: sobe oitavas) em semitons. */
+  private degree(sc: number[], deg: number) {
+    return sc[((deg % sc.length) + sc.length) % sc.length] + 12 * Math.floor(deg / sc.length);
+  }
+
   /** Aba oculta: suspende o áudio inteiro (a música não fica tocando em segundo plano). */
   pause(hidden: boolean) {
     if (!this.ctx) return;
@@ -91,14 +117,23 @@ export class Sfx {
       return;
     }
     const m = MOODS[this.mood];
+    const sc = this.scale(m);
+    const top = sc.length * 2 - 1;
     while (this.nextBeat < ctx.currentTime + 0.5) {
       const t = this.nextBeat;
-      if (this.beat % PAD_BEATS === 0) this.pad(t, m.beat * PAD_BEATS, m);
+      if (this.beat % PAD_BEATS === 0) {
+        this.pad(t, m.beat * PAD_BEATS, m);
+        // Camadas da era: bordão na tônica (II), acorde de sinos (IV).
+        if (this.era >= 1) this.drone(130.81 * Math.pow(2, (m.root - 12) / 12), t, m.beat * PAD_BEATS);
+        if (this.era >= 3) [0, 2, 4].forEach((d, i) => this.bell(523.25 * Math.pow(2, (m.root + this.degree(sc, d)) / 12), t + i * 0.09, 3.5, 0.012, this.musicBus!));
+      }
       if (Math.random() < m.density) {
         // Passeio pela escala em passos curtos: soa como melodia, não como notas soltas.
-        this.lastDeg = Math.max(0, Math.min(9, this.lastDeg + [-2, -1, -1, 1, 1, 2][Math.floor(Math.random() * 6)]));
-        const semi = m.root + m.scale[this.lastDeg % 5] + 12 * Math.floor(this.lastDeg / 5);
-        this.voice(392 * Math.pow(2, semi / 12), t, 2.2, 'sine', 0.032, this.musicBus, 0.03, true);
+        this.lastDeg = Math.max(0, Math.min(top, this.lastDeg + [-2, -1, -1, 1, 1, 2][Math.floor(Math.random() * 6)]));
+        this.melody(392 * Math.pow(2, (m.root + this.degree(sc, this.lastDeg)) / 12), t, 2.2, 0.032, this.musicBus);
+      } else if (this.era >= 2 && Math.random() < 0.3) {
+        // Cordas dedilhadas (III): notas do acorde uma oitava abaixo, entre as da melodia.
+        this.pluck(196 * Math.pow(2, (m.root + this.degree(sc, [0, 2, 4][Math.floor(Math.random() * 3)])) / 12), t, 0.05, this.musicBus);
       }
       this.beat++;
       this.nextBeat += m.beat;
@@ -112,9 +147,10 @@ export class Sfx {
     f.type = 'lowpass';
     f.frequency.value = 700;
     f.connect(this.musicBus!);
+    const sc = this.scale(m);
     const deg = [0, 2, 3][Math.floor(Math.random() * 3)];
     for (const step of [0, 2, 4]) {
-      const semi = m.root + m.scale[(deg + step) % 5] + (deg + step >= 5 ? 12 : 0);
+      const semi = m.root + this.degree(sc, deg + step);
       for (const det of [-6, 6]) {
         const o = ctx.createOscillator();
         o.type = 'triangle';
@@ -129,6 +165,80 @@ export class Sfx {
         o.stop(t + dur * 1.1 + 0.1);
       }
     }
+  }
+
+  /** Nota da melodia no timbre do tema. */
+  private melody(freq: number, t: number, dur: number, vol: number, dest: AudioNode) {
+    const tb = this.style?.timbre ?? 'flute';
+    if (tb === 'pluck') this.pluck(freq, t, vol * 1.6, dest);
+    else if (tb === 'bell') this.bell(freq, t, dur * 1.4, vol, dest);
+    else if (tb === 'reed') this.reed(freq, t, dur * 0.8, vol, dest);
+    else {
+      this.voice(freq, t, dur, 'sine', vol, dest, 0.03, true);
+      if (tb === 'glass') this.voice(freq * 4.02, t, dur * 0.5, 'sine', vol * 0.18, dest, 0.01, true);
+    }
+  }
+
+  /** Palheta: dente-de-serra com filtro passa-baixa e ataque macio. */
+  private reed(freq: number, t: number, dur: number, vol: number, dest: AudioNode) {
+    const ctx = this.ctx!;
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = freq * 3;
+    f.Q.value = 2;
+    f.connect(dest);
+    if (this.echo) f.connect(this.echo);
+    this.voice(freq, t, dur, 'sawtooth', vol * 0.6, f, 0.06, false);
+  }
+
+  /** Sino: parciais inarmônicas que somem em tempos diferentes. */
+  private bell(freq: number, t: number, dur: number, vol: number, dest: AudioNode) {
+    for (const [k, v, d] of [[1, 1, 1], [2.76, 0.4, 0.5], [5.4, 0.2, 0.3]]) this.voice(freq * k, t, dur * d, 'sine', vol * v, dest, 0.004, true);
+  }
+
+  /** Bordão: dente-de-serra grave e abafado, que entra e sai devagar com o acorde. */
+  private drone(freq: number, t: number, dur: number) {
+    const ctx = this.ctx!;
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 320;
+    f.connect(this.musicBus!);
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.01, t + dur * 0.3);
+    g.gain.linearRampToValueAtTime(0.0001, t + dur * 1.05);
+    o.connect(g).connect(f);
+    o.start(t);
+    o.stop(t + dur * 1.05 + 0.1);
+  }
+
+  /** Corda dedilhada (Karplus-Strong): ruído que passa por uma linha de atraso com média. */
+  private pluck(freq: number, t: number, vol: number, dest: AudioNode) {
+    const ctx = this.ctx!;
+    const key = Math.round(freq);
+    let buf = this.plucks.get(key);
+    if (!buf) {
+      const sr = ctx.sampleRate, len = Math.floor(sr * 1.6), n = Math.max(2, Math.round(sr / freq));
+      buf = ctx.createBuffer(1, len, sr);
+      const out = buf.getChannelData(0);
+      const ring = new Float32Array(n);
+      for (let i = 0; i < n; i++) ring[i] = Math.random() * 2 - 1;
+      for (let i = 0, j = 0; i < len; i++, j = (j + 1) % n) {
+        out[i] = ring[j];
+        ring[j] = 0.5 * (ring[j] + ring[(j + 1) % n]) * 0.996;
+      }
+      this.plucks.set(key, buf);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const g = ctx.createGain();
+    g.gain.value = vol * 3;
+    src.connect(g).connect(dest);
+    if (this.echo) g.connect(this.echo);
+    src.start(t);
   }
 
   private voice(freq: number, t: number, dur: number, type: OscillatorType, vol: number, dest: AudioNode, attack: number, echo: boolean) {
@@ -218,6 +328,25 @@ export class Sfx {
   /** Fim de partida: cadência que desce até a tônica, ou sobe se foi recorde. */
   gameOver(record: boolean) {
     (record ? [0, 4, 7, 12, 16, 24] : [12, 9, 7, 4, 0]).forEach((s, i) => this.note(s - 12, 0.1 + i * 0.16, 1.4, 0.1));
+  }
+
+  /**
+   * Fanfarra de nova era na escala do tema: três notas curtas que sobem e uma longa na
+   * oitava. A instrumentação cresce com a era: voz; + bordão; + cordas; + acorde de sinos.
+   */
+  eraFanfare(era: number) {
+    const ctx = this.ready();
+    if (!ctx) return;
+    this.era = era;
+    const m = MOODS[this.mood];
+    const sc = this.scale(m);
+    const t0 = ctx.currentTime + 0.12;
+    const semi = (d: number) => this.degree(sc, d);
+    const steps: [number, number, number][] = [[0, 0, 0.18], [2, 0.16, 0.18], [4, 0.32, 0.18], [sc.length, 0.52, 1.8]];
+    for (const [d, at, dur] of steps) this.melody(523.25 * Math.pow(2, semi(d) / 12), t0 + at, dur, 0.09, this.master!);
+    if (era >= 1) this.voice(130.81, t0, 2.4, 'triangle', 0.06, this.master!, 0.08, false);
+    if (era >= 2) [0, 2, 4, sc.length].forEach((d, i) => this.pluck(261.63 * Math.pow(2, semi(d) / 12), t0 + 0.52 + i * 0.05, 0.08, this.master!));
+    if (era >= 3) [0, 2, 4].forEach((d) => this.bell(1046.5 * Math.pow(2, semi(d) / 12), t0 + 0.54, 3, 0.035, this.master!));
   }
 
   perfect() {

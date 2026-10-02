@@ -132,6 +132,7 @@ Um tema é um objeto de dados (`Theme`, em `src/themes/types.ts`, com comentári
 - **vila:** tipos de casa (corpo `cottage`/`long`/`cube`/`tall`/`round` + telhado `gable`/`hip`/`flat`/`dome`/`pagoda`/`thatch`/`turf`/`stepgable`/`cone`, com enxaimel e chaminé opcionais) e um marco (`church`, `baroque`, `tower`, `pagoda`, `pyramid`, `obelisk`, `windmill`, `temple`, `stave`, `hall`, `pylon`, `kancha`, `watertower`, `dome`);
 - **construções opcionais:** a da interação vila + plantação (`windmill`, `granary`, `windpump`, `stilt`), um portal sobre a estrada na entrada da vila (`torii`, `paifang`, `inca`) e uma ponte sobre o rio (`stone`, `wood`, `rope`);
 - **plantações:** `wheat`, `barley`, `corn`, `rice`, `tulip`, `lavender`, `sunflower`, `vineyard`, `sugarcane`, `papyrus`, `tea`, `coffee`, `cotton`, `quinoa`, `potato`, `flax`, `mulberry`, `hydro`;
+- **aldeões** (`folk`: pele, chapéu `straw`/`cap`/`scarf`/`hood`/`helmet`/`none` e cor do chapéu) e **música** (`music`: a escala em semitons e o timbre `flute`/`reed`/`pluck`/`bell`/`glass`; a fanfarra de nova era usa a mesma escala, e a música ganha bordão, cordas e sinos a cada era);
 - **animais, barco, estilo de estrada e veículo**, nomes das interações e, se quiser, regras próprias (`rules`).
 
 O tema aparece sozinho no menu, agrupado pela época. Para conferir as formas, abra `?gallery&theme=<id>`.
