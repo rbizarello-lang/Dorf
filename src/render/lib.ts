@@ -453,6 +453,37 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
   }
 }
 
+/** Formas com ponta, folha ou cristal: a quina é a forma, então ficam facetadas. */
+const FACETED: ReadonlySet<TreeGeo> = new Set<TreeGeo>(['crystal', 'cactus', 'palm', 'waxpalm', 'bamboo']);
+
+/**
+ * Copa arredondada: a normal das partes tingidas aponta do centro da copa (elipsoide do
+ * tamanho dela), com um quarto da normal da face. A luz corre num gradiente, como a copa
+ * pintada do Dorfromantik, em vez de acender faceta por faceta. O tronco continua plano.
+ */
+function softCanopy(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  const nrm = g.attributes.normal as THREE.BufferAttribute;
+  const tint = g.attributes.tint as THREE.BufferAttribute;
+  const box = new THREE.Box3();
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) if (tint.getX(i) > 0.5) box.expandByPoint(v.fromBufferAttribute(pos, i));
+  if (box.isEmpty()) return g;
+  const c = box.getCenter(new THREE.Vector3());
+  const ext = box.getSize(new THREE.Vector3()).multiplyScalar(0.5).max(new THREE.Vector3(1e-3, 1e-3, 1e-3));
+  // O centro desce um pouco: a copa fica mais clara no alto e escura embaixo, sem polo duro.
+  c.y -= ext.y * 0.25;
+  const f = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    if (tint.getX(i) <= 0.5) continue;
+    v.fromBufferAttribute(pos, i).sub(c).divide(ext).divide(ext).normalize();
+    f.fromBufferAttribute(nrm, i);
+    v.multiplyScalar(0.75).addScaledVector(f, 0.25).normalize();
+    nrm.setXYZ(i, v.x, v.y, v.z);
+  }
+  return g;
+}
+
 // ---------------------------------------------------------------- plantações
 
 export interface CropLayout {
@@ -1490,7 +1521,7 @@ export class Lib {
     U.sparkle.value.set(theme.sparkle);
     U.glow.value.set(theme.window);
 
-    for (const f of theme.forest) if (!this.geos.has(`tree:${f.geo}`)) set(`tree:${f.geo}`, treeGeometry(f.geo, theme.trunk));
+    for (const f of theme.forest) if (!this.geos.has(`tree:${f.geo}`)) set(`tree:${f.geo}`, FACETED.has(f.geo) ? treeGeometry(f.geo, theme.trunk) : softCanopy(treeGeometry(f.geo, theme.trunk)));
     this.domeKeys.clear();
     theme.houses.forEach((k, i) => k.roof === 'dome' && this.domeKeys.add(`roof:${i}`));
     this.houseMeta = theme.houses.map((k, i) => {
@@ -1512,7 +1543,7 @@ export class Lib {
     if (theme.mill === 'granary') set('mill', sp.granary);
     set('grass', kit(tuft(4, 0.042, 0.0045, 0.012, 0.75, 0.004, 23).map((geo) => ({ geo, color: '#fff', tint: 1, grad: [0.6, 1.12, 0, 0.045] as [number, number, number, number] }))));
     set('reed', kit(tuft(5, 0.07, 0.004, 0.012, 0.8, 0.01, 29).map((geo) => ({ geo, color: '#4f7a3a', grad: [0.6, 1.1, 0, 0.07] as [number, number, number, number] }))));
-    set('bush', kit([{ geo: jitter(ico(0.05, 0), 0.01, 5).translate(0, 0.03, 0), color: '#fff', tint: 1, grad: [0.8, 1.1, 0, 0.07] }]));
+    set('bush', softCanopy(kit([{ geo: jitter(ico(0.05, 0), 0.01, 5).translate(0, 0.03, 0), color: '#fff', tint: 1, grad: [0.8, 1.1, 0, 0.07] }])));
     set('rock', kit([{ geo: new THREE.DodecahedronGeometry(0.04, 0).scale(1, 0.6, 1).translate(0, 0.012, 0), color: '#fff', tint: 1 }]));
     set('flower', kit([{ geo: oct(0.014).translate(0, 0.024, 0), color: '#fff', tint: 1 }, { geo: tri([-0.002, 0, 0], [0.002, 0, 0], [0, 0.02, 0]), color: '#4f7a3a' }]));
     set('lily', kit([{ geo: cyl(0.035, 0.035, 0.006, 7, 0, 0.011), color: '#fff', tint: 1 }, { geo: oct(0.008).translate(0.01, 0.02, 0.006), color: '#f7c6d8' }]));

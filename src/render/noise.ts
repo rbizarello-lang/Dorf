@@ -82,6 +82,58 @@ export function makeNoiseTexture() {
   return dataTexture(data);
 }
 
+/** Perlin periódico anisotrópico: `px` células em u e `py` em v (traços alongados quando px < py). */
+function perlin2(px: number, py: number, seed: number) {
+  const rng = mulberry32(seed);
+  const gx = new Float32Array(px * py);
+  const gy = new Float32Array(px * py);
+  for (let i = 0; i < px * py; i++) {
+    const a = rng() * Math.PI * 2;
+    gx[i] = Math.cos(a);
+    gy[i] = Math.sin(a);
+  }
+  const fade = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
+  return (u: number, v: number) => {
+    const x = u * px, y = v * py;
+    const x0 = Math.floor(x), y0 = Math.floor(y);
+    const fx = x - x0, fy = y - y0;
+    const dot = (ix: number, iy: number, dx: number, dy: number) => {
+      const k = (((iy % py) + py) % py) * px + (((ix % px) + px) % px);
+      return gx[k] * dx + gy[k] * dy;
+    };
+    const uu = fade(fx), vv = fade(fy);
+    const a = dot(x0, y0, fx, fy) + (dot(x0 + 1, y0, fx - 1, fy) - dot(x0, y0, fx, fy)) * uu;
+    const b = dot(x0, y0 + 1, fx, fy - 1) + (dot(x0 + 1, y0 + 1, fx - 1, fy - 1) - dot(x0, y0 + 1, fx, fy - 1)) * uu;
+    return (a + (b - a) * vv) * 1.41;
+  };
+}
+
+/**
+ * Pinceladas, para o aspecto pintado à mão (Dorfromantik: albedo pintado com pincel).
+ * R = traços longos ao longo de u (campos, paredes), G = toques curtos (copas),
+ * B = manchas largas que trocam o tom de um traço para outro. Em [0, 1], média ~0,5.
+ */
+export function makeBrushTexture() {
+  const long = [perlin2(2, 24, 71), perlin2(4, 48, 73), perlin2(8, 96, 79)];
+  const dab = [perlin2(8, 20, 83), perlin2(16, 40, 89)];
+  const hue = [perlin2(3, 6, 97), perlin2(6, 12, 101)];
+  const data = new Uint8Array(SIZE * SIZE * 4);
+  const to8 = (v: number) => Math.max(0, Math.min(255, Math.round((v * 0.5 + 0.5) * 255)));
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const u = x / SIZE, v = y / SIZE;
+      const i = (y * SIZE + x) * 4;
+      data[i] = to8((long[0](u, v) + long[1](u, v) * 0.6 + long[2](u, v) * 0.3) * 1.3);
+      // Toques com borda: o ruído passa por uma curva em S, como tinta que acaba no fim do traço.
+      const d = dab[0](u, v) + dab[1](u, v) * 0.5;
+      data[i + 1] = to8(Math.tanh(d * 3) * 0.9);
+      data[i + 2] = to8((hue[0](u, v) + hue[1](u, v) * 0.5) * 1.4);
+      data[i + 3] = 255;
+    }
+  }
+  return dataTexture(data);
+}
+
 /** Resolução do volume de cáusticas: lado (x, z) e quadros do ciclo de tempo. */
 export const CAUSTIC_SIZE = 128;
 export const CAUSTIC_FRAMES = 32;

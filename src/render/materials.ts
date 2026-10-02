@@ -61,7 +61,7 @@ import {
   vertexColor,
 } from 'three/tsl';
 import { GROUND_EXTENT, GROUND_SIZE, groundMap } from './groundMap';
-import { CAUSTIC_FRAMES, CAUSTIC_SIZE, makeCausticTexture, makeNoiseTexture, makeWaterTexture } from './noise';
+import { CAUSTIC_FRAMES, CAUSTIC_SIZE, makeBrushTexture, makeCausticTexture, makeNoiseTexture, makeWaterTexture } from './noise';
 
 // Materiais do jogo em TSL (nós do three.js), que compilam tanto para WebGPU
 // quanto para WebGL2. Atributos por vértice dos kits (ver lib.ts):
@@ -98,6 +98,8 @@ export const U = {
 };
 
 export const noiseTex = makeNoiseTexture();
+/** Pinceladas (noise.ts): traços longos, toques curtos e manchas de tom. */
+export const brushTex = makeBrushTexture();
 export const waterTex = makeWaterTexture();
 
 // Os tipos do TSL distinguem nós "variáveis" de expressões e travam composições válidas;
@@ -280,6 +282,10 @@ interface DecoOpts {
   shingles?: boolean;
   /** Contorno luminoso nas bordas das copas, na cor do sol. */
   rim?: boolean;
+  /** Normais da geometria (copas arredondadas em lib.ts), em vez da normal plana de cada face. */
+  smooth?: boolean;
+  /** Pincelada nas partes tingidas: toques nas copas, traços verticais nas paredes. */
+  paint?: 'canopy' | 'wall';
   roughness?: number;
   metalness?: number;
   emissive?: string;
@@ -289,7 +295,7 @@ interface DecoOpts {
 
 /** Material dos kits instanciados: cor por vértice × cor da instância (onde tint = 1), janelas acesas à noite. */
 function decoMaterial(o: DecoOpts) {
-  const m = new LitMaterial({ roughness: o.roughness ?? 0.85, metalness: o.metalness ?? 0, flatShading: true, side: o.side ?? THREE.FrontSide });
+  const m = new LitMaterial({ roughness: o.roughness ?? 0.85, metalness: o.metalness ?? 0, flatShading: !o.smooth, side: o.side ?? THREE.FrontSide });
   const tint = attribute('tint', 'float');
   const glow = attribute('glow', 'float');
   const iColor = attribute('iColor', 'vec3');
@@ -310,6 +316,22 @@ function decoMaterial(o: DecoOpts) {
     });
     base = base.mul(sheen.mul(0.22).add(1));
   } else m.positionNode = displaced(undefined, true);
+  if (o.paint) {
+    // Coordenadas do próprio kit (a pincelada gira com a instância), deslocadas por instância
+    // para duas árvores iguais não terem os mesmos toques.
+    const pg = positionGeometry;
+    const off = varying(vec2(hash(instanceIndex), hash(instanceIndex.add(7))).mul(5), 'vBrush');
+    if (o.paint === 'canopy') {
+      const b = texture(brushTex, vec2(pg.x.add(pg.z.mul(0.6)), pg.y.add(pg.z.mul(0.3))).mul(3).add(off));
+      // Toque claro ou escuro, e um tom mais quente ou mais frio de um toque para outro.
+      const dab = vec3(b.g.mul(0.28).add(0.86)).mul(mix(vec3(0.95, 1.0, 1.05), vec3(1.06, 1.0, 0.88), b.b));
+      base = base.mul(mix(vec3(1), dab, tint));
+    } else {
+      const wall = tint.mul(smoothstep(0.5, 0.3, abs(normalWorld.y)));
+      const b = texture(brushTex, vec2(pg.y.mul(1.5), pg.x.add(pg.z).mul(3)).add(off));
+      base = base.mul(b.r.sub(0.5).mul(0.16).mul(wall).add(1));
+    }
+  }
   const toCam = cameraPosition.sub(positionWorld);
   const camDist = length(toCam);
   if (o.shingles) {
@@ -337,8 +359,8 @@ export type MatKey = 'deco' | 'foliage' | 'crop' | 'cropFine' | 'crystal' | 'gla
 
 export function makeDecoMaterials(): Record<MatKey, THREE.MeshStandardNodeMaterial> {
   return {
-    deco: decoMaterial({ shingles: true }),
-    foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true }),
+    deco: decoMaterial({ shingles: true, paint: 'wall' }),
+    foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy' }),
     crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide }),
     cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true }),
     crystal: decoMaterial({ sway: 'tree', roughness: 0.25, metalness: 0.1, emissive: '#3a2a66', emissiveIntensity: 0.6 }),
@@ -371,8 +393,13 @@ export function makeGroundMaterial() {
   const grass = mix(cool, warm, blot).mul(blot2.mul(0.18).add(0.86)).mul(fine.sub(0.5).mul(0.14).add(1));
   const litter = smoothstep(0.62, 0.8, grain);
   const forest = mix(vec3(0.74, 0.8, 0.74), vec3(0.98, 0.96, 0.9), blot.mul(0.7).add(blot2.mul(0.3))).mul(mix(vec3(1), vec3(1.25, 1.02, 0.7), litter.mul(0.55)));
-  const furrow = sin(p.x.mul(31).add(p.y.mul(17)).add(blot.mul(6))).mul(0.5).add(0.5);
-  const field = vec3(furrow.mul(0.1).add(0.93)).mul(blot2.mul(0.14).add(0.93));
+  // Plantação pintada: traços longos de pincel cuja direção gira devagar pelo mapa, e o tom
+  // passa do rosado ao dourado de um traço para outro (os campos do Dorfromantik).
+  const ang = texture(noiseTex, p.div(9)).a.mul(6.2832);
+  const ca = cos(ang), sa = sin(ang);
+  const rot = vec2(p.x.mul(ca).add(p.y.mul(sa)), p.y.mul(ca).sub(p.x.mul(sa)));
+  const stroke = texture(brushTex, rot.mul(vec2(0.35, 1.4)));
+  const field = vec3(stroke.r.mul(0.36).add(0.82)).mul(mix(vec3(1.07, 0.93, 0.96), vec3(1.06, 1.04, 0.84), stroke.b));
   const pebble = smoothstep(0.7, 0.86, grain);
   const village = vec3(blot.mul(0.2).add(0.88)).mul(mix(vec3(1), vec3(1.16, 1.12, 1.06), pebble.mul(0.6)));
   const rest = float(1).sub(sp.x.add(sp.y).add(sp.z).add(sp.w)).max(0);
