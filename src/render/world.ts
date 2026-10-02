@@ -11,6 +11,9 @@ import { createRenderer, type Backend } from './gpu';
 import { Lib, instGeometry, setInstColor } from './lib';
 import { Life } from './life';
 import { U, makeVoidMaterial, softShadowFilter } from './materials';
+import { A, fogNode } from './atmosphere';
+import { CL, makeCloudMesh } from './clouds';
+import { groundMap } from './groundMap';
 import { P, buildPost, type Post, type Quality } from './post';
 import { SkyEnv } from './sky';
 import { FX, Fireflies, Sprites, Weather } from './fx';
@@ -19,7 +22,7 @@ import { PreviewView } from './preview';
 import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, type TileBuild } from './tileBuilder';
 
 export type { Quality };
-export type TimeOfDay = 'day' | 'dusk' | 'night';
+export type TimeOfDay = 'dawn' | 'day' | 'golden' | 'dusk' | 'night';
 
 const CHUNK = 8;
 /** O alto do céu um pouco mais azul que a cor "do céu" do tema (que é quase branca). */
@@ -31,6 +34,7 @@ const SHADOW_MAP: Record<Quality, number> = { ultra: 4096, high: 2048, medium: 1
 const CASCADES = 3;
 const tmpM = new THREE.Matrix4();
 const tmpColor = new THREE.Color();
+const WHITE = new THREE.Color(1, 1, 1);
 /** Densidade do clima por qualidade. */
 const WEATHER: Record<Quality, number> = { ultra: 1, high: 1, medium: 0.5, low: 0 };
 // Teto de densidade de pixels e orçamento de pixels desenhados por qualidade. Sem o orçamento,
@@ -38,6 +42,10 @@ const WEATHER: Record<Quality, number> = { ultra: 1, high: 1, medium: 0.5, low: 
 // não alivia a GPU (o custo do GTAO, do TRAA e do desfoque cresce com a área).
 const DPR_MAX: Record<Quality, number> = { ultra: 2, high: 2, medium: 1.5, low: 1 };
 const PIXELS: Record<Quality, number> = { ultra: 3840 * 2160, high: 2560 * 1440, medium: 1920 * 1080, low: 1920 * 1080 };
+/** Quanto da luz que chega ao chão ele devolve para paredes e copas (a cor vem do mapa do chão). */
+const BOUNCE = 0.7;
+/** Força das poças dos lampiões com a noite fechada. */
+const LAMPS = 5;
 
 function tileMatrix(q: number, r: number, rot: number, y = 0, out = new THREE.Matrix4()) {
   const { x, z } = hexToWorld(q, r);
@@ -248,7 +256,7 @@ interface Drop {
 const BUILDS: ReadonlySet<string> = new Set(['logs', 'mill', 'sails', 'rotor', 'fence', 'apiary', 'landmark', 'pennant']);
 const easeOutBack = (x: number) => 1 + 2.4 * Math.pow(x - 1, 3) + 1.4 * Math.pow(x - 1, 2);
 
-/** Estado da iluminação: interpolado suavemente entre dia, entardecer e noite. */
+/** Estado da iluminação: interpolado suavemente entre as horas do dia. */
 interface Sky {
   bg: THREE.Color;
   fill: THREE.Color;
@@ -260,6 +268,9 @@ interface Sky {
   hemiGround: THREE.Color;
   hemiI: number;
   night: number;
+  /** Densidade da bruma no chão e da névoa rasteira (atmosphere.ts). */
+  haze: number;
+  mist: number;
 }
 
 const tmpSnap = new THREE.Vector3();
@@ -290,6 +301,43 @@ function skyFor(theme: Theme, tod: TimeOfDay): Sky {
   const C = (h: string) => new THREE.Color(h);
   const mix = (a: string, b: string, t: number) => C(a).lerp(C(b), t);
   const [dx, dy, dz] = theme.sunDir;
+  /** Sol com elevação `elev` e o azimute do tema girado de `turn` (graus). */
+  const sunAt = (elev: number, turn: number) => {
+    const a = Math.atan2(dz, dx) + THREE.MathUtils.degToRad(turn), e = THREE.MathUtils.degToRad(elev);
+    return new THREE.Vector3(Math.cos(a) * Math.cos(e), Math.sin(e), Math.sin(a) * Math.cos(e));
+  };
+  if (tod === 'dawn')
+    // Sol rasante do outro lado do céu, luz rosada, céu lilás e névoa no chão; algumas janelas ainda acesas.
+    return {
+      bg: mix(theme.bg, '#e3c6d6', 0.45),
+      fill: mix(theme.voidFill, '#ead2de', 0.4),
+      line: mix(theme.voidLine, '#f6e2ea', 0.35),
+      sun: C('#ffc6a4'),
+      sunI: theme.sunIntensity * 0.72,
+      sunDir: sunAt(13, -95),
+      hemiSky: mix(theme.hemiSky, '#aeb8ec', 0.5),
+      hemiGround: mix(theme.hemiGround, '#56506a', 0.35),
+      hemiI: theme.hemiIntensity * 0.85,
+      night: 0.15,
+      haze: 0.03,
+      mist: 0.8,
+    };
+  if (tod === 'golden')
+    // Fim de tarde: sol baixo e dourado, sombras compridas, ar morno.
+    return {
+      bg: mix(theme.bg, '#f2cf96', 0.3),
+      fill: mix(theme.voidFill, '#f5d9a8', 0.26),
+      line: mix(theme.voidLine, '#fbe8c4', 0.22),
+      sun: C('#ffcf88'),
+      sunI: theme.sunIntensity * 1.02,
+      sunDir: sunAt(26, 18),
+      hemiSky: mix(theme.hemiSky, '#ffdcb0', 0.35),
+      hemiGround: mix(theme.hemiGround, '#6a5040', 0.25),
+      hemiI: theme.hemiIntensity * 0.9,
+      night: 0,
+      haze: 0.022,
+      mist: 0,
+    };
   if (tod === 'dusk')
     return {
       bg: mix(theme.bg, '#f09a74', 0.42),
@@ -302,6 +350,8 @@ function skyFor(theme: Theme, tod: TimeOfDay): Sky {
       hemiGround: mix(theme.hemiGround, '#5a3a4a', 0.4),
       hemiI: theme.hemiIntensity * 0.8,
       night: 0.35,
+      haze: 0.03,
+      mist: 0.5,
     };
   if (tod === 'night')
     return {
@@ -315,6 +365,8 @@ function skyFor(theme: Theme, tod: TimeOfDay): Sky {
       hemiGround: C('#1c2130'),
       hemiI: 1.05,
       night: 1,
+      haze: 0.02,
+      mist: 0.3,
     };
   return {
     bg: C(theme.bg),
@@ -327,6 +379,8 @@ function skyFor(theme: Theme, tod: TimeOfDay): Sky {
     hemiGround: C(theme.hemiGround),
     hemiI: theme.hemiIntensity,
     night: 0,
+    haze: 0.008,
+    mist: 0,
   };
 }
 
@@ -382,6 +436,11 @@ export class World {
   private ghostPrev = new THREE.Vector3();
   private post: Post | null = null;
   private time = 0;
+  /** Cor da água do tema, para o mapa do chão. */
+  private waterColor = new THREE.Color();
+  /** Nuvens volumétricas (clouds.ts): só com a câmera longe, numa cena que o pós compõe por cima. */
+  private clouds = makeCloudMesh();
+  private cloudScene = new THREE.Scene();
   private size = new THREE.Vector2(1, 1);
 
   /** A peça da vez sobre a pilha (canvas próprio, posto no HUD por main.ts). */
@@ -414,7 +473,8 @@ export class World {
     this.renderer.info.autoReset = false;
 
     this.scene.add(this.staticRoot);
-    this.scene.fog = new THREE.Fog('#ffffff', 10, 40);
+    // Névoa por altura com bruma e névoa rasteira (atmosphere.ts) no lugar do THREE.Fog.
+    (this.scene as THREE.Scene & { fogNode?: THREE.Node }).fogNode = fogNode;
     this.life = new Life(this.lib, this.scene);
 
     this.sun.castShadow = true;
@@ -461,6 +521,8 @@ export class World {
     }
 
     this.scene.add(this.sprites.group, this.weather.mesh, this.fireflies.mesh);
+    this.cloudScene.add(this.clouds);
+    (this.cloudScene as THREE.Scene & { fogNode?: THREE.Node }).fogNode = fogNode;
   }
 
   // ---------------------------------------------------------------- tema, luz, qualidade
@@ -468,6 +530,7 @@ export class World {
   setTheme(theme: Theme, board: Board) {
     this.theme = theme;
     this.lib.applyTheme(theme);
+    this.waterColor.set(theme.water);
     U.clouds.value = theme.period === 'futuro' ? 0.08 : 0.16;
     this.skyTarget = skyFor(theme, this.timeOfDay);
     this.sky = skyFor(theme, this.timeOfDay);
@@ -490,7 +553,22 @@ export class World {
     const s = this.sky;
     if (!(this.scene.background instanceof THREE.Color)) this.scene.background = s.bg.clone();
     else this.scene.background.copy(s.bg);
-    (this.scene.fog as THREE.Fog).color.copy(s.bg);
+    A.bg.value.copy(s.bg);
+    // A bruma tem a cor do horizonte (um pouco do céu sobre o fundo) e brilha contra o sol.
+    A.haze.value.copy(s.bg).lerp(s.hemiSky, 0.3);
+    // A névoa rasteira é mais clara que o fundo e pega um pouco da cor do sol.
+    A.mistColor.value.copy(s.bg).lerp(WHITE, 0.3 * (1 - s.night * 0.7)).add(tmpColor.copy(s.sun).multiplyScalar(0.05 * s.sunI * (1 - s.night)));
+    A.glow.value.copy(s.sun).multiplyScalar(0.12 * s.sunI);
+    A.hazeDensity.value = s.haze;
+    A.mist.value = s.mist;
+    // Luz que o chão recebe (o sol pela altura dele e o céu), devolvida na cor do mapa do chão.
+    const up = Math.max(0, s.sunDir.y / s.sunDir.length());
+    U.bounce.value.copy(s.sun).multiplyScalar(s.sunI * up).add(tmpColor.copy(s.hemiSky).multiplyScalar(s.hemiI)).multiplyScalar(BOUNCE);
+    U.lamps.value = THREE.MathUtils.smoothstep(s.night, 0.25, 0.9) * LAMPS;
+    // Nuvens: o topo ao sol um pouco mais claro que o fundo do tema, a base na cor do chão.
+    CL.sun.value.copy(s.sun).multiplyScalar(s.sunI * 0.42);
+    CL.sky.value.copy(s.hemiSky).multiplyScalar(s.hemiI * 0.35);
+    CL.ground.value.copy(s.hemiGround).multiplyScalar(s.hemiI * 0.18);
     this.voidU.bg.value.copy(s.bg);
     this.voidU.fill.value.copy(s.fill);
     this.voidU.line.value.copy(s.line);
@@ -526,6 +604,8 @@ export class World {
     a.sunI += (b.sunI - a.sunI) * k;
     a.hemiI += (b.hemiI - a.hemiI) * k;
     a.night += (b.night - a.night) * k;
+    a.haze += (b.haze - a.haze) * k;
+    a.mist += (b.mist - a.mist) * k;
     this.applySky();
   }
 
@@ -552,7 +632,8 @@ export class World {
       this.post?.dispose();
       const rays = q === 'ultra' && (!this.fx || this.fx.includes('rays'));
       this.setRayLight(rays);
-      this.post = q === 'low' ? null : buildPost(this.renderer, this.scene, this.camera, q, this.fx, rays ? this.rayLight : undefined);
+      this.post = q === 'low' ? null : buildPost(this.renderer, this.scene, this.camera, q, this.fx, rays ? this.rayLight : undefined, this.cloudScene);
+      CL.temporal.value = this.post?.temporal ? 1 : 0;
       // O vazio quase todo emissivo clarearia a luz indireta: ele não entra como cor difusa,
       // e o alfa 1 mantém a oclusão inteira nele, como nos materiais sem luz indireta separada.
       // Só vale com a saída `diffuse` na cena (sem ela, o mrtNode viraria a única saída).
@@ -669,6 +750,7 @@ export class World {
     this.sprites.clear();
     this.life.reset(this.theme);
     this.flows.clear();
+    groundMap.clear();
     for (const p of board.list) this.bake(p, this.buildPlaced(p), false);
     for (const pool of this.pools.values()) pool.flush();
     this.updateFrontier(board);
@@ -775,9 +857,16 @@ export class World {
   private bake(p: Placed, b: TileBuild, flush = true) {
     const m = tileMatrix(p.q, p.r, p.rot);
     this.chunkFor(p.q, p.r).append(b, m);
+    groundMap.add(b, m, this.waterColor);
     for (const d of b.decos) {
       decoMatrix(d, tmpM);
       tmpM.premultiply(m);
+      if (this.lib.lit(d.key)) {
+        // Uma poça por casa com janela, umas mais fortes que outras (sorteio pela posição).
+        const x = tmpM.elements[12], z = tmpM.elements[14];
+        const h = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
+        groundMap.lantern(x, z, 0.28 + 0.2 * h);
+      }
       if (d.anim === 'spin-z' || d.anim === 'spin-x') this.life.addSpinner(d.key, tmpM, d.anim === 'spin-x' ? 'x' : 'z');
       else if (d.anim === 'wander') this.life.addAnimal(tmpM, d.color);
       else this.pool(this.isLod(d.key) && this.lodFlip++ % 2 ? `${d.key}~` : d.key)?.add(tmpM, d.color);
@@ -1067,9 +1156,13 @@ export class World {
     this.rig.update(dt);
     this.rig.apply(this.camera);
 
-    const fog = this.scene.fog as THREE.Fog;
-    fog.near = this.rig.dist * 1.5;
-    fog.far = this.rig.dist * 4.2;
+    A.near.value = this.rig.dist * 1.5;
+    A.far.value = this.rig.dist * 4.2;
+    groundMap.flush();
+    // As nuvens aparecem quando a câmera sobe bem acima delas (não no nível Baixo).
+    CL.fade.value = this.quality === 'low' ? 0 : THREE.MathUtils.smoothstep(this.rig.dist, 20, 28);
+    CL.focus.value.set(this.rig.target.x, this.rig.target.z, this.rig.dist);
+    this.clouds.visible = CL.fade.value > 1e-3;
 
     // Foco da profundidade de campo: o ponto que a câmera olha.
     P.focus.value = this.rig.dist;

@@ -3,10 +3,12 @@
 
 const PENTA = [0, 2, 4, 7, 9, 12, 14, 16];
 
-export type Mood = 'day' | 'dusk' | 'night';
+export type Mood = 'dawn' | 'day' | 'golden' | 'dusk' | 'night';
 /** Música ambiente por hora do dia: escala (semitons), duração da batida e chance de nota por batida. */
 const MOODS: Record<Mood, { scale: number[]; beat: number; density: number; root: number }> = {
+  dawn: { scale: [0, 2, 4, 7, 9], beat: 0.82, density: 0.28, root: 2 },
   day: { scale: [0, 2, 4, 7, 9], beat: 0.62, density: 0.42, root: 0 },
+  golden: { scale: [0, 2, 4, 7, 11], beat: 0.68, density: 0.38, root: -2 },
   dusk: { scale: [0, 2, 5, 7, 9], beat: 0.74, density: 0.34, root: -3 },
   night: { scale: [0, 3, 5, 7, 10], beat: 0.9, density: 0.26, root: -5 },
 };
