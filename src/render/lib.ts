@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import type { SiteKind } from '../core/sites';
 import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
 import type { AnimalKind, BoatKind, BodyStyle, BridgeStyle, CenterCrown, CropStyle, GateStyle, HatStyle, HouseKind, Landmark, RoofStyle, Theme, TreeGeo, VehicleKind } from '../themes/types';
 
@@ -1229,6 +1230,90 @@ function folkGeometry(tool: 'axe' | 'hoe' | 'sack', folk: { skin: string; hat: H
   return kit(parts).scale(1.4, 1.4, 1.4);
 }
 
+// ---------------------------------------------------------------- sítios descobertos
+
+const MOSS = '#6a8a4a';
+
+/**
+ * Kits dos sítios, numa planta de raio ~0,12: ruína (colunas quebradas e um bloco caído),
+ * baú aberto com moedas e o animal do tema dormindo ao lado (a cor da instância tinge o
+ * animal), relicário dourado num pedestal e torre de vigia de madeira.
+ */
+function siteGeometries(theme: Theme): Record<string, THREE.BufferGeometry> {
+  const rock = theme.rock, wood = theme.trunk;
+  const ruin: Part[] = [];
+  const cols: [number, number, number][] = [[-0.07, -0.04, 0.12], [-0.02, -0.07, 0.07], [0.05, -0.05, 0.1], [0.07, 0.03, 0.03]];
+  for (const [x, z, h] of cols) {
+    ruin.push({ geo: cyl(0.016, 0.018, h, 6, x, 0.01, z), color: rock, grad: [0.85, 1.08, 0, 0.12] });
+    ruin.push({ geo: cyl(0.0165, 0.0165, 0.006, 6, x, 0.01 + h, z), color: MOSS });
+  }
+  ruin.push({ geo: box(0.2, 0.012, 0.13, 0, 0, -0.03), color: rock, grad: [0.8, 0.95, 0, 0.012] });
+  ruin.push({ geo: box(0.055, 0.026, 0.028).rotateY(0.6).rotateZ(0.12).translate(-0.01, 0.012, 0.06), color: rock });
+  ruin.push({ geo: box(0.08, 0.012, 0.02, 0.01, 0.13, -0.055), color: rock });
+  const chest: Part[] = [
+    { geo: box(0.05, 0.035, 0.035), color: '#7a4a28', grad: [0.85, 1.05, 0, 0.035] },
+    { geo: box(0.052, 0.006, 0.037, 0, 0.012), color: GOLD },
+    { geo: box(0.05, 0.004, 0.035).rotateX(-1.1).translate(0, 0.045, -0.032), color: '#7a4a28' },
+    { geo: box(0.04, 0.004, 0.028, 0, 0.033), color: GOLD, glow: 0.3 },
+  ];
+  for (let i = 0; i < 5; i++) chest.push({ geo: cyl(0.006, 0.006, 0.002, 6, 0.035 + Math.cos(i * 2.4) * 0.015, 0, 0.02 + Math.sin(i * 2.4) * 0.015), color: GOLD });
+  const guard = animalGeometry(theme.animals.kind).clone().scale(1, 0.6, 1).rotateY(0.8).translate(-0.06, 0, 0.04);
+  const relic = kit([
+    { geo: box(0.06, 0.012, 0.06), color: rock },
+    { geo: cyl(0.016, 0.02, 0.05, 6, 0, 0.012), color: rock, grad: [0.85, 1.05, 0.012, 0.062] },
+    { geo: box(0.03, 0.022, 0.02, 0, 0.062), color: GOLD, glow: 0.4 },
+    { geo: cone(0.014, 0.016, 4, 0, 0.084).rotateY(Math.PI / 4), color: GOLD, glow: 0.4 },
+    { geo: oct(0.006).translate(0, 0.106, 0), color: '#fff2c0', glow: 1 },
+  ]).scale(1.5, 1.5, 1.5);
+  const lookout: Part[] = [];
+  const w = 0.035, h = 0.24;
+  for (const [x, z] of [[-w, -w], [w, -w], [-w, w], [w, w]]) lookout.push({ geo: strut([x * 1.5, 0, z * 1.5], [x, h, z], 0.007), color: wood });
+  for (const y of [0.08, 0.16]) lookout.push({ geo: box(w * 2.3, 0.005, 0.005, 0, y, w * 1.2), color: wood }, { geo: box(0.005, 0.005, w * 2.3, w * 1.2, y, 0), color: wood });
+  lookout.push({ geo: box(0.1, 0.008, 0.1, 0, h), color: wood, grad: [0.9, 1.1, h, h + 0.008] });
+  for (const [x, z] of [[-0.046, -0.046], [0.046, -0.046], [-0.046, 0.046], [0.046, 0.046]]) lookout.push({ geo: box(0.006, 0.05, 0.006, x, h, z), color: wood });
+  lookout.push({ geo: cone(0.08, 0.05, 4, 0, h + 0.05).rotateY(Math.PI / 4), color: theme.houses[0].roofs[0] });
+  return {
+    'site:ruin': kit(ruin),
+    'site:treasure': mergeGeometries([kit(chest), guard])!,
+    'site:relic': relic,
+    'site:lookout': kit(lookout),
+  };
+}
+
+/**
+ * Carimbo de um sítio no mapa de pergaminho, deitado no plano xz, com ~0,6 de largura:
+ * arco quebrado (ruína), X (tesouro), estrela de 8 pontas (relíquia) e torre (mirante).
+ */
+export function stampGeometry(kind: SiteKind): THREE.BufferGeometry {
+  const bar = (w: number, h: number, x: number, y: number, rot = 0) => new THREE.PlaneGeometry(w, h).rotateZ(rot).translate(x, y, 0);
+  let parts: THREE.BufferGeometry[];
+  if (kind === 'ruin') {
+    parts = [bar(0.07, 0.3, -0.16, -0.06), bar(0.07, 0.17, 0.16, -0.125), new THREE.RingGeometry(0.125, 0.195, 8, 1, Math.PI * 0.42, Math.PI * 0.58).translate(0, 0.09, 0), bar(0.44, 0.05, 0, -0.22)];
+  } else if (kind === 'treasure') {
+    parts = [bar(0.5, 0.08, 0, 0, Math.PI / 4), bar(0.5, 0.08, 0, 0, -Math.PI / 4)];
+  } else if (kind === 'relic') {
+    const star = new THREE.Shape();
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2 + Math.PI / 2, r = i % 2 ? 0.11 : 0.27;
+      if (i === 0) star.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+      else star.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    parts = [new THREE.ShapeGeometry(star)];
+  } else {
+    const t = new THREE.Shape();
+    t.moveTo(-0.15, -0.25);
+    t.lineTo(0.15, -0.25);
+    t.lineTo(0.045, 0.14);
+    t.lineTo(-0.045, 0.14);
+    parts = [new THREE.ShapeGeometry(t), bar(0.2, 0.05, 0, 0.17), new THREE.CircleGeometry(0.035, 6).translate(0, 0.25, 0)];
+  }
+  const out = mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)).map((g) => {
+    for (const k of Object.keys(g.attributes)) if (k !== 'position') g.deleteAttribute(k);
+    return g;
+  }))!;
+  return out.rotateX(-Math.PI / 2);
+}
+
 // ---------------------------------------------------------------- Centro da vila e marco da era
 
 const GOLD = '#d9b44a';
@@ -1590,6 +1675,9 @@ export class Lib {
     set('scaffold', scaffoldGeometry(theme.trunk));
     const folk = theme.folk ?? { skin: '#c99a72', hat: 'none', hatColor: '#000' };
     for (const t of ['axe', 'hoe', 'sack'] as const) set(`folk:${t}`, folkGeometry(t, folk, theme.trunk));
+    // Batedor do começo da partida: um aldeão montado no animal do tema (a instância tinge os dois).
+    set('scout', mergeGeometries([animalGeometry(theme.animals.kind), folkGeometry('sack', folk, theme.trunk).translate(0, 0.022, 0)])!);
+    for (const [k, g] of Object.entries(siteGeometries(theme))) set(k, g);
   }
 
   geo(key: string) {

@@ -691,13 +691,19 @@ export function makeWaterMaterial() {
   return m;
 }
 
-/** Grade hexagonal do vazio, que desbota longe do tabuleiro. */
+/**
+ * Terra incógnita: o vazio é um mapa antigo de pergaminho. Perto do tabuleiro (até o raio
+ * explorado R), papel com grão e fibras e a grade hexagonal a nanquim, tremida como feita à
+ * mão; de R a R+4 a tinta desbota e o papel puxa para o sépia; além disso, uma névoa clara
+ * rolando cobre o desconhecido e recua quando o mapa cresce.
+ */
 export function makeVoidMaterial() {
   const u = {
     bg: uniform(new THREE.Color()),
     fill: uniform(new THREE.Color()),
     line: uniform(new THREE.Color()),
     center: uniform(new THREE.Vector2()),
+    /** Raio explorado R (o World persegue o alvo com amortecimento). */
     radius: uniform(6),
   };
   // Parte iluminada (recebe a sombra do tabuleiro e a oclusão) e parte emissiva (a cor
@@ -718,13 +724,29 @@ export function makeVoidMaterial() {
     rc.z.assign(select(fixX.not().and(fixY.not()), rc.x.negate().sub(rc.y), rc.z));
     const ctr = vec2(rc.x.mul(1.5), rc.z.add(rc.x.mul(0.5)).mul(1.7320508));
     const a = abs(p.sub(ctr));
-    const hd = max(a.y, a.x.mul(0.8660254).add(a.y.mul(0.5)));
+    // Traço a mão: a distância ao hexágono treme um pouco ao longo da linha.
+    const wobble = texture(noiseTex, p.mul(0.37)).b.sub(0.5).mul(0.03);
+    const hd = max(a.y, a.x.mul(0.8660254).add(a.y.mul(0.5))).add(wobble);
     const aa = fwidth(hd).mul(1.2);
     const lineW = smoothstep(float(0.831).sub(aa), float(0.831), hd);
     const inner = float(1).sub(smoothstep(float(0.8).sub(aa), float(0.8), hd));
-    const fade = float(1).sub(smoothstep(u.radius, u.radius.add(7), length(p.sub(u.center))));
-    const col = mix(u.bg, u.fill, inner.mul(fade).mul(0.9));
-    return mix(col, u.line, lineW.mul(fade));
+    const dist = length(p.sub(u.center));
+    const band = smoothstep(u.radius, u.radius.add(4), dist);
+    const fade = float(1).sub(band);
+    // Papel: grão miúdo e fibras compridas, ±3%.
+    const grain = texture(noiseTex, p.div(4)).b.sub(0.5).mul(0.06);
+    const fiber = texture(noiseTex, vec2(p.x.div(3), p.y.div(30))).g.sub(0.5).mul(0.04);
+    const paper = float(1).add(grain).add(fiber);
+    // Sépia como tinta multiplicativa (mantém o brilho da paleta, de dia e de noite).
+    const sepia = mix(vec3(1), vec3(1.17, 1.02, 0.74), band.mul(0.35));
+    const col = mix(u.bg, u.fill, inner.mul(fade).mul(0.9)).mul(sepia).mul(paper).toVar();
+    col.assign(mix(col, u.line, lineW.mul(fade).mul(float(0.85).add(grain.mul(4)))));
+    // Névoa do desconhecido: duas oitavas de ruído rolando devagar, um véu claro de 20%.
+    const drift = vec2(U.time.mul(0.01), U.time.mul(0.006));
+    const mist = texture(noiseTex, p.div(9).add(drift)).r.mul(0.65).add(texture(noiseTex, p.div(3.7).sub(drift.mul(1.7))).g.mul(0.35));
+    const veil = smoothstep(u.radius.add(4), u.radius.add(7), dist).mul(smoothstep(0.3, 0.7, mist).mul(0.6).add(0.4));
+    const white = mix(vec3(1), u.fill, U.night.mul(0.8));
+    return mix(col, white, veil.mul(0.2));
   })();
   const LIT = 0.4;
   m.colorNode = grid.mul(LIT);

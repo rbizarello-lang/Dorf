@@ -26,7 +26,7 @@ Coloque peças encostadas no mapa. Cada borda que combina com a vizinha vale 10 
 
 **Eras da vila:** com 500, 1.500 e 3.000 pontos a vila muda de era (os nomes mudam por tema, como Borgo → Comune → Signoria → Rinascimento na Toscana) e ganha +3 peças. A cada era, o Centro da vila (no meio da primeira peça) muda de forma, de fogueira com cabanas a palácio, e uma onda dourada corre pelo mapa. A próxima peça com vila ergue o marco da era, que o fantasma já mostra antes de colocar.
 
-**Sítios escondidos:** carimbos no mapa marcam ruínas (+60 pontos), tesouros (+2 peças), relíquias (+100 pontos e +1 peça) e mirantes (+20 pontos e as próximas 3 peças à vista por 10 jogadas). Coloque uma peça em cima para descobrir. Ficam em anéis cada vez mais longe do centro.
+**Sítios escondidos:** carimbos no mapa marcam ruínas (+60 pontos), tesouros (+2 peças), relíquias (+100 pontos e +1 peça) e mirantes (+20 pontos e as próximas 3 peças à vista por 10 jogadas). Com a peça em cima, uma etiqueta mostra a recompensa; coloque para descobrir, e o sítio vira uma ruína, um baú, um relicário ou uma torre de vigia na peça. Ficam em anéis cada vez mais longe do centro. O vazio é um mapa antigo: a tinta desbota longe das peças e uma névoa clara cobre o desconhecido. No começo da partida, um batedor sai do Centro na direção do sítio mais perto.
 
 **Bônus de cada tema:** cada época tem uma regra curta, como a Dádiva do Nilo (borda de rio encaixada vale +5) no Egito ou os Moinhos de pôlder (+5 por moinho) na Holanda. Aparece no menu de temas.
 

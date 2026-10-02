@@ -160,6 +160,8 @@ export class Life {
   private wakeList: Mover[] = [];
   private flocks: Flock[] = [];
   private workers: Worker[] = [];
+  /** Batedor do começo da partida: vai do Centro até a beira, olha o sítio e volta. */
+  private scoutRide: { x0: number; z0: number; x1: number; z1: number; t: number } | null = null;
   /** Os aldeões só aparecem de perto (`World` atualiza a cada quadro). */
   folkNear = true;
   /** 1 de dia; vai a 0 em ~1 s quando a noite passa de 0,6 (os aldeões "vão para casa"). */
@@ -186,6 +188,7 @@ export class Life {
     this.movers = [];
     this.flocks = [];
     this.workers = [];
+    this.scoutRide = null;
     this.theme = theme;
     this.beast.set(theme.animals.colors[0]);
   }
@@ -218,6 +221,10 @@ export class Life {
     if (key !== 'folk:axe' && key !== 'folk:hoe' && key !== 'folk:sack') return;
     if (this.folkCount() >= FOLK_MAX || !this.pool(key)) return;
     this.workers.push({ key, anim, base: world.clone(), color: color.clone(), phase: Math.random() * 20 });
+  }
+
+  scout(x0: number, z0: number, x1: number, z1: number) {
+    if (this.pool('scout')) this.scoutRide = { x0, z0, x1, z1, t: 0 };
   }
 
   private folkCount() {
@@ -327,7 +334,39 @@ export class Life {
 
     this.updateMovers(dt);
     this.updateFolk(dt);
+    this.updateScout(dt);
     this.updateBirds(dt);
+  }
+
+  private updateScout(dt: number) {
+    const p = this.pools.get('scout');
+    const r = this.scoutRide;
+    if (!p) return;
+    if (!r) {
+      p.commit(0);
+      return;
+    }
+    // Ida a 0,12 unidade/s, 2,5 s olhando o sítio, volta, e some no Centro.
+    const len = Math.hypot(r.x1 - r.x0, r.z1 - r.z0);
+    const go = len / 0.12, look = 2.5;
+    r.t += dt;
+    const back = r.t > go + look;
+    const k = r.t < go ? r.t / go : back ? 1 - (r.t - go - look) / go : 1;
+    if (k < 0) {
+      this.scoutRide = null;
+      p.commit(0);
+      return;
+    }
+    const e = k * k * (3 - 2 * k);
+    const heading = Math.atan2(r.z1 - r.z0, r.x1 - r.x0) + (back ? Math.PI : 0);
+    const moving = r.t < go || back;
+    const bob = moving ? Math.abs(Math.sin(this.time * 8)) * 0.005 : 0;
+    // Sai e volta crescendo/encolhendo, para não brotar do nada dentro do Centro.
+    const s = Math.min(1, k * 6);
+    q4.setFromAxisAngle(UP, -heading);
+    m4.compose(v3.set(r.x0 + (r.x1 - r.x0) * e, 0.004 + bob, r.z0 + (r.z1 - r.z0) * e), q4, s3.setScalar(1.3 * s));
+    p.set(0, m4, this.beast);
+    p.commit(1);
   }
 
   private updateFolk(dt: number) {
@@ -575,6 +614,7 @@ export class Life {
       boats: this.movers.filter((m) => m.boat).length,
       vehicles: this.movers.filter((m) => !m.boat && !m.folk).length,
       folk: this.folkCount(),
+      scout: this.scoutRide ? 1 : 0,
       animals: this.animals.length,
       spinners: this.spinners.length,
       birds: this.flocks.reduce((a, f) => a + f.n, 0),

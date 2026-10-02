@@ -1125,12 +1125,13 @@ body.capture #floaters {
   opacity: 0.9;
 }
 
-/* ---------- sítios escondidos: carimbo de mapa antigo */
+/* ---------- sítios escondidos: etiqueta da recompensa sob o fantasma (o carimbo fica no mapa) */
 .marker.site {
-  border-radius: 50%;
+  border-radius: 13px;
   min-width: 26px;
   height: 26px;
-  padding: 0;
+  padding: 0 10px;
+  white-space: nowrap;
   display: grid;
   place-items: center;
   font-size: 14px;

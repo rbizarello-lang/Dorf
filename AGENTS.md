@@ -86,6 +86,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__mark(zoom?)` | centraliza a câmera no último marco de era erguido |
 | `window.__boat(zoom?)` | centraliza a câmera num barco andando (esteiras na água) |
 | `window.__folk(i?, zoom?)` | centraliza a câmera no i-ésimo aldeão de construção |
+| `window.__site(zoom?)` | centraliza no último sítio achado (ou no primeiro escondido) e devolve qual |
 | `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` | ver o `README.md` |
 | `window.__stats` | estatísticas do último quadro |
 | `window.__pools()` | relatório dos InstancedMesh |
@@ -111,7 +112,7 @@ src/themes/      temas como DADOS
   eras.ts        8 temas históricos (Egito, Song, Vikings, Toscana, Edo, Colonial, Oeste, Andes)
 src/render/
   gpu.ts         cria o WebGPURenderer (WebGPU ou WebGL2)
-  materials.ts   materiais em TSL: chão, água, kits instanciados (vento, plantações, janelas), grade do vazio; uniformes U
+  materials.ts   materiais em TSL: chão, água, kits instanciados (vento, plantações, janelas), pergaminho do vazio (terra incógnita); uniformes U
   noise.ts       texturas de ruído periódicas geradas em código (nuvens, chão, ondulação da água)
   atmosphere.ts  névoa da cena (scene.fogNode): bruma e névoa rasteira por altura, e a névoa de alcance
   groundMap.ts   mapa do chão visto de cima: cor do terreno (luz rebatida) e poças dos lampiões

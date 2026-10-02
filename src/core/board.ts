@@ -1,5 +1,5 @@
 import { DIRS, hkey, opposite } from './hex';
-import { LOOKOUT_MOVES, SITE_REWARD, type Site } from './sites';
+import { LOOKOUT_MOVES, SITE_REWARD, type Site, type SiteKind } from './sites';
 import { type SynHit, type SynKind, synergyOf } from './synergy';
 import { T, isStrict, rotateEdges, type TileDef } from './tiles';
 
@@ -64,6 +64,8 @@ export interface Placed {
   synergies: SynHit[];
   /** Era cujo marco foi erguido nesta peça (a primeira peça com vila depois do avanço). */
   eraMark?: number;
+  /** Sítio descoberto nesta peça (a peça mostra a ruína, o baú, o relicário ou a torre). */
+  site?: SiteKind;
 }
 
 export interface Quest {
@@ -229,6 +231,7 @@ export class Board {
     const site = c.site;
     if (site) {
       site.found = true;
+      placed.site = site.kind;
       points += SITE_REWARD[site.kind].points;
       tilesGained += SITE_REWARD[site.kind].tiles;
       if (site.kind === 'lookout') this.lookout = LOOKOUT_MOVES;
