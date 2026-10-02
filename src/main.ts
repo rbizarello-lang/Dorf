@@ -7,8 +7,16 @@ import { LOOKOUT_MOVES, SITE_REWARD, type SiteKind } from './core/sites';
 import { mulberry32 } from './core/rng';
 import { DIRS, hexToWorld, hkey, worldToHex } from './core/hex';
 import type { Quality, TimeOfDay } from './render/world';
+import { DynRes } from './render/dynres';
+import { readGpuInfo } from './render/gpu';
+import { gpuName, tierForGpu } from './render/gpuTier';
 import { FX_FLAGS } from './render/post';
 import { World } from './render/world';
+import { pickCodec, type VideoSize } from './video/encoder';
+import { planFilm } from './video/film';
+import { SMOOTHING, resample, smooth, type Smoothing } from './video/path';
+import { renderVideo, type Script } from './video/render';
+import { Take, type TakeEvent } from './video/take';
 import { themeById, type Theme } from './themes/themes';
 import { Hud, questLabel } from './ui/hud';
 import './ui/style.css';
@@ -93,7 +101,7 @@ let moves: MoveRec[] = [];
 let rotSteps = 0;
 let hover: { q: number; r: number } | null = null;
 let best = Number(store.get('best')) || 0;
-const QUALITIES: QualityMode[] = ['auto', 'ultra', 'high', 'medium', 'low'];
+const QUALITIES: QualityMode[] = ['auto', 'cinema', 'ultra', 'high', 'medium', 'low'];
 const pickQ = (v: string | null) => (v && (QUALITIES as string[]).includes(v) ? (v as QualityMode) : null);
 let qualityMode: QualityMode = pickQ(params.get('quality')) ?? pickQ(store.get('quality')) ?? 'auto';
 let gameOverShown = false;
@@ -101,6 +109,12 @@ let overTimer = 0;
 let bestAtStart = 0;
 let recordCheered = false;
 const special = params.has('stress') || params.has('auto') || params.has('demo');
+/** O que a tela está fazendo: o jogo, o modo foto, ou um vídeo sendo desenhado (o laço não desenha). */
+let stage: 'play' | 'photo' | 'export' = 'play';
+/** Gravação em andamento (tecla V) e o estado do jogo quando ela começou. */
+let take: Take | null = null;
+type TakeStart = Pick<Script, 'theme' | 'seed' | 'rules' | 'prefix' | 'tod'>;
+let takeStart: TakeStart | null = null;
 
 // Regras: padrão ← tema ← modo. O desafio do dia ignora as regras do tema (é igual para todos).
 const rulesFor = (t: Theme, m: Mode = mode): Rules => ({ ...DEFAULT_RULES, ...(m.daily ? {} : t.rules), ...m.rules });
@@ -125,6 +139,8 @@ const SITE_LABEL: Record<SiteKind, { name: string; icon: string }> = {
 const synTimers: number[] = [];
 
 function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number, undos = 0): boolean {
+  // A gravação vale para uma partida só (desfazer refaz a partida pelo replay).
+  if (take) stopTake('A gravação terminou aqui: o vídeo não acompanha o desfazer nem uma partida nova.');
   clearTimeout(overTimer);
   for (const t of synTimers.splice(0)) clearTimeout(t);
   game = new Game(seed, rulesFor(rulesTheme));
@@ -257,13 +273,15 @@ function refreshHud(instant = false) {
 }
 
 function updateGhost() {
-  if (!game.current || !hover || !game.board.frontier.has(hkey(hover.q, hover.r)) || hud.modalOpen) {
+  if (!game.current || !hover || !game.board.frontier.has(hkey(hover.q, hover.r)) || hud.modalOpen || stage !== 'play') {
     world.clearGhost();
     hud.confirm.hidden = true;
+    take?.event({ kind: 'noghost' });
     return;
   }
   const check = game.check(hover.q, hover.r)!;
   world.setGhost(game.current, game.rot, rotSteps * (Math.PI / 3), hover.q, hover.r, check);
+  take?.event({ kind: 'ghost', q: hover.q, r: hover.r, rot: game.rot, angle: rotSteps * (Math.PI / 3) });
 }
 
 function rotate(dir: 1 | -1) {
@@ -294,6 +312,7 @@ function place(q: number, r: number) {
   const rot = game.rot;
   const res = game.place(q, r)!;
   moves.push([q, r, rot]);
+  take?.event({ kind: 'place', q, r, rot });
   world.placeAnimated(res.placed);
   world.updateFrontier(game.board);
   rotSteps = 0;
@@ -334,16 +353,14 @@ function place(q: number, r: number) {
 
 function announce(res: PlaceResult) {
   const s = screenOf(res.placed.q, res.placed.r);
+  world.placeFx(res);
   sfx.place(res.matches);
   if (res.points > 0) {
     hud.floater(s.x, s.y - 10, `+${res.points}`, res.perfect ? 'big' : '');
     hud.bumpScore(res.perfect || res.synergies.length ? 'big' : '');
   }
-  const { x, z } = hexToWorld(res.placed.q, res.placed.r);
   if (res.perfect) {
     sfx.perfect();
-    world.burst(x, z, 'sparkle', 26);
-    world.halo(x, z);
     hud.floater(s.x, s.y - 46, 'Perfeito!', 'big');
   }
   // Interações: um aviso por borda, perto dela.
@@ -358,22 +375,14 @@ function announce(res: PlaceResult) {
     }, 250 + k * 160));
   });
   if (res.synergies.length || res.placed.eraMark !== undefined) sfx.hammer(0.3);
-  if (res.placed.eraMark !== undefined) {
-    hud.toast(`Marco da era erguido: ${eraName(res.placed.eraMark)}`, 'good');
-    world.burst(x, z, 'sparkle', 30, 0.3);
-    world.halo(x, z, 1.5);
-  }
+  if (res.placed.eraMark !== undefined) hud.toast(`Marco da era erguido: ${eraName(res.placed.eraMark)}`, 'good');
   for (const t of res.closed) {
     const p = screenOf(t.q, t.r);
     hud.floater(p.x, p.y - 20, '+1 peça', 'tiles');
-    const w = hexToWorld(t.q, t.r);
-    world.burst(w.x, w.z, 'sparkle', 16);
   }
   for (const q of res.questsDone) {
     sfx.quest();
     hud.toast(`Missão cumprida: ${questLabel(q, theme)} · +${q.reward} peças`, 'good');
-    const w = hexToWorld(q.anchor.q, q.anchor.r);
-    world.burst(w.x, w.z, 'sparkle', 40);
   }
   for (const q of res.questsFailed) {
     sfx.fail();
@@ -385,18 +394,12 @@ function announce(res: PlaceResult) {
     const what = [r.points ? `+${r.points} pontos` : '', r.tiles ? `+${r.tiles} peça${r.tiles > 1 ? 's' : ''}` : '', res.site.kind === 'lookout' ? `próximas peças à vista por ${LOOKOUT_MOVES} jogadas` : ''].filter(Boolean).join(' · ');
     hud.toast(`${SITE_LABEL[res.site.kind].name} descoberta: ${what}`, 'good');
     sfx.quest();
-    world.burst(x, z, 'sparkle', 46);
   }
   if (res.eraUp !== null) {
     hud.toast(`Nova era: ${eraName(res.eraUp)} · +${game.rules.eraTiles} peças · a próxima vila ergue o marco`, 'good');
     sfx.perfect();
     sfx.quest();
     sfx.hammer(0.45);
-    world.eraUp(res.eraUp);
-    world.ripple(x, z, 2.2);
-    world.burst(x, z, 'sparkle', 60);
-    world.halo(x, z, 2);
-    world.flushBirds(x, z);
     const el = document.getElementById('era')!;
     el.classList.remove('up');
     void el.offsetWidth;
@@ -427,6 +430,7 @@ function showHelp() {
       <li><b>Sítios</b>: carimbos no mapa marcam ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.</li>
       <li><kbd>U</kbd> desfaz a última jogada (o número de vezes depende do modo).</li>
       <li>O botão de som alterna entre música e efeitos, só efeitos e mudo; <kbd>M</kbd> liga ou desliga a música.</li>
+      <li>O botão Câmera tira fotos sem a interface (<kbd>P</kbd>) e grava vídeos de até 2 minutos (<kbd>V</kbd>), salvos em MP4 de até 4K.</li>
       <li>A partida acaba quando a pilha esvazia.</li>
     </ul>
     <p class="muted">Mouse: clique coloca, botão direito ou <kbd>R</kbd> gira a peça, arrastar move, roda dá zoom, <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera. Toque: toque num espaço para ver a peça, toque de novo (ou ✓) para colocar.</p>
@@ -475,10 +479,15 @@ hud.modal.addEventListener('click', (e) => {
   } else if (act === 'theme') {
     hud.hideModal();
     hud.openThemeMenu(theme, pickTheme);
+  } else if (act === 'export') {
+    const o = readExportForm();
+    hud.hideModal();
+    if (o) void exportVideo(o.kind, o.height, o.quality, o.cam, o.tod);
   }
 });
 
 function pickTheme(t: Theme) {
+  if (take) stopTake('A gravação terminou aqui: o vídeo fica no tema em que começou.');
   theme = t;
   store.set('theme', t.id);
   hud.applyTheme(t);
@@ -495,36 +504,58 @@ function pickTheme(t: Theme) {
 
 // ------------------------------------------------------------------ qualidade
 
-const qualityLabel: Record<QualityMode, string> = { auto: 'Auto', ultra: 'Ultra', high: 'Alta', medium: 'Média', low: 'Baixa' };
+const qualityLabel: Record<QualityMode, string> = { auto: 'Auto', cinema: 'Cinema', ultra: 'Ultra', high: 'Alta', medium: 'Média', low: 'Baixa' };
+const QUALITY_NOTE: Record<Quality, string> = {
+  cinema: 'Desenha 1,5× acima da tela, com grão de filme e lente. Para placas de topo (classe RTX 4080)',
+  ultra: 'Luz indireta, reflexos na água e raios de sol. Para placas acima da RX 580',
+  high: 'Oclusão, bloom e profundidade de campo',
+  medium: 'Leve, para notebooks e celulares',
+  low: 'Sem sombras nem pós-processamento',
+};
 const qualityBtn = document.getElementById('btn-quality')!;
 
-// Em telas de toque (celular/tablet) o modo Auto começa em Média; no computador, em Ultra.
+// O modo Auto começa pelo nome da placa de vídeo (gpuTier.ts). Sem um nome conhecido, começa em
+// Média nas telas de toque (celular, tablet) e em Ultra no computador.
+const gpu = readGpuInfo(world.renderer);
+const gpuLabel = gpuName(gpu);
 const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-const autoStart: Quality = coarsePointer ? 'medium' : 'ultra';
-const LOWER: Record<Quality, Quality> = { ultra: 'high', high: 'medium', medium: 'low', low: 'low' };
+const autoStart: Quality = tierForGpu(gpu) ?? (coarsePointer ? 'medium' : 'ultra');
+const LOWER: Record<Quality, Quality> = { cinema: 'ultra', ultra: 'high', high: 'medium', medium: 'low', low: 'low' };
 let autoLevel: Quality = autoStart;
+/** Resolução dinâmica do Auto: cede antes de o nível descer. */
+const dynres = new DynRes();
+
+function autoNote() {
+  return `${qualityLabel[autoLevel]}${dynres.step ? `, resolução ${Math.round(dynres.scale * 100)}%` : ''}`;
+}
+
+function updateQualityTitle() {
+  qualityBtn.title = `Qualidade gráfica: ${qualityLabel[qualityMode]}${qualityMode === 'auto' ? ` (${autoNote()})` : ''}${gpuLabel ? ` · ${gpuLabel}` : ''}`;
+}
 
 function applyQuality(mode: QualityMode) {
   qualityMode = mode;
   if (mode === 'auto') autoLevel = autoStart;
+  dynres.reset();
+  world.setResolutionScale(1);
   world.setQuality(mode === 'auto' ? autoLevel : mode);
   qualityBtn.textContent = qualityLabel[mode];
-  frameTimes.length = 0;
+  updateQualityTitle();
 }
 
-const frameTimes: number[] = [];
-function adaptQuality(dt: number) {
-  if (qualityMode !== 'auto' || document.hidden) return;
-  frameTimes.push(dt);
-  if (frameTimes.length < 150) return;
-  frameTimes.sort((a, b) => a - b);
-  const median = frameTimes[75];
-  frameTimes.length = 0;
-  if (median > 1 / 38 && autoLevel !== 'low') {
+/** Modo Auto: com o quadro lento, a resolução cede um degrau por vez; no menor degrau, o nível desce. */
+function adaptQuality(dt: number, now: number) {
+  if (qualityMode !== 'auto' || document.hidden || stage !== 'play') return;
+  const ev = dynres.push(dt, now / 1000);
+  if (ev === 'up' || ev === 'down') world.setResolutionScale(dynres.scale);
+  else if (ev === 'floor' && autoLevel !== 'low') {
     autoLevel = LOWER[autoLevel];
+    dynres.reset();
+    world.setResolutionScale(1);
     world.setQuality(autoLevel);
     hud.toast(`Qualidade ajustada para ${qualityLabel[autoLevel]} para manter a fluidez.`);
   }
+  if (ev) updateQualityTitle();
 }
 
 // ------------------------------------------------------------------ entrada
@@ -591,7 +622,7 @@ canvas.addEventListener('pointermove', (e) => {
       return;
     }
   }
-  if (e.pointerType === 'mouse') setHover(hoverAt(e.clientX, e.clientY));
+  if (e.pointerType === 'mouse' && stage === 'play') setHover(hoverAt(e.clientX, e.clientY));
 });
 
 function endPointer(e: PointerEvent) {
@@ -601,7 +632,7 @@ function endPointer(e: PointerEvent) {
   canvas.style.cursor = '';
   const d = drag;
   drag = null;
-  if (!d || d.moved || e.type === 'pointercancel') return;
+  if (!d || d.moved || e.type === 'pointercancel' || stage !== 'play') return;
   if (d.button === 2) {
     rotate(1);
     return;
@@ -630,6 +661,7 @@ canvas.addEventListener(
   'wheel',
   (e) => {
     e.preventDefault();
+    if (stage === 'export') return;
     world.rig.zoom(Math.exp(e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)));
   },
   { passive: false },
@@ -640,6 +672,23 @@ window.addEventListener('keydown', (e) => {
   // Atalhos do navegador (Ctrl/Cmd+R, Cmd+D...) ficam com o navegador.
   if (e.target instanceof HTMLInputElement || e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
+  if (stage === 'export') {
+    if (k === 'escape') exportCancel = true;
+    return;
+  }
+  if (stage === 'photo') {
+    // No modo foto só a câmera, a hora, a pausa e a foto.
+    if (k === 'escape' || k === 'p') exitPhoto();
+    else if (k === ' ') {
+      e.preventDefault();
+      togglePhotoFreeze();
+    } else if (k === 'l') cycleTime();
+    else if (k === 'enter') void shootPhoto();
+    else if (k === '+' || k === '=') world.rig.zoom(0.85);
+    else if (k === '-') world.rig.zoom(1.18);
+    else held.add(k);
+    return;
+  }
   if (k === 'escape') {
     if (hud.modalOpen && !game.over) store.set('seenHelp', '1');
     hud.hideModal();
@@ -658,7 +707,11 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'n') requestNewGame();
   else if (k === 'u') undo();
   else if (k === 'm') toggleMusic();
-  else if (k === '+' || k === '=') world.rig.zoom(0.85);
+  else if (k === 'p') enterPhoto();
+  else if (k === 'v') {
+    if (take) stopTake();
+    else startTake();
+  } else if (k === '+' || k === '=') world.rig.zoom(0.85);
   else if (k === '-') world.rig.zoom(1.18);
   else held.add(k);
 });
@@ -699,10 +752,20 @@ hud.themeBtn.addEventListener('click', () => {
   else hud.closeThemeMenu();
 });
 qualityBtn.addEventListener('click', () => {
-  const next = QUALITIES[(QUALITIES.indexOf(qualityMode) + 1) % QUALITIES.length];
-  applyQuality(next);
-  store.set('quality', next);
-  hud.toast(`Qualidade: ${qualityLabel[next]}`);
+  if (stage !== 'play') return;
+  const items = QUALITIES.map((q) => ({
+    id: q,
+    label: q === 'auto' ? `Auto · ${autoNote()}` : qualityLabel[q],
+    note: q === 'auto' ? `Escolhe pela placa de vídeo${gpuLabel ? ` (${gpuLabel})` : ''} e baixa a resolução antes de tirar efeitos` : QUALITY_NOTE[q],
+    current: q === qualityMode,
+  }));
+  hud.toggleMenu(qualityBtn, items, (id) => {
+    const next = pickQ(id);
+    if (!next) return;
+    applyQuality(next);
+    store.set('quality', next);
+    hud.toast(`Qualidade: ${qualityLabel[next]}${next === 'cinema' ? ' · pede uma placa de vídeo de topo' : ''}`);
+  });
 });
 const TIME_LABEL: Record<TimeOfDay, string> = { dawn: 'Amanhecer', day: 'Dia', golden: 'Hora dourada', dusk: 'Entardecer', night: 'Noite' };
 const TIME_ICON: Record<TimeOfDay, string> = { dawn: '◒', day: '☀', golden: '☼', dusk: '◐', night: '☾' };
@@ -719,6 +782,8 @@ function cycleTime() {
   setTimeLabel(next);
   sfx.setMood(next);
   store.set('time', next);
+  take?.event({ kind: 'time', tod: next });
+  if (stage === 'photo') renderPhotoBar();
 }
 timeBtn.addEventListener('click', cycleTime);
 {
@@ -764,6 +829,346 @@ document.addEventListener('visibilitychange', () => sfx.pause(document.hidden));
 
 window.addEventListener('resize', () => world.resize());
 
+// ------------------------------------------------------------------ foto e vídeo
+
+/** "1:05" para durações. */
+const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+/** Carimbo de data e hora para nomes de arquivo. */
+const stamp = () => {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+};
+
+function download(blob: Blob, name: string) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 120_000);
+}
+
+/** Esconde a interface do jogo (foto e vídeo) ou volta com ela. */
+function setCaptureUi(on: boolean) {
+  document.body.classList.toggle('capture', on);
+  hud.closeThemeMenu();
+  world.showSlots = !on;
+  if (on) {
+    hover = null;
+    world.clearGhost();
+    hud.confirm.hidden = true;
+  }
+}
+
+const cameraBtn = document.getElementById('btn-camera')!;
+function updateCameraBtn() {
+  cameraBtn.classList.toggle('rec', !!take);
+  cameraBtn.querySelector('.long')!.textContent = take ? `● ${clock(take.t)}` : 'Câmera';
+  cameraBtn.querySelector('.short')!.textContent = take ? '●' : '◉';
+  cameraBtn.title = take ? 'Parar a gravação (V)' : 'Foto e vídeo';
+}
+cameraBtn.addEventListener('click', () => {
+  if (take) {
+    stopTake();
+    return;
+  }
+  if (stage !== 'play') return;
+  hud.toggleMenu(
+    cameraBtn,
+    [
+      { id: 'photo', label: 'Foto', key: 'P', note: 'Esconde a interface e salva a imagem em até 8K' },
+      { id: 'take', label: 'Gravar vídeo', key: 'V', note: 'Grava até 2 minutos do que você fizer; o vídeo sai liso, em até 4K' },
+      { id: 'film', label: 'Filme da partida', note: moves.length ? `A partida inteira, peça por peça (${moves.length} jogadas)` : 'Faça algumas jogadas primeiro' },
+      ...(pendingTake ? [{ id: 'last', label: 'Última gravação', note: `${clock(pendingTake.take.t)} · exportar de novo, em outro tamanho ou câmera` }] : []),
+    ],
+    (id) => {
+      if (id === 'photo') enterPhoto();
+      else if (id === 'take') startTake();
+      else if (id === 'last') showExportDialog('take');
+      else if (moves.length) showExportDialog('film');
+      else hud.toast('O filme precisa de pelo menos uma jogada.');
+    },
+  );
+});
+
+// ---- modo foto (P): sem interface, mundo parado ou animado, PNG em até 8K
+
+const PHOTO_SIZES = { screen: 'Tela', '4k': '4K', '8k': '8K' } as const;
+type PhotoSize = keyof typeof PHOTO_SIZES;
+let photoSize: PhotoSize = (() => {
+  const v = store.get('photoSize');
+  return v && Object.hasOwn(PHOTO_SIZES, v) ? (v as PhotoSize) : '4k';
+})();
+let photoFrozen = false;
+let shooting = false;
+const photoBar = document.createElement('div');
+photoBar.className = 'capture-bar';
+photoBar.hidden = true;
+document.body.appendChild(photoBar);
+
+/** Tamanho da foto: o lado maior da tela levado a 4K ou 8K (no máximo 8192, o limite das texturas). */
+function photoPixels(size: PhotoSize) {
+  const w = window.innerWidth, h = window.innerHeight;
+  const long = size === 'screen' ? Math.max(w, h) * (window.devicePixelRatio || 1) : size === '4k' ? 3840 : 7680;
+  const ratio = Math.min(long, 8192) / Math.max(w, h);
+  return { w, h, ratio, pw: Math.floor(w * ratio), ph: Math.floor(h * ratio) };
+}
+
+function renderPhotoBar() {
+  const p = photoPixels(photoSize);
+  photoBar.innerHTML = `
+    <button type="button" data-photo="freeze" title="Pausar ou animar o mundo (Espaço)">${photoFrozen ? '▶ Animar' : '❚❚ Pausar'}</button>
+    <button type="button" data-photo="time" title="Hora do dia (L)">${TIME_ICON[world.timeOfDay]} ${TIME_LABEL[world.timeOfDay]}</button>
+    <button type="button" data-photo="size" title="Tamanho da foto">${PHOTO_SIZES[photoSize]} · ${p.pw}×${p.ph}</button>
+    <button type="button" class="primary" data-photo="shoot" title="Salvar a foto (Enter)">Salvar foto</button>
+    <button type="button" data-photo="exit" title="Sair do modo foto (Esc)" aria-label="Sair do modo foto">✕</button>`;
+}
+
+photoBar.addEventListener('click', (e) => {
+  const act = (e.target as HTMLElement).closest('button')?.dataset.photo;
+  if (shooting || !act) return;
+  if (act === 'freeze') togglePhotoFreeze();
+  else if (act === 'time') cycleTime();
+  else if (act === 'size') {
+    const keys = Object.keys(PHOTO_SIZES) as PhotoSize[];
+    photoSize = keys[(keys.indexOf(photoSize) + 1) % keys.length];
+    store.set('photoSize', photoSize);
+    renderPhotoBar();
+  } else if (act === 'shoot') void shootPhoto();
+  else if (act === 'exit') exitPhoto();
+});
+
+function enterPhoto() {
+  if (stage !== 'play' || hud.modalOpen) return;
+  if (take) {
+    hud.toast('Pare a gravação antes (V).');
+    return;
+  }
+  stage = 'photo';
+  setCaptureUi(true);
+  world.timeScale = photoFrozen ? 0 : 1;
+  renderPhotoBar();
+  photoBar.hidden = false;
+  hud.toast('Modo foto · Espaço pausa · Enter salva · Esc sai');
+}
+
+function exitPhoto() {
+  if (stage !== 'photo' || shooting) return;
+  stage = 'play';
+  photoBar.hidden = true;
+  world.timeScale = 1;
+  setCaptureUi(false);
+  updateGhost();
+}
+
+function togglePhotoFreeze() {
+  photoFrozen = !photoFrozen;
+  world.timeScale = photoFrozen ? 0 : 1;
+  renderPhotoBar();
+}
+
+/** Desenha a cena parada no tamanho da foto, deixa o TRAA assentar e salva um PNG. */
+async function shootPhoto() {
+  if (stage !== 'photo' || shooting) return;
+  shooting = true;
+  photoBar.classList.add('busy');
+  const p = photoPixels(photoSize);
+  hud.toast(`Salvando a foto em ${p.pw}×${p.ph}…`);
+  world.timeScale = 0;
+  world.setFixedSize({ w: p.w, h: p.h, ratio: p.ratio });
+  try {
+    // Com o tamanho novo o antisserrilhado temporal recomeça: alguns quadros parados para ele assentar.
+    const out = document.createElement('canvas');
+    for (let i = 0; i < 24; i++) {
+      await new Promise((r) => requestAnimationFrame(r));
+      world.tick(1 / 60);
+    }
+    // A cópia sai no mesmo passo do último desenho, antes de o navegador trocar o quadro do canvas.
+    out.width = canvas.width;
+    out.height = canvas.height;
+    out.getContext('2d')!.drawImage(canvas, 0, 0);
+    const blob = await new Promise<Blob | null>((r) => out.toBlob(r, 'image/png'));
+    if (!blob) throw new Error('imagem vazia');
+    download(blob, `retalhos-${theme.id}-${stamp()}.png`);
+    hud.toast(`Foto salva · ${out.width}×${out.height}`, 'good');
+  } catch (err) {
+    console.error(err);
+    hud.toast('A foto não pôde ser salva (memória de vídeo?). Tente um tamanho menor.', 'bad');
+  } finally {
+    world.setFixedSize(null);
+    world.timeScale = photoFrozen ? 0 : 1;
+    shooting = false;
+    photoBar.classList.remove('busy');
+  }
+}
+
+// ---- gravação (V) e filme da partida
+
+function startTake() {
+  if (stage !== 'play' || take || hud.modalOpen) return;
+  take = new Take();
+  takeStart = { theme, seed: game.seed, rules: game.rules, prefix: moves.slice(), tod: world.timeOfDay };
+  // A peça que já está flutuando entra na gravação desde o começo.
+  updateGhost();
+  updateCameraBtn();
+  hud.toast('Gravando · V para parar (até 2 minutos)');
+}
+
+function stopTake(reason?: string) {
+  if (!take || !takeStart) return;
+  const t = take, start = takeStart;
+  take = null;
+  takeStart = null;
+  updateCameraBtn();
+  if (reason) hud.toast(reason);
+  if (t.t < 1) {
+    hud.toast('A gravação foi curta demais para virar vídeo.');
+    return;
+  }
+  pendingTake = { take: t, start };
+  showExportDialog('take');
+}
+
+/** A última gravação, para exportar (de novo, em outro tamanho ou câmera). */
+let pendingTake: { take: Take; start: TakeStart } | null = null;
+let exportCancel = false;
+
+const RESOLUTIONS = { 1080: '1080p', 1440: '1440p', 2160: '4K' } as const;
+const VIDEO_QUALITIES = ['cinema', 'ultra', 'high'] as const;
+const CAMERAS: Record<Smoothing, string> = { off: 'Como gravada', light: 'Suave', cinematic: 'Cinematográfica' };
+
+/** Escolhas do vídeo: tamanho, nível, câmera (gravação) ou hora (filme). */
+function showExportDialog(kind: 'take' | 'film') {
+  const dur = kind === 'take' ? pendingTake!.take.t : planFilm(moves, world.rig.yaw).duration;
+  const seg = (name: string, value: string, label: string, on: boolean) => `<label class="seg"><input type="radio" name="${name}" value="${value}"${on ? ' checked' : ''}><span>${label}</span></label>`;
+  const group = (legend: string, html: string) => `<fieldset class="segs"><legend>${legend}</legend><div>${html}</div></fieldset>`;
+  hud.showModal(`
+    <h2 id="modal-title">${kind === 'take' ? 'Gravação pronta' : 'Filme da partida'}</h2>
+    <p class="muted">${clock(dur)} de vídeo · ${Math.round(dur * 60).toLocaleString('pt-BR')} quadros a 60 por segundo${kind === 'film' ? ` · ${moves.length} jogadas` : ''}</p>
+    <form class="export" data-kind="${kind}">
+      ${group('Tamanho', Object.entries(RESOLUTIONS).map(([v, l]) => seg('res', v, l, v === '2160')).join(''))}
+      ${group('Qualidade', VIDEO_QUALITIES.map((q) => seg('q', q, qualityLabel[q], q === 'cinema')).join(''))}
+      ${
+        kind === 'take'
+          ? group('Câmera', (Object.keys(CAMERAS) as Smoothing[]).map((c) => seg('cam', c, CAMERAS[c], c === 'cinematic')).join(''))
+          : group('Hora', TIME_ORDER.map((t) => seg('tod', t, TIME_LABEL[t], t === world.timeOfDay)).join(''))
+      }
+    </form>
+    <p class="muted">Cada quadro é desenhado com calma, então o vídeo sai liso mesmo numa placa lenta. Em 4K no Cinema leva um bom tempo; dá para cancelar.</p>
+    <div class="row"><button class="primary" type="button" data-act="export">Exportar MP4</button><button class="secondary" type="button" data-act="close">${kind === 'take' ? 'Descartar' : 'Cancelar'}</button></div>`);
+}
+
+/** Lê as escolhas do diálogo (só valores das listas fixas). */
+function readExportForm() {
+  const form = hud.modalBody.querySelector<HTMLFormElement>('form.export');
+  if (!form) return null;
+  const val = (name: string) => (form.elements.namedItem(name) as RadioNodeList | null)?.value ?? '';
+  const res = Number(val('res'));
+  const q = val('q');
+  const cam = val('cam');
+  const tod = val('tod');
+  return {
+    kind: form.dataset.kind === 'film' ? ('film' as const) : ('take' as const),
+    height: Object.hasOwn(RESOLUTIONS, res) ? res : 1080,
+    quality: (VIDEO_QUALITIES as readonly string[]).includes(q) ? (q as Quality) : 'high',
+    cam: Object.hasOwn(CAMERAS, cam) ? (cam as Smoothing) : 'cinematic',
+    tod: Object.hasOwn(TIME_LABEL, tod) ? (tod as TimeOfDay) : world.timeOfDay,
+  };
+}
+
+/** Monta o roteiro do vídeo: a gravação suavizada, ou o filme da partida desde a peça inicial. */
+function buildScript(kind: 'take' | 'film', cam: Smoothing, tod: TimeOfDay, fps: number): Script | null {
+  if (kind === 'take') {
+    if (!pendingTake) return null;
+    const { take: t, start } = pendingTake;
+    const poses = smooth(resample(t.times, t.poses, fps, t.t), SMOOTHING[cam] * fps);
+    return { ...start, events: t.events, poses, gameUi: true };
+  }
+  if (!moves.length) return null;
+  const plan = planFilm(moves, world.rig.yaw);
+  const poses = smooth(resample(plan.times, plan.poses, fps, plan.duration), 0.8 * fps);
+  const events: TakeEvent[] = moves.map(([q, r, rot], i) => ({ t: plan.placeAt[i], kind: 'place', q, r, rot }));
+  return { theme, seed: game.seed, rules: game.rules, prefix: [], tod, events, poses, gameUi: false };
+}
+
+const exportBar = document.createElement('div');
+exportBar.className = 'capture-bar export';
+exportBar.hidden = true;
+document.body.appendChild(exportBar);
+exportBar.addEventListener('click', (e) => {
+  if ((e.target as HTMLElement).closest('button')) exportCancel = true;
+});
+
+/**
+ * Desenha o vídeo quadro a quadro e baixa o MP4. O mapa do jogo é refeito no fim (o vídeo
+ * reconstrói o mapa do começo da gravação), com a câmera, a hora e o nível de antes.
+ */
+async function exportVideo(kind: 'take' | 'film', height: number, quality: Quality, cam: Smoothing, tod: TimeOfDay) {
+  if (stage !== 'play') return null;
+  const size: VideoSize = { width: Math.round((height * 16) / 9 / 2) * 2, height, fps: 60 };
+  const pick = await pickCodec(size);
+  if (!pick) {
+    hud.toast('Este navegador não grava vídeo (falta o WebCodecs com H.264 ou VP9). Use o Chrome ou o Edge.', 'bad');
+    return null;
+  }
+  const script = buildScript(kind, cam, tod, size.fps);
+  if (!script) return null;
+  const rig = world.rig;
+  const live = { tod: world.timeOfDay, goal: rig.goal.clone(), target: rig.target.clone(), dist: rig.goalDist, yaw: rig.goalYaw };
+  stage = 'export';
+  exportCancel = false;
+  setCaptureUi(true);
+  // O vídeo é 16:9: na tela, o canvas mostra o quadro inteiro com faixas, sem esticar.
+  canvas.classList.add('letterbox');
+  exportBar.hidden = false;
+  exportBar.innerHTML = `<span class="label">Preparando…</span><span class="bar"><i></i></span><button type="button">Cancelar</button>`;
+  const label = exportBar.querySelector<HTMLElement>('.label')!;
+  const bar = exportBar.querySelector<HTMLElement>('.bar i')!;
+  const t0 = performance.now();
+  let blob: Blob | null = null;
+  try {
+    blob = await renderVideo(
+      world,
+      script,
+      { size, quality, supersample: quality === 'cinema' ? 1.5 : 1 },
+      pick,
+      (f, total) => {
+        if (f % 10 && f !== total) return;
+        const left = ((performance.now() - t0) / f) * (total - f) / 1000;
+        label.textContent = `Quadro ${f.toLocaleString('pt-BR')} de ${total.toLocaleString('pt-BR')} · ${f < 30 ? 'calculando o tempo' : `faltam ~${left > 90 ? `${Math.round(left / 60)} min` : `${Math.ceil(left)} s`}`}`;
+        bar.style.width = `${((f / total) * 100).toFixed(1)}%`;
+      },
+      () => exportCancel,
+    );
+    if (blob) {
+      download(blob, `retalhos-${script.theme.id}-${stamp()}.mp4`);
+      hud.toast(`Vídeo salvo · ${clock(script.poses.length / size.fps)} em ${RESOLUTIONS[height as keyof typeof RESOLUTIONS] ?? `${height}p`} · ${(blob.size / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: blob.size < 1e7 ? 1 : 0 })} MB`, 'good');
+    } else hud.toast('Exportação cancelada.');
+  } catch (err) {
+    console.error(err);
+    hud.toast(`O vídeo não pôde ser exportado: ${err instanceof Error ? err.message : String(err)}`, 'bad');
+  } finally {
+    exportBar.hidden = true;
+    canvas.classList.remove('letterbox');
+    world.setFixedSize(null);
+    world.setTimeOfDay(live.tod, true);
+    world.setQuality(qualityMode === 'auto' ? autoLevel : qualityMode);
+    world.setTheme(theme, game.board);
+    rig.goal.copy(live.goal);
+    rig.target.copy(live.target);
+    rig.dist = rig.goalDist = live.dist;
+    rig.yaw = rig.goalYaw = live.yaw;
+    dynres.reset();
+    world.setResolutionScale(1);
+    stage = 'play';
+    setCaptureUi(false);
+    refreshHud(true);
+  }
+  return blob;
+}
+
 // ------------------------------------------------------------------ modos especiais
 
 /** Joga N peças instantaneamente com a IA gulosa (captura de tela e teste de carga). */
@@ -780,6 +1185,8 @@ function autoPlace(n: number, infinite: boolean) {
     const res = game.place(m.q, m.r);
     if (!res) break;
     placed.push(res.placed);
+    // As jogadas entram na lista: o filme e a gravação refazem o mapa por elas.
+    moves.push([m.q, m.r, m.rot]);
     while (game.discardIfStuck());
   }
   const logic = performance.now() - t0;
@@ -828,10 +1235,13 @@ function step(now: number) {
   const realDt = (now - last) / 1000;
   const dt = Math.min(0.05, realDt) * timeScale;
   last = now;
+  // A foto e o vídeo desenham por conta própria.
+  if (stage === 'export' || shooting) return;
   const c0 = performance.now();
   keyboardCamera(dt);
   if (params.has('demo')) demoStep(dt);
   world.tick(dt);
+  if (take && !take.frame(realDt, { x: world.rig.target.x, z: world.rig.target.z, dist: world.rig.dist, yaw: world.rig.yaw })) stopTake('A gravação chegou a 2 minutos.');
   hud.tick(dt);
   const markers = [];
   for (const q of game.board.quests) {
@@ -864,12 +1274,14 @@ function step(now: number) {
         `triângulos ${(s.triangles / 1000).toFixed(0)} mil`,
         `peças ${game.board.list.length} · blocos ${s.chunks}`,
         `instâncias ${s.instances.toLocaleString('pt-BR')}`,
-        `qualidade ${qualityLabel[qualityMode]}${qualityMode === 'auto' ? ` (${qualityLabel[autoLevel]})` : ''}`,
+        `qualidade ${qualityLabel[qualityMode]}${qualityMode === 'auto' ? ` (${autoNote()})` : ''}`,
+        `placa ${gpuLabel || '?'}`,
       ].join('\n');
     }
-    (window as unknown as { __stats: unknown }).__stats = { ...statsText, ...world.stats(), tiles: game.board.list.length, quality: world.quality };
+    (window as unknown as { __stats: unknown }).__stats = { ...statsText, ...world.stats(), tiles: game.board.list.length, quality: world.quality, res: dynres.scale, gpu: gpuLabel };
+    if (take) updateCameraBtn();
   }
-  adaptQuality(realDt);
+  adaptQuality(realDt, now);
 }
 
 // ------------------------------------------------------------------ início
@@ -1008,6 +1420,26 @@ function start(data: unknown) {
   const { x, z } = hexToWorld(best.q, best.r);
   world.rig.goal.set(x, 0, z);
   return best.n;
+};
+
+// Exporta um vídeo sem o diálogo (teste no contêiner): o filme da partida ou a gravação em andamento
+// (tecla V), em `height` linhas, e devolve o MP4 em base64 para conferir com o ffprobe.
+(window as unknown as { __video: (o?: { kind?: string; height?: number; quality?: string }) => Promise<unknown> }).__video = async (o = {}) => {
+  const kind = o.kind === 'take' ? 'take' : 'film';
+  if (kind === 'take') {
+    if (!take) return null;
+    stopTake();
+    hud.hideModal();
+  }
+  const height = Math.round(THREE.MathUtils.clamp(Number(o.height) || 360, 144, 2160) / 2) * 2;
+  const q = (VIDEO_QUALITIES as readonly string[]).includes(o.quality ?? '') ? (o.quality as Quality) : 'high';
+  const t0 = performance.now();
+  const blob = await exportVideo(kind, height, q, 'cinematic', world.timeOfDay);
+  if (!blob) return null;
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  return { bytes: blob.size, ms: performance.now() - t0, b64: btoa(bin) };
 };
 
 const hot = (window as unknown as { claude?: { hot?: Hot } }).claude?.hot;

@@ -251,6 +251,41 @@ kbd {
   color: var(--accent);
 }
 
+/* ---------- menus de qualidade e câmera */
+.menu {
+  width: min(330px, calc(100vw - 2 * var(--gutter)));
+}
+
+.menu-opt {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  align-items: center;
+  text-align: left;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+}
+
+.menu-opt:hover,
+.menu-opt[aria-current='true'] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.menu-opt strong {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 16px;
+}
+
+.menu-opt span {
+  grid-column: 1 / -1;
+  font-size: 12.5px;
+  color: var(--soft);
+  line-height: 1.35;
+}
+
 /* ---------- missões */
 .quests {
   position: fixed;
@@ -755,6 +790,156 @@ kbd {
   border-radius: 3px;
   flex: none;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 25%, transparent);
+}
+
+/* ---------- foto e vídeo */
+/* Modo foto e vídeo: só o mapa (os avisos continuam). */
+body.capture .hud-top,
+body.capture .quests,
+body.capture .stack,
+body.capture .hint,
+body.capture .stats,
+body.capture #markers,
+body.capture #floaters {
+  display: none;
+}
+
+/* O vídeo é 16:9: durante a exportação o canvas mostra o quadro inteiro, sem esticar. */
+#scene.letterbox {
+  object-fit: contain;
+  background: #000;
+}
+
+.icon-btn.rec {
+  color: var(--bad);
+}
+
+.icon-btn.rec .long,
+.icon-btn.rec .short {
+  animation: rec 1.2s ease-in-out infinite;
+}
+
+@keyframes rec {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.capture-bar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 2 * var(--gutter));
+  padding: 8px;
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(6px);
+  z-index: 6;
+}
+
+.capture-bar button {
+  height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 19px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  font-weight: 800;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.capture-bar button.primary {
+  background: var(--accent);
+  color: var(--panel);
+}
+
+.capture-bar.busy button {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.capture-bar.export {
+  width: min(520px, calc(100vw - 2 * var(--gutter)));
+  flex-wrap: nowrap;
+  padding: 8px 8px 8px 18px;
+}
+
+.capture-bar .label {
+  flex: 1;
+  font-weight: 800;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.capture-bar .bar {
+  flex: 0 0 30%;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+.capture-bar .bar i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* Escolhas do vídeo: grupos de botões segmentados. */
+.segs {
+  border: 0;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.segs legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--soft);
+}
+
+.segs > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.seg input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.seg span {
+  display: inline-block;
+  padding: 7px 13px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  font-weight: 800;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.seg input:checked + span {
+  background: var(--accent);
+  color: var(--panel);
+}
+
+.seg input:focus-visible + span {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ---------- telas pequenas */

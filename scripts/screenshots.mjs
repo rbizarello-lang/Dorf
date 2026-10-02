@@ -27,6 +27,8 @@ const all = [
   { name: 'tarde', q: 'theme=toscana&seed=10&auto=32&quality=high&time=dusk', wait: 14000 },
   { name: 'amanhecer', q: 'theme=vale&seed=7&auto=32&quality=high&time=dawn', wait: 14000 },
   { name: 'dourada', q: 'theme=toscana&seed=10&auto=32&quality=high&time=golden', wait: 14000 },
+  // Cinema: cada quadro leva ~30 s no SwiftShader; o mundo bem devagar e uns 8 quadros para o TRAA assentar.
+  { name: 'cinema', q: 'theme=toscana&seed=10&auto=32&quality=cinema&time=golden&timescale=0.05', wait: 240000 },
   { name: 'nuvens', q: 'theme=vale&seed=7&auto=60&quality=high&zoom=44', wait: 14000 },
   { name: 'close', q: 'theme=vale&seed=7&auto=32&quality=high&zoom=4.5', wait: 12000 },
   { name: 'trigo', q: 'theme=vale&seed=21&auto=40&quality=high&zoom=3.6', wait: 12000 },

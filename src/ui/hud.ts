@@ -25,6 +25,16 @@ export function questLabel(q: Quest, theme: Theme) {
   return q.exact ? `${name}: exatamente ${q.target}` : `${name}: ${q.target} ou mais`;
 }
 
+/** Opção de um menu do topo (qualidade, câmera). */
+export interface MenuItem {
+  id: string;
+  label: string;
+  note?: string;
+  /** Atalho de teclado mostrado à direita. */
+  key?: string;
+  current?: boolean;
+}
+
 export class Hud {
   readonly score = $('score');
   readonly best = $('best');
@@ -38,6 +48,8 @@ export class Hud {
   readonly modalBody = $('modal-body');
   readonly themeMenu = $('theme-menu');
   readonly themeBtn = $('btn-theme');
+  readonly menu = $('menu');
+  private menuBtn: HTMLElement | null = null;
   readonly stats = $<HTMLPreElement>('stats');
   readonly hint = $('hint');
   readonly confirm = $<HTMLButtonElement>('confirm');
@@ -233,6 +245,7 @@ export class Hud {
   }
 
   openThemeMenu(current: Theme, onPick: (t: Theme) => void) {
+    this.closeMenu();
     const opt = (t: Theme) => `<button class="theme-opt" type="button" data-id="${t.id}" aria-current="${t.id === current.id}" title="${esc(t.tagline)}">
         <span class="swatch">${t.terrainColors.slice(0, 5).map((c) => `<i style="background:${c}"></i>`).join('')}</span>
         <strong>${esc(t.name)}</strong>
@@ -257,5 +270,36 @@ export class Hud {
   closeThemeMenu() {
     this.themeMenu.hidden = true;
     this.themeBtn.setAttribute('aria-expanded', 'false');
+    this.closeMenu();
+  }
+
+  /** Menu preso a um botão do topo; clicar de novo no mesmo botão fecha. */
+  toggleMenu(btn: HTMLElement, items: MenuItem[], onPick: (id: string) => void) {
+    const same = this.menuBtn === btn && !this.menu.hidden;
+    this.closeThemeMenu();
+    if (same) return;
+    this.menu.innerHTML = items
+      .map(
+        (it) => `<button class="menu-opt" type="button" data-id="${esc(it.id)}" aria-current="${!!it.current}">
+        <strong>${esc(it.label)}</strong>${it.key ? `<kbd>${esc(it.key)}</kbd>` : ''}
+        ${it.note ? `<span>${esc(it.note)}</span>` : ''}
+      </button>`,
+      )
+      .join('');
+    this.menu.hidden = false;
+    this.menuBtn = btn;
+    btn.setAttribute('aria-expanded', 'true');
+    this.menu.querySelectorAll<HTMLButtonElement>('.menu-opt').forEach((b) =>
+      b.addEventListener('click', () => {
+        this.closeMenu();
+        onPick(b.dataset.id!);
+      }),
+    );
+  }
+
+  closeMenu() {
+    this.menu.hidden = true;
+    this.menuBtn?.setAttribute('aria-expanded', 'false');
+    this.menuBtn = null;
   }
 }

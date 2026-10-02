@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { mrt, vec3, vec4 } from 'three/tsl';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
-import type { Board, Check, Placed } from '../core/board';
+import type { Board, Check, PlaceResult, Placed } from '../core/board';
 import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey } from '../core/hex';
 import type { SynHit, SynKind } from '../core/synergy';
 import { T, rotateEdges, type TileDef } from '../core/tiles';
@@ -27,21 +27,29 @@ export type TimeOfDay = 'dawn' | 'day' | 'golden' | 'dusk' | 'night';
 const CHUNK = 8;
 /** O alto do céu um pouco mais azul que a cor "do céu" do tema (que é quase branca). */
 const ZENITH_TINT = new THREE.Color(0.86, 0.93, 1.08);
-// Ultra passa de 1: mais árvores, capim e plantações de perto (alvo: GPUs acima da atual).
-const DETAIL: Record<Quality, number> = { ultra: 1.35, high: 1, medium: 0.65, low: 0.4 };
-/** Mapa de sombra por nível. No Ultra, cada uma das cascatas tem esse tamanho. */
-const SHADOW_MAP: Record<Quality, number> = { ultra: 4096, high: 2048, medium: 1024, low: 1024 };
-const CASCADES = 3;
+// Ultra e Cinema passam de 1: mais árvores, capim e plantações de perto (alvo: GPUs acima da atual).
+const DETAIL: Record<Quality, number> = { cinema: 1.6, ultra: 1.35, high: 1, medium: 0.65, low: 0.4 };
+/** Mapa de sombra por nível. No Ultra e no Cinema, cada uma das cascatas tem esse tamanho. */
+const SHADOW_MAP: Record<Quality, number> = { cinema: 4096, ultra: 4096, high: 2048, medium: 1024, low: 1024 };
+/**
+ * Cascatas da sombra do sol (0 = sombra única) e onde cada uma termina, em frações de maxFar.
+ * O Cinema divide o perto em mais faixas: a sombra junto ao alvo fica mais fina.
+ */
+const CASCADES: Record<Quality, number[]> = { cinema: [0.18, 0.34, 0.56, 1], ultra: [0.3, 0.5, 1], high: [], medium: [], low: [] };
 const tmpM = new THREE.Matrix4();
 const tmpColor = new THREE.Color();
 const WHITE = new THREE.Color(1, 1, 1);
 /** Densidade do clima por qualidade. */
-const WEATHER: Record<Quality, number> = { ultra: 1, high: 1, medium: 0.5, low: 0 };
+const WEATHER: Record<Quality, number> = { cinema: 1, ultra: 1, high: 1, medium: 0.5, low: 0 };
 // Teto de densidade de pixels e orçamento de pixels desenhados por qualidade. Sem o orçamento,
 // uma tela 4K renderiza 8 milhões de pixels em qualquer nível, e descer de Ultra para Alta
 // não alivia a GPU (o custo do GTAO, do TRAA e do desfoque cresce com a área).
-const DPR_MAX: Record<Quality, number> = { ultra: 2, high: 2, medium: 1.5, low: 1 };
-const PIXELS: Record<Quality, number> = { ultra: 3840 * 2160, high: 2560 * 1440, medium: 1920 * 1080, low: 1920 * 1080 };
+// O Cinema desenha 1,5× acima da densidade da tela em cada eixo (supersamplagem): até 4K × 2,25.
+const DPR_MAX: Record<Quality, number> = { cinema: 3, ultra: 2, high: 2, medium: 1.5, low: 1 };
+const PIXELS: Record<Quality, number> = { cinema: 3840 * 2160 * 2.25, ultra: 3840 * 2160, high: 2560 * 1440, medium: 1920 * 1080, low: 1920 * 1080 };
+const SUPERSAMPLE: Record<Quality, number> = { cinema: 1.5, ultra: 1, high: 1, medium: 1, low: 1 };
+/** Lado máximo de textura garantido pelo WebGPU: o desenho nunca passa disso. */
+const MAX_SIDE = 8192;
 /** Quanto da luz que chega ao chão ele devolve para paredes e copas (a cor vem do mapa do chão). */
 const BOUNCE = 0.7;
 /** Força das poças dos lampiões com a noite fechada. */
@@ -399,10 +407,10 @@ export class World {
   private board: Board | null = null;
   private chimneys: number[] = [];
   private sun = new THREE.DirectionalLight();
-  /** Sombras em cascata do sol (só no Ultra): nítidas perto da câmera, cobrindo até a névoa. */
+  /** Sombras em cascata do sol (Ultra e Cinema): nítidas perto da câmera, cobrindo até a névoa. */
   private csm: CSMShadowNode | null = null;
   /**
-   * Luz sem intensidade que só existe para os raios de luz (Ultra): o pós-processamento
+   * Luz sem intensidade que só existe para os raios de luz (Ultra e Cinema): o pós-processamento
    * percorre o mapa de sombra dela, já que as cascatas não têm um mapa único.
    */
   private rayLight = new THREE.DirectionalLight('#ffffff', 0);
@@ -442,6 +450,14 @@ export class World {
   private clouds = makeCloudMesh();
   private cloudScene = new THREE.Scene();
   private size = new THREE.Vector2(1, 1);
+  /** Resolução dinâmica do modo Auto (dynres.ts): fração do lado da imagem do nível. */
+  private resScale = 1;
+  /** Desenho em tamanho fixo (foto e vídeo): tamanho lógico e pixels por unidade. */
+  private fixed: { w: number; h: number; ratio: number } | null = null;
+  /** 0 congela o mundo (modo foto); a câmera e a luz continuam respondendo. */
+  timeScale = 1;
+  /** Vagas da fronteira, aro e marcas do fantasma (o modo foto e o vídeo podem esconder). */
+  showSlots = true;
 
   /** A peça da vez sobre a pilha (canvas próprio, posto no HUD por main.ts). */
   readonly preview: PreviewView;
@@ -541,12 +557,20 @@ export class World {
     // O fantasma guarda cores e decoração do tema antigo: descarta em vez de só esconder.
     this.dropGhost();
     this.clearGhost();
+    // Mapa refeito do zero (outra partida, desfazer, fim de um vídeo): a onda de uma era passada não continua.
+    U.eraWave.value.w = 0;
     this.rebuild(board);
   }
 
-  setTimeOfDay(tod: TimeOfDay) {
+  /** Troca a hora do dia: a luz passa devagar para a nova, ou na hora com `instant` (vídeo). */
+  setTimeOfDay(tod: TimeOfDay, instant = false) {
     this.timeOfDay = tod;
-    if (this.theme) this.skyTarget = skyFor(this.theme, tod);
+    if (!this.theme) return;
+    this.skyTarget = skyFor(this.theme, tod);
+    if (instant) {
+      this.sky = skyFor(this.theme, tod);
+      this.applySky();
+    }
   }
 
   private applySky() {
@@ -626,11 +650,11 @@ export class World {
       this.sun.shadow.map?.dispose();
       this.sun.shadow.map = null;
     }
-    this.setCascades(q === 'ultra');
+    this.setCascades(CASCADES[q]);
     this.weather.setDetail(WEATHER[q]);
     if (postChanged) {
       this.post?.dispose();
-      const rays = q === 'ultra' && (!this.fx || this.fx.includes('rays'));
+      const rays = CASCADES[q].length > 0 && (!this.fx || this.fx.includes('rays'));
       this.setRayLight(rays);
       this.post = q === 'low' ? null : buildPost(this.renderer, this.scene, this.camera, q, this.fx, rays ? this.rayLight : undefined, this.cloudScene);
       CL.temporal.value = this.post?.temporal ? 1 : 0;
@@ -650,28 +674,32 @@ export class World {
     this.resize();
   }
 
-  /** Liga ou desliga as cascatas; os materiais recompilam para trocar o nó de sombra. */
-  private setCascades(on: boolean) {
-    if (on === !!this.csm) return;
-    if (on) {
+  /** Liga, troca ou desliga as cascatas; os materiais recompilam para trocar o nó de sombra. */
+  private cascadeSplits: number[] = [];
+  private setCascades(splits: number[]) {
+    if (splits.join() === this.cascadeSplits.join()) return;
+    this.cascadeSplits = splits;
+    if (this.csm) {
+      (this.sun.shadow as THREE.LightShadow & { shadowNode?: unknown }).shadowNode = undefined;
+      this.csm.dispose();
+      this.csm = null;
+    }
+    if (splits.length) {
       // A cascata nasce como cópia da sombra do sol (filtro, viés), então vem depois do mapSize.
       this.sun.shadow.camera.near = 1;
       this.sun.shadow.camera.far = 200;
       // A câmera orbita olhando para baixo: perto dela só há ar. As divisões se concentram
       // em volta do alvo (frações de maxFar, que world.tick mantém em ~4,7× a distância).
       this.csm = new CSMShadowNode(this.sun, {
-        cascades: CASCADES,
+        cascades: splits.length,
         maxFar: 60,
         mode: 'custom',
         lightMargin: 40,
-        customSplitsCallback: (_n: number, _near: number, _far: number, out: number[]) => out.push(0.3, 0.5, 1),
+        customSplitsCallback: (_n: number, _near: number, _far: number, out: number[]) => out.push(...splits),
       });
       this.csm.fade = true;
       (this.sun.shadow as THREE.LightShadow & { shadowNode?: unknown }).shadowNode = this.csm;
     } else {
-      (this.sun.shadow as THREE.LightShadow & { shadowNode?: unknown }).shadowNode = undefined;
-      this.csm?.dispose();
-      this.csm = null;
       this.sun.shadow.camera.far = 60;
     }
     this.recompile();
@@ -692,13 +720,39 @@ export class World {
     });
   }
 
+  /** Resolução dinâmica: escala do lado da imagem (1 = a do nível). */
+  setResolutionScale(s: number) {
+    if (s === this.resScale) return;
+    this.resScale = s;
+    this.resize();
+  }
+
+  /**
+   * Desenha num tamanho fixo, sem olhar a janela (foto e vídeo): `w`×`h` lógicos com `ratio`
+   * pixels por unidade, que é a supersamplagem. `null` volta ao tamanho da tela.
+   */
+  setFixedSize(size: { w: number; h: number; ratio: number } | null) {
+    this.fixed = size;
+    this.resize();
+  }
+
   resize() {
-    const w = this.canvas.clientWidth || window.innerWidth;
-    const h = this.canvas.clientHeight || window.innerHeight;
+    let w: number, h: number, dpr: number, cell: number;
+    if (this.fixed) {
+      ({ w, h } = this.fixed);
+      dpr = Math.min(this.fixed.ratio, MAX_SIDE / Math.max(w, h));
+      cell = dpr;
+    } else {
+      w = this.canvas.clientWidth || window.innerWidth;
+      h = this.canvas.clientHeight || window.innerHeight;
+      const q = this.quality;
+      dpr = Math.min((window.devicePixelRatio || 1) * SUPERSAMPLE[q], DPR_MAX[q], Math.sqrt(PIXELS[q] / (w * h)), MAX_SIDE / Math.max(w, h)) * this.resScale;
+      cell = dpr / (window.devicePixelRatio || 1);
+    }
     this.size.set(w, h);
-    const q = this.quality;
-    const dpr = Math.min(window.devicePixelRatio || 1, DPR_MAX[q], Math.sqrt(PIXELS[q] / (w * h)));
     this.renderer.setPixelRatio(Math.max(0.5, dpr));
+    // O grão do Cinema tem o tamanho de um pixel da tela ou do vídeo (post.ts).
+    P.grainCell.value = Math.max(1, cell);
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -1014,6 +1068,39 @@ export class World {
     h.grow = 0.35 + strength * 0.4;
   }
 
+  /**
+   * Efeitos de uma jogada no mapa: brilhos do encaixe perfeito, do marco da era, das peças
+   * cercadas, das missões e dos sítios, e a festa da nova era (o Centro muda de forma e a onda
+   * dourada corre). O jogo e o vídeo usam os mesmos.
+   */
+  placeFx(res: PlaceResult) {
+    const { x, z } = hexToWorld(res.placed.q, res.placed.r);
+    if (res.perfect) {
+      this.burst(x, z, 'sparkle', 26);
+      this.halo(x, z);
+    }
+    if (res.placed.eraMark !== undefined) {
+      this.burst(x, z, 'sparkle', 30, 0.3);
+      this.halo(x, z, 1.5);
+    }
+    for (const t of res.closed) {
+      const w = hexToWorld(t.q, t.r);
+      this.burst(w.x, w.z, 'sparkle', 16);
+    }
+    for (const q of res.questsDone) {
+      const w = hexToWorld(q.anchor.q, q.anchor.r);
+      this.burst(w.x, w.z, 'sparkle', 40);
+    }
+    if (res.site) this.burst(x, z, 'sparkle', 46);
+    if (res.eraUp !== null) {
+      this.eraUp(res.eraUp);
+      this.ripple(x, z, 2.2);
+      this.burst(x, z, 'sparkle', 60);
+      this.halo(x, z, 2);
+      this.flushBirds(x, z);
+    }
+  }
+
   /** Bando de pássaros que levanta voo do lugar (marcos da partida). */
   flushBirds(x: number, z: number) {
     this.life.flush(x, z);
@@ -1144,16 +1231,18 @@ export class World {
     U.ripple.value.set(x, z, this.time - age, strength);
   }
 
-  tick(dt: number) {
+  tick(realDt: number) {
     this.renderer.info.reset();
+    // A câmera, o fantasma e a troca de hora seguem o tempo real; o resto, o tempo do mundo.
+    const dt = realDt * this.timeScale;
     this.time += dt;
     U.time.value = this.time;
     U.dt.value = Math.max(dt, 1e-4);
     // O vento muda de direção devagar.
     const wa = 0.65 + Math.sin(this.time * 0.05) * 0.5;
     U.wind.value.set(Math.cos(wa), Math.sin(wa));
-    this.stepSky(dt);
-    this.rig.update(dt);
+    this.stepSky(realDt);
+    this.rig.update(realDt);
     this.rig.apply(this.camera);
 
     A.near.value = this.rig.dist * 1.5;
@@ -1218,16 +1307,16 @@ export class World {
     // Fantasma: flutua e gira suavemente até a orientação escolhida.
     if (this.ghost && this.ghost.group.visible) {
       const g = this.ghost.group;
-      const k = 1 - Math.exp(-dt * 16);
+      const k = 1 - Math.exp(-realDt * 16);
       g.position.x += (this.ghostTarget.x - g.position.x) * k;
       g.position.z += (this.ghostTarget.z - g.position.z) * k;
       g.position.y += (this.ghostTarget.y + Math.sin(this.time * 2.4) * 0.025 - g.position.y) * k;
       const inner = this.ghost.inner;
-      inner.rotation.y += (-this.ghostAngle - inner.rotation.y) * (1 - Math.exp(-dt * 18));
+      inner.rotation.y += (-this.ghostAngle - inner.rotation.y) * (1 - Math.exp(-realDt * 18));
       // Inclina na direção em que desliza, como uma bandeja carregada.
-      const kv = 1 - Math.exp(-dt * 10);
-      this.ghostVel.x += ((g.position.x - this.ghostPrev.x) / Math.max(dt, 1e-3) - this.ghostVel.x) * kv;
-      this.ghostVel.y += ((g.position.z - this.ghostPrev.z) / Math.max(dt, 1e-3) - this.ghostVel.y) * kv;
+      const kv = 1 - Math.exp(-realDt * 10);
+      this.ghostVel.x += ((g.position.x - this.ghostPrev.x) / Math.max(realDt, 1e-3) - this.ghostVel.x) * kv;
+      this.ghostVel.y += ((g.position.z - this.ghostPrev.z) / Math.max(realDt, 1e-3) - this.ghostVel.y) * kv;
       this.ghostPrev.copy(g.position);
       g.rotation.x = THREE.MathUtils.clamp(this.ghostVel.y * 0.035, -0.22, 0.22);
       g.rotation.z = THREE.MathUtils.clamp(-this.ghostVel.x * 0.035, -0.22, 0.22);
@@ -1296,11 +1385,13 @@ export class World {
     this.spawnSmoke(dt);
     this.sprites.update(dt);
     this.updateFxUniforms();
-    this.slots.visible = this.slotCount > 0;
+    this.slots.visible = this.slotCount > 0 && this.showSlots;
+    // Grão do Cinema: um padrão novo a cada quadro (passageiro, não precisa de semente).
+    P.grainSeed.value = Math.floor(Math.random() * 3e6);
 
     if (this.post) this.post.pipeline.render();
     else this.renderer.render(this.scene, this.camera);
 
-    this.preview.render(dt);
+    this.preview.render(realDt);
   }
 }
