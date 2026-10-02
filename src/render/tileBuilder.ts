@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 import { corner, edgeMid, INR } from '../core/hex';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
 import type { SynKind } from '../core/synergy';
@@ -11,11 +11,17 @@ import { CROP_LAYOUT, type HouseMeta } from './lib';
 // no bloco estático: só muda a matriz. Tudo é determinístico pela semente.
 
 export const TILE_T = 0.28;
-const WATER_Y = 0.013;
-const BANK_Y = 0.006;
+/** Superfície da água: abaixo do chão, dentro do leito escavado. */
+export const WATER_Y = -0.02;
 const BED_Y = 0.004;
 export const RIVER_HW = 0.19;
+/** Raio do lago no fim de um rio. */
+const LAKE_R = 0.3;
+/** Afastamento que a decoração guarda da água (antiga faixa de margem). */
 const BANK_EXTRA = 0.055;
+/** Profundidade do leito e largura da margem inclinada (a partir da linha d'água nominal). */
+const BED_DEPTH = 0.048;
+const BANK_W = 0.075;
 export const ROAD_HW = 0.1;
 /** Altura em que veículos andam (maglev flutua sobre a via). */
 export const ROAD_Y = { rail: 0.03, dirt: 0.006, stone: 0.008, sand: 0.006, maglev: 0.075 } as const;
@@ -38,7 +44,16 @@ export interface Deco {
 export interface TileBuild {
   pos: Float32Array;
   col: Float32Array;
+  /** Por vértice do chão: pesos de detalhe [prado, floresta, plantação, vila] (0 nas laterais). */
+  splat: Float32Array;
   water: Float32Array;
+  /** Por vértice da água: correnteza (x, z, em unidades/s relativas). */
+  wflow: Float32Array;
+  /**
+   * Por vértice da água: cor do leito logo abaixo (r, g, b) e profundidade da coluna
+   * (superfície menos leito; negativa onde o barranco já saiu da água).
+   */
+  wbed: Float32Array;
   decos: Deco[];
   /** Pontos (x, y, z) de onde sai fumaça de chaminé. */
   chimneys: number[];
@@ -50,6 +65,11 @@ export interface BuildOpts {
   /** Interações nas bordas (setor na orientação de origem). */
   synergies?: { sector: number; kind: SynKind }[];
   houses: HouseMeta[];
+  /**
+   * Sentido da correnteza em cada borda de rio, na orientação de origem: +1 a água sai
+   * da peça, -1 entra. Sem isso (pilha), vale a regra padrão de `resolveFlow`.
+   */
+  flow?: readonly number[];
 }
 
 type V2 = [number, number];
@@ -65,26 +85,33 @@ export function tc(hex: string): THREE.Color {
   return c;
 }
 
+/** Pesos de detalhe do chão por vértice: [prado, floresta, plantação, vila]. */
+type Splat = readonly [number, number, number, number];
+const NO_SPLAT: Splat = [0, 0, 0, 0];
+
 class Buf {
   pos: number[] = [];
   col: number[] = [];
+  spl: number[] = [];
   constructor(readonly withColor: boolean) {}
 
-  tri(a: V3, b: V3, c: V3, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, n: V3) {
+  tri(a: V3, b: V3, c: V3, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, n: V3, sa: Splat = NO_SPLAT, sb: Splat = sa, sc: Splat = sa) {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
     const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     if (nx * n[0] + ny * n[1] + nz * n[2] < 0) {
       [b, c] = [c, b];
       [cb, cc] = [cc, cb];
+      [sb, sc] = [sc, sb];
     }
     this.pos.push(...a, ...b, ...c);
     if (this.withColor) this.col.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b, cc.r, cc.g, cc.b);
+    this.spl.push(...sa, ...sb, ...sc);
   }
 
-  quad(a: V3, b: V3, c: V3, d: V3, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, cd: THREE.Color, n: V3) {
-    this.tri(a, b, c, ca, cb, cc, n);
-    this.tri(a, c, d, ca, cc, cd, n);
+  quad(a: V3, b: V3, c: V3, d: V3, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, cd: THREE.Color, n: V3, sp: Splat = NO_SPLAT) {
+    this.tri(a, b, c, ca, cb, cc, n, sp);
+    this.tri(a, c, d, ca, cc, cd, n, sp);
   }
 }
 
@@ -148,7 +175,159 @@ function nearestOnPaths(x: number, z: number, paths: Path[]) {
 
 const distToPaths = (x: number, z: number, paths: Path[]) => nearestOnPaths(x, z, paths).d;
 
-function strip(buf: Buf, pts: V2[], hw: number, y: number, color: THREE.Color) {
+/**
+ * Completa o sentido da correnteza nas bordas de rio sem vizinho conhecido (0). Se a água
+ * já entra por alguma borda, as demais são saídas, e vice-versa. Sem nada conhecido:
+ * rio de 2 bordas entra pela de menor índice; lago recebe a água; junção de 3+ é uma
+ * confluência (sai pela de menor índice). Usada pelo World (com os vizinhos) e pela pilha.
+ */
+export function resolveFlow(edges: readonly T[], known?: readonly number[]): number[] {
+  const out = [0, 0, 0, 0, 0, 0];
+  const idx: number[] = [];
+  for (let i = 0; i < 6; i++) if (edges[i] === T.Water) idx.push(i);
+  if (!idx.length) return out;
+  let ins = 0, outs = 0;
+  for (const i of idx) {
+    const k = known?.[i] ?? 0;
+    out[i] = k;
+    if (k < 0) ins++;
+    else if (k > 0) outs++;
+  }
+  const fill = ins ? 1 : outs ? -1 : 0;
+  idx.forEach((i, j) => {
+    if (out[i]) return;
+    if (fill) out[i] = fill;
+    else if (idx.length === 1) out[i] = -1;
+    else if (idx.length === 2) out[i] = j === 0 ? -1 : 1;
+    else out[i] = j === 0 ? 1 : -1;
+  });
+  return out;
+}
+
+/** Ponto mais próximo num caminho, com o parâmetro t (0 no início, 1 no fim) e a tangente. */
+function nearestParam(x: number, z: number, pts: V2[]) {
+  let best = { d: Infinity, t: 0, tx: 1, tz: 0 };
+  const n = pts.length - 1;
+  for (let k = 0; k < n; k++) {
+    const [ax, az] = pts[k];
+    const [bx, bz] = pts[k + 1];
+    const dx = bx - ax, dz = bz - az;
+    const len2 = dx * dx + dz * dz || 1;
+    const u = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2));
+    const d = Math.hypot(x - ax - dx * u, z - az - dz * u);
+    if (d < best.d) {
+      const l = Math.sqrt(len2);
+      best = { d, t: (k + u) / n, tx: dx / l, tz: dz / l };
+    }
+  }
+  return best;
+}
+
+const smooth = (a: number, b: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+/**
+ * Campo da água de uma peça: distância assinada até a linha d'água nominal (negativa
+ * dentro do rio), perfil do leito e correnteza. Tudo função da posição, então peças
+ * vizinhas concordam na borda comum.
+ */
+function waterField(water: { paths: Path[]; idx: number[] }, flow: readonly number[], seed: number) {
+  const n = water.idx.length;
+  const discR = n === 1 ? LAKE_R : n >= 3 ? RIVER_HW : 0;
+  // Margem orgânica: ondula no interior da peça e volta a ser reta perto da borda,
+  // onde o rio precisa casar com o da vizinha.
+  const r = mulberry32(seed ^ 0x51ed);
+  const o = [r() * 6.3, r() * 6.3, r() * 6.3, r() * 6.3];
+  const wiggle = (x: number, z: number) => {
+    let border = Infinity;
+    for (let i = 0; i < 6; i++) {
+      const [mx, mz] = edgeMid(i);
+      border = Math.min(border, INR - (x * mx + z * mz) / INR);
+    }
+    const w = Math.sin(x * 9.1 + o[0]) * Math.sin(z * 8.3 + o[1]) + Math.sin((x - z) * 15.7 + o[2]) * 0.45 + Math.sin((x + z) * 23 + o[3]) * 0.2;
+    return w * 0.026 * smooth(0.02, 0.22, border);
+  };
+  const e = (x: number, z: number) => {
+    let d = Infinity;
+    for (const p of water.paths) d = Math.min(d, nearestParam(x, z, p.pts).d - p.hw);
+    if (discR) d = Math.min(d, Math.hypot(x, z) - discR);
+    return d + wiggle(x, z);
+  };
+  const ground = (x: number, z: number) => {
+    const d = e(x, z);
+    return d >= BANK_W ? 0 : -BED_DEPTH * smooth(BANK_W, -0.05, d);
+  };
+  /** Correnteza [fx, fz] num ponto da superfície. */
+  const at = (x: number, z: number): [number, number] => {
+    let best: ReturnType<typeof nearestParam> | null = null;
+    let bi = 0;
+    water.paths.forEach((p, i) => {
+      const r = nearestParam(x, z, p.pts);
+      if (!best || r.d < best.d) {
+        best = r;
+        bi = i;
+      }
+    });
+    const b = best as ReturnType<typeof nearestParam> | null;
+    if (!b) return [0, 0];
+    let dir = 1, speed = 1;
+    if (n === 2) {
+      const sa = flow[water.idx[0]], sb = flow[water.idx[1]];
+      if (sa < 0 && sb > 0) dir = 1;
+      else if (sa > 0 && sb < 0) dir = -1;
+      else {
+        // As duas entram (encontro) ou as duas saem (nascente): a água para no meio.
+        const toMid = b.t < 0.5 ? 1 : -1;
+        dir = sa < 0 ? toMid : -toMid;
+        speed = smooth(0, 0.45, Math.abs(b.t - 0.5) * 2);
+      }
+    } else {
+      dir = flow[water.idx[bi]] < 0 ? 1 : -1; // t cresce da borda para o centro
+      speed = smooth(0, 0.5, 1 - b.t);
+      if (n === 1) speed *= smooth(LAKE_R * 0.5, LAKE_R * 1.25, Math.hypot(x, z));
+    }
+    return [b.tx * dir * speed, b.tz * dir * speed];
+  };
+  return { e, ground, at };
+}
+
+/**
+ * Superfície da água: os mesmos triângulos do leito que ficam abaixo da linha d'água,
+ * achatados em WATER_Y. Assim a profundidade interpolada em cada pixel é exatamente a
+ * do chão de baixo (zero na beira, onde o barranco corta a água) e a cor do leito
+ * acompanha a do barranco.
+ */
+class WaterBuf {
+  pos: number[] = [];
+  flow: number[] = [];
+  bed: number[] = [];
+  private cache = new Map<string, [number, number]>();
+  constructor(private field: ReturnType<typeof waterField>) {}
+
+  private attr(x: number, z: number) {
+    const k = `${x.toFixed(4)},${z.toFixed(4)}`;
+    let v = this.cache.get(k);
+    if (!v) this.cache.set(k, (v = this.field.at(x, z)));
+    return v;
+  }
+
+  tri(a: { p: V3; c: THREE.Color }, b: { p: V3; c: THREE.Color }, c: { p: V3; c: THREE.Color }) {
+    if (Math.min(a.p[1], b.p[1], c.p[1]) > WATER_Y - 1e-4) return;
+    // Sempre virado para cima.
+    const cross = (b.p[0] - a.p[0]) * (c.p[2] - a.p[2]) - (b.p[2] - a.p[2]) * (c.p[0] - a.p[0]);
+    for (const v of cross > 0 ? [a, c, b] : [a, b, c]) {
+      const [x, y, z] = v.p;
+      const [fx, fz] = this.attr(x, z);
+      this.pos.push(x, WATER_Y, z);
+      this.flow.push(fx, fz);
+      this.bed.push(v.c.r, v.c.g, v.c.b, WATER_Y - y);
+    }
+  }
+}
+
+function strip(buf: Buf, pts: V2[], hw: number, y: number, color: THREE.Color, sp: Splat = NO_SPLAT) {
   const L: V3[] = [];
   const R: V3[] = [];
   for (let k = 0; k < pts.length; k++) {
@@ -162,14 +341,14 @@ function strip(buf: Buf, pts: V2[], hw: number, y: number, color: THREE.Color) {
     L.push([p[0] - tz * hw, y, p[1] + tx * hw]);
     R.push([p[0] + tz * hw, y, p[1] - tx * hw]);
   }
-  for (let k = 0; k < pts.length - 1; k++) buf.quad(L[k], R[k], R[k + 1], L[k + 1], color, color, color, color, UP);
+  for (let k = 0; k < pts.length - 1; k++) buf.quad(L[k], R[k], R[k + 1], L[k + 1], color, color, color, color, UP, sp);
 }
 
-function disc(buf: Buf, cx: number, cz: number, r: number, y: number, color: THREE.Color, seg = 12) {
+function disc(buf: Buf, cx: number, cz: number, r: number, y: number, color: THREE.Color, seg = 12, sp: Splat = NO_SPLAT) {
   for (let k = 0; k < seg; k++) {
     const a0 = (k / seg) * Math.PI * 2;
     const a1 = ((k + 1) / seg) * Math.PI * 2;
-    buf.tri([cx, y, cz], [cx + Math.cos(a0) * r, y, cz + Math.sin(a0) * r], [cx + Math.cos(a1) * r, y, cz + Math.sin(a1) * r], color, color, color, UP);
+    buf.tri([cx, y, cz], [cx + Math.cos(a0) * r, y, cz + Math.sin(a0) * r], [cx + Math.cos(a1) * r, y, cz + Math.sin(a1) * r], color, color, color, UP, sp);
   }
 }
 
@@ -236,6 +415,9 @@ function insidePoly(x: number, z: number, pts: V2[]) {
   return inside;
 }
 
+/** Marcos de planta larga: as casas guardam mais distância deles. */
+const WIDE_LANDMARKS: ReadonlySet<string> = new Set(['pyramid', 'pylon', 'kancha', 'hall']);
+
 /** Ângulo de rotação em y que leva o eixo x local para a direção (dx, dz). */
 const yawTo = (dx: number, dz: number) => Math.atan2(-dz, dx);
 
@@ -243,56 +425,114 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const rng = mulberry32(seed);
   const detail = opts.detail;
   const g = new Buf(true);
-  const w = new Buf(false);
-  const decos: Deco[] = [];
+    const decos: Deco[] = [];
   const chimneys: number[] = [];
   const groundCols = edges.map((t) => tc(theme.ground[t]));
+  // y = 0 quer dizer "no chão": acompanha o leito e as margens dos rios.
   const D = (key: string, x: number, y: number, z: number, ry: number, s: number | V3, color: THREE.Color, anim?: Anim) => {
     const [sx, sy, sz] = typeof s === 'number' ? [s, s, s] : s;
-    decos.push({ key, x, y, z, ry, sx, sy, sz, color, anim });
+    decos.push({ key, x, y: y === 0 ? groundY(x, z) : y, z, ry, sx, sy, sz, color, anim });
   };
-
-  // --- Topo: 6 setores subdivididos, com cores misturadas nas divisas.
-  const N = 4;
-  const center = new THREE.Color(0, 0, 0);
-  for (const c of groundCols) center.add(c);
-  center.multiplyScalar(1 / 6);
-  for (let i = 0; i < 6; i++) {
-    const A = corner(i);
-    const B = corner((i + 1) % 6);
-    const own = groundCols[i];
-    const edgeA = own.clone().lerp(groundCols[(i + 5) % 6], 0.5);
-    const edgeB = own.clone().lerp(groundCols[(i + 1) % 6], 0.5);
-    const P = (a: number, b: number): V3 => [(a / N) * A[0] + (b / N) * B[0], 0, (a / N) * A[1] + (b / N) * B[1]];
-    const C = (a: number, b: number) => (a === 0 && b === 0 ? center : b === 0 ? edgeA : a === 0 ? edgeB : own);
-    for (let a = 0; a < N; a++) {
-      for (let b = 0; b < N - a; b++) {
-        g.tri(P(a, b), P(a + 1, b), P(a, b + 1), C(a, b), C(a + 1, b), C(a, b + 1), UP);
-        if (a + b < N - 1) g.tri(P(a + 1, b), P(a + 1, b + 1), P(a, b + 1), C(a + 1, b), C(a + 1, b + 1), C(a, b + 1), UP);
-      }
-    }
-  }
-
-  // --- Laterais em camadas de terra.
-  const side = tc(theme.side);
-  const sideDark = tc(theme.sideDark);
-  const LIP = 0.05;
-  for (let i = 0; i < 6; i++) {
-    const [ax, az] = corner(i);
-    const [bx, bz] = corner((i + 1) % 6);
-    const [mx, mz] = edgeMid(i);
-    const n: V3 = [mx, 0, mz];
-    const lip = shade(groundCols[i], 0.72);
-    g.quad([ax, 0, az], [bx, 0, bz], [bx, -LIP, bz], [ax, -LIP, az], lip, lip, lip, lip, n);
-    const mid = side.clone().lerp(sideDark, 0.35);
-    g.quad([ax, -LIP, az], [bx, -LIP, bz], [bx, -0.15, bz], [ax, -0.15, az], side, side, mid, mid, n);
-    g.quad([ax, -0.15, az], [bx, -0.15, bz], [bx, -TILE_T, bz], [ax, -TILE_T, az], mid, mid, sideDark, sideDark, n);
-  }
 
   const water = pathsFor(edges, T.Water, RIVER_HW);
   const road = pathsFor(edges, T.Rail, ROAD_HW);
   const allPaths = [...water.paths, ...road.paths];
-  if (water.idx.length === 1) allPaths.push({ pts: [[0, 0], [0.001, 0]], hw: 0.3 + BANK_EXTRA });
+  if (water.idx.length === 1) allPaths.push({ pts: [[0, 0], [0.001, 0]], hw: LAKE_R + BANK_EXTRA });
+  const hasWater = water.idx.length > 0;
+  const flow = opts.flow ?? resolveFlow(edges);
+  const field = hasWater ? waterField(water, flow, seed) : null;
+  /** Altura do chão: 0, exceto no leito e nas margens dos rios. */
+  const groundY = (x: number, z: number) => (field ? field.ground(x, z) : 0);
+  const bank = tc(theme.bank);
+  const waterSide = tc(theme.water).clone().lerp(bank, 0.25);
+  const waterDeep = shade(tc(theme.water), 0.55);
+  const wb = field ? new WaterBuf(field) : null;
+
+  // --- Topo: 6 setores subdivididos, com cores misturadas nas divisas. Peças com rio
+  // usam uma malha mais fina para o leito e as margens inclinadas.
+  const N = hasWater ? 12 : 4;
+  const center = new THREE.Color(0, 0, 0);
+  for (const c of groundCols) center.add(c);
+  center.multiplyScalar(1 / 6);
+  // Rio e estrada têm chão de prado para o detalhe do shader.
+  const landOf = (t: T) => (t === T.Forest ? 1 : t === T.Field ? 2 : t === T.Village ? 3 : 0);
+  const oneHot = (t: T): number[] => [0, 1, 2, 3].map((k) => (k === landOf(t) ? 1 : 0));
+  const centerSplat = [0, 0, 0, 0];
+  for (const e of edges) oneHot(e).forEach((v, k) => (centerSplat[k] += v / 6));
+  const topColor = (i: number, a: number, b: number, x: number, z: number): { c: THREE.Color; s: Splat } => {
+    const own = groundCols[i];
+    const c = own.clone();
+    let sp = oneHot(edges[i]);
+    const mixS = (o: number[], t: number) => (sp = sp.map((v, k) => v + (o[k] - v) * t));
+    const sum = a + b;
+    if (sum > 0) {
+      const sAng = b / sum; // 0 no lado do canto i, 1 no lado do canto i+1
+      const tA = 0.5 * (1 - smooth(0, 0.3, sAng)), tB = 0.5 * (1 - smooth(0, 0.3, 1 - sAng));
+      c.lerp(groundCols[(i + 5) % 6], tA);
+      mixS(oneHot(edges[(i + 5) % 6]), tA);
+      c.lerp(groundCols[(i + 1) % 6], tB);
+      mixS(oneHot(edges[(i + 1) % 6]), tB);
+    }
+    const tC = 1 - smooth(0, 0.3, sum / N);
+    c.lerp(center, tC);
+    mixS(centerSplat, tC);
+    if (field) {
+      const e = field.e(x, z);
+      const sand = 1 - smooth(0.03, 0.085, e);
+      c.lerp(bank, sand);
+      c.multiplyScalar(1 - 0.3 * (1 - smooth(0.004, 0.03, e)));
+      sp = sp.map((v) => v * (1 - sand));
+    }
+    return { c, s: sp as unknown as Splat };
+  };
+  for (let i = 0; i < 6; i++) {
+    const A = corner(i);
+    const B = corner((i + 1) % 6);
+    const vs = new Map<number, { p: V3; c: THREE.Color; s: Splat }>();
+    const V = (a: number, b: number) => {
+      const k = a * 64 + b;
+      let v = vs.get(k);
+      if (!v) {
+        const x = (a / N) * A[0] + (b / N) * B[0], z = (a / N) * A[1] + (b / N) * B[1];
+        v = { p: [x, groundY(x, z), z], ...topColor(i, a, b, x, z) };
+        vs.set(k, v);
+      }
+      return v;
+    };
+    for (let a = 0; a < N; a++) {
+      for (let b = 0; b < N - a; b++) {
+        const p0 = V(a, b), p1 = V(a + 1, b), p2 = V(a, b + 1);
+        g.tri(p0.p, p1.p, p2.p, p0.c, p1.c, p2.c, UP, p0.s, p1.s, p2.s);
+        wb?.tri(p0, p1, p2);
+        if (a + b < N - 1) {
+          const p3 = V(a + 1, b + 1);
+          g.tri(p1.p, p3.p, p2.p, p1.c, p3.c, p2.c, UP, p1.s, p3.s, p2.s);
+          wb?.tri(p1, p3, p2);
+        }
+      }
+    }
+
+    // --- Lateral desta borda, em camadas de terra; acompanha o perfil do leito.
+    const [mx, mz] = edgeMid(i);
+    const nrm: V3 = [mx, 0, mz];
+    const side = tc(theme.side);
+    const sideDark = tc(theme.sideDark);
+    const midC = side.clone().lerp(sideDark, 0.35);
+    for (let k = 0; k < N; k++) {
+      const v0 = V(N - k, k), v1 = V(N - k - 1, k + 1);
+      const [x0, y0, z0] = v0.p, [x1, y1, z1] = v1.p;
+      const l0 = shade(v0.c, 0.72), l1 = shade(v1.c, 0.72);
+      const b0 = Math.min(y0 - 0.05, -0.05), b1 = Math.min(y1 - 0.05, -0.05);
+      g.quad([x0, y0, z0], [x1, y1, z1], [x1, b1, z1], [x0, b0, z0], l0, l1, l1, l0, nrm);
+      g.quad([x0, b0, z0], [x1, b1, z1], [x1, -0.15, z1], [x0, -0.15, z0], side, side, midC, midC, nrm);
+      g.quad([x0, -0.15, z0], [x1, -0.15, z1], [x1, -TILE_T, z1], [x0, -TILE_T, z0], midC, midC, sideDark, sideDark, nrm);
+      // Corte da água na lateral (só aparece na beira aberta do mapa, como num aquário).
+      if (y0 < WATER_Y - 0.001 || y1 < WATER_Y - 0.001) {
+        const c0 = Math.min(y0, WATER_Y), c1 = Math.min(y1, WATER_Y);
+        g.quad([x0, WATER_Y, z0], [x1, WATER_Y, z1], [x1, c1, z1], [x0, c0, z0], waterSide, waterSide, waterDeep, waterDeep, [mx * 1.01, 0, mz * 1.01]);
+      }
+    }
+  }
 
   // --- Lugares reservados para construções especiais (a decoração desvia deles).
   const reserved: [number, number, number][] = [];
@@ -303,40 +543,14 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     return true;
   };
 
-  // --- Rios e lagos.
-  const bank = tc(theme.bank);
-  if (water.idx.length) {
-    for (const p of water.paths) {
-      strip(g, p.pts, p.hw + BANK_EXTRA, BANK_Y, bank);
-      strip(w, p.pts, p.hw, WATER_Y, WHITE);
-    }
+  // --- Rios e lagos: plantas na água e na margem (a superfície já saiu com o leito).
+  if (field) {
     const n = water.idx.length;
-    if (n === 1 || n >= 3) {
-      const r = n === 1 ? 0.3 : RIVER_HW;
-      disc(g, 0, 0, r + BANK_EXTRA, BANK_Y, bank);
-      disc(w, 0, 0, r, WATER_Y, WHITE);
-    }
-    if (n >= 3) {
-      for (let i = 0; i < 6; i++) {
-        const j = (i + 1) % 6;
-        if (edges[i] !== T.Water || edges[j] !== T.Water) continue;
-        const [mx, mz] = edgeMid(i);
-        const [cx, cz] = corner(j);
-        const [nx, nz] = edgeMid(j);
-        for (const [buf, y, c] of [
-          [g, BANK_Y, bank],
-          [w, WATER_Y, WHITE],
-        ] as const) {
-          buf.tri([0, y, 0], [mx, y, mz], [cx, y, cz], c, c, c, UP);
-          buf.tri([0, y, 0], [cx, y, cz], [nx, y, nz], c, c, c, UP);
-        }
-      }
-    }
     // Vitórias-régias e juncos na margem.
     for (let k = randInt(rng, 0, n >= 3 ? 3 : 1); k > 0; k--) {
       const p = pick(rng, water.paths);
       const pt = p.pts[randInt(rng, 2, p.pts.length - 2)];
-      D('lily', pt[0] + (rng() - 0.5) * 0.14, WATER_Y - 0.008, pt[1] + (rng() - 0.5) * 0.14, rng() * 6, 1, vary(rng, tc(theme.lily)));
+      D('lily', pt[0] + (rng() - 0.5) * 0.14, WATER_Y - 0.0095, pt[1] + (rng() - 0.5) * 0.14, rng() * 6, 1, vary(rng, tc(theme.lily)));
     }
     for (const p of water.paths) {
       alongPath(p.pts, 0.05 + rng() * 0.05, 0.075 / Math.max(0.35, detail), (x, z, tx, tz) => {
@@ -345,7 +559,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         const o = p.hw + 0.012 + rng() * 0.02;
         const rx = x - tz * o * s, rz = z + tx * o * s;
         if (Math.hypot(rx, rz) > INR - 0.03 || distToPaths(rx, rz, allPaths) < -0.005) return;
-        D('reed', rx, BANK_Y, rz, rng() * 6, randRange(rng, 0.8, 1.3), WHITE);
+        D('reed', rx, 0, rz, rng() * 6, randRange(rng, 0.8, 1.3), WHITE);
       });
     }
   }
@@ -405,6 +619,14 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       D('station', sx, BED_Y, sz, yawTo(ux, uz), 1, WHITE);
       reserved.push([sx, sz, 0.15]);
     }
+    // Portal sobre a via, na primeira borda de linha que encosta num setor de vila.
+    const gi = theme.gate ? road.idx.find((i) => edges[(i + 1) % 6] === T.Village || edges[(i + 5) % 6] === T.Village) : undefined;
+    if (gi !== undefined) {
+      const [mx, mz] = edgeMid(gi);
+      const n = nearestOnPaths(mx * 0.7, mz * 0.7, road.paths);
+      D('gate', n.p[0], BED_Y, n.p[1], yawTo(-n.t[1], n.t[0]), 1, WHITE);
+      reserved.push([n.p[0], n.p[1], 0.17]);
+    }
   }
 
   // --- Interações nas bordas: reservam um lugar perto da borda do setor.
@@ -422,13 +644,16 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       D('fence', x, 0, z, ry, 1, WHITE);
       for (let a = 0; a < 3; a++) D('animal', x + (rng() - 0.5) * 0.1, 0, z + (rng() - 0.5) * 0.1, rng() * 6, randRange(rng, 0.9, 1.15), vary(rng, tc(pick(rng, theme.animals.colors)), 0.05), 'wander');
     } else if (s.kind === 'mill') {
-      const sc = theme.mill === 'windmill' ? 1.1 : 1.2;
+      const sc = theme.mill === 'windmill' ? 1.1 : theme.mill === 'windpump' ? 1 : 1.2;
       const face = Math.atan2(-mx, -mz); // +z local (porta e pás) voltado para o centro da peça
       D('mill', x, 0, z, face, sc, WHITE);
       if (theme.mill === 'windmill') {
         // Cubo das pás: à frente do capuz, na direção +z local do moinho.
         const fx = Math.sin(face) * 0.078 * sc, fz = Math.cos(face) * 0.078 * sc;
         D('sails', x + fx, 0.255 * sc, z + fz, face, sc, WHITE, 'spin-z');
+      } else if (theme.mill === 'windpump') {
+        const fx = Math.sin(face) * 0.022 * sc, fz = Math.cos(face) * 0.022 * sc;
+        D('rotor', x + fx, groundY(x, z) + 0.318 * sc, z + fz, face, sc, WHITE, 'spin-z');
       }
     }
   }
@@ -452,7 +677,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         const wx = n.p[0] + px * (RIVER_HW + 0.012), wz = n.p[1] + pz * (RIVER_HW + 0.012);
         if (Math.hypot(wx, wz) > INR - 0.08) continue;
         watermill = true;
-        D('wheel', wx, 0.04, wz, yawTo(px, pz), 1, WHITE, 'spin-x');
+        D('wheel', wx, WATER_Y + 0.05, wz, yawTo(px, pz), 1, WHITE, 'spin-x');
         const hx = n.p[0] + px * (RIVER_HW + 0.11), hz = n.p[1] + pz * (RIVER_HW + 0.11);
         const ry = yawTo(n.t[0], n.t[1]);
         D('wall:0', hx, 0, hz, ry, 1.15, WHITE.clone().multiply(tc(theme.houses[0].walls[0])));
@@ -483,6 +708,26 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     }
   }
 
+  // --- Ponte: rio de duas bordas com vila numa margem e terra na outra. Sem sorteio,
+  // para não mudar o resto da peça.
+  if (theme.bridge && water.idx.length === 2) {
+    const [a, b] = water.idx;
+    const sideA = edges.slice(a + 1, b), sideB = [...edges.slice(b + 1), ...edges.slice(0, a)];
+    if (sideA.length && sideB.length && (sideA.includes(T.Village) || sideB.includes(T.Village))) {
+      const pts = water.paths[0].pts;
+      const m = pts.length >> 1;
+      const [px, pz] = pts[m];
+      const tx = pts[m + 1][0] - pts[m - 1][0], tz = pts[m + 1][1] - pts[m - 1][1];
+      const l = Math.hypot(tx, tz) || 1;
+      const ex = (-tz / l) * 0.3, ez = (tx / l) * 0.3;
+      if (free(px + ex, pz + ez, 0.06) && free(px - ex, pz - ez, 0.06)) {
+        // y explícito: com 0 a ponte iria para o fundo do leito.
+        D('bridge', px, 0.001, pz, yawTo(ex, ez), 1, WHITE);
+        reserved.push([px + ex, pz + ez, 0.1], [px - ex, pz - ez, 0.1]);
+      }
+    }
+  }
+
   // --- Marco no centro das vilas grandes.
   const villageCount = edges.filter((e) => e === T.Village).length;
   const landmarkRoll = rng();
@@ -493,7 +738,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const fx = Math.sin(ry) * 0.078, fz = Math.cos(ry) * 0.078;
       D('sails', fx, 0.255, fz, ry, 1, WHITE, 'spin-z');
     }
-    reserved.push([0, 0, theme.landmark === 'pyramid' ? 0.3 : 0.2]);
+    reserved.push([0, 0, WIDE_LANDMARKS.has(theme.landmark) ? 0.3 : 0.2]);
   }
 
   // --- Plantações: parcelas de terra com fileiras de plantas.
@@ -579,7 +824,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     taken.push([x, z]);
   };
   const houseKinds = theme.houses.map((h, i) => [i, h.weight] as const);
-  const addHouse = (x: number, z: number, baseAng: number) => {
+  const houses: { x: number; z: number; s: number; sector: number }[] = [];
+  const addHouse = (x: number, z: number, baseAng: number, sector = -1) => {
     const i = weighted(rng, houseKinds);
     const kind = theme.houses[i];
     const meta = opts.houses[i];
@@ -594,6 +840,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       chimneys.push(x + (cx * c + cz * sn) * s, cy * s * sy, z + (-cx * sn + cz * c) * s);
     }
     taken.push([x, z]);
+    houses.push({ x, z, s, sector });
   };
 
   const grassN = Math.round(randInt(rng, 9, 15) * detail);
@@ -617,7 +864,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       for (let k = 0, tries = 0; k < n && tries < n * 6; tries++) {
         const p = samplePoint(rng, i, 0.14, 0.13);
         if (!p || !free(p[0], p[1], 0.22) || distToPaths(p[0], p[1], allPaths) < 0.14) continue;
-        addHouse(p[0], p[1], sectorAng);
+        addHouse(p[0], p[1], sectorAng, i);
         k++;
       }
       for (let k = Math.round(3 * detail); k > 0; k--) {
@@ -666,7 +913,61 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     if (n >= 3 && top === T.Village && free(0, 0, 0.2)) addHouse(0, 0, rng() * 6);
   }
 
-  return { pos: new Float32Array(g.pos), col: new Float32Array(g.col), water: new Float32Array(w.pos), decos, chimneys };
+  // --- Vida na vila: pegada de terra batida sob as casas, trilhas até uma pracinha e,
+  // nas vilas com 3 ou mais casas, um poço. Sem sorteio: sai das posições das casas.
+  if (houses.length) {
+    const vg = tc(theme.ground[T.Village]);
+    const dirt = vg.clone().lerp(tc(theme.roadBed), 0.45).multiplyScalar(0.8);
+    const trail = vg.clone().lerp(tc(theme.roadBed), 0.2).multiplyScalar(1.14);
+    const VILLAGE: Splat = [0, 0, 0, 1];
+    // Trechos contíguos de setores de vila (a casa do centro vai para o maior).
+    const runs: number[][] = [];
+    const start = edges.findIndex((e, i) => e === T.Village && edges[(i + 5) % 6] !== T.Village);
+    if (start < 0) runs.push([0, 1, 2, 3, 4, 5]);
+    else {
+      for (let k = 0; k < 6; k++) {
+        const i = (start + k) % 6;
+        if (edges[i] !== T.Village) continue;
+        if (edges[(i + 5) % 6] === T.Village && runs.length) runs[runs.length - 1].push(i);
+        else runs.push([i]);
+      }
+    }
+    runs.sort((a, b) => b.length - a.length);
+    for (const run of runs) {
+      const hs = houses.filter((h) => run.includes(h.sector) || (h.sector < 0 && run === runs[0]));
+      for (const h of hs) disc(g, h.x, h.z, 0.075 * h.s, 0.004, dirt, 8, VILLAGE);
+      if (hs.length < 2) continue;
+      let px = hs.reduce((a, h) => a + h.x, 0) / hs.length, pz = hs.reduce((a, h) => a + h.z, 0) / hs.length;
+      // A praça não pode cair dentro de uma casa: escorrega em direção ao centro da peça.
+      for (let k = 0; k < 6 && hs.some((h) => Math.hypot(h.x - px, h.z - pz) < 0.1); k++) {
+        px *= 0.82;
+        pz *= 0.82;
+      }
+      for (const h of hs) {
+        // Trilha com uma leve curva (para um lado ou outro, conforme a posição da casa).
+        const mx = (h.x + px) / 2, mz = (h.z + pz) / 2;
+        const dx = px - h.x, dz = pz - h.z, l = Math.hypot(dx, dz) || 1;
+        const bend = Math.sin(h.x * 37.1 + h.z * 19.7) * 0.18 * l;
+        strip(g, bezier([h.x, h.z], [mx - (dz / l) * bend, mz + (dx / l) * bend], [px, pz], 6), 0.024, 0.0045, trail, VILLAGE);
+      }
+      disc(g, px, pz, 0.065, 0.005, trail, 10, VILLAGE);
+      if (hs.length >= 3 && free(px, pz, 0.05) && distToPaths(px, pz, allPaths) > 0.08) {
+        D('well', px, 0, pz, Math.atan2(pz, px), 1, WHITE);
+        taken.push([px, pz]);
+      }
+    }
+  }
+
+  return {
+    pos: new Float32Array(g.pos),
+    col: new Float32Array(g.col),
+    splat: new Float32Array(g.spl),
+    water: new Float32Array(wb?.pos ?? []),
+    wflow: new Float32Array(wb?.flow ?? []),
+    wbed: new Float32Array(wb?.bed ?? []),
+    decos,
+    chimneys,
+  };
 }
 
 const _m = new THREE.Matrix4();

@@ -4,6 +4,7 @@ import { launch } from './browser.mjs';
 
 const base = process.argv[2] ?? 'http://127.0.0.1:4173/';
 const all = [
+  { n: 300, quality: 'ultra' },
   { n: 300, quality: 'high' },
   { n: 1000, quality: 'high' },
   { n: 2500, quality: 'high' },

@@ -1,4 +1,5 @@
 import { DIRS, hkey, opposite } from './hex';
+import { LOOKOUT_MOVES, SITE_REWARD, type Site } from './sites';
 import { type SynHit, type SynKind, synergyOf } from './synergy';
 import { T, isStrict, rotateEdges, type TileDef } from './tiles';
 
@@ -13,6 +14,21 @@ export interface Rules {
   maxQuests: number;
   /** Pontos por borda de interação (bordas diferentes que "conversam"). */
   synergyPoints: number;
+  /** Pontuação que abre cada era da vila (a primeira é 0). Uma só entrada = sem eras. */
+  eraScores: number[];
+  /** Peças ganhas a cada era nova. */
+  eraTiles: number;
+  /** Bônus do tema: pontos extras por borda encaixada de um terreno. */
+  matchBonus: Partial<Record<T, number>>;
+  /** Bônus do tema: pontos extras por interação de um tipo. */
+  synergyBonus: Partial<Record<SynKind, number>>;
+  /** Quantos sítios escondidos o mapa tem. */
+  sites: number;
+  /** Modo zen: a pilha nunca acaba. */
+  infinite: boolean;
+  /** A partida acaba quando todos os sítios forem achados (cada peça que sobrou vale `leftoverPoints`). */
+  endOnSites: boolean;
+  leftoverPoints: number;
 }
 
 export const DEFAULT_RULES: Rules = {
@@ -24,6 +40,14 @@ export const DEFAULT_RULES: Rules = {
   questChance: 0.24,
   maxQuests: 4,
   synergyPoints: 5,
+  eraScores: [0, 500, 1500, 3000],
+  eraTiles: 3,
+  matchBonus: {},
+  synergyBonus: {},
+  sites: 6,
+  infinite: false,
+  endOnSites: false,
+  leftoverPoints: 20,
 };
 
 export interface Placed {
@@ -60,6 +84,8 @@ export interface Check {
   /** Por borda: 0 sem vizinho, 1 encaixa, 2 não encaixa, 3 conflito (rio/trilho), 4 interação. */
   edgeState: number[];
   synergies: SynHit[];
+  /** Sítio ainda escondido nesta posição (a prévia mostra a recompensa). */
+  site: Site | null;
 }
 
 export interface PlaceResult {
@@ -74,6 +100,12 @@ export interface PlaceResult {
   questsDone: Quest[];
   questsFailed: Quest[];
   newQuest: Quest | null;
+  /** Sítio descoberto nesta jogada. */
+  site: Site | null;
+  /** Era alcançada nesta jogada (índice a partir de 0), ou null. */
+  eraUp: number | null;
+  /** Exploradores: pontos pelas peças que sobraram quando o último sítio foi achado. */
+  leftoverBonus?: number;
 }
 
 export class Board {
@@ -85,6 +117,12 @@ export class Board {
   perfects = 0;
   questsCompleted = 0;
   readonly synergyCount: Record<SynKind, number> = { lumber: 0, mill: 0, pasture: 0, apiary: 0 };
+  /** Era atual da vila (0 = primeira). */
+  era = 0;
+  /** Sítios do mapa (preenchidos pelo Game a partir da semente). */
+  sites: Site[] = [];
+  /** Jogadas restantes em que o mirante mostra as próximas peças. */
+  lookout = 0;
   private questSeq = 0;
   // Union-find sobre (peça, setor): refeito a cada jogada, O(n).
   private parent = new Int32Array(0);
@@ -125,7 +163,17 @@ export class Board {
         if (kind) synergies.push({ edge: i, kind });
       }
     }
-    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, synergies };
+    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, synergies, site: this.siteAt(q, r) };
+  }
+
+  /** Sítio ainda não descoberto em (q, r). */
+  siteAt(q: number, r: number): Site | null {
+    for (const s of this.sites) if (!s.found && s.q === q && s.r === r) return s;
+    return null;
+  }
+
+  sitesLeft() {
+    return this.sites.filter((s) => !s.found).length;
   }
 
   /** Coloca sem pontuar (peça inicial, reconstrução de estado). */
@@ -155,11 +203,26 @@ export class Board {
     }
     placed.synergies = c.synergies;
     points += c.synergies.length * R.synergyPoints;
-    for (const h of c.synergies) this.synergyCount[h.kind]++;
+    for (const h of c.synergies) {
+      this.synergyCount[h.kind]++;
+      points += R.synergyBonus[h.kind] ?? 0;
+    }
+    // Bônus do tema por terreno encaixado.
+    for (let i = 0; i < 6; i++) if (c.edgeState[i] === 1) points += R.matchBonus[edges[i]] ?? 0;
 
     // Peças que acabaram de ficar cercadas por 6 vizinhos encaixados.
     const closed: Placed[] = [];
     let tilesGained = 0;
+
+    // Sítio descoberto: o mirante conta a partir da próxima jogada.
+    if (this.lookout > 0) this.lookout--;
+    const site = c.site;
+    if (site) {
+      site.found = true;
+      points += SITE_REWARD[site.kind].points;
+      tilesGained += SITE_REWARD[site.kind].tiles;
+      if (site.kind === 'lookout') this.lookout = LOOKOUT_MOVES;
+    }
     const candidates = [placed, ...DIRS.map(([dq, dr]) => this.get(q + dq, r + dr)).filter((x): x is Placed => !!x)];
     for (const t of candidates) {
       if (t.closed || !this.isClosedPerfect(t)) continue;
@@ -210,7 +273,14 @@ export class Board {
     }
 
     this.score += points;
-    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest };
+    // Eras: a pontuação acumulada abre a próxima, que traz peças.
+    let eraUp: number | null = null;
+    while (this.era + 1 < R.eraScores.length && this.score >= R.eraScores[this.era + 1]) {
+      this.era++;
+      tilesGained += R.eraTiles;
+      eraUp = this.era;
+    }
+    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp };
   }
 
   private isClosedPerfect(t: Placed) {

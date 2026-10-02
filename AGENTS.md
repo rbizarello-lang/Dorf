@@ -1,6 +1,6 @@
 # AGENTS.md: guia para agentes de IA
 
-> **Resumo em inglês:** *Retalhos* is a relaxing hex-tile puzzle in the Dorfromantik genre, with 14 historical/regional themes. Stack: TypeScript, three.js r186 and Vite, with procedural geometry and no art assets. The build is a single HTML file. Before every commit, run `npm run check`, which does the typecheck, simulates 600 games and builds. UI text, docs, code comments and commit messages are in Brazilian Portuguese.
+> **Resumo em inglês:** *Retalhos* is a relaxing hex-tile puzzle in the Dorfromantik genre, with 14 historical/regional themes. Stack: TypeScript, three.js r186 (WebGPURenderer with TSL node materials; WebGPU where available, automatic WebGL2 fallback) and Vite, with procedural geometry and no art assets. The build is a single HTML file. Before every commit, run `npm run check`, which does the typecheck, simulates 600 games and builds. UI text, docs, code comments and commit messages are in Brazilian Portuguese.
 
 Este arquivo existe para que qualquer agente (Claude Code, Codex, Cursor, Copilot, Gemini etc.) entenda o projeto e trabalhe nele sem quebrar o que já funciona. O `README.md` é o manual de quem joga e roda o projeto. Este arquivo é o manual de quem mexe no código.
 
@@ -61,6 +61,8 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
   2. `/opt/pw-browsers/chromium`, que existe nos contêineres do Claude Code;
   3. o Chromium do Playwright. Se não houver nenhum, instale com `npx playwright-core install chromium`.
 - **Renderização por software (SwiftShader):** o FPS medido assim não vale nada. Compare triângulos, draw calls e CPU por quadro.
+- **WebGPU sem GPU:** `scripts/browser.mjs` liga o WebGPU do SwiftShader com `--enable-features=Vulkan --use-vulkan=swiftshader` (sem o Vulkan, o canvas perde o dispositivo). Acrescente `&webgl` à URL para conferir o caminho WebGL2; os dois precisam funcionar.
+- **Captura avulsa:** `node scripts/shot.mjs <pasta> "nome=query" ...` grava fora de `docs/screens` (ex.: `"rio=theme=egito&seed=4&auto=32&zoom=4&focus=4"`). Com `?seed=`, o `?auto=` monta sempre o mesmo tabuleiro, e as capturas ficam comparáveis.
 - **Capturas:** só faça commit das PNGs de `docs/screens/` quando a mudança visual for intencional. Se gerou capturas apenas para conferir, desfaça com `git checkout docs/screens/`.
 - **Rede:** o Chromium tenta acessar domínios do Google. Em ambiente com proxy, essas falhas de conexão são esperadas e inofensivas.
 
@@ -72,6 +74,14 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?gallery&theme=<id>` | mostra todos os kits do tema lado a lado; `window.__gallery` lista as chaves |
 | `?auto=40` | a IA gulosa coloca 40 peças |
 | `?stress=1000` | teste de carga; o resultado fica em `window.__load` |
+| `?focus=4` | centraliza a câmera na peça com mais bordas do terreno (4 = rio); `window.__focus(t, zoom)` |
+| `?webgl` | força o backend WebGL2 (o padrão é WebGPU quando o navegador oferece) |
+| `?fx=ao.gi.ssr.rays.traa.bloom.dof` | liga os efeitos de pós um a um (medir custo); `?fx=` desliga todos |
+| `?timescale=0.05` | desacelera o mundo (animações nas capturas por software) |
+| `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
+| `window.__ripple(idade)` | dispara a onda do chão no foco da câmera, já com essa idade em segundos |
+| `window.__celebrate()` | anel dourado e bando de pássaros no foco da câmera (efeitos de nova era) |
+| `window.__boat(zoom?)` | centraliza a câmera num barco andando (esteiras na água) |
 | `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` | ver o `README.md` |
 | `window.__stats` | estatísticas do último quadro |
 | `window.__pools()` | relatório dos InstancedMesh |
@@ -86,17 +96,30 @@ src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em
   tiles.ts       enum T (Prado, Floresta, Plantação, Vila, Rio, Estrada), rotateEdges, geração de peças
   board.ts       Rules/DEFAULT_RULES, Board: validação, pontuação, grupos, missões, interações
   synergy.ts     tabela das interações (vila×floresta, vila×plantação, vila×prado, plantação×prado)
-  game.ts        Game: semente, pilha, sorteio por peça, descarte, bestMove (IA gulosa)
+  game.ts        Game: semente, pilha, sorteio por peça, descarte, bestMove (IA gulosa), upcoming (mirante)
+  sites.ts       sítios escondidos (ruína, tesouro, relíquia, mirante), da semente por um gerador à parte
+  modes.ts       modos: Clássico, Zen, Desafio do dia, Exploradores (regras + desfazer)
   rng.ts         mulberry32 e utilitários de sorteio
 src/themes/      temas como DADOS
   types.ts       esquema Theme, com cada kit comentado: é a referência de tudo que um tema pode escolher
   themes.ts      6 temas base, THEMES, PERIOD_LABEL/ORDER, themeById
   eras.ts        8 temas históricos (Egito, Song, Vikings, Toscana, Edo, Colonial, Oeste, Andes)
 src/render/
-  lib.ts         geometria dos kits (casas, árvores, plantações, animais, barcos, veículos, marcos),
-                 materiais e shaders (patch via onBeforeCompile), classe Lib
-  tileBuilder.ts buildTile: monta UMA peça (chão, rios, estradas, decoração) a partir de bordas + semente + tema
-  world.ts       World: cena, luz, céu e hora do dia, blocos estáticos, pools instanciados, fantasma, animações de queda
+  gpu.ts         cria o WebGPURenderer (WebGPU ou WebGL2)
+  materials.ts   materiais em TSL: chão, água, kits instanciados (vento, plantações, janelas), grade do vazio; uniformes U
+  noise.ts       texturas de ruído periódicas geradas em código (nuvens, chão, ondulação da água)
+  post.ts        pós-processamento por perfil: SSGI ou GTAO, reflexos (SSR), raios de luz, TRAA, bloom,
+                 profundidade de campo, vinheta, ombro de tons
+  lib.ts         geometria dos kits (casas, árvores, plantações, animais, barcos, veículos, marcos), classe Lib,
+                 instGeometry (atributo de cor por instância)
+  tileBuilder.ts buildTile: monta UMA peça (chão com leito de rio, água com correnteza, estradas, decoração)
+                 a partir de bordas + semente + tema
+  world.ts       World: cena, luz, céu e hora do dia, blocos estáticos, pools instanciados, fantasma, animações
+                 de queda, sentido da correnteza por peça
+  liveTile.ts    LiveTile: peça avulsa (fantasma, queda, pilha)
+  fx.ts          partículas em sprites: poeira, fumaça e brilhos (CPU); clima do tema e vaga-lumes (no shader)
+  sky.ts         céu procedural para a luz de ambiente (IBL)
+  preview.ts     a peça da vez sobre a pilha, com canvas e renderizador próprios
   life.ts        Life: barcos, veículos, animais, moinhos e pássaros que se movem
   cameraRig.ts   câmera orbital
 src/ui/          HUD em HTML/CSS (hud.ts, style.css); a página é o index.html
@@ -126,16 +149,19 @@ scripts/         capturas, teste de carga, conversão para página publicável
    Mude os três juntos ou nenhum.
 5. **Rio e estrada são estritos** (`isStrict`): só encostam neles mesmos. Os 4 terrenos comuns aceitam qualquer vizinho, mas só pontuam quando iguais. As interações pontuam pares diferentes.
 6. **Saves:**
-   - o formato é `{ v, seed, rulesId, moves, score }`, guardado em `localStorage` com o prefixo `retalhos.`;
+   - o formato é `{ v, seed, rulesId, mode, moves, undone, score }` (v4), guardado em `localStorage` com o prefixo `retalhos.`;
    - ao carregar, a partida é **reconstruída pelo replay** das jogadas e conferida contra a pontuação.
    - Se você mudar regras, pontuação ou geração de peças de um jeito que altere o replay, **aumente `SAVE_VERSION` em `main.ts`**. Saves antigos mostram um aviso e são descartados.
 7. **Os testes têm oráculos independentes.** Ao mudar a pontuação, atualize o oráculo em `tests/logic.ts` reimplementando a regra. Nunca faça o oráculo chamar o código que ele testa.
 8. **Tema é só dado.** O renderizador sabe desenhar cada kit; o tema escolhe e colore. Não ponha `if (theme.id === '...')` no render. Crie ou parametrize um kit.
-9. **Shaders (three r186):** o `patch()` de `lib.ts` injeta código via `onBeforeCompile`.
-   - `vColor` é **vec4** nesta versão: atribua `.rgb`.
-   - Os atributos por vértice são `color`, `tint` (quanto a cor da instância tinge) e `glow` (janelas que acendem com `uNight`).
-   - Uniformes: `uTime`, `uWind`, `uNight`, `uClouds`, `uSparkle`, `uGlow`.
-   - Se o shader falhar ao compilar, o erro aparece no console das capturas.
+9. **Materiais em TSL (three r186, `three/webgpu` e `three/tsl`):** nada de `onBeforeCompile` nem GLSL; o mesmo nó compila para WebGPU e WebGL2.
+   - Importe sempre de `three/webgpu` (não de `three`), para o bundle não levar o WebGLRenderer.
+   - Atributos por vértice dos kits: `color`, `tint` (quanto a cor da instância tinge) e `glow` (janelas que acendem com `U.night`). A cor da instância é o atributo `iColor` da geometria criada por `instGeometry()`; não use `mesh.instanceColor`, que o three multiplicaria de novo.
+   - Uniformes globais em `U` (`materials.ts`): `time`, `dt`, `wind`, `night`, `clouds`, `sparkle`, `glow`, `water`, `sun`, `sunDir`.
+   - No r186 a instância é aplicada **antes** do `positionNode`: ali `positionLocal` já está no espaço do mundo (pools) e `positionGeometry` é o vértice original. Quem desloca vértices (vento) também ajusta `positionPrevious`, senão o antisserrilhado temporal deixa rastro.
+   - A água usa os atributos `wflow` (correnteza) e `wbed` (cor do leito e profundidade da coluna): a malha da água repete os triângulos do leito abaixo da linha d'água, então a beira fica exatamente onde a profundidade zera. A correnteza de cada peça herda das vizinhas (`World.flowAt` + `resolveFlow`) e gira junto com a peça no bloco.
+   - Sem tone mapping do renderizador: o pós-processamento aplica um ombro suave que preserva as paletas dos temas.
+   - Se um nó falhar ao compilar, o erro aparece no console das capturas.
 10. **Blocos estáticos só crescem** (append-only). Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim, escondida quando `rig.dist >= 13` (nível de detalhe). Quem consulta geometria pela chave precisa tirar o `~`.
 11. **Construções internas não pontuam.** A roda d'água (vila na beira do rio), a irrigação, a estação e o silo (junto à ferrovia) são só visuais. Pontos de interação vêm apenas de `synergy.ts` × `Rules.synergyPoints`.
 12. **Parâmetros de URL e valores salvos são validados** contra listas fixas (ver `pickQ` e o uso de `Object.hasOwn` para `time`). Mantenha esse padrão ao criar um parâmetro novo.
@@ -149,7 +175,7 @@ Medido com `RUNS=300:high node scripts/stress.mjs`, renderização por software:
 | 300 | alta | ~94 | ~1,37 milhão | ~4,3 ms |
 
 - **Regra prática:** uma mudança visual não deve subir triângulos ou draw calls em mais de ~10% sem justificativa escrita no commit.
-- **Qualidade:** a densidade de decoração é multiplicada por 1 (alta), 0,65 (média) ou 0,4 (baixa). Em telas de toque, o modo automático começa em "média".
+- **Qualidade:** Ultra (pensado para GPUs acima da RX 580: sombras em 3 cascatas de 4096, luz indireta SSGI, reflexos na água, raios de luz no entardecer, TRAA, bloom, profundidade de campo, DPR até 2 e 35% mais vegetação), Alta (GTAO em meia resolução, sombra única de 2048), Média (MSAA, sem pós pesado) e Baixa (sem pós e sem sombras). Cada nível tem um teto de pixels desenhados (Ultra 4K, Alta 1440p, Média e Baixa 1080p; `PIXELS` em `world.ts`): numa tela 4K, descer de nível também reduz a resolução interna. A densidade de decoração é multiplicada por 1,35 (ultra), 1 (alta), 0,65 (média) ou 0,4 (baixa). O modo automático começa em Ultra no computador e em Média em telas de toque, e desce sozinho se o quadro passar de ~26 ms.
 - **Ainda não foi medido:** o FPS numa GPU de verdade.
 
 ## Tarefas comuns
@@ -173,6 +199,10 @@ O menu agrupa os temas pelo campo `period` sem nenhuma outra mudança. Os testes
 
 A lista priorizada de kits que faltam está no fim de `docs/TEMAS.md`.
 
+### Portal e ponte
+
+São opcionais no tema (`gate`, `bridge`) e não pontuam. O `buildTile` decide onde entram sem sorteio: o portal na primeira borda de estrada vizinha de vila, a ponte no meio de um rio de 2 bordas com vila numa margem. Para um tema novo, basta escolher o estilo e as duas cores.
+
 ### Nova interação entre bordas
 
 1. Acrescente o par em `src/core/synergy.ts`: o tipo `SynKind`, `SYN_KINDS` e `synergyOf`.
@@ -190,10 +220,11 @@ A lista priorizada de kits que faltam está no fim de `docs/TEMAS.md`.
 
 ## Estado atual e próximos passos
 
+- **Feito (v4, outubro de 2026):** renderização WebGPU/TSL com GTAO, TRAA, bloom e profundidade de campo; rios escavados com correnteza; céu procedural (IBL); chão com detalhe por terreno; clima por tema; vilas com trilhas; eras da vila, sítios, bônus por tema, desfazer e 4 modos. Ideias de Age of Empires ainda não feitas estão em `docs/IDEIAS_AOE.md` (Centro que evolui, arquitetura por era, aldeões, maravilha, terra incógnita).
 - **Feito (v3):** 14 temas, kits detalhados, 4 interações com prévia em dourado, mundo animado, dia/entardecer/noite, qualidade adaptativa, save v3 com replay, duas rodadas de revisão de código com correções. O histórico está em `docs/VIABILIDADE.md`, Apêndice A.
 - **Pendente:**
   - medir o FPS numa GPU real (`?stress=1000&debug`) no PC e no celular;
-  - kits de fidelidade histórica (`docs/TEMAS.md`): ponte em arco, portais (torii, paifang), torre d'água, templos por cultura, armazém sobre estacas, batata, linho e amoreira, salgueiro e pinheiro-manso, barcos do Nilo e a vapor;
+  - kits de fidelidade histórica que ainda faltam (`docs/TEMAS.md`, fim): roda-d'água como `MillStyle`, cipreste em alameda, estação de fim de linha por tema;
   - funções de jogo: bandeiras, desfazer, mostrar as 3 próximas peças, peças especiais (`docs/VIABILIDADE.md` §12);
   - otimizações com folga conhecida: culling por super-bloco, sombra em cache, renderizar sob demanda (`docs/VIABILIDADE.md` §5).
 - **Publicação:** o build de página única (`scripts/artifact.mjs`) é o que vai para o link público do protótipo.

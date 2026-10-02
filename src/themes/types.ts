@@ -19,7 +19,10 @@ export type TreeGeo =
   | 'birch' // bétula: tronco branco, copa pequena
   | 'cactus' // cacto saguaro
   | 'bamboo' // touceira de bambu
-  | 'araucaria'; // araucária em "candelabro"
+  | 'araucaria' // araucária em "candelabro"
+  | 'willow' // salgueiro-chorão: ramos pendentes
+  | 'umbrella' // pinheiro-manso: tronco alto e copa chata em guarda-sol
+  | 'waxpalm'; // palmeira-de-cera: tronco muito alto e claro, copa pequena
 
 /** Corpo da casa (as proporções mudam o caráter da vila). */
 export type BodyStyle =
@@ -65,6 +68,10 @@ export type Landmark =
   | 'temple' // templo de colunas
   | 'stave' // igreja de madeira escalonada (nórdica)
   | 'dome' // cúpula grande (Marte)
+  | 'watertower' // caixa d'água de ferrovia sobre cavalete de madeira
+  | 'hall' // salão comprido nórdico com cabeças de dragão nas cumeeiras
+  | 'pylon' // templo egípcio: pilone trapezoidal com dois obeliscos
+  | 'kancha' // templo inca de pedra, paredes inclinadas e nichos trapezoidais
   | 'none';
 
 export type CropStyle =
@@ -82,6 +89,9 @@ export type CropStyle =
   | 'coffee' // café, arbustos escuros com frutos vermelhos
   | 'cotton' // algodão, arbustos com pontos brancos
   | 'quinoa' // quinoa com panículas coloridas
+  | 'potato' // batata: touceira baixa com flores (cor da planta = folhagem)
+  | 'flax' // linho: hastes finas com flor azul (cor da planta = flor)
+  | 'mulberry' // amoreira podada baixa, para a seda
   | 'hydro'; // hidroponia luminosa (ficção)
 
 export interface CropKind {
@@ -94,13 +104,48 @@ export interface CropKind {
 }
 
 export type AnimalKind = 'sheep' | 'cow' | 'goat' | 'horse' | 'donkey' | 'buffalo' | 'llama' | 'camel' | 'deer' | 'rover';
-export type BoatKind = 'rowboat' | 'sailboat' | 'felucca' | 'junk' | 'longship' | 'barge' | 'canoe' | 'reedboat' | 'hover';
+export type BoatKind =
+  | 'rowboat'
+  | 'sailboat'
+  | 'felucca'
+  | 'junk'
+  | 'longship'
+  | 'barge'
+  | 'canoe'
+  | 'reedboat'
+  | 'nile' // barco do Nilo: pontas recurvadas e vela quadrada larga
+  | 'paddle' // vapor de roda de pás na popa
+  | 'hover';
 /** Como a borda "linha" (índice 5) é desenhada. */
 export type RoadStyle = 'rail' | 'dirt' | 'stone' | 'sand' | 'maglev';
 /** O que anda pela linha: trem, carroça, caravana de animais, maglev. */
 export type VehicleKind = 'steam' | 'cart' | 'caravan' | 'maglev';
 /** Estrutura construída quando vila encosta em plantação. */
-export type MillStyle = 'windmill' | 'granary';
+export type MillStyle =
+  | 'windmill' // moinho de vento com pás de pano
+  | 'granary' // celeiro de silos redondos
+  | 'windpump' // moinho-bomba americano: torre de treliça, rotor de aço e caixa d'água
+  | 'stilt'; // armazém sobre estacas (estabur, celeiro elevado)
+
+/** Portal sobre a estrada na entrada da vila. */
+export type GateStyle =
+  | 'torii' // dois pilares e duas travessas, a de cima recurvada
+  | 'paifang' // três vãos com telhadinhos
+  | 'inca'; // portal trapezoidal de pedra
+/** Ponte de pedestres sobre o rio, entre a vila e a outra margem. */
+export type BridgeStyle =
+  | 'stone' // arco de pedra com parapeito
+  | 'wood' // arco alto de madeira com guarda-corpo (ponte arco-íris, taikobashi)
+  | 'rope'; // ponte de corda pênsil, tabuado e cabos
+
+/** O que flutua no ar, desenhado pelo shader (sem custo de CPU). */
+export type WeatherKind =
+  | 'none'
+  | 'snow' // flocos redondos caindo devagar
+  | 'petals' // pétalas ovais que giram e viram no ar
+  | 'leaves' // folhas alongadas, caem rodopiando
+  | 'dust' // poeira fina levada pelo vento, quase na horizontal
+  | 'pollen'; // penugem e pólen flutuando, brilham contra a luz
 
 export interface Theme {
   id: string;
@@ -158,6 +203,10 @@ export interface Theme {
   /** Cor das janelas (de dia) e do brilho à noite. */
   window: string;
   mill: MillStyle;
+  /** Portal sobre a estrada onde ela encosta na vila: [estrutura, topo]. Omitir = sem portal. */
+  gate?: { style: GateStyle; colors: [string, string] };
+  /** Ponte sobre rio de 2 bordas com vila numa margem: [estrutura, detalhe]. Omitir = sem ponte. */
+  bridge?: { style: BridgeStyle; colors: [string, string] };
 
   // --- plantação e prado
   crops: CropKind[];
@@ -175,10 +224,14 @@ export interface Theme {
 
   // --- efeitos e interface
   smoke: string;
+  /** Partículas no ar e sua densidade (1 = padrão). */
+  weather: { kind: WeatherKind; colors: [string, string]; density: number };
   sparkle: string;
   ui: { accent: string; panel: string; ink: string; soft: string };
   /** Nomes das interações entre bordas neste tema. */
   synergy: { lumber: string; mill: string; pasture: string; apiary: string };
   rules?: Partial<Rules>;
+  /** Nomes das 4 eras da vila (padrão: Aldeia, Vila, Burgo, Cidade). */
+  eras?: [string, string, string, string];
   ruleNote?: string;
 }

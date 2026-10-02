@@ -1,6 +1,7 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import type { AnimalKind, BoatKind, BodyStyle, CropStyle, HouseKind, Landmark, RoofStyle, Theme, TreeGeo, VehicleKind } from '../themes/types';
+import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
+import type { AnimalKind, BoatKind, BodyStyle, BridgeStyle, CropStyle, GateStyle, HouseKind, Landmark, RoofStyle, Theme, TreeGeo, VehicleKind } from '../themes/types';
 
 // Biblioteca de "kits": geometrias low-poly com cor por vértice, montadas por tema.
 // Cada chave vira um InstancedMesh (1 draw call para milhares de cópias).
@@ -106,6 +107,50 @@ function hull(len: number, w: number, h: number) {
   return g;
 }
 
+/** Afina o topo: x e z encolhem até o fator `k` na altura máxima (paredes inclinadas, pilones). */
+function taper(geo: THREE.BufferGeometry, k: number) {
+  const g = geo.index ? geo.toNonIndexed() : geo;
+  g.computeBoundingBox();
+  const { min, max } = g.boundingBox!;
+  const cx = (min.x + max.x) / 2, cz = (min.z + max.z) / 2;
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const t = (pos.getY(i) - min.y) / (max.y - min.y || 1);
+    const f = 1 + (k - 1) * t;
+    pos.setXYZ(i, cx + (pos.getX(i) - cx) * f, pos.getY(i), cz + (pos.getZ(i) - cz) * f);
+  }
+  return g;
+}
+
+/** Inclina para o lado: desloca x proporcionalmente à altura (`dx` no topo). */
+function lean(geo: THREE.BufferGeometry, dx: number) {
+  geo.computeBoundingBox();
+  const { min, max } = geo.boundingBox!;
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) pos.setX(i, pos.getX(i) + (dx * (pos.getY(i) - min.y)) / (max.y - min.y || 1));
+  return geo;
+}
+
+/** Pirâmide de base retangular (telhados de quatro águas pequenos). */
+const pyramid = (w: number, h: number, d: number, y: number) => new THREE.ConeGeometry(Math.SQRT1_2, 1, 4).rotateY(Math.PI / 4).scale(w, h, d).translate(0, y + h / 2, 0);
+
+/** Barra de seção quadrada entre dois pontos (treliças, cabos, pernas inclinadas). */
+function strut(a: [number, number, number], b: [number, number, number], t: number) {
+  const va = new THREE.Vector3(...a), vb = new THREE.Vector3(...b);
+  const dir = vb.clone().sub(va);
+  const g = new THREE.BoxGeometry(t, dir.length(), t);
+  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize()));
+  return g.translate((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+}
+
+/** Trapézio vertical voltado para +z (portas e nichos incas). */
+function trapezoid(wb: number, wt: number, h: number) {
+  const g = new THREE.BufferGeometry();
+  const v = [-wb / 2, 0, 0, wb / 2, 0, 0, wt / 2, h, 0, -wb / 2, 0, 0, wt / 2, h, 0, -wt / 2, h, 0];
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(v), 3));
+  return g;
+}
+
 // ---------------------------------------------------------------- casas
 
 export interface HouseMeta {
@@ -183,8 +228,8 @@ function wallGeometry(k: HouseKind, win: Col) {
   const body = k.body === 'round' ? cyl(w / 2, w / 2, h, 12) : box(w, h, d);
   const parts: Part[] = [{ geo: body, color: '#ffffff', tint: 1 }, ...windowsFor(k.body, win, w, h, d)];
   if (k.trim) parts.push(...trimFor(k.body, k.trim, w, h, d));
-  // Soco (base) um pouco mais escuro dá peso à casa.
-  if (k.body !== 'round') parts.push({ geo: box(w + 0.004, 0.012, d + 0.004), color: '#8a7a6a' });
+  // Soco (base) escuro dá peso à casa e a separa do chão claro (legibilidade de longe).
+  if (k.body !== 'round') parts.push({ geo: box(w + 0.004, 0.018, d + 0.004), color: '#6a5d52' });
   return kit(parts);
 }
 
@@ -262,6 +307,8 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean): { ge
       g.scale(w + o * 2, rh / 1.5, (d + o * 2) / 1.732).translate(0, h + rh / 3, 0);
       parts.push({ geo: g, color: '#fff', tint: 1 });
       if (style === 'turf') parts.push({ geo: box(w + o * 2 + 0.004, 0.01, 0.01, 0, h + rh - 0.004), color: '#6a8a3a' });
+      // Beiral escuro: o telhado se destaca do chão mesmo quando tem a cor dele (neve).
+      for (const z of [d / 2 + o, -d / 2 - o]) parts.push({ geo: box(w + o * 2 + 0.003, 0.007, 0.008, 0, h - 0.005, z), color: '#3e3530' });
       top = h + rh;
     }
   }
@@ -372,6 +419,36 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
       }
       return kit(parts);
     }
+    case 'willow': {
+      // Copa baixa e larga com cortina de ramos: cones de ponta para baixo em volta.
+      const parts: Part[] = [
+        { geo: cyl(0.016, 0.026, 0.15, 5).rotateZ(0.12), color: trunk, grad: [0.8, 1.05, 0, 0.15] },
+        { geo: jitter(ico(0.09, 1), 0.016, 31).scale(1.25, 0.6, 1.25).translate(0.015, 0.2, 0), color: '#fff', tint: 1, grad: [0.85, 1.1, 0.15, 0.25] },
+      ];
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2 + 0.2;
+        const h = 0.13 + (i % 3) * 0.025;
+        const strand = new THREE.ConeGeometry(0.03, h, 4).rotateX(Math.PI).translate(0.015 + Math.cos(a) * 0.088, 0.205 - h / 2, Math.sin(a) * 0.088);
+        parts.push({ geo: strand, color: '#fff', tint: 1, grad: [0.72, 1.0, 0.07, 0.2] });
+      }
+      return kit(parts);
+    }
+    case 'umbrella':
+      return kit([
+        { geo: cyl(0.012, 0.02, 0.17, 5).rotateZ(0.1), color: trunk, grad: [0.8, 1.05, 0, 0.17] },
+        { geo: cyl(0.01, 0.012, 0.1, 5).rotateZ(-0.18).translate(-0.006, 0.16, 0), color: trunk },
+        { geo: jitter(ico(0.1, 1), 0.016, 32).scale(1.55, 0.36, 1.45).translate(0.006, 0.27, 0), color: '#fff', tint: 1, grad: [0.72, 1.1, 0.24, 0.3] },
+      ]);
+    case 'waxpalm': {
+      // Palmeira-de-cera dos Andes: o tronco claro e altíssimo é o que a identifica.
+      const parts: Part[] = [{ geo: cyl(0.009, 0.013, 0.46, 5), color: '#d8d2c2', grad: [0.85, 1.05, 0, 0.46] }];
+      for (let i = 0; i < 6; i++) {
+        const leaf = new THREE.ConeGeometry(0.024, 0.14, 3, 1).rotateZ(-Math.PI / 2 - 0.55).translate(0.06, 0.45, 0).rotateY((i / 6) * Math.PI * 2 + 0.4);
+        parts.push({ geo: leaf, color: '#fff', tint: 1 });
+      }
+      parts.push({ geo: oct(0.014).translate(0, 0.45, 0), color: '#5a6a3a' });
+      return kit(parts);
+    }
   }
 }
 
@@ -400,6 +477,9 @@ export const CROP_LAYOUT: Record<CropStyle, CropLayout> = {
   coffee: { rowGap: 0.06, step: 0.05, scale: [0.9, 1.1], rowColor: false },
   cotton: { rowGap: 0.055, step: 0.045, scale: [0.9, 1.1], rowColor: false },
   quinoa: { rowGap: 0.05, step: 0.042, scale: [0.9, 1.15], rowColor: true },
+  potato: { rowGap: 0.058, step: 0.042, scale: [0.9, 1.1], rowColor: false },
+  flax: { rowGap: 0.042, step: 0.03, scale: [0.95, 1.2], rowColor: false },
+  mulberry: { rowGap: 0.066, step: 0.05, scale: [0.9, 1.1], rowColor: false },
   hydro: { rowGap: 0.06, step: 0.05, scale: [0.9, 1.1], rowColor: false },
 };
 
@@ -501,6 +581,30 @@ function cropGeometry(style: CropStyle): THREE.BufferGeometry {
       ]);
     case 'quinoa':
       return kit([...green(tuft(3, 0.05, 0.006, 0.014, 0.5, 0, 21)), { geo: oct(0.012).scale(0.9, 2.2, 0.9).translate(0, 0.07, 0), color: '#fff', tint: 1, grad: [0.8, 1.1, 0.05, 0.1] }]);
+    case 'potato':
+      // Leira de terra com a touceira por cima; flores brancas e lilases salpicadas.
+      return kit([
+        { geo: jitter(ico(0.024, 0), 0.004, 33).scale(1.3, 0.45, 1.1).translate(0, 0.004, 0), color: '#6a4e34' },
+        { geo: jitter(ico(0.024, 0), 0.005, 34).scale(1.2, 0.75, 1.1).translate(0, 0.024, 0), color: '#fff', tint: 1, grad: [0.72, 1.08, 0.008, 0.042] },
+        { geo: oct(0.0055).translate(0.012, 0.042, 0.006), color: '#f4f0f6' },
+        { geo: oct(0.0055).translate(-0.01, 0.04, -0.008), color: '#c8b0dc' },
+      ]);
+    case 'flax':
+      return kit([
+        ...green(tuft(4, 0.075, 0.0035, 0.01, 0.85, 0.004, 35)),
+        ...[
+          [0.006, 0.078, 0.003],
+          [-0.006, 0.072, -0.004],
+          [0.001, 0.084, -0.006],
+        ].map(([x, y, z]) => ({ geo: oct(0.006).scale(1.2, 0.6, 1.2).translate(x, y, z), color: '#fff', tint: 1 })),
+      ]);
+    case 'mulberry':
+      // Amoreira cortada baixa (como nos amoreirais de seda): toco nodoso e copa redonda.
+      return kit([
+        { geo: cyl(0.005, 0.008, 0.04, 4), color: '#6a5040' },
+        { geo: cyl(0.003, 0.004, 0.025, 4).rotateZ(0.6).translate(0.006, 0.03, 0), color: '#6a5040' },
+        { geo: jitter(ico(0.03, 0), 0.006, 36).scale(1.1, 0.85, 1.1).translate(0, 0.058, 0), color: '#fff', tint: 1, grad: [0.75, 1.08, 0.035, 0.085] },
+      ]);
     case 'hydro':
       return kit([
         { geo: box(0.05, 0.012, 0.03), color: '#cfd6de' },
@@ -604,6 +708,86 @@ function landmarkGeometry(kind: Landmark, [wall, roof, det]: [string, string, st
       parts.push({ geo: cone(0.012, 0.04, 4, 0.1, 0.12, 0).rotateZ(-0.9), color: det });
       return kit(parts);
     }
+    case 'watertower': {
+      // Caixa d'água de ferrovia: tonel de madeira com aros de ferro sobre cavalete.
+      const parts: Part[] = [];
+      const legW = '#5a4636';
+      for (const [x, z] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) parts.push({ geo: strut([x * 0.065, 0, z * 0.065], [x * 0.05, 0.21, z * 0.05], 0.012), color: legW });
+      for (const s of [1, -1]) {
+        parts.push({ geo: strut([-0.062, 0.02, s * 0.058], [0.055, 0.19, s * 0.052], 0.005), color: legW });
+        parts.push({ geo: strut([0.062, 0.02, s * 0.058], [-0.055, 0.19, s * 0.052], 0.005), color: legW });
+        parts.push({ geo: strut([s * 0.058, 0.02, -0.062], [s * 0.052, 0.19, 0.055], 0.005), color: legW });
+      }
+      parts.push({ geo: box(0.15, 0.01, 0.15, 0, 0.205), color: legW });
+      parts.push({ geo: cyl(0.074, 0.078, 0.1, 12, 0, 0.215), color: wall, grad: [0.85, 1.05, 0.215, 0.315] });
+      for (const y of [0.228, 0.262, 0.296]) parts.push({ geo: cyl(0.08, 0.08, 0.005, 12, 0, y), color: det });
+      parts.push({ geo: cone(0.088, 0.055, 12, 0, 0.315), color: roof });
+      // Bica que desce para encher o tênder da locomotiva.
+      parts.push({ geo: strut([0.07, 0.24, 0], [0.13, 0.17, 0], 0.01), color: det });
+      parts.push({ geo: box(0.04, 0.008, 0.04), color: '#8a7a6a' });
+      return kit(parts);
+    }
+    case 'hall': {
+      // Salão nórdico: telhado íngreme e tábuas cruzadas nas empenas, com cabeças de dragão.
+      const parts: Part[] = [
+        { geo: box(0.36, 0.022, 0.17), color: '#6a5d52' },
+        { geo: box(0.34, 0.075, 0.15), color: wall, grad: [0.85, 1.05, 0, 0.075] },
+        { geo: gable(0.37, 0.14, 0.2, 0.075), color: roof },
+        { geo: box(0.03, 0.05, 0.006, 0.04, 0, 0.076), color: DOOR },
+        { geo: box(0.018, 0.02, 0.006, -0.08, 0.035, 0.076), color: win, glow: 1 },
+        { geo: box(0.018, 0.02, 0.006, -0.08, 0.035, -0.076), color: win, glow: 1 },
+      ];
+      for (const s of [1, -1]) {
+        const x = s * 0.185;
+        parts.push({ geo: new THREE.BoxGeometry(0.008, 0.08, 0.012).rotateX(0.7).translate(x, 0.215, 0.012), color: roof });
+        parts.push({ geo: new THREE.BoxGeometry(0.008, 0.08, 0.012).rotateX(-0.7).translate(x, 0.215, -0.012), color: roof });
+        parts.push({ geo: cone(0.01, 0.04, 4).rotateZ(-s * 1.15).translate(x + s * 0.016, 0.24, 0.026), color: det });
+        parts.push({ geo: cone(0.01, 0.04, 4).rotateZ(-s * 1.15).translate(x + s * 0.016, 0.24, -0.026), color: det });
+      }
+      return kit(parts);
+    }
+    case 'pylon': {
+      // Templo do Novo Império: pilone de duas torres inclinadas, portal no meio e obeliscos à frente.
+      const parts: Part[] = [{ geo: box(0.34, 0.016, 0.34, 0, 0, -0.04), color: det }];
+      for (const s of [1, -1]) {
+        parts.push({ geo: taper(box(0.12, 0.2, 0.07, s * 0.085, 0.016, 0.04), 0.78), color: wall, grad: [0.88, 1.05, 0, 0.22] });
+        parts.push({ geo: box(0.1, 0.012, 0.062, s * 0.085, 0.216, 0.04), color: wall });
+        parts.push({ geo: box(0.09, 0.006, 0.004, s * 0.085, 0.12, 0.072), color: det });
+        // Obelisco: fuste de base quadrada e piramídio dourado.
+        parts.push({ geo: box(0.03, 0.012, 0.03, s * 0.07, 0.016, 0.125), color: det });
+        parts.push({ geo: cyl(0.0085, 0.013, 0.17, 4, s * 0.07, 0.028, 0.125).rotateY(Math.PI / 4), color: wall });
+        parts.push({ geo: pyr(0.013, 0.02, 0.013, 0.198).translate(s * 0.07, 0, 0.125), color: roof });
+      }
+      parts.push({ geo: box(0.05, 0.15, 0.05, 0, 0.016, 0.04), color: wall });
+      parts.push({ geo: box(0.026, 0.07, 0.004, 0, 0.016, 0.066), color: DOOR });
+      parts.push({ geo: box(0.2, 0.1, 0.17, 0, 0.016, -0.1), color: wall, grad: [0.9, 1.04, 0, 0.12] });
+      parts.push({ geo: box(0.12, 0.08, 0.06, 0, 0.016, -0.2), color: wall });
+      parts.push({ geo: box(0.004, 0.016, 0.03, 0.1, 0.08, -0.1), color: win, glow: 1 });
+      parts.push({ geo: box(0.004, 0.016, 0.03, -0.1, 0.08, -0.1), color: win, glow: 1 });
+      return kit(parts);
+    }
+    case 'kancha': {
+      // Templo inca: pedra sem colunas, paredes que se inclinam para dentro, nichos e
+      // porta trapezoidais e telhado alto de palha.
+      const stone = (w: number, h: number, d: number, x: number, z: number, ry: number): Part[] => {
+        const parts: Part[] = [
+          { geo: taper(box(w, h, d, 0, 0.02), 0.9).rotateY(ry).translate(x, 0, z), color: wall, grad: [0.85, 1.05, 0.02, 0.02 + h] },
+          { geo: gable(w + 0.03, 0.11, d + 0.04, 0.02 + h).rotateY(ry).translate(x, 0, z), color: roof, grad: [0.85, 1.08, 0.02 + h, 0.13 + h] },
+        ];
+        const fz = d / 2 + 0.0015;
+        const front = (g: THREE.BufferGeometry) => g.rotateY(ry).translate(x, 0, z);
+        parts.push({ geo: front(trapezoid(0.034, 0.024, 0.06).translate(0, 0.02, fz)), color: DOOR });
+        for (const nx of [-w * 0.3, w * 0.3]) parts.push({ geo: front(trapezoid(0.02, 0.014, 0.028).translate(nx, 0.05, fz - 0.001)), color: '#4a443c' });
+        parts.push({ geo: front(trapezoid(0.02, 0.014, 0.02).translate(0, 0.088, fz - 0.002)), color: win, glow: 1 });
+        return parts;
+      };
+      return kit([
+        { geo: box(0.34, 0.02, 0.28), color: det },
+        ...stone(0.22, 0.1, 0.12, 0, -0.06, 0),
+        ...stone(0.12, 0.08, 0.09, 0.1, 0.08, -Math.PI / 2),
+        { geo: box(0.1, 0.035, 0.022, -0.09, 0.02, 0.1), color: wall },
+      ]);
+    }
     case 'dome':
       return kit([
         { geo: cyl(0.22, 0.23, 0.03, 16), color: wall },
@@ -649,6 +833,176 @@ function wheelGeometry(wood: Col) {
   }
   parts.push({ geo: new THREE.TorusGeometry(0.06, 0.005, 4, 12).rotateY(Math.PI / 2).translate(0.014, 0, 0), color: '#5a4032' });
   parts.push({ geo: new THREE.TorusGeometry(0.06, 0.005, 4, 12).rotateY(Math.PI / 2).translate(-0.014, 0, 0), color: '#5a4032' });
+  return kit(parts);
+}
+
+// ---------------------------------------------------------------- portais e pontes
+
+/** Portal sobre a estrada: a via passa ao longo de z, os pilares ficam fora dela em x. */
+function gateGeometry(style: GateStyle, [main, top]: [string, string]): THREE.BufferGeometry {
+  switch (style) {
+    case 'torii':
+      return kit([
+        ...[-0.12, 0.12].flatMap((x) => [
+          { geo: cyl(0.009, 0.011, 0.16, 6, x), color: main },
+          { geo: cyl(0.013, 0.013, 0.014, 6, x), color: top },
+        ]),
+        { geo: box(0.28, 0.012, 0.012, 0, 0.11), color: main },
+        { geo: box(0.012, 0.03, 0.008, 0, 0.122), color: main },
+        { geo: box(0.3, 0.012, 0.016, 0, 0.152), color: main },
+        // Kasagi: a travessa de cima, preta, com as pontas erguidas.
+        { geo: box(0.26, 0.012, 0.022, 0, 0.164), color: top },
+        ...[1, -1].map((s) => ({ geo: new THREE.BoxGeometry(0.05, 0.012, 0.022).rotateZ(s * 0.22).translate(s * 0.15, 0.174, 0), color: top })),
+      ]);
+    case 'paifang': {
+      const parts: Part[] = [];
+      for (const [x, h] of [
+        [-0.15, 0.12],
+        [-0.065, 0.16],
+        [0.065, 0.16],
+        [0.15, 0.12],
+      ] as const) {
+        parts.push({ geo: cyl(0.008, 0.009, h, 6, x), color: main }, { geo: box(0.022, 0.014, 0.022, x), color: '#9a948a' });
+      }
+      parts.push({ geo: box(0.15, 0.022, 0.012, 0, 0.13), color: main }, { geo: box(0.06, 0.03, 0.006, 0, 0.098), color: top });
+      for (const x of [-0.108, 0.108]) parts.push({ geo: box(0.1, 0.016, 0.012, x, 0.098), color: main });
+      // Telhadinhos de beiral largo: o do meio mais alto.
+      parts.push({ geo: pyramid(0.21, 0.035, 0.06, 0.152), color: top }, { geo: box(0.17, 0.006, 0.028, 0, 0.183), color: top });
+      for (const x of [-0.112, 0.112]) parts.push({ geo: pyramid(0.12, 0.028, 0.05, 0.12).translate(x, 0, 0), color: top });
+      return kit(parts);
+    }
+    case 'inca':
+      // Portal de pedra trapezoidal (como o Inti Punku): ombreiras que se inclinam para dentro.
+      return kit([
+        ...[1, -1].flatMap((s) => [
+          { geo: lean(taper(box(0.06, 0.13, 0.07, s * 0.14, 0), 0.82), -s * 0.02), color: main, grad: [0.85, 1.05, 0, 0.13] as [number, number, number, number] },
+          { geo: box(0.05, 0.03, 0.08, s * 0.15), color: top },
+        ]),
+        { geo: box(0.3, 0.035, 0.07, 0, 0.13), color: main },
+        { geo: box(0.32, 0.008, 0.074, 0, 0.165), color: top },
+      ]);
+  }
+}
+
+/** Ponte sobre o rio: atravessa ao longo de x (de margem a margem), a água corre em z. */
+function bridgeGeometry(style: BridgeStyle, [main, det]: [string, string]): THREE.BufferGeometry {
+  const L = 0.31;
+  const parts: Part[] = [];
+  /** Trechos retos ao longo de uma curva y(x): tábuas do tabuleiro, corrimões, cabos. */
+  const along = (y: (x: number) => number, n: number, x0: number, x1: number, h: number, w: number, z: number, color: string) => {
+    for (let i = 0; i < n; i++) {
+      const a = x0 + ((x1 - x0) * i) / n, b = x0 + ((x1 - x0) * (i + 1)) / n;
+      const ang = Math.atan2(y(b) - y(a), b - a);
+      parts.push({ geo: new THREE.BoxGeometry(Math.hypot(b - a, y(b) - y(a)) + 0.002, h, w).rotateZ(ang).translate((a + b) / 2, (y(a) + y(b)) / 2, z), color });
+    }
+  };
+  switch (style) {
+    case 'stone': {
+      // Arco de pedra: perfil extrudado (tabuleiro em lombada, intradorso em arco).
+      const H = 0.085;
+      const deck = (x: number) => H * (1 - (x / L) ** 2) + 0.012;
+      const sh = new THREE.Shape();
+      sh.moveTo(-L, -0.03);
+      for (let i = 0; i <= 12; i++) {
+        const x = -L + (2 * L * i) / 12;
+        sh.lineTo(x, deck(x));
+      }
+      sh.lineTo(L, -0.03);
+      const rx = 0.2, ry = 0.085;
+      for (let i = 0; i <= 10; i++) {
+        const x = rx - (2 * rx * i) / 10;
+        sh.lineTo(x, -0.03 + ry * Math.sqrt(Math.max(0, 1 - (x / rx) ** 2)));
+      }
+      sh.closePath();
+      const body = new THREE.ExtrudeGeometry(sh, { depth: 0.09, bevelEnabled: false }).translate(0, 0, -0.045);
+      parts.push({ geo: body, color: main, grad: [0.75, 1.05, -0.03, 0.1] });
+      along((x) => deck(x) + 0.008, 8, -L, L, 0.018, 0.012, 0.04, det);
+      along((x) => deck(x) + 0.008, 8, -L, L, 0.018, 0.012, -0.04, det);
+      return kit(parts);
+    }
+    case 'wood': {
+      // Arco alto de madeira: tabuleiro em lombada sobre vigas cruzadas, guarda-corpo pintado.
+      // Alto o bastante para os barcos passarem por baixo.
+      const H = 0.13;
+      const deck = (x: number) => H * (1 - (x / L) ** 2) + 0.01;
+      along(deck, 10, -L, L, 0.01, 0.08, 0, main);
+      along((x) => deck(x) - 0.022, 8, -0.27, 0.27, 0.012, 0.012, 0.03, main);
+      along((x) => deck(x) - 0.022, 8, -0.27, 0.27, 0.012, 0.012, -0.03, main);
+      for (const z of [0.038, -0.038]) {
+        along((x) => deck(x) + 0.032, 10, -L + 0.02, L - 0.02, 0.006, 0.006, z, det);
+        for (let i = 0; i <= 6; i++) {
+          const x = -L + 0.02 + ((2 * L - 0.04) * i) / 6;
+          parts.push({ geo: box(0.007, 0.034, 0.007, x, deck(x), z), color: det });
+        }
+      }
+      for (const s of [1, -1]) parts.push({ geo: box(0.05, 0.03, 0.1, s * (L - 0.01), -0.02), color: '#7a7066' });
+      return kit(parts);
+    }
+    case 'rope': {
+      // Ponte pênsil: tabuado que cede no meio, dois cabos de mão e cabeceiras de pedra.
+      const deck = (x: number) => 0.06 - 0.025 * (1 - (x / 0.27) ** 2);
+      for (let i = 0; i <= 18; i++) {
+        const x = -0.27 + (0.54 * i) / 18;
+        parts.push({ geo: box(0.014, 0.005, 0.07, x, deck(x)), color: main });
+      }
+      for (const z of [0.036, -0.036]) {
+        along((x) => deck(x) + 0.004, 8, -0.27, 0.27, 0.004, 0.004, z, det);
+        along((x) => deck(x) + 0.045, 8, -0.27, 0.27, 0.005, 0.005, z, det);
+      }
+      for (const s of [1, -1]) {
+        parts.push({ geo: box(0.05, 0.07, 0.1, s * 0.3, -0.01), color: '#8f897c' });
+        for (const z of [0.036, -0.036]) parts.push({ geo: cyl(0.006, 0.007, 0.075, 5, s * 0.285, 0.04, z), color: main });
+      }
+      return kit(parts);
+    }
+  }
+}
+
+/** Moinho-bomba americano (sem o rotor, que gira à parte): torre de treliça e caixa d'água. */
+function windpumpBody(wood: Col) {
+  const parts: Part[] = [];
+  const top = 0.3;
+  const corners = [[1, 1], [1, -1], [-1, -1], [-1, 1]];
+  const at = (k: number, y: number): [number, number, number] => {
+    const r = 0.045 + (0.012 - 0.045) * (y / top);
+    return [corners[k][0] * r, y, corners[k][1] * r];
+  };
+  for (let k = 0; k < 4; k++) {
+    parts.push({ geo: strut(at(k, 0), at(k, top), 0.007), color: wood });
+    for (const y of [0.1, 0.2]) parts.push({ geo: strut(at(k, y), at((k + 1) % 4, y), 0.004), color: wood });
+    parts.push({ geo: strut(at(k, 0.01), at((k + 1) % 4, 0.1), 0.003), color: wood });
+  }
+  parts.push({ geo: box(0.03, 0.012, 0.03, 0, top), color: '#5a5a5e' });
+  // Leme de cauda, para trás (-z), mantendo o rotor de frente para o vento.
+  parts.push({ geo: strut([0, top + 0.012, 0], [0, top + 0.02, -0.1], 0.005), color: '#5a5a5e' });
+  parts.push({ geo: box(0.003, 0.04, 0.05, 0, top - 0.002, -0.1), color: '#c9ccd2' });
+  // Caixa d'água ao pé da torre.
+  parts.push({ geo: cyl(0.045, 0.047, 0.035, 12, 0.07, 0, 0.04), color: wood, grad: [0.8, 1.05, 0, 0.035] });
+  parts.push({ geo: cyl(0.04, 0.04, 0.002, 12, 0.07, 0.031, 0.04), color: '#4a7090' });
+  parts.push({ geo: strut([0, 0.03, 0], [0.04, 0.034, 0.03], 0.004), color: '#5a5a5e' });
+  return kit(parts);
+}
+
+/** Rotor de lâminas de aço do moinho-bomba: gira em torno de z, centro em (0,0,0). */
+function rotorGeometry() {
+  const parts: Part[] = [{ geo: cyl(0.01, 0.01, 0.016, 6).rotateX(Math.PI / 2), color: '#4a4a4e' }];
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2;
+    parts.push({ geo: new THREE.BoxGeometry(0.012, 0.05, 0.002).rotateY(0.35).translate(0, 0.04, 0).rotateZ(a), color: '#c9ccd2' });
+  }
+  parts.push({ geo: new THREE.TorusGeometry(0.06, 0.002, 3, 14), color: '#8a8f96' });
+  return kit(parts);
+}
+
+/** Armazém sobre estacas (estabur): pés de madeira com pedras, sótão em balanço, escada. */
+function stiltGeometry(walls: Col, roofs: Col, wood: Col) {
+  const parts: Part[] = [];
+  for (const x of [-0.035, 0.035]) for (const z of [-0.03, 0.03]) parts.push({ geo: cyl(0.006, 0.007, 0.045, 5, x, 0, z), color: wood }, { geo: cyl(0.012, 0.011, 0.008, 6, x, 0.045, z), color: '#8a8278' });
+  parts.push({ geo: box(0.09, 0.06, 0.08, 0, 0.053), color: walls, grad: [0.85, 1.05, 0.05, 0.11] });
+  parts.push({ geo: box(0.11, 0.035, 0.1, 0, 0.113), color: walls });
+  parts.push({ geo: new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2).scale(0.13, 0.04, 0.12 / 1.732).translate(0, 0.148 + 0.02, 0), color: roofs });
+  parts.push({ geo: box(0.022, 0.04, 0.004, 0, 0.055, 0.041), color: DOOR });
+  parts.push({ geo: strut([0, 0.05, 0.048], [0, 0.0, 0.085], 0.02), color: wood });
   return kit(parts);
 }
 
@@ -734,6 +1088,33 @@ function boatGeometry(kind: BoatKind, [hullC, sailC]: [string, string]): THREE.B
       }
       return kit([{ geo: g, color: hullC, grad: [0.85, 1.05, 0, 0.04] }, { geo: box(0.01, 0.022, 0.01, 0.0, 0.02), color: sailC }]);
     }
+    case 'nile':
+      // Barco do Novo Império: pontas recurvadas como umbelas de papiro, vela quadrada mais
+      // larga que alta entre duas vergas, remos de governo na popa.
+      return kit([
+        H(0.13, 0.036, 0.014),
+        { geo: cone(0.007, 0.04, 4, 0.062, 0.016).rotateZ(-0.7), color: hullC },
+        { geo: cone(0.007, 0.034, 4, -0.062, 0.016).rotateZ(0.8), color: hullC },
+        mast(0.11),
+        { geo: box(0.003, 0.06, 0.1, 0.002, 0.045), color: sailC },
+        { geo: box(0.004, 0.004, 0.11, 0.002, 0.105), color: '#4a3a30' },
+        { geo: box(0.004, 0.004, 0.11, 0.002, 0.043), color: '#4a3a30' },
+        { geo: box(0.025, 0.014, 0.024, -0.035, 0.014), color: '#8a6a4a' },
+        ...[0.012, -0.012].map((z) => ({ geo: strut([-0.05, 0.03, z], [-0.075, 0.0, z * 1.6], 0.003), color: '#4a3a30' })),
+      ]);
+    case 'paddle':
+      // Vapor de roda na popa: casco largo e chato, dois conveses, duas chaminés pretas.
+      return kit([
+        H(0.15, 0.048, 0.012),
+        { geo: box(0.1, 0.022, 0.044, 0.008, 0.014), color: hullC },
+        { geo: box(0.102, 0.008, 0.046, 0.008, 0.036), color: sailC },
+        { geo: box(0.06, 0.018, 0.034, 0.0, 0.044), color: hullC },
+        { geo: box(0.02, 0.014, 0.02, 0.015, 0.062), color: hullC },
+        ...[0.009, -0.009].map((z) => ({ geo: cyl(0.0045, 0.005, 0.07, 6, 0.042, 0.04, z), color: '#2a2622' })),
+        ...[0.0225, -0.0225].map((z) => ({ geo: box(0.08, 0.008, 0.002, 0.008, 0.022, z), color: '#ffe2a8', glow: 1 })),
+        { geo: cyl(0.022, 0.022, 0.04, 8).rotateX(Math.PI / 2).translate(-0.082, 0.022, 0), color: sailC },
+        { geo: box(0.004, 0.046, 0.044, -0.082, 0.0), color: '#3a2a22' },
+      ]);
     case 'hover':
       return kit([{ geo: cyl(0.04, 0.05, 0.016, 12, 0, 0.004), color: hullC }, { geo: new THREE.SphereGeometry(0.022, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 0.02, 0), color: sailC, glow: 0.6 }, { geo: cyl(0.052, 0.052, 0.004, 12, 0, 0.004), color: sailC, glow: 1 }]);
   }
@@ -844,7 +1225,19 @@ function specialsFor(theme: Theme, walls: string, roofs: string) {
     { geo: box(0.05, 0.05, 0.04, 0.05, 0, 0), color: walls },
   ];
 
+  // Poço da praça: mureta de pedra, dois esteios, telhadinho e balde.
+  const well: Part[] = [
+    { geo: cyl(0.026, 0.028, 0.022, 9), color: theme.rock, grad: [0.8, 1.05, 0, 0.022] },
+    { geo: cyl(0.019, 0.019, 0.004, 9, 0, 0.019), color: '#2f3a44' },
+    { geo: box(0.004, 0.06, 0.004, 0.022, 0.0, 0), color: wood },
+    { geo: box(0.004, 0.06, 0.004, -0.022, 0.0, 0), color: wood },
+    { geo: cyl(0.003, 0.003, 0.05, 5).rotateZ(Math.PI / 2).translate(0, 0.05, 0), color: wood },
+    { geo: new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2).scale(0.058, 0.022, 0.05 / 1.732).translate(0, 0.068, 0), color: roofs },
+    { geo: cyl(0.006, 0.005, 0.009, 6, 0.008, 0.03, 0), color: '#6a4a32' },
+  ];
+
   return {
+    well: kit(well),
     logs: kit(logs),
     fence: kit(fence),
     apiary: kit(apiary),
@@ -855,167 +1248,44 @@ function specialsFor(theme: Theme, walls: string, roofs: string) {
   };
 }
 
-// ---------------------------------------------------------------- materiais
+// ---------------------------------------------------------------- instâncias
 
-export interface Uniforms {
-  uTime: { value: number };
-  uSparkle: { value: THREE.Color };
-  uWind: { value: THREE.Vector2 };
-  uNight: { value: number };
-  uGlow: { value: THREE.Color };
-  uClouds: { value: number };
+/**
+ * Geometria para um InstancedMesh: compartilha os atributos do kit e acrescenta
+ * `iColor`, a cor de cada instância (a mesma geometria base serve a vários meshes).
+ */
+export function instGeometry(base: THREE.BufferGeometry, cap: number, colors?: Float32Array) {
+  const g = new THREE.BufferGeometry();
+  for (const [k, a] of Object.entries(base.attributes)) g.setAttribute(k, a);
+  if (base.index) g.setIndex(base.index);
+  const arr = new Float32Array(cap * 3).fill(1);
+  if (colors) arr.set(colors.subarray(0, Math.min(colors.length, arr.length)));
+  g.setAttribute('iColor', new THREE.InstancedBufferAttribute(arr, 3));
+  g.boundingSphere = base.boundingSphere;
+  return g;
 }
 
-const NOISE = `
-float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
-float vnoise(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); f = f*f*(3.0-2.0*f);
-  return mix(mix(h21(i), h21(i+vec2(1,0)), f.x), mix(h21(i+vec2(0,1)), h21(i+vec2(1,1)), f.x), f.y); }
-float cloudShade(vec2 p, float t){
-  vec2 q = p * 0.085 + t * vec2(0.011, 0.006);
-  float n = vnoise(q) * 0.65 + vnoise(q * 2.3 + 7.1) * 0.35;
-  return smoothstep(0.5, 0.74, n);
-}`;
-
-interface PatchOpts {
-  key: string;
-  tint?: boolean;
-  glow?: boolean;
-  sway?: 'tree' | 'crop';
-  clouds?: boolean;
-  groundNoise?: boolean;
-  water?: boolean;
+/** Cor da instância i (a geometria precisa ter vindo de `instGeometry`). */
+export function setInstColor(mesh: THREE.InstancedMesh, i: number, c: THREE.Color) {
+  const a = mesh.geometry.getAttribute('iColor') as THREE.InstancedBufferAttribute;
+  a.setXYZ(i, c.r, c.g, c.b);
 }
-
-/** Injeta nos shaders padrão do three.js os efeitos do jogo (vento, nuvens, janelas...). */
-function patch(mat: THREE.Material, u: Uniforms, o: PatchOpts) {
-  mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, u);
-    let vs = shader.vertexShader;
-    let fs = shader.fragmentShader;
-    const common = `#include <common>
-uniform float uTime; uniform vec2 uWind; varying vec3 vWPos; varying float vGlow; varying float vSheen;
-${o.tint || o.glow ? 'attribute float tint; attribute float glow;' : ''}`;
-    vs = vs.replace('#include <common>', common);
-    if (o.tint || o.glow) {
-      vs = vs.replace(
-        '#include <color_vertex>',
-        `#if defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
-  vColor = vec4(1.0);
-#endif
-#ifdef USE_COLOR
-  vColor.rgb *= color.rgb;
-#endif
-#ifdef USE_INSTANCING_COLOR
-  vColor.rgb *= mix(vec3(1.0), instanceColor.rgb, tint);
-#endif
-vGlow = glow;`,
-      );
-    } else vs = vs.replace('#include <color_vertex>', '#include <color_vertex>\nvGlow = 0.0;');
-    let move = '';
-    if (o.sway === 'tree') {
-      move = `
-#ifdef USE_INSTANCING
-  vec3 ip = instanceMatrix[3].xyz;
-  float ph = ip.x * 1.7 + ip.z * 1.3;
-  float bend = max(transformed.y - 0.08, 0.0);
-  float gust = 0.6 + 0.4 * sin(dot(ip.xz, uWind) * 0.8 - uTime * 0.9);
-  transformed.x += sin(uTime * 1.6 + ph) * 0.05 * bend * gust;
-  transformed.z += cos(uTime * 1.3 + ph * 1.2) * 0.04 * bend * gust;
-#endif`;
-    } else if (o.sway === 'crop') {
-      move = `
-#ifdef USE_INSTANCING
-  vec3 ip = instanceMatrix[3].xyz;
-  float hgt = max(transformed.y, 0.0);
-  float wave = sin(dot(ip.xz, uWind) * 2.4 - uTime * 2.2) * 0.5 + 0.5;
-  float gust = wave * wave;
-  vec3 lw = transpose(mat3(instanceMatrix)) * vec3(uWind.x, 0.0, uWind.y);
-  vec2 ld = normalize(lw.xz + 1e-5);
-  float bend = hgt * hgt * (1.2 + 3.8 * gust);
-  transformed.xz += ld * bend + vec2(sin(uTime * 3.1 + ip.x * 9.0), cos(uTime * 2.7 + ip.z * 7.0)) * hgt * 0.06;
-  transformed.y -= bend * 0.45;
-  vSheen = gust * clamp(hgt * 14.0, 0.0, 1.0);
-#endif`;
-    }
-    vs = vs.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
-vSheen = 0.0;
-${move}
-#ifdef USE_INSTANCING
-  vWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
-#else
-  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
-#endif`,
-    );
-    fs = fs.replace('#include <common>', `#include <common>\nuniform float uTime; uniform vec3 uSparkle; uniform float uNight; uniform vec3 uGlow; uniform float uClouds;\nvarying vec3 vWPos; varying float vGlow; varying float vSheen;\n${NOISE}`);
-    let color = '';
-    if (o.groundNoise) {
-      color += `{ vec2 p = vWPos.xz; float n = vnoise(p * 2.3) * 0.6 + vnoise(vec2(p.x * 7.0 + p.y * 2.0, p.y * 3.0)) * 0.4; diffuseColor.rgb *= 0.9 + 0.2 * n; }`;
-    }
-    if (o.water) {
-      color += `{ vec2 p = vWPos.xz;
-  float w = sin(p.x * 5.0 + uTime * 1.1 + sin(p.y * 3.0)) * sin(p.y * 6.0 - uTime * 0.9 + sin(p.x * 2.0));
-  diffuseColor.rgb *= 0.94 + 0.08 * w;
-  float s = smoothstep(0.93, 1.0, sin(p.x * 11.0 + uTime * 1.7) * sin(p.y * 13.0 - uTime * 1.3 + p.x));
-  diffuseColor.rgb = mix(diffuseColor.rgb, uSparkle, s * 0.55 * (1.0 - uNight * 0.7)); }`;
-    }
-    if (o.sway === 'crop') color += `diffuseColor.rgb *= 1.0 + vSheen * 0.22;`;
-    if (o.clouds) color += `diffuseColor.rgb *= 1.0 - uClouds * cloudShade(vWPos.xz, uTime);`;
-    fs = fs.replace('#include <color_fragment>', `#include <color_fragment>\n${color}`);
-    if (o.glow) fs = fs.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += uGlow * vGlow * uNight * 2.4;');
-    shader.vertexShader = vs;
-    shader.fragmentShader = fs;
-  };
-  mat.customProgramCacheKey = () => o.key;
-}
-
-export type MatKey = 'deco' | 'foliage' | 'crop' | 'crystal' | 'glass';
 
 export class Lib {
-  readonly uniforms: Uniforms = {
-    uTime: { value: 0 },
-    uSparkle: { value: new THREE.Color('#ffffff') },
-    uWind: { value: new THREE.Vector2(0.8, 0.6).normalize() },
-    uNight: { value: 0 },
-    uGlow: { value: new THREE.Color('#ffd98a') },
-    uClouds: { value: 0.16 },
-  };
-  readonly ground: THREE.MeshStandardMaterial;
-  readonly water: THREE.MeshStandardMaterial;
-  readonly mats: Record<MatKey, THREE.MeshStandardMaterial>;
+  readonly ground = makeGroundMaterial();
+  readonly water = makeWaterMaterial();
+  readonly mats: Record<MatKey, THREE.MeshStandardNodeMaterial> = makeDecoMaterials();
   readonly geos = new Map<string, THREE.BufferGeometry>();
   houseMeta: HouseMeta[] = [];
   landmarkMeta: { sails: [number, number, number] | null } = { sails: null };
-
-  constructor() {
-    const u = this.uniforms;
-    this.ground = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0 });
-    patch(this.ground, u, { key: 'ground', groundNoise: true, clouds: true });
-    this.water = new THREE.MeshStandardMaterial({ color: '#63b1dc', roughness: 0.3, metalness: 0.05 });
-    patch(this.water, u, { key: 'water', water: true, clouds: true });
-    const std = (extra: THREE.MeshStandardMaterialParameters = {}) => new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.85, metalness: 0, ...extra });
-    this.mats = {
-      deco: std(),
-      foliage: std({ roughness: 0.9 }),
-      crop: std({ roughness: 0.9, side: THREE.DoubleSide }),
-      crystal: std({ roughness: 0.25, metalness: 0.1, emissive: '#3a2a66', emissiveIntensity: 0.6 }),
-      glass: std({ roughness: 0.2, metalness: 0.2 }),
-    };
-    patch(this.mats.deco, u, { key: 'deco', tint: true, glow: true, clouds: true });
-    patch(this.mats.foliage, u, { key: 'foliage', tint: true, glow: true, sway: 'tree', clouds: true });
-    patch(this.mats.crop, u, { key: 'crop', tint: true, glow: true, sway: 'crop', clouds: true });
-    patch(this.mats.crystal, u, { key: 'crystal', tint: true, glow: true, sway: 'tree' });
-    patch(this.mats.glass, u, { key: 'glass', tint: true, glow: true });
-  }
 
   applyTheme(theme: Theme) {
     for (const g of this.geos.values()) g.dispose();
     this.geos.clear();
     const set = (k: string, g: THREE.BufferGeometry | null) => g && this.geos.set(k, g);
-    this.water.color.set(theme.water);
-    this.uniforms.uSparkle.value.set(theme.sparkle);
-    this.uniforms.uGlow.value.set(theme.window);
+    U.water.value.set(theme.water);
+    U.sparkle.value.set(theme.sparkle);
+    U.glow.value.set(theme.window);
 
     for (const f of theme.forest) if (!this.geos.has(`tree:${f.geo}`)) set(`tree:${f.geo}`, treeGeometry(f.geo, theme.trunk));
     this.domeKeys.clear();
@@ -1029,7 +1299,10 @@ export class Lib {
     set('landmark', landmarkGeometry(theme.landmark, theme.landmarkColors, theme.window));
     const [lw, lr, ld] = theme.landmarkColors;
     if (theme.landmark === 'windmill' || theme.mill === 'windmill') set('sails', sailsGeometry(ld, '#f3ead8'));
-    set('mill', theme.mill === 'windmill' ? windmillBody(lw, lr, ld, theme.window) : null);
+    set('mill', theme.mill === 'windmill' ? windmillBody(lw, lr, ld, theme.window) : theme.mill === 'windpump' ? windpumpBody(theme.trunk) : theme.mill === 'stilt' ? stiltGeometry(theme.houses[0].walls[0], theme.houses[0].roofs[0], theme.trunk) : null);
+    if (theme.mill === 'windpump') set('rotor', rotorGeometry());
+    if (theme.gate) set('gate', gateGeometry(theme.gate.style, theme.gate.colors));
+    if (theme.bridge) set('bridge', bridgeGeometry(theme.bridge.style, theme.bridge.colors));
     for (const c of theme.crops) if (!this.geos.has(`crop:${c.style}`)) set(`crop:${c.style}`, cropGeometry(c.style));
     const sp = specialsFor(theme, theme.houses[0].walls[0], theme.houses[0].roofs[0]);
     for (const [k, g] of Object.entries(sp)) set(k, g);

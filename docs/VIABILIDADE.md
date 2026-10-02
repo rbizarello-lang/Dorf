@@ -320,6 +320,73 @@ Na lista priorizada do [TEMAS.md](TEMAS.md), burro/mula e búfalo já entraram (
 
 ---
 
+---
+
+## 14. Evolução v4: polimento visual máximo e mecânicas novas
+
+**Pedido:** testar o máximo de polimento visual possível (animação, serrilhado, qualidade de pixel, gráficos), mesmo migrando de tecnologia, e ter liberdade para mudar, aprofundar e criar versões alternativas das regras. Um agente em paralelo pesquisou Age of Empires em busca de ideias ([IDEIAS_AOE.md](IDEIAS_AOE.md)).
+
+**Decisão de tecnologia.** Migramos do `WebGLRenderer` para o **`WebGPURenderer` do three.js r186**, com materiais em TSL. Onde o navegador não tem WebGPU, o three usa WebGL2 sozinho, com os mesmos materiais. Trocar de engine (Unity, Godot, Babylon) não traria um teto visual maior para arte procedural e perderia o HTML único. O que o WebGPU destrava:
+
+| Recurso | Como entrou |
+|---|---|
+| Oclusão ambiente (GTAO) | normais na mesma passada (MRT), filtro de ruído que respeita profundidade |
+| Antisserrilhado temporal (TRAA) | vetores de movimento corretos inclusive para o vento nas plantas (`positionPrevious`) |
+| Profundidade de campo real | foco no ponto que a câmera olha: efeito maquete sem a faixa fixa do tilt-shift antigo |
+| Bloom | janelas acesas, cintilar do sol na água, faíscas |
+| Luz por imagem (IBL) | céu procedural refeito quando a hora do dia muda |
+| Sombras suaves | filtro próprio 4×4 com comparação bilinear (o PCF padrão deixava ruído fixo) |
+
+**Visual novo:**
+- rios com leito escavado, margens inclinadas e onduladas, cor por profundidade, espuma, correnteza que desce de peça em peça e cintilar do sol;
+- chão com detalhe por terreno (manchas no prado, folhas na mata, sulcos na terra, pedrinhas na vila), laterais com estratos;
+- vilas com terra batida, trilhas até uma praça e poço; telhados com fiadas de telha e beiral;
+- clima por tema no shader (neve, pétalas, folhas, poeira, pólen), vaga-lumes à noite, fumaça e poeira em sprites macios;
+- onda no chão quando a peça assenta, quique, fantasma que inclina, construções de interação que sobem com som de martelo.
+
+**Mecânicas novas** (todas com oráculo independente nos testes): eras da vila (+3 peças por era), sítios escondidos (ruína, tesouro, relíquia, mirante), bônus de "civilização" por tema, desfazer e quatro modos (Clássico, Zen, Desafio do dia, Exploradores). Save v4.
+
+**Custo.** Com 300 peças em renderização por software: 106 draw calls (+11%) e 1,45 M de triângulos (+6%) no perfil Alta. A CPU por quadro medida no SwiftShader subiu, mas o profiler mostra quase tudo em escrita de buffers e envio de comandos disputando CPU com o rasterizador por software. **A medição em GPU real (`?stress=1000&debug`) continua sendo o próximo passo**; o modo Auto desce de Ultra para Alta, Média e Baixa se o quadro passar de ~26 ms.
+
+### Ultra além do PC de hoje (outubro de 2026)
+
+O Ultra deixou de ser medido pelo PC atual (RX 580, que fica em Média com 1.000 peças em 4K): o alvo é a máxima qualidade numa GPU melhor. Alta, Média e Baixa não mudaram, e o Auto continua descendo de nível sozinho.
+
+| Recurso (só no Ultra) | Como entrou |
+|---|---|
+| Sombras em cascata | `CSMShadowNode` com 3 cascatas de 4096², divididas em volta do alvo da câmera (que olha de cima: perto dela só há ar) |
+| Reflexos na água (SSR) | só onde a água grava a máscara própria (`ssrMask`, no alfa da saída de normal, onde os outros materiais gravam a rugosidade); a normal do reflexo é acalmada para os raios não se espalharem nas ondas |
+| Luz indireta (SSGI) | substitui o GTAO: oclusão mais a cor que rebate das superfícies vizinhas, somada só onde há oclusão (no chão aberto e ondulado ela apagava as sombras longas do entardecer); o vazio fica fora da cor difusa |
+| Raios de luz (godrays) | percorrem o mapa de sombra de uma luz sem intensidade (as cascatas não têm mapa único); só aparecem com o sol baixo |
+| Vegetação mais densa | detalhe 1,35 (Alta segue em 1) |
+
+**Armadilhas:**
+- O WebGPU limita a 32 bytes por amostra o total das saídas da passada (cada RGBA8 conta 8). Cor, normal, difusa e velocidade já ocupam tudo, por isso a rugosidade vai no alfa da normal.
+- Numa MRT, só a saída `output` usa a mistura do material; as outras são sobrescritas até por partículas transparentes, que deixavam quadrados na oclusão. A normal e a difusa usam `setBlendMode(..., MaterialBlending)`, e os materiais transparentes gravam nelas com alfa 0.
+
+**Custo.** Com 300 peças em renderização por software: Ultra com 193 draw calls e 3,05 M de triângulos, contra 111 e 1,53 M na Alta. O dobro de triângulos vem das passadas de sombra extras (3 cascatas mais a luz dos raios) e de 35% mais decoração. O custo real em GPU ainda precisa ser medido; `?fx=gi.ssr.rays.traa` liga os efeitos um a um.
+
+### Água física (outubro de 2026)
+
+A água deixou de ser uma faixa pintada sobre o leito e virou uma coluna d'água: o olhar atravessa a superfície e vê o fundo. Vale em todos os níveis de qualidade; o reflexo de tela continua só no Ultra.
+
+| Recurso | Como entrou |
+|---|---|
+| Leito visível | a malha da água repete os triângulos do leito que ficam abaixo da linha d'água, com a cor e a profundidade exata de cada vértice (`wbed`); a beira fica onde a profundidade zera, sem a faixa de espuma que escondia a emenda |
+| Cor por absorção | o olhar refrata (n = 1,333) e cada canal é absorvido no caminho do sol até o leito e na volta; a absorção vem da cor da água do tema, então cada tema mantém a sua água, e o que a coluna absorve vira a cor turva da água funda |
+| Cáusticas | 32 quadros de 128² (512 KB) calculados por traçado de fótons num Web Worker, periódicos no espaço e no tempo; o shader interpola os quadros e mistura duas fases da correnteza sem perder contraste; multiplicam só a luz direta, então somem na sombra e à noite |
+| Reflexo estável | Fresnel exato de dielétrico para o céu; o brilho do sol é o GGX da própria luz, com a rugosidade alargada pela variação das ondas dentro do pixel (filtro de Kaplanyan e Tokuyoshi): de longe vira um caminho de luz que não pisca |
+| Esteiras e anéis | barcos andando deixam os braços do V de Kelvin, ondas transversais e espuma no casco (até 8, os mais perto do foco da câmera); peixes abrem anéis de tempos em tempos; a peça que assenta faz ondinhas na água |
+
+**Armadilhas:**
+- O Dawn (testado com SwiftShader) recusa o envio fatia por fatia de uma textura 3D ("TextureViewDimension e2D not compatible with e3D"). As cáusticas usam uma textura em camadas (`DataArrayTexture`) e o shader interpola entre duas camadas.
+- O cálculo das cáusticas leva ~150 ms; na thread principal, sob render por software, ele travava a abertura. Vai num Web Worker criado do texto da própria função, que por isso não pode depender de nada de fora. Sem worker (uma política de conteúdo que bloqueie `blob:`), roda na thread principal logo depois da abertura.
+- O SSR reconhecia a água pela rugosidade baixa. Com o filtro de Kaplanyan, a rugosidade da água sobe com a distância, então a água grava uma máscara própria no lugar dela.
+
+**Custo.** Com 300 peças em renderização por software, os draw calls não mudam (193 no Ultra, 111 na Alta) e os triângulos sobem 0,3% no Ultra (3,06 M) e 0,7% na Alta (1,54 M), porque a água agora segue a grade do leito. A montagem das peças fica ~15% mais lenta, já que a correnteza é calculada em mais vértices. A CPU por quadro ficou dentro do ruído do SwiftShader, que dá picos de ~1 s nos dois builds. O shader da água ficou mais pesado (12 leituras de textura por pixel de água, contra 3); esse custo só uma GPU de verdade mede.
+
+**Ainda não feito, do documento do AoE:** Centro que evolui com a era, arquitetura que muda por era, aldeões trabalhando, maravilha, vazio como mapa antigo, minimapa, trilha sonora por era.
+
 ## Apêndice A: revisão de código e QA pelo Sonnet
 
 Um segundo agente (Sonnet) revisou o código sem editá-lo, escreveu testes próprios e reportou achados com cenário de falha e correção sugerida. Todas as correções foram aplicadas e **conferidas de novo com os próprios testes do revisor**.

@@ -6,9 +6,19 @@ import { Game } from '../src/core/game';
 import { DIRS, hkey, opposite, unkey, hexToWorld, worldToHex, hexDistance } from '../src/core/hex';
 import { T, isStrict, rotateEdges, type TileDef } from '../src/core/tiles';
 import { mulberry32 } from '../src/core/rng';
+import { MODES, type Mode } from '../src/core/modes';
+import { generateSites } from '../src/core/sites';
 import { THEMES } from '../src/themes/themes';
 
-const rulesFor = (t: { rules?: Partial<Rules> }): Rules => ({ ...DEFAULT_RULES, ...t.rules });
+const rulesFor = (t: { rules?: Partial<Rules> }, mode?: Mode): Rules => ({ ...DEFAULT_RULES, ...(mode?.daily ? {} : t.rules), ...mode?.rules });
+
+// Recompensas dos sítios (cópia independente da tabela de src/core/sites.ts).
+const ORACLE_SITE: Record<string, { points: number; tiles: number }> = {
+  ruin: { points: 60, tiles: 0 },
+  treasure: { points: 0, tiles: 2 },
+  relic: { points: 100, tiles: 1 },
+  lookout: { points: 20, tiles: 0 },
+};
 
 // Math.random determinístico para tornar bestMove reprodutível nos testes.
 function seedMathRandom(seed: number) {
@@ -144,10 +154,13 @@ function chooseMove(game: Game, policy: Policy, rnd: () => number): { q: number;
   return best;
 }
 
-function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: Policy = 'greedy'): GameLog {
+function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: Policy = 'greedy', mode: Mode = MODES[0]): GameLog {
   const prnd = mulberry32(seed ^ 0x5bd1e995);
   const theme = THEMES[themeIdx];
-  const rules = rulesFor(theme);
+  const rules = rulesFor(theme, mode);
+  // Zen não acaba: a simulação para num teto de jogadas.
+  const maxMoves = rules.infinite ? 70 : Infinity;
+  let expectedEra = 0;
   const game = new Game(seed, rules);
   const b = game.board;
   const log: GameLog = { seed, themeId: theme.id, rules, moves: [], snapshots: [], finalScore: 0, finalStack: 0, placed: 0, discarded: 0 };
@@ -163,7 +176,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
   assert(game.current !== null && oracleAnyMove(b, game.current), `seed ${seed}/${theme.id}: 1ª peça sem jogada`);
 
   let guard = 0;
-  while (game.current && guard++ < 5000) {
+  while (game.current && guard++ < 5000 && log.moves.length < maxMoves) {
     assert(game.stack >= 1, `seed ${seed}: pilha ${game.stack} com peça atual`);
     const cur = game.current;
     // bestMove só devolve jogadas válidas e null <=> não há jogada
@@ -200,6 +213,10 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     }
     const prevQuestStates = b.quests.map((q) => q.state);
     const listBefore = b.list.length;
+    // Sítio escondido na posição escolhida (antes de colocar).
+    const siteHere = b.sites.find((st) => !st.found && st.q === m.q && st.r === m.r) ?? null;
+    const siteKind = siteHere?.kind ?? null;
+    const foundBefore = b.sites.filter((st) => st.found).length;
 
     game.rot = m.rot;
     const res = game.place(m.q, m.r);
@@ -213,8 +230,18 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     assert(b.list.length === listBefore + 1, `seed ${seed}: list não cresceu 1`);
     assert(b.tiles.size === b.list.length, `seed ${seed}: tiles.size != list.length`);
 
-    // --- pontuação esperada
+    // --- pontuação esperada (inclui os bônus do tema, recalculados aqui)
     let pts = mt * rules.matchPoints + syn * rules.synergyPoints;
+    for (let i = 0; i < 6; i++) {
+      const n = b.get(m.q + DIRS[i][0], m.r + DIRS[i][1]);
+      if (!n || n === res.placed) continue;
+      const a = edges[i], c = n.edges[(i + 3) % 6];
+      if (a === c) pts += rules.matchBonus[a] ?? 0;
+      else {
+        const pair = SYN_PAIRS.findIndex(([x, y]) => (a === x && c === y) || (a === y && c === x));
+        if (pair >= 0) pts += rules.synergyBonus[(['lumber', 'mill', 'pasture', 'apiary'] as const)[pair]] ?? 0;
+      }
+    }
     assert(res.synergies.length === syn, `seed ${seed}: interações ${res.synergies.length} != oráculo ${syn}`);
     const perfect = nbs >= 2 && mt === nbs;
     if (perfect) pts += rules.perfectBonus;
@@ -268,8 +295,37 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     }
     for (const q of b.quests) if (!hist.has(q.id)) fail(`seed ${seed}: missão ${q.id} sem histórico`);
 
+    // --- sítio
+    if (siteKind) {
+      pts += ORACLE_SITE[siteKind].points;
+      gained += ORACLE_SITE[siteKind].tiles;
+      inc('sitios_' + siteKind);
+    }
+    assert((res.site?.kind ?? null) === siteKind, `seed ${seed}: sítio ${res.site?.kind} != oráculo ${siteKind}`);
+    assert(b.sites.filter((st) => st.found).length === foundBefore + (siteKind ? 1 : 0), `seed ${seed}: contagem de sítios achados`);
+
+    // --- eras: limiares de pontuação, +eraTiles por era
     expectedScore += pts;
-    expectedStack += gained - 1;
+    let eraUps = 0;
+    while (expectedEra + 1 < rules.eraScores.length && expectedScore >= rules.eraScores[expectedEra + 1]) {
+      expectedEra++;
+      eraUps++;
+    }
+    gained += eraUps * rules.eraTiles;
+    if (eraUps) inc('eras');
+    assert(b.era === expectedEra, `seed ${seed}: era ${b.era} != oráculo ${expectedEra}`);
+    assert((res.eraUp !== null) === eraUps > 0, `seed ${seed}: eraUp ${res.eraUp} sem avanço esperado`);
+
+    // --- exploradores: último sítio encerra e as peças que sobram viram pontos
+    const allFound = rules.endOnSites && b.sites.length > 0 && b.sites.every((st) => st.found);
+    if (!rules.infinite) expectedStack += gained - 1;
+    if (allFound) {
+      const bonus = Math.max(0, expectedStack) * rules.leftoverPoints;
+      pts += bonus;
+      expectedScore += bonus;
+      expectedStack = 0;
+      inc('exploradores_completos');
+    }
     assert(res.points === pts, `seed ${seed}: pontos da jogada ${res.points} != oráculo ${pts}`);
     assert(res.tilesGained === gained, `seed ${seed}: peças ganhas ${res.tilesGained} != oráculo ${gained}`);
     assert(b.score === expectedScore, `seed ${seed}: score acumulado ${b.score} != oráculo ${expectedScore}`);
@@ -301,8 +357,8 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       assert(did === stuckOracle, `seed ${seed}: discardIfStuck=${did} oráculo=${stuckOracle}`);
       if (!did) break;
       disc++;
-      expectedStack -= 1;
-      assert(game.stack === stackBefore - 1, `seed ${seed}: descarte não reduziu pilha em 1`);
+      if (!rules.infinite) expectedStack -= 1;
+      assert(game.stack === stackBefore - (rules.infinite ? 0 : 1), `seed ${seed}: descarte mexeu na pilha de forma errada`);
       inc('descartes');
       ts.discards++;
     }
@@ -337,10 +393,12 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
   ts.score += b.score;
   ts.maxActive = Math.max(ts.maxActive, maxActive);
   if (maxActive > rules.maxQuests) ts.overshootGames++;
-  assert(game.over, `seed ${seed}: jogo não terminou`);
+  if (!rules.infinite) {
+    assert(game.over, `seed ${seed}: jogo não terminou`);
+    // conservação da pilha: início + ganhos - jogadas - descartes = 0 (fim)
+    assert(game.stack <= 0, `seed ${seed}: fim de jogo com pilha ${game.stack}`);
+  } else assert(!game.over && game.stack === rules.startTiles, `seed ${seed}: zen terminou ou mexeu na pilha`);
   assert(game.placedCount === log.moves.length, `seed ${seed}: placedCount != moves`);
-  // conservação da pilha: início + ganhos - jogadas - descartes = 0 (fim)
-  assert(game.stack <= 0, `seed ${seed}: fim de jogo com pilha ${game.stack}`);
   return log;
 }
 
@@ -369,9 +427,12 @@ for (let g = 0; g < N_GAMES; g++) {
   const policy = POLICIES[Math.floor(g / THEMES.length) % POLICIES.length];
   const seed = 1000 + g * 7919;
   seedMathRandom(seed ^ 0xabcdef);
-  const lg = simulate(seed, themeIdx, g < 60, policy);
+  // Um quinto das partidas em cada modo alternativo (o resto no clássico).
+  const mode = g % 5 === 4 ? MODES[1 + Math.floor(g / 5) % (MODES.length - 1)] : MODES[0];
+  const lg = simulate(seed, themeIdx, g < 60, policy, mode);
   (lg as GameLog & { policy?: string }).policy = policy;
   inc('partidas_' + policy);
+  inc('modo_' + mode.id);
   logs.push(lg);
 }
 console.log(`Simulação: ${N_GAMES} partidas em ${((Date.now() - t0) / 1000).toFixed(1)} s`);
@@ -473,6 +534,41 @@ if (contBad) fail(`continuação pós-replay divergiu em ${contBad} partidas`);
   }
   console.log(`Hex: ${n} ida-e-volta, erros ${bad}; vizinho mais próximo violado ${nearestBad}/20000; DIRS/oposto erros ${dirBad}`);
   if (bad || nearestBad || dirBad) fail(`hex: bad=${bad} nearest=${nearestBad} dir=${dirBad}`);
+}
+
+// ------------------------------------------------------------------ sítios: determinismo e distribuição
+{
+  let bad = 0, total = 0;
+  const dist = (a: { q: number; r: number }, b: { q: number; r: number }) => (Math.abs(a.q - b.q) + Math.abs(a.r - b.r) + Math.abs(a.q + a.r - b.q - b.r)) / 2;
+  const RING_OK: [number, number][] = [
+    [3, 4],
+    [5, 6],
+    [7, 9],
+    [10, 12],
+    [13, 15],
+  ];
+  for (let seed = 1; seed <= 400; seed++) {
+    for (const n of [6, 10]) {
+      const a = generateSites(seed, n), b2 = generateSites(seed, n);
+      total++;
+      if (JSON.stringify(a) !== JSON.stringify(b2)) bad++;
+      if (a.length !== n) bad++;
+      for (let i = 0; i < a.length; i++) {
+        const [lo, hi] = RING_OK[Math.min(RING_OK.length - 1, Math.floor(i / 2))];
+        const d0 = dist(a[i], { q: 0, r: 0 });
+        if (d0 < lo || d0 > hi || a[i].found) bad++;
+        for (let j = i + 1; j < a.length; j++) if (dist(a[i], a[j]) < 3) bad++;
+      }
+    }
+  }
+  // A semente dos sítios não mexe na sequência de peças: mesma semente, mesmas peças com e sem sítios.
+  for (let seed = 1; seed <= 50; seed++) {
+    const g1 = new Game(seed, { ...DEFAULT_RULES, sites: 0 });
+    const g2 = new Game(seed, { ...DEFAULT_RULES, sites: 10 });
+    if (g1.current?.seed !== g2.current?.seed || g1.next.seed !== g2.next.seed) bad++;
+  }
+  console.log(`Sítios: ${total} gerações conferidas, erros ${bad}`);
+  if (bad) fail(`sítios: ${bad} erros de geração`);
 }
 
 // ------------------------------------------------------------------ resumo
