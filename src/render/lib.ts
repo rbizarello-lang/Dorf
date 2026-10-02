@@ -1323,6 +1323,195 @@ export function stampGeometry(kind: SiteKind): THREE.BufferGeometry {
   return out.rotateX(-Math.PI / 2);
 }
 
+// ---------------------------------------------------------------- maravilha
+
+/** Altura do pódio da maravilha (a obra cresce a partir dele). */
+export const WONDER_PODIUM = 0.05;
+
+/**
+ * Maravilha do tema em três partes, todas na planta de ~0,4 de raio, com o +z para a
+ * frente: pódio em degraus (aparece no canteiro), corpo (cresce dentro do andaime, com a
+ * base em y = 0) e remate (pináculo dourado no topo e quatro flâmulas da casa nos cantos
+ * do pódio, só na obra pronta). Devolve também a altura e a largura do corpo.
+ */
+function wonderGeometry(theme: Theme): { base: THREE.BufferGeometry; body: THREE.BufferGeometry; crown: THREE.BufferGeometry; h: number; w: number } {
+  const w = theme.wonder ?? { core: 'castle' as const, colors: theme.landmarkColors };
+  const [c0, c1, c2] = w.colors;
+  const stone = theme.rock, win = theme.window;
+  const P: Part[] = [];
+  const add = (geo: THREE.BufferGeometry, color: Col, extra: Partial<Part> = {}) => P.push({ geo, color, ...extra });
+  const gable = (wd: number, rh: number, d: number, y: number) => new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2).scale(wd, rh / 1.5, d / 1.732).translate(0, y + rh / 3, 0);
+  const windows = (x0: number, x1: number, n: number, y: number, z: number, sz = 0.018) => {
+    for (let i = 0; i < n; i++) add(box(sz * 0.7, sz, 0.004, x0 + ((x1 - x0) * (i + 0.5)) / n, y, z), win, { glow: 1 });
+  };
+  switch (w.core) {
+    case 'castle': {
+      add(cyl(0.11, 0.12, 0.36, 10), c0, { grad: [0.9, 1.05, 0, 0.36] });
+      add(cone(0.14, 0.2, 10, 0, 0.36), c1);
+      for (const [x, z] of [[-0.24, -0.24], [0.24, -0.24], [-0.24, 0.24], [0.24, 0.24]]) {
+        add(cyl(0.055, 0.06, 0.24, 8, x, 0, z), c0, { grad: [0.9, 1.05, 0, 0.24] });
+        add(cone(0.075, 0.14, 8, x, 0.24, z), c1);
+        add(box(0.004, 0.03, 0.03, x, 0.38, z), c2);
+      }
+      for (const [x, z, ry] of [[0, -0.24, 0], [0, 0.24, 0], [-0.24, 0, Math.PI / 2], [0.24, 0, Math.PI / 2]]) add(box(0.42, 0.1, 0.04).rotateY(ry).translate(x, 0, z), c0);
+      add(box(0.06, 0.08, 0.01, 0, 0, 0.26), '#5a4636');
+      windows(-0.05, 0.05, 2, 0.2, 0.116);
+      break;
+    }
+    case 'civic': {
+      add(box(0.62, 0.24, 0.3), c0, { grad: [0.9, 1.05, 0, 0.24] });
+      add(box(0.64, 0.02, 0.32, 0, 0.24), c2);
+      add(gable(0.62, 0.08, 0.3, 0.26), c1);
+      add(trapezoid(0.24, 0, 0.08).translate(0, 0.26, 0.152), c0);
+      add(cyl(0.04, 0.045, 0.08, 8, 0, 0.32), c0);
+      add(new THREE.SphereGeometry(0.045, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 0.4, 0), c1);
+      for (const y of [0.06, 0.15]) windows(-0.27, 0.27, 9, y, 0.152);
+      add(box(0.06, 0.08, 0.01, 0, 0, 0.152), '#4a3a30');
+      break;
+    }
+    case 'church': {
+      add(box(0.26, 0.2, 0.42, 0, 0, -0.04), c0, { grad: [0.9, 1.05, 0, 0.2] });
+      add(gable(0.26, 0.12, 0.42, 0.2).translate(0, 0, -0.04), c1);
+      for (const x of [-0.12, 0.12]) {
+        add(box(0.1, 0.36, 0.1, x, 0, 0.17), c0, { grad: [0.9, 1.05, 0, 0.36] });
+        add(box(0.112, 0.014, 0.112, x, 0.24, 0.17), c2);
+        add(cone(0.075, 0.12, 4, x, 0.36, 0.17).rotateY(0), c1);
+        add(box(0.03, 0.05, 0.004, x, 0.27, 0.222), win, { glow: 0.6 });
+      }
+      add(box(0.14, 0.24, 0.02, 0, 0, 0.21), c0);
+      add(trapezoid(0.14, 0, 0.07).translate(0, 0.24, 0.221), c2);
+      add(box(0.05, 0.1, 0.01, 0, 0, 0.222), '#5a3f2e');
+      add(oct(0.02).translate(0, 0.16, 0.222), win, { glow: 1 });
+      break;
+    }
+    case 'ice': {
+      const blocks: [number, number, number, number, number][] = [[0, 0, 0.2, 0.42, 0.2], [-0.18, -0.06, 0.14, 0.26, 0.14], [0.18, -0.04, 0.14, 0.3, 0.14], [-0.1, 0.17, 0.12, 0.18, 0.12], [0.12, 0.18, 0.11, 0.2, 0.11]];
+      for (const [x, z, wd, h, d] of blocks) {
+        add(box(wd, h, d, x, 0, z), c0, { glow: 0.4, grad: [0.85, 1.1, 0, h] });
+        add(cone(wd * 0.62, h * 0.45, 4, x, h, z).rotateY(0), c1, { glow: 0.4 });
+      }
+      add(cone(0.05, 0.34, 6, 0, 0.6), c2, { glow: 0.5 });
+      add(box(0.06, 0.09, 0.01, 0, 0, 0.101), '#2a4a6a', { glow: 0.6 });
+      break;
+    }
+    case 'tree': {
+      add(cyl(0.05, 0.08, 0.3, 8), theme.trunk, { grad: [0.8, 1.05, 0, 0.3] });
+      for (const [x, z, a] of [[-0.12, 0, 0.6], [0.12, 0.02, -0.6], [0, -0.1, 0.5]]) add(cyl(0.02, 0.03, 0.16, 6).rotateZ(a).translate(x * 0.5, 0.24, z * 0.5), theme.trunk);
+      const blobs: [number, number, number, number][] = [[0, 0.46, 0, 0.2], [-0.2, 0.38, 0.04, 0.15], [0.2, 0.4, -0.02, 0.15], [0.04, 0.38, -0.18, 0.14], [-0.06, 0.4, 0.17, 0.13], [0.14, 0.52, 0.1, 0.12]];
+      for (const [x, y, z, r] of blobs) add(jitter(ico(r, 1), r * 0.12, Math.round(r * 100)).translate(x, y, z), c0, { grad: [0.85, 1.12, y - r, y + r] });
+      // Torii na frente.
+      for (const x of [-0.1, 0.1]) add(cyl(0.012, 0.014, 0.17, 6, x, 0, 0.33), c1);
+      add(box(0.27, 0.018, 0.026, 0, 0.17, 0.33), c1);
+      add(box(0.24, 0.012, 0.018, 0, 0.13, 0.33), c1);
+      add(box(0.29, 0.008, 0.03, 0, 0.188, 0.33), c2);
+      break;
+    }
+    case 'elevator': {
+      add(cyl(0.2, 0.24, 0.08, 6), c0, { grad: [0.8, 1.05, 0, 0.08] });
+      add(cyl(0.12, 0.16, 0.12, 6, 0, 0.08), c0);
+      add(cyl(0.008, 0.012, 1.4, 6, 0, 0.2), c1);
+      for (const y of [0.55, 1.05]) add(new THREE.TorusGeometry(0.07, 0.008, 4, 16).rotateX(Math.PI / 2).translate(0, y, 0), c2, { glow: 1 });
+      add(box(0.05, 0.06, 0.05, 0, 0.8), c1, { glow: 0.3 });
+      for (let i = 0; i < 6; i++) add(box(0.02, 0.02, 0.004, Math.sin((i * Math.PI) / 3) * 0.13, 0.14, Math.cos((i * Math.PI) / 3) * 0.13).rotateY(0), c2, { glow: 1 });
+      break;
+    }
+    case 'pylon': {
+      for (const x of [-0.15, 0.15]) {
+        add(taper(box(0.2, 0.34, 0.12), 0.72).translate(x, 0, -0.08), c0, { grad: [0.88, 1.05, 0, 0.34] });
+        add(box(0.16, 0.016, 0.1, x, 0.34, -0.08), c2);
+      }
+      add(box(0.1, 0.24, 0.08, 0, 0, -0.08), c0);
+      add(box(0.06, 0.15, 0.01, 0, 0, -0.035), '#3a2e24');
+      for (const x of [-0.07, 0.07]) {
+        add(taper(box(0.035, 0.36, 0.035), 0.55).translate(x, 0, 0.06), c1);
+        add(cone(0.014, 0.03, 4, x, 0.36, 0.06), GOLD);
+      }
+      for (let i = 0; i < 4; i++) for (const x of [-0.12, 0.12]) add(box(0.04, 0.03, 0.06, x, 0, 0.1 + i * 0.07), c1, { grad: [0.9, 1.05, 0, 0.03] }), add(box(0.025, 0.03, 0.02, x, 0.02, 0.125 + i * 0.07), c1);
+      break;
+    }
+    case 'pagoda': {
+      const n = w.stories ?? 5;
+      const hs = Math.min(0.11, 0.62 / n);
+      for (let i = 0; i < n; i++) {
+        const r = 0.15 - (0.08 * i) / n, y = i * hs;
+        add(cyl(r * 0.78, r * 0.82, hs * 0.72, 8, 0, y), c0, { grad: [0.9, 1.05, y, y + hs * 0.72] });
+        add(cone(r * 1.45, hs * 0.42, 8, 0, y + hs * 0.6), c1);
+        if (n <= 7) windows(-0.02, 0.02, 1, y + hs * 0.2, r * 0.8);
+      }
+      add(cyl(0.006, 0.008, 0.16, 5, 0, n * hs), c2);
+      for (let k = 0; k < 4; k++) add(cyl(0.02, 0.02, 0.008, 8, 0, n * hs + 0.03 + k * 0.03), c2);
+      break;
+    }
+    case 'hall': {
+      add(box(0.22, 0.12, 0.64), c0, { grad: [0.85, 1.05, 0, 0.12] });
+      add(taper(gable(0.3, 0.22, 0.66, 0.1), 1), c1);
+      for (const z of [-0.33, 0.33]) {
+        add(strut([0, 0.12, z], [0, 0.36, z * 1.12], 0.018), c2);
+        add(cone(0.016, 0.06, 4).rotateX(z > 0 ? 1.1 : -1.1).translate(0, 0.37, z * 1.16), c2);
+      }
+      add(box(0.05, 0.08, 0.01, 0, 0, 0.32), '#3a2e24');
+      for (const x of [-0.1, 0.1]) add(box(0.01, 0.12, 0.6, x, 0, 0), c2);
+      break;
+    }
+    case 'dome': {
+      add(box(0.34, 0.14, 0.4, 0, 0, 0.02), c0, { grad: [0.9, 1.05, 0, 0.14] });
+      add(gable(0.34, 0.06, 0.4, 0.14).translate(0, 0, 0.02), c1);
+      add(cyl(0.12, 0.12, 0.1, 8, 0, 0.14), c0);
+      add(new THREE.SphereGeometry(0.13, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 1.25, 1).translate(0, 0.24, 0), c1, { grad: [0.85, 1.1, 0.24, 0.4] });
+      for (let i = 0; i < 8; i++) add(box(0.006, 0.15, 0.006).rotateZ(0).translate(Math.cos((i * Math.PI) / 4) * 0.095, 0.25, Math.sin((i * Math.PI) / 4) * 0.095).rotateY(0), c2);
+      add(cyl(0.022, 0.026, 0.05, 8, 0, 0.4), c2);
+      add(cone(0.026, 0.05, 8, 0, 0.45), c1);
+      add(box(0.08, 0.5, 0.08, 0.22, 0, -0.2), c0, { grad: [0.88, 1.05, 0, 0.5] });
+      add(box(0.09, 0.02, 0.09, 0.22, 0.42, -0.2), c2);
+      add(cone(0.06, 0.08, 4, 0.22, 0.5, -0.2).rotateY(0), c1);
+      for (const y of [0.06, 0.2, 0.34]) windows(0.2, 0.24, 1, y, -0.159);
+      break;
+    }
+    case 'trestle': {
+      const L = 0.68, H = 0.24;
+      for (let i = 0; i < 6; i++) {
+        const z = -L / 2 + (L * (i + 0.5)) / 6;
+        for (const x of [-0.07, 0.07]) add(strut([x * 1.4, 0, z], [x, H, z], 0.012), c0);
+        add(strut([-0.09, 0.02, z], [0.075, H - 0.02, z], 0.008), c0);
+        add(strut([0.09, 0.02, z], [-0.075, H - 0.02, z], 0.008), c0);
+        add(box(0.17, 0.01, 0.01, 0, H * 0.5, z), c0);
+      }
+      for (const x of [-0.07, 0.07]) add(box(0.012, 0.012, L, x, H - 0.012, 0), c0);
+      add(box(0.2, 0.012, L + 0.02, 0, H), c1);
+      for (const x of [-0.035, 0.035]) add(box(0.006, 0.008, L + 0.02, x, H + 0.012), c2);
+      add(box(0.06, 0.07, 0.12, 0, H + 0.02, 0.1), c2, { grad: [0.8, 1.05, H, H + 0.09] });
+      add(cyl(0.012, 0.016, 0.04, 6, 0, H + 0.09, 0.14), '#2a2622');
+      break;
+    }
+    case 'rings': {
+      for (let i = 0; i < 6; i++) {
+        const r = 0.34 - i * 0.045, y = i * 0.035;
+        add(cyl(r, r + 0.01, 0.03, 18, 0, y), c0, { grad: [0.85, 1, y, y + 0.03] });
+        add(cyl(r - 0.01, r - 0.01, 0.006, 18, 0, y + 0.03), c1, { grad: [0.9, 1.1, y, y + 0.04] });
+      }
+      add(cyl(0.1, 0.1, 0.012, 12, 0, 0.21), c2);
+      add(box(0.05, 0.22, 0.03, 0, 0, 0.33), stone);
+      break;
+    }
+  }
+  const body = kit(P);
+  body.computeBoundingBox();
+  const bb = body.boundingBox!;
+  const h = bb.max.y, wd = Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z);
+  const ph = WONDER_PODIUM;
+  const base = kit([
+    { geo: box(0.8, ph * 0.5, 0.8), color: stone, grad: [0.8, 1, 0, ph * 0.5] },
+    { geo: box(0.7, ph * 0.5, 0.7, 0, ph * 0.5), color: stone, grad: [0.9, 1.1, ph * 0.5, ph] },
+    { geo: box(0.2, ph * 0.5, 0.08, 0, 0, 0.42), color: stone },
+  ]);
+  const crown: Part[] = [{ geo: oct(0.03).scale(1, 1.6, 1).translate(0, ph + h + 0.03, 0), color: GOLD, glow: 0.4 }];
+  for (const [x, z] of [[-0.32, -0.32], [0.32, -0.32], [-0.32, 0.32], [0.32, 0.32]]) {
+    crown.push({ geo: cyl(0.004, 0.005, 0.24, 5, x, ph, z), color: theme.trunk });
+    crown.push({ geo: flagGeo(0.1, 0.055, 0.2).translate(x, ph, z), color: '#ffffff', tint: 1 });
+  }
+  return { base, body, crown: kit(crown), h, w: wd };
+}
+
 // ---------------------------------------------------------------- Centro da vila e marco da era
 
 const GOLD = '#d9b44a';
@@ -1638,6 +1827,8 @@ export class Lib {
   readonly geos = new Map<string, THREE.BufferGeometry>();
   houseMeta: HouseMeta[] = [];
   landmarkMeta: { sails: [number, number, number] | null } = { sails: null };
+  /** Altura e largura do corpo da maravilha do tema (para o andaime). */
+  wonderSize = { h: 0.4, w: 0.4 };
 
   applyTheme(theme: Theme) {
     for (const g of this.geos.values()) g.dispose();
@@ -1683,6 +1874,11 @@ export class Lib {
     for (let e = 0; e < 4; e++) set(`center:${e}`, centerGeometry(e, theme));
     set('pennant', pennantGeometry(theme.trunk));
     set('scaffold', scaffoldGeometry(theme.trunk));
+    const wonder = wonderGeometry(theme);
+    set('wonder:base', wonder.base);
+    set('wonder:body', wonder.body);
+    set('wonder:crown', wonder.crown);
+    this.wonderSize = { h: wonder.h, w: wonder.w };
     const folk = theme.folk ?? { skin: '#c99a72', hat: 'none', hatColor: '#000' };
     for (const t of ['axe', 'hoe', 'sack'] as const) set(`folk:${t}`, folkGeometry(t, folk, theme.trunk));
     // Batedor do começo da partida: um aldeão montado no animal do tema (a instância tinge os dois).

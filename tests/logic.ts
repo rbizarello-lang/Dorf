@@ -162,6 +162,9 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
   const maxMoves = rules.infinite ? 70 : Infinity;
   let expectedEra = 0;
   let pendingMark: number | null = null;
+  // Maravilha (oráculo): índice da peça do canteiro e etapa.
+  let wonderAt: number | null = null;
+  let wonderStage = 0;
   const game = new Game(seed, rules);
   const b = game.board;
   const log: GameLog = { seed, themeId: theme.id, rules, moves: [], snapshots: [], finalScore: 0, finalStack: 0, placed: 0, discarded: 0 };
@@ -306,6 +309,27 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     }
     assert((res.site?.kind ?? null) === siteKind, `seed ${seed}: sítio ${res.site?.kind} != oráculo ${siteKind}`);
     assert(b.sites.filter((st) => st.found).length === foundBefore + (siteKind ? 1 : 0), `seed ${seed}: contagem de sítios achados`);
+
+    // --- maravilha: na última era, a primeira peça com 2+ bordas de vila (que não seja a do
+    // marco) vira canteiro; cada peça seguinte avança uma etapa; a última etapa paga o bônus.
+    let wonderExp: { stage: number; started: boolean; done: boolean } | null = null;
+    if (wonderAt !== null && wonderStage < rules.wonderStages) {
+      wonderStage++;
+      const done = wonderStage === rules.wonderStages;
+      if (done) {
+        pts += rules.wonderPoints;
+        gained += rules.wonderTiles;
+        inc('maravilhas');
+      }
+      wonderExp = { stage: wonderStage, started: false, done };
+    } else if (wonderAt === null && rules.wonderStages > 0 && rules.eraScores.length > 1 && expectedEra === rules.eraScores.length - 1 && expectedMark === null && edges.filter((e) => e === T.Village).length >= 2) {
+      wonderAt = res.placed.index;
+      wonderStage = 0;
+      wonderExp = { stage: 0, started: true, done: false };
+      inc('canteiros');
+    }
+    assert(JSON.stringify(res.wonder) === JSON.stringify(wonderExp), `seed ${seed}: maravilha ${JSON.stringify(res.wonder)} != oráculo ${JSON.stringify(wonderExp)}`);
+    assert((b.wonder?.tile.index ?? null) === wonderAt && (b.wonder?.stage ?? 0) === wonderStage, `seed ${seed}: estado da maravilha diverge do oráculo`);
 
     // --- eras: limiares de pontuação, +eraTiles por era
     expectedScore += pts;
