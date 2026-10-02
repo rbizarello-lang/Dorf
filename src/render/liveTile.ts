@@ -49,10 +49,13 @@ export class LiveTile {
       mesh.castShadow = shadows && lib.castsShadow(key);
       mesh.receiveShadow = true;
       items.forEach((d, i) => {
-        mesh.setMatrixAt(i, decoMatrix(d));
+        // O andaime só aparece na queda (a animação dá a escala); no fantasma, a obra já pronta.
+        mesh.setMatrixAt(i, d.transient ? tmpM.makeScale(0, 0, 0) : decoMatrix(d));
         setInstColor(mesh, i, d.color);
       });
       mesh.computeBoundingSphere();
+      // Instâncias com escala 0 dariam uma esfera vazia, e o andaime seria recortado ao crescer.
+      if (items.some((d) => d.transient)) mesh.frustumCulled = false;
       this.inner.add(mesh);
       this.meshes.push({ mesh, items });
     }
@@ -71,6 +74,13 @@ export class LiveTile {
       });
       mesh.instanceMatrix.needsUpdate = true;
     }
+  }
+
+  /** Posição no mundo (x, z) das decorações de uma chave. */
+  worldOf(key: string) {
+    this.group.updateMatrixWorld();
+    const v = new THREE.Vector3();
+    return this.build.decos.filter((d) => d.key === key).map((d) => v.set(d.x, d.y, d.z).applyMatrix4(this.inner.matrixWorld).clone());
   }
 
   /** Tem alguma das chaves? (construções de interação, para a animação de obra). */

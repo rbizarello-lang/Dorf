@@ -88,7 +88,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__stats` | estatísticas do último quadro |
 | `window.__pools()` | relatório dos InstancedMesh |
 | `window.__ghostBest()` | põe o fantasma na melhor jogada |
-| `window.__ghostSynergy()` | põe o fantasma numa jogada com interação e devolve quantas |
+| `window.__ghostSynergy(colocar?)` | põe o fantasma numa jogada com interação e devolve quantas; com `true`, coloca a peça (obra com andaime) |
 | `window.__video({ kind, height, quality })` | exporta sem o diálogo o filme da partida (`film`) ou a gravação em andamento (`take`, tecla `V`) e devolve `{ bytes, ms, b64 }`: o MP4 em base64, para conferir com o `ffprobe` |
 
 ## Mapa do código

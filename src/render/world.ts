@@ -258,10 +258,14 @@ interface Drop {
   landed: boolean;
   /** Quanto tempo a peça fica viva depois de assentar (mais longo quando há obra). */
   hold: number;
+  /** O andaime já desmontou (poeira lançada). */
+  cleared: boolean;
 }
 
 /** Construções de interação: sobem do chão depois que a peça assenta. */
 const BUILDS: ReadonlySet<string> = new Set(['logs', 'mill', 'sails', 'rotor', 'fence', 'apiary', 'landmark', 'pennant']);
+/** Instante (depois de assentar) em que o andaime começa a desmontar. */
+const SCAFFOLD_DOWN = 0.9;
 const easeOutBack = (x: number) => 1 + 2.4 * Math.pow(x - 1, 3) + 1.4 * Math.pow(x - 1, 2);
 
 /** Estado da iluminação: interpolado suavemente entre as horas do dia. */
@@ -913,6 +917,7 @@ export class World {
     this.chunkFor(p.q, p.r).append(b, m);
     groundMap.add(b, m, this.waterColor);
     for (const d of b.decos) {
+      if (d.transient) continue;
       decoMatrix(d, tmpM);
       tmpM.premultiply(m);
       if (this.lib.lit(d.key)) {
@@ -973,7 +978,7 @@ export class World {
     live.group.position.set(x, y0, z);
     this.hoverRing.visible = false;
     for (const m of this.markers) m.visible = false;
-    this.drops.push({ live, placed: p, t: 0, y0, landed: false, hold: live.has(BUILDS) ? 1.05 : 0.55 });
+    this.drops.push({ live, placed: p, t: 0, y0, landed: false, hold: live.has(BUILDS) ? SCAFFOLD_DOWN + 0.3 : 0.55, cleared: false });
   }
 
   /** Coloca várias peças de uma vez, sem animação (modo automático / teste de carga). */
@@ -1350,7 +1355,17 @@ export class World {
         const u = (d.t - fall) / 0.32;
         g.scale.set(1 + Math.sin(Math.min(1, u) * Math.PI) * 0.03, 1 - Math.sin(Math.min(1, u) * Math.PI) * 0.08, 1 + Math.sin(Math.min(1, u) * Math.PI) * 0.03);
         const tt = d.t - fall;
+        if (!d.cleared && tt >= SCAFFOLD_DOWN) {
+          // A obra acabou: o andaime some numa nuvem de poeira.
+          d.cleared = true;
+          for (const p of d.live.worldOf('scaffold')) this.burst(p.x, p.z, 'dust', 8);
+        }
         d.live.setDecoScale((i, n, key) => {
+          if (key === 'scaffold') {
+            // Andaime: firme enquanto a obra sobe; depois desmonta para baixo em 0,2 s.
+            const k = Math.max(0, Math.min(1, (tt - SCAFFOLD_DOWN) / 0.2));
+            return [1, Math.max(0.001, 1 - k * k), 1];
+          }
           if (BUILDS.has(key)) {
             // Obra: sobe do chão com um leve passo além do ponto e assenta.
             const b = Math.max(0, Math.min(1, (tt - 0.08) / 0.8));
