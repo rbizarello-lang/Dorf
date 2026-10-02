@@ -70,6 +70,10 @@ export interface BuildOpts {
    * da peça, -1 entra. Sem isso (pilha), vale a regra padrão de `resolveFlow`.
    */
   flow?: readonly number[];
+  /** Peça inicial: o meio fica livre para o Centro da vila (objeto à parte, no World). */
+  center?: boolean;
+  /** Marco da era erguido nesta peça (índice da era: uma flâmula por era). */
+  eraMark?: number;
 }
 
 type V2 = [number, number];
@@ -542,6 +546,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     for (const [rx, rz, rr] of reserved) if ((rx - x) ** 2 + (rz - z) ** 2 < rr * rr) return false;
     return true;
   };
+  if (opts.center) reserved.push([0, 0, 0.3]);
 
   // --- Rios e lagos: plantas na água e na margem (a superfície já saiu com o leito).
   if (field) {
@@ -655,6 +660,36 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         const fx = Math.sin(face) * 0.022 * sc, fz = Math.cos(face) * 0.022 * sc;
         D('rotor', x + fx, groundY(x, z) + 0.318 * sc, z + fz, face, sc, WHITE, 'spin-z');
       }
+    }
+  }
+
+  // --- Marco da era: o marco do tema maior, num tablado de pedra, com uma flâmula por era.
+  // Fica no meio da peça ou, se um rio ou estrada passa ali, no meio de um setor de vila.
+  // Sem sorteio, para o resto da peça não mudar.
+  if (opts.eraMark) {
+    const wide = WIDE_LANDMARKS.has(theme.landmark);
+    const villages = [0, 1, 2, 3, 4, 5].filter((i) => edges[i] === T.Village);
+    const spots: [number, number, number][] = [[0, 0, wide ? 1.15 : 1.25]];
+    for (const i of villages) {
+      const [mx, mz] = edgeMid(i);
+      spots.push([mx * 0.5, mz * 0.5, wide ? 0.8 : 1]);
+    }
+    const spot = spots.find(([x, z, sc]) => distToPaths(x, z, allPaths) > 0.27 * sc + 0.04 && free(x, z, 0.2));
+    if (spot) {
+      const [x, z, sc] = spot;
+      const [fx, fz] = edgeMid(villages[0] ?? 0);
+      const ry = x === 0 && z === 0 ? yawTo(fx, fz) : yawTo(-x, -z);
+      const R = 0.24 * sc;
+      disc(g, x, z, R, 0.006, shade(tc(theme.rock), 1.18), 18, [0, 0, 0, 1]);
+      D('landmark', x, 0.006, z, ry, sc, WHITE);
+      if (theme.landmark === 'windmill') D('sails', x + Math.sin(ry) * 0.078 * sc, 0.006 + 0.255 * sc, z + Math.cos(ry) * 0.078 * sc, ry, sc, WHITE, 'spin-z');
+      // Flâmulas na cor de destaque do tema, espalhadas em volta do tablado.
+      const flag = tc(theme.ui.accent);
+      for (let k = 0; k < opts.eraMark; k++) {
+        const a = ry + Math.PI / 4 + (k * Math.PI * 2) / opts.eraMark;
+        D('pennant', x + Math.cos(a) * R * 0.88, 0.006, z - Math.sin(a) * R * 0.88, ry, 1.35, flag);
+      }
+      reserved.push([x, z, R + 0.05]);
     }
   }
 
@@ -911,6 +946,12 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const [top, n] = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
     if (n >= 3 && top === T.Forest && free(0, 0, 0.09)) addTree((rng() - 0.5) * 0.05, (rng() - 0.5) * 0.05);
     if (n >= 3 && top === T.Village && free(0, 0, 0.2)) addHouse(0, 0, rng() * 6);
+  }
+
+  // Praça de terra batida sob o Centro da vila.
+  if (opts.center) {
+    const vg = tc(theme.ground[T.Village]);
+    disc(g, 0, 0, 0.29, 0.004, vg.clone().lerp(tc(theme.roadBed), 0.35).multiplyScalar(0.92), 18, [0, 0, 0, 1]);
   }
 
   // --- Vida na vila: pegada de terra batida sob as casas, trilhas até uma pracinha e,

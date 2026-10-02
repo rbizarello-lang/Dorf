@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
-import type { AnimalKind, BoatKind, BodyStyle, BridgeStyle, CropStyle, GateStyle, HouseKind, Landmark, RoofStyle, Theme, TreeGeo, VehicleKind } from '../themes/types';
+import type { AnimalKind, BoatKind, BodyStyle, BridgeStyle, CenterCrown, CropStyle, GateStyle, HouseKind, Landmark, RoofStyle, Theme, TreeGeo, VehicleKind } from '../themes/types';
 
 // Biblioteca de "kits": geometrias low-poly com cor por vértice, montadas por tema.
 // Cada chave vira um InstancedMesh (1 draw call para milhares de cópias).
@@ -1165,6 +1165,178 @@ function birdGeometry() {
   ]);
 }
 
+// ---------------------------------------------------------------- Centro da vila e marco da era
+
+const GOLD = '#d9b44a';
+const FIRE = '#ff9a3c';
+
+/** Flâmula triangular apontando para +x, com a base em x = 0 e o meio em y. */
+const flagGeo = (len: number, h: number, y: number) =>
+  new THREE.CylinderGeometry(h / 2, h / 2, 0.002, 3).rotateX(Math.PI / 2).rotateZ(Math.PI / 2).scale(len / (0.75 * h), 1, 1).translate(len / 3, y, 0);
+
+/** Mastro com flâmula (o pano recebe a cor da instância). */
+function pennantGeometry(pole: Col) {
+  return kit([
+    { geo: cyl(0.0032, 0.004, 0.17, 5), color: pole },
+    { geo: oct(0.006).translate(0, 0.172, 0), color: GOLD },
+    { geo: flagGeo(0.085, 0.046, 0.14), color: '#ffffff', tint: 1 },
+  ]);
+}
+
+/** Desloca a geometria para (x, z) virando o +z dela para o centro. */
+const facing = (g: THREE.BufferGeometry, x: number, z: number) => g.rotateY(Math.atan2(-x, -z)).translate(x, 0, z);
+
+/**
+ * Centro da vila na peça inicial, um por era: fogueira comunal com cabanas, salão comprido,
+ * paço com torre e muro, e palácio com torreões e o remate do tema. Cabe num raio de ~0,26.
+ */
+function centerGeometry(era: number, theme: Theme): THREE.BufferGeometry {
+  const [lw, lr, ld] = theme.landmarkColors;
+  const hw = theme.houses[0].walls[0], hr = theme.houses[0].roofs[0];
+  const win = theme.window, wood = theme.trunk, stone = theme.rock;
+  const gable = (w: number, rh: number, d: number, y: number) => new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2).scale(w, rh / 1.5, d / 1.732).translate(0, y + rh / 3, 0);
+  const pyr = (w: number, h: number, d: number, y: number) => new THREE.ConeGeometry(Math.SQRT1_2, 1, 4).rotateY(Math.PI / 4).scale(w, h, d).translate(0, y + h / 2, 0);
+  const flagpole = (x: number, y: number, z: number, h: number, c: Col): Part[] => [
+    { geo: cyl(0.003, 0.0038, h, 5, x, y, z), color: wood },
+    { geo: flagGeo(0.075, 0.04, h - 0.026).translate(x, y, z), color: c },
+  ];
+  const parts: Part[] = [];
+  if (era <= 0) {
+    // Fogueira no meio de três cabanas redondas, com as portas voltadas para o fogo.
+    for (let k = 0; k < 3; k++) {
+      const a = Math.PI / 2 + (k * Math.PI * 2) / 3;
+      const x = Math.cos(a) * 0.15, z = Math.sin(a) * 0.15;
+      parts.push({ geo: cyl(0.054, 0.06, 0.06, 9, x, 0, z), color: hw, grad: [0.85, 1.05, 0, 0.06] });
+      parts.push({ geo: cone(0.076, 0.09, 9, x, 0.058, z), color: hr, grad: [0.9, 1.08, 0.058, 0.148] });
+      parts.push({ geo: facing(box(0.024, 0.04, 0.004, 0, 0, 0.059), x, z), color: DOOR });
+    }
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      parts.push({ geo: box(0.012, 0.008, 0.012, Math.cos(a) * 0.036, 0, Math.sin(a) * 0.036).rotateY(a), color: stone });
+    }
+    parts.push({ geo: cyl(0.005, 0.005, 0.05, 5).rotateZ(Math.PI / 2).rotateY(0.6).translate(0, 0.006, 0), color: wood });
+    parts.push({ geo: cyl(0.005, 0.005, 0.05, 5).rotateZ(Math.PI / 2).rotateY(-0.6).translate(0, 0.006, 0), color: wood });
+    parts.push({ geo: cone(0.022, 0.05, 6, 0, 0.006), color: FIRE, glow: 1 });
+    parts.push({ geo: cone(0.012, 0.072, 5, 0.004, 0.006, -0.003), color: '#ffd36a', glow: 1 });
+    // Varal com peles secando entre duas cabanas.
+    parts.push({ geo: box(0.005, 0.07, 0.005, -0.19, 0, -0.05), color: wood }, { geo: box(0.005, 0.07, 0.005, -0.19, 0, 0.07), color: wood });
+    parts.push({ geo: box(0.003, 0.003, 0.12, -0.19, 0.065, 0.01), color: wood });
+    parts.push({ geo: box(0.002, 0.036, 0.03, -0.19, 0.03, -0.01), color: ld }, { geo: box(0.002, 0.03, 0.026, -0.19, 0.036, 0.035), color: lr });
+    return kit(parts);
+  }
+  if (era === 1) {
+    // Salão comprido sobre soco de pedra, com duas flâmulas nas pontas.
+    parts.push({ geo: box(0.36, 0.016, 0.18), color: stone });
+    parts.push({ geo: box(0.34, 0.11, 0.15, 0, 0.016), color: hw, grad: [0.86, 1.04, 0.016, 0.126] });
+    parts.push({ geo: gable(0.37, 0.11, 0.19, 0.126), color: hr, grad: [0.9, 1.06, 0.126, 0.236] });
+    parts.push({ geo: box(0.034, 0.06, 0.004, 0, 0.016, 0.077), color: DOOR });
+    for (const x of [-0.12, -0.06, 0.06, 0.12]) for (const z of [0.0765, -0.0765]) parts.push({ geo: box(0.018, 0.022, 0.004, x, 0.06, z), color: win, glow: 1 });
+    parts.push(...flagpole(-0.2, 0, 0.1, 0.22, ld), ...flagpole(0.2, 0, -0.1, 0.22, lr));
+    return kit(parts);
+  }
+  if (era === 2) {
+    // Paço: salão, torre quadrada de telhado de quatro águas e muro baixo em U.
+    parts.push({ geo: box(0.25, 0.1, 0.13, -0.04, 0, -0.06), color: hw, grad: [0.86, 1.04, 0, 0.1] });
+    parts.push({ geo: gable(0.27, 0.09, 0.16, 0.1).translate(-0.04, 0, -0.06), color: hr });
+    parts.push({ geo: box(0.032, 0.056, 0.004, -0.06, 0, 0.006), color: DOOR });
+    for (const x of [-0.13, 0.0]) parts.push({ geo: box(0.018, 0.022, 0.004, x, 0.05, 0.006), color: win, glow: 1 });
+    parts.push({ geo: box(0.1, 0.36, 0.1, 0.11, 0, 0.04), color: lw, grad: [0.84, 1.05, 0, 0.36] });
+    parts.push({ geo: box(0.112, 0.014, 0.112, 0.11, 0.3, 0.04), color: ld });
+    parts.push({ geo: pyr(0.13, 0.1, 0.13, 0.36).translate(0.11, 0, 0.04), color: lr });
+    for (const y of [0.12, 0.22, 0.31]) parts.push({ geo: box(0.02, 0.03, 0.004, 0.11, y, 0.091), color: win, glow: 1 });
+    parts.push({ geo: box(0.004, 0.03, 0.02, 0.161, 0.22, 0.04), color: win, glow: 1 });
+    parts.push(...flagpole(0.11, 0.46, 0.04, 0.12, ld));
+    const wall = (w: number, d: number, x: number, z: number): Part => ({ geo: box(w, 0.036, d, x, 0, z), color: stone, grad: [0.82, 1.04, 0, 0.036] });
+    parts.push(wall(0.44, 0.016, 0, -0.17), wall(0.016, 0.3, -0.215, -0.02), wall(0.016, 0.3, 0.215, -0.02));
+    for (const x of [-0.215, 0.215]) parts.push({ geo: box(0.028, 0.06, 0.028, x, 0, 0.13), color: stone });
+    return kit(parts);
+  }
+  // Palácio: corpo central, quatro torreões, e o remate do tema no alto.
+  const top = 0.175;
+  parts.push({ geo: box(0.44, 0.025, 0.36), color: stone });
+  parts.push({ geo: box(0.3, 0.15, 0.22, 0, 0.025), color: lw, grad: [0.85, 1.04, 0.025, top] });
+  parts.push({ geo: box(0.312, 0.012, 0.232, 0, top - 0.012), color: ld });
+  parts.push({ geo: box(0.05, 0.08, 0.004, 0, 0.025, 0.111), color: DOOR });
+  parts.push({ geo: box(0.07, 0.014, 0.02, 0, 0.105, 0.115), color: ld });
+  for (const x of [-0.1, -0.05, 0.05, 0.1]) {
+    parts.push({ geo: box(0.02, 0.03, 0.004, x, 0.06, 0.111), color: win, glow: 1 });
+    parts.push({ geo: box(0.02, 0.03, 0.004, x, 0.06, -0.111), color: win, glow: 1 });
+  }
+  for (const x of [-0.07, 0, 0.07]) {
+    parts.push({ geo: box(0.02, 0.026, 0.004, x, 0.12, 0.111), color: win, glow: 1 });
+    parts.push({ geo: box(0.02, 0.026, 0.004, x, 0.12, -0.111), color: win, glow: 1 });
+  }
+  const crown: CenterCrown = theme.center ?? 'spire';
+  // Torreões: coruchéu cônico na Europa, beiral de quatro águas na Ásia, terraço com ameias no Egito e nos Andes.
+  const cap = crown === 'pagoda' ? 'eave' : crown === 'pyramid' || crown === 'stepped' ? 'flat' : 'cone';
+  for (const [x, z] of [[-0.165, -0.125], [0.165, -0.125], [-0.165, 0.125], [0.165, 0.125]]) {
+    if (cap === 'flat') {
+      parts.push({ geo: box(0.07, 0.24, 0.07, x, 0.025, z), color: lw, grad: [0.84, 1.05, 0.025, 0.265] });
+      parts.push({ geo: box(0.078, 0.012, 0.078, x, 0.255, z), color: ld });
+      for (const [mx, mz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) parts.push({ geo: box(0.018, 0.022, 0.018, x + mx * 0.028, 0.267, z + mz * 0.028), color: lw });
+    } else {
+      parts.push({ geo: cyl(0.034, 0.038, 0.24, 9, x, 0.025, z), color: lw, grad: [0.84, 1.05, 0.025, 0.265] });
+      parts.push({ geo: cyl(0.04, 0.04, 0.012, 9, x, 0.255, z), color: ld });
+      if (cap === 'eave') parts.push({ geo: pyr(0.11, 0.06, 0.11, 0.262).translate(x, 0, z), color: lr });
+      else parts.push({ geo: cone(0.042, 0.09, 9, x, 0.267, z), color: lr, grad: [0.9, 1.08, 0.267, 0.357] });
+      parts.push({ geo: oct(0.008).translate(x, cap === 'eave' ? 0.33 : 0.365, z), color: GOLD, glow: 0.3 });
+    }
+    const a = Math.atan2(x, z);
+    parts.push({ geo: box(0.012, 0.022, 0.004, 0, 0.17, 0).rotateY(a).translate(x + Math.sin(a) * 0.037, 0, z + Math.cos(a) * 0.037), color: win, glow: 1 });
+  }
+  let peak = top;
+  if (crown === 'spire') {
+    parts.push({ geo: box(0.1, 0.17, 0.1, 0, top), color: lw, grad: [0.92, 1.05, top, top + 0.17] });
+    parts.push({ geo: box(0.02, 0.04, 0.004, 0, top + 0.09, 0.051), color: win, glow: 1 });
+    parts.push({ geo: pyr(0.12, 0.22, 0.12, top + 0.17), color: lr });
+    peak = top + 0.39;
+  } else if (crown === 'dome') {
+    parts.push({ geo: cyl(0.078, 0.082, 0.07, 14, 0, top), color: lw });
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      parts.push({ geo: box(0.012, 0.03, 0.004, 0, top + 0.024, 0).rotateY(a).translate(Math.sin(a) * 0.08, 0, Math.cos(a) * 0.08), color: win, glow: 1 });
+    }
+    parts.push({ geo: new THREE.SphereGeometry(0.084, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 1.15, 1).translate(0, top + 0.07, 0), color: lr, grad: [0.88, 1.1, top + 0.07, top + 0.17] });
+    parts.push({ geo: cyl(0.014, 0.016, 0.04, 8, 0, top + 0.162), color: lw });
+    peak = top + 0.2;
+  } else if (crown === 'pagoda') {
+    let y = top;
+    for (let i = 0; i < 3; i++) {
+      const s = 1 - i * 0.24;
+      parts.push({ geo: box(0.13 * s, 0.06, 0.13 * s, 0, y), color: lw });
+      parts.push({ geo: box(0.004, 0.028, 0.04 * s, 0.066 * s, y + 0.018), color: win, glow: 1 });
+      parts.push({ geo: pyr(0.26 * s, 0.06, 0.26 * s, y + 0.05), color: lr });
+      y += 0.085;
+    }
+    parts.push({ geo: cyl(0.005, 0.007, 0.07, 5, 0, y + 0.02), color: GOLD, glow: 0.3 });
+    peak = y + 0.09;
+  } else if (crown === 'pyramid') {
+    parts.push({ geo: pyr(0.22, 0.17, 0.22, top), color: lw, grad: [0.86, 1.06, top, top + 0.17] });
+    parts.push({ geo: pyr(0.05, 0.04, 0.05, top + 0.13), color: GOLD, glow: 0.3 });
+    peak = top + 0.17;
+  } else if (crown === 'stepped') {
+    let y = top;
+    for (const w of [0.2, 0.15, 0.1]) {
+      parts.push({ geo: box(w, 0.04, w * 0.85, 0, y), color: lw, grad: [0.86, 1.04, y, y + 0.04] });
+      y += 0.04;
+    }
+    parts.push({ geo: cyl(0.04, 0.04, 0.008, 16).rotateX(Math.PI / 2).translate(0, y + 0.045, 0), color: GOLD, glow: 0.3 });
+    parts.push({ geo: box(0.008, 0.008, 0.006, 0, y, 0), color: GOLD });
+    peak = y + 0.085;
+  } else {
+    parts.push({ geo: box(0.22, 0.06, 0.12, 0, top), color: lw });
+    parts.push({ geo: gable(0.24, 0.15, 0.16, top + 0.06), color: lr, grad: [0.9, 1.06, top + 0.06, top + 0.21] });
+    for (const s of [1, -1]) {
+      parts.push({ geo: new THREE.BoxGeometry(0.008, 0.07, 0.012).rotateX(0.7).translate(s * 0.122, top + 0.23, 0.012), color: lr });
+      parts.push({ geo: new THREE.BoxGeometry(0.008, 0.07, 0.012).rotateX(-0.7).translate(s * 0.122, top + 0.23, -0.012), color: lr });
+    }
+    peak = top + 0.25;
+  }
+  // Remate dourado: com o brilho noturno, o bloom o pega de longe.
+  parts.push({ geo: cyl(0.003, 0.003, 0.03, 4, 0, peak), color: GOLD }, { geo: oct(0.013).translate(0, peak + 0.04, 0), color: GOLD, glow: 0.3 });
+  return kit(parts);
+}
+
 // ---------------------------------------------------------------- estruturas das interações
 
 function specialsFor(theme: Theme, walls: string, roofs: string) {
@@ -1319,6 +1491,8 @@ export class Lib {
     set('vehicle:head', v.head);
     set('vehicle:car', v.car);
     set('bird', birdGeometry());
+    for (let e = 0; e < 4; e++) set(`center:${e}`, centerGeometry(e, theme));
+    set('pennant', pennantGeometry(theme.trunk));
   }
 
   geo(key: string) {
