@@ -88,7 +88,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__stats` | estatísticas do último quadro |
 | `window.__pools()` | relatório dos InstancedMesh |
 | `window.__ghostBest()` | põe o fantasma na melhor jogada |
-| `window.__ghostSynergy()` | põe o fantasma numa jogada com interação e devolve quantas |
+| `window.__ghostSynergy(colocar?)` | põe o fantasma numa jogada com interação e devolve quantas; com `true`, coloca a peça (obra com andaime) |
 
 ## Mapa do código
 
