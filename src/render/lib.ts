@@ -223,13 +223,14 @@ function trimFor(style: BodyStyle, trim: Col, w: number, h: number, d: number): 
   return parts;
 }
 
-function wallGeometry(k: HouseKind, win: Col) {
+function wallGeometry(k: HouseKind, win: Col, plinth: Col) {
   const { w, h, d } = BODY[k.body];
   const body = k.body === 'round' ? cyl(w / 2, w / 2, h, 12) : box(w, h, d);
   const parts: Part[] = [{ geo: body, color: '#ffffff', tint: 1 }, ...windowsFor(k.body, win, w, h, d)];
   if (k.trim) parts.push(...trimFor(k.body, k.trim, w, h, d));
-  // Soco (base) escuro dá peso à casa e a separa do chão claro (legibilidade de longe).
-  if (k.body !== 'round') parts.push({ geo: box(w + 0.004, 0.018, d + 0.004), color: '#6a5d52' });
+  // Soco (base) escuro, na cor da lateral das peças: dá peso à casa e a separa do chão claro
+  // (legibilidade de longe, sobretudo onde parede clara encontra chão claro).
+  if (k.body !== 'round') parts.push({ geo: box(w + 0.004, 0.022, d + 0.004), color: plinth });
   return kit(parts);
 }
 
@@ -1367,8 +1368,10 @@ function specialsFor(theme: Theme, walls: string, roofs: string) {
     logs.push({ geo: cyl(0.009, 0.009, 0.08, 6).rotateX(Math.PI / 2).rotateY(Math.PI / 2).translate(0, 0.009 + row * 0.016, z), color: wood, grad: [0.8, 1.1, 0, 0.03] });
   }
   logs.push({ geo: cyl(0.014, 0.016, 0.02, 7, 0.07, 0, 0.04), color: wood });
-  logs.push({ geo: box(0.06, 0.05, 0.05, -0.02, 0, -0.07), color: walls });
-  logs.push({ geo: new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2).scale(0.075, 0.03, 0.064 / 1.732).translate(-0.02, 0.06, -0.07), color: roofs });
+  // Galpão da serra, com telhado de uma água: o elemento alto que faz a serraria ler de longe.
+  logs.push({ geo: box(0.07, 0.085, 0.06, -0.02, 0, -0.07), color: walls });
+  logs.push({ geo: box(0.086, 0.006, 0.084).rotateX(0.38).translate(-0.02, 0.112, -0.07), color: roofs });
+  logs.push({ geo: box(0.004, 0.04, 0.03, 0.016, 0.02, -0.07), color: DOOR });
 
   const fence: Part[] = [];
   const N = 10;
@@ -1382,6 +1385,8 @@ function specialsFor(theme: Theme, walls: string, roofs: string) {
     fence.push({ geo: box(len, 0.004, 0.003, 0, 0.02, 0).rotateY(-(a + a2) / 2 + Math.PI / 2).translate(mx, 0, mz), color: wood });
   }
   fence.push({ geo: box(0.03, 0.012, 0.012, 0.06, 0, 0.02), color: '#8a7a6a' });
+  // Mastro com flâmula no meio do pasto (de longe, o cercado baixo some).
+  fence.push({ geo: cyl(0.003, 0.004, 0.16, 5, -0.03, 0, -0.02), color: wood }, { geo: flagGeo(0.07, 0.038, 0.14).translate(-0.03, 0, -0.02), color: roofs });
 
   const apiary: Part[] = [];
   for (const [x, z] of [
@@ -1392,6 +1397,12 @@ function specialsFor(theme: Theme, walls: string, roofs: string) {
     apiary.push({ geo: box(0.024, 0.006, 0.024, x, 0, z), color: '#6a4a32' });
     apiary.push({ geo: box(0.022, 0.026, 0.022, x, 0.006, z), color: '#f3e3b0' });
     apiary.push({ geo: box(0.026, 0.005, 0.026, x, 0.032, z), color: '#c9a24a' });
+  }
+  // Colmeias de palha altas sobre um banco: dão altura ao conjunto.
+  apiary.push({ geo: box(0.07, 0.04, 0.026, 0, 0, -0.04), color: '#6a4a32' });
+  for (const x of [-0.018, 0.018]) {
+    apiary.push({ geo: cyl(0.016, 0.019, 0.045, 8, x, 0.04, -0.04), color: '#d8b45a', grad: [0.85, 1.05, 0.04, 0.085] });
+    apiary.push({ geo: cone(0.017, 0.04, 8, x, 0.085, -0.04), color: '#c9a24a' });
   }
 
   const granary: Part[] = [
@@ -1483,7 +1494,7 @@ export class Lib {
     this.domeKeys.clear();
     theme.houses.forEach((k, i) => k.roof === 'dome' && this.domeKeys.add(`roof:${i}`));
     this.houseMeta = theme.houses.map((k, i) => {
-      set(`wall:${i}`, wallGeometry(k, theme.window));
+      set(`wall:${i}`, wallGeometry(k, theme.window, theme.sideDark));
       const r = roofGeometry(k.roof, k.body, !!k.chimney);
       set(`roof:${i}`, r.geo);
       return { h: BODY[k.body].h, top: r.top, chimney: r.chim };

@@ -11,6 +11,7 @@ import { DynRes } from './render/dynres';
 import { readGpuInfo } from './render/gpu';
 import { gpuName, tierForGpu } from './render/gpuTier';
 import { FX_FLAGS } from './render/post';
+import { U } from './render/materials';
 import { World } from './render/world';
 import { pickCodec, type VideoSize } from './video/encoder';
 import { planFilm } from './video/film';
@@ -1313,6 +1314,8 @@ function start(data: unknown) {
     (window as unknown as { __load: unknown }).__load = r;
   } else if (params.has('auto')) autoPlace(Number(params.get('auto')) || 40, false);
   if (params.has('debug')) hud.stats.hidden = false;
+  // Legibilidade: decorações pretas sobre chão branco (vilas, construções e marcos precisam ler de longe).
+  if (params.has('silhueta')) U.silhouette.value = 1;
   (window as unknown as { __pools: () => unknown }).__pools = () => world.poolReport();
   if (params.has('gallery')) (window as unknown as { __gallery: string[] }).__gallery = world.showGallery();
   if (params.has('yaw')) world.rig.yaw = world.rig.goalYaw = Number(params.get('yaw'));
