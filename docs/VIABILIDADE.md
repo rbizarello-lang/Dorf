@@ -385,6 +385,25 @@ A água deixou de ser uma faixa pintada sobre o leito e virou uma coluna d'água
 
 **Custo.** Com 300 peças em renderização por software, os draw calls não mudam (193 no Ultra, 111 na Alta) e os triângulos sobem 0,3% no Ultra (3,06 M) e 0,7% na Alta (1,54 M), porque a água agora segue a grade do leito. A montagem das peças fica ~15% mais lenta, já que a correnteza é calculada em mais vértices. A CPU por quadro ficou dentro do ruído do SwiftShader, que dá picos de ~1 s nos dois builds. O shader da água ficou mais pesado (12 leituras de textura por pixel de água, contra 3); esse custo só uma GPU de verdade mede.
 
+### Acabamento (outubro de 2026)
+
+Cinco ajustes de imagem do estudo da Lagoa e do Threetopia, quase sem custo na placa.
+
+| Recurso | Como entrou |
+|---|---|
+| Oclusão só na luz indireta | os materiais do jogo (`LitMaterial`: kits, chão e água) gravam no passe da cena a parte da cor que veio do céu (`indirectShare`), e o pós escurece só essa parte. O sol direto, as janelas acesas, o contorno das copas e a névoa não ganham mais halo escuro. Na Alta, o GTAO ganha o rebatimento colorido de Jimenez (2016): o pé da grama fica verde-escuro, não cinza. No Ultra, o próprio SSGI já traz a luz rebatida |
+| Nitidez e faixas | o RCAS (`SharpenNode`) depois do TRAA devolve o detalhe que a média temporal amolece, sem realçar o ruído do SSGI; um dither triangular de ±1 nível, depois da conversão para sRGB, tira as faixas do céu e da névoa |
+| Cor por hora | a gradação puxa os realces para a cor do sol e as sombras para o tom oposto: quase nada ao meio-dia, realce dourado e sombra azulada no entardecer, nada à noite. O tom sai da cor do sol de cada tema, sem regra por tema |
+| Sombra firme | sem cascatas (Alta e abaixo), o centro da sombra anda de texel em texel no plano da luz, e as bordas não tremem quando a câmera desliza; as cascatas do Ultra já faziam isso |
+| Capim sem pipocar | a metade fina das plantas (chaves `~`) não some mais de uma vez em `rig.dist` 13: entre 11,5 e 14,5, cada planta afunda no chão na sua vez (material `cropFine`, sem `discard`) |
+
+**Armadilhas:**
+- O `builtinAOContext` do three aplica a oclusão dentro do material, mas pede um pré-passe de profundidade e normal, o que dobra os draw calls. Gravar a parte indireta numa saída do passe da cena dá o mesmo resultado sem passe extra. Ela vai no alfa da saída `diffuse` (Ultra) ou da `normal` (Alta, que não grava a máscara do reflexo).
+- Com SSGI, o vazio grava a cor difusa zerada, para não tingir a luz rebatida. O alfa dessa saída precisa ser 1; com 0, o vazio perde a oclusão e o fundo entre as peças clareia.
+- O dither precisa vir depois da conversão para sRGB, então o pipeline faz a conversão no próprio grafo (`outputColorTransform = false` e `renderOutput`).
+
+**Custo.** Com 300 peças em renderização por software, os níveis com TRAA ganham 2 draw calls (o RCAS e uma cópia da saída do TRAA): 195 no Ultra e 113 na Alta. Os triângulos não mudam. A CPU por quadro fica dentro do ruído; os picos de ~0,7 s aparecem nos dois builds e vêm de shaders compilados tarde, dentro da janela da medida. Na GPU, entra uma passada de tela cheia (5 leituras por pixel) e algumas contas no pós.
+
 **Ainda não feito, do documento do AoE:** Centro que evolui com a era, arquitetura que muda por era, aldeões trabalhando, maravilha, vazio como mapa antigo, minimapa, trilha sonora por era.
 
 ## Apêndice A: revisão de código e QA pelo Sonnet
