@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { Fn, convertToTexture, diffuseColor, dot, float, hash, length, max, mix, mrt, normalView, output, packNormalToRGB, pass, renderOutput, roughness, sample, screenCoordinate, screenUV, smoothstep, uniform, unpackRGBToNormal, vec2, vec3, vec4, velocity } from 'three/tsl';
+import { Fn, convertToTexture, diffuseColor, dot, float, hash, length, max, mix, mrt, normalView, output, packNormalToRGB, pass, perspectiveDepthToViewZ, renderOutput, roughness, sample, screenCoordinate, screenUV, smoothstep, uniform, unpackRGBToNormal, vec2, vec3, vec4, velocity } from 'three/tsl';
 import { bilateralBlur } from 'three/addons/tsl/display/BilateralBlurNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
@@ -20,6 +20,7 @@ import { indirectShare, ssrMask } from './materials';
 //          (godrays) + bloom + profundidade de campo + antisserrilhado temporal (TRAA)
 //   high:  GTAO em meia resolução + bloom + profundidade de campo + TRAA
 //          (GTAO lê a profundidade, que no WebGPU não pode ser multiamostrada: por isso TRAA, não MSAA)
+//   (cinema, ultra e high também desenham o traço de tinta, o contorno dos objetos)
 //   medium: MSAA 4× + gradação e vinheta (um passe barato)
 //   low:   sem pipeline (desenho direto, com o MSAA do canvas)
 
@@ -32,16 +33,18 @@ interface Config {
   rays: boolean;
   bloom: boolean;
   dof: boolean;
+  /** Traço de tinta (contorno); precisa ler a profundidade, então não combina com MSAA. */
+  ink: boolean;
   aa: 'traa' | 'msaa' | 'fxaa';
   /** Acabamento de cinema: mais amostras, reflexo em resolução cheia, aberração e grão. */
   film?: boolean;
 }
 
 const CONFIG: Record<Exclude<Quality, 'low'>, Config> = {
-  cinema: { ao: 0, gi: true, ssr: true, rays: true, bloom: true, dof: true, aa: 'traa', film: true },
-  ultra: { ao: 0, gi: true, ssr: true, rays: true, bloom: true, dof: true, aa: 'traa' },
-  high: { ao: 0.5, gi: false, ssr: false, rays: false, bloom: true, dof: true, aa: 'traa' },
-  medium: { ao: 0, gi: false, ssr: false, rays: false, bloom: false, dof: false, aa: 'msaa' },
+  cinema: { ao: 0, gi: true, ssr: true, rays: true, bloom: true, dof: true, ink: true, aa: 'traa', film: true },
+  ultra: { ao: 0, gi: true, ssr: true, rays: true, bloom: true, dof: true, ink: true, aa: 'traa' },
+  high: { ao: 0.5, gi: false, ssr: false, rays: false, bloom: true, dof: true, ink: true, aa: 'traa' },
+  medium: { ao: 0, gi: false, ssr: false, rays: false, bloom: false, dof: false, ink: false, aa: 'msaa' },
 };
 
 /** Parâmetros ajustáveis em tempo real (sem recompilar). */
@@ -70,6 +73,12 @@ export const P = {
   grainSeed: uniform(0),
   /** Pixels do desenho por pixel da tela: o grão tem o tamanho de um pixel da tela, com ou sem supersamplagem. */
   grainCell: uniform(1),
+  /** Traço de tinta: força (0 = sem contorno) e a cor da tinta (linear). */
+  ink: uniform(0.9),
+  inkColor: uniform(new THREE.Color(0.045, 0.03, 0.022)),
+  /** Distâncias da câmera em que o traço começa a sumir e some de todo (world.ts, pelo zoom). */
+  inkNear: uniform(20),
+  inkFar: uniform(40),
 };
 
 /**
@@ -155,6 +164,46 @@ const sceneNormal = (withRoughness: boolean) =>
     return vec4(packNormalToRGB(normalView), !withRoughness ? indirectShare(m) : mask ? mask : m?.roughness !== undefined ? roughness : float(1));
   })();
 
+/**
+ * Traço de tinta, como o contorno desenhado do Dorfromantik. Cada pixel olha os vizinhos até
+ * `w` pixels (3 em 1080p, 6 em 4K): se algum está bem mais longe, o pixel é a silhueta de um
+ * objeto à frente e escurece na cor dele (o traço fica do lado do objeto, não do fundo). Com a
+ * normal, as quinas vivas (canto de parede, beiral) ganham um traço mais leve; as facetas do
+ * chão e das copas dobram menos que o limiar. Vem antes do TRAA, que o antisserrilha.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ink = (input: any, depth: any, normal: any, camera: THREE.PerspectiveCamera) =>
+  Fn(() => {
+    const near = uniform(camera.near);
+    const far = uniform(camera.far);
+    const size = vec2(depth.size(0));
+    const w = max(float(2), size.y.div(360).round());
+    const px = vec2(1).div(size);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const distAt = (uv: any) => perspectiveDepthToViewZ(depth.sample(uv).r, near, far).negate();
+    const dc = distAt(screenUV);
+    // Oito direções na distância w e quatro na metade: a linha fica cheia também na diagonal.
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
+    const offs = [...dirs.map(([x, y]) => px.mul(vec2(x, y)).mul(w)), ...dirs.slice(0, 4).map(([x, y]) => px.mul(vec2(x, y)).mul(w.mul(0.5).ceil()))];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let gap: any = float(0);
+    for (const o of offs) gap = max(gap, distAt(screenUV.add(o)).sub(dc));
+    // Salto relativo: o chão visto de lado varia pouco por pixel; uma casa contra o chão, muito.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let e: any = smoothstep(0.015, 0.04, gap.div(dc));
+    if (normal) {
+      const nc = unpackRGBToNormal(normal.sample(screenUV).rgb);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let bend: any = float(0);
+      for (const o of offs.slice(8)) bend = max(bend, float(1).sub(dot(nc, unpackRGBToNormal(normal.sample(screenUV.add(o)).rgb))));
+      e = max(e, smoothstep(0.3, 0.6, bend).mul(0.5));
+    }
+    e = e.mul(smoothstep(P.inkFar, P.inkNear, dc)).mul(P.ink);
+    // Quase só tinta, com um pouco da cor do objeto: escuro também sobre a mata escura.
+    const line = mix(input.rgb.mul(0.3), P.inkColor, 0.7);
+    return vec4(mix(input.rgb, line, e), input.a);
+  })();
+
 /** Cor difusa da cena (rebatimento do SSGI) e, no alfa, a parte indireta da luz. */
 const sceneDiffuse = Fn((builder: { material: THREE.Material | null }) => {
   const m = builder.material;
@@ -182,8 +231,8 @@ export interface Post {
   dispose(): void;
 }
 
-/** Efeitos que `?fx=` pode ligar um a um (depuração de custo): ao, gi, ssr, rays, traa, msaa, bloom, dof, film. */
-export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'dof', 'film'] as const;
+/** Efeitos que `?fx=` pode ligar um a um (depuração de custo): ao, gi, ssr, rays, traa, msaa, bloom, dof, ink, film. */
+export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'dof', 'ink', 'film'] as const;
 
 /**
  * `rayLight` é a luz cujo mapa de sombra os raios percorrem. Precisa ser uma DirectionalLight
@@ -192,7 +241,7 @@ export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'do
  */
 export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, q: Exclude<Quality, 'low'>, fx?: string[], rayLight?: THREE.DirectionalLight, clouds?: THREE.Scene): Post {
   const cfg: Config = fx
-    ? { ao: fx.includes('ao') ? CONFIG[q].ao || 0.5 : 0, gi: fx.includes('gi'), ssr: fx.includes('ssr'), rays: fx.includes('rays'), bloom: fx.includes('bloom'), dof: fx.includes('dof'), aa: fx.includes('traa') ? 'traa' : fx.includes('msaa') ? 'msaa' : 'fxaa', film: fx.includes('film') }
+    ? { ao: fx.includes('ao') ? CONFIG[q].ao || 0.5 : 0, gi: fx.includes('gi'), ssr: fx.includes('ssr'), rays: fx.includes('rays'), bloom: fx.includes('bloom'), dof: fx.includes('dof'), ink: fx.includes('ink') && !fx.includes('msaa'), aa: fx.includes('traa') ? 'traa' : fx.includes('msaa') ? 'msaa' : 'fxaa', film: fx.includes('film') }
     : { ...CONFIG[q] };
   if (!rayLight) cfg.rays = false;
   const disposables: { dispose(): void }[] = [];
@@ -306,6 +355,9 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
     const lit = blurred.r.mul(P.rays);
     node = vec4(mix(node.rgb, P.rayColor, lit), node.a);
   }
+
+  // O traço vem antes das nuvens: elas passam por cima do mapa sem contorno.
+  if (cfg.ink) node = ink(node, depth, nrm, camera);
 
   if (clouds) {
     // Nuvens (clouds.ts) num passe à parte, por cima da luz indireta, da oclusão e dos reflexos:

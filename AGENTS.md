@@ -76,7 +76,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?stress=1000` | teste de carga; o resultado fica em `window.__load` |
 | `?focus=4` | centraliza a câmera na peça com mais bordas do terreno (4 = rio); `window.__focus(t, zoom)` |
 | `?webgl` | força o backend WebGL2 (o padrão é WebGPU quando o navegador oferece) |
-| `?fx=ao.gi.ssr.rays.traa.bloom.dof.film` | liga os efeitos de pós um a um (medir custo; `film` é o acabamento do Cinema: mais amostras, grão e aberração); `?fx=` desliga todos |
+| `?fx=ao.gi.ssr.rays.traa.bloom.dof.ink.film` | liga os efeitos de pós um a um (medir custo; `film` é o acabamento do Cinema: mais amostras, grão e aberração); `?fx=` desliga todos |
 | `?timescale=0.05` | desacelera o mundo (animações nas capturas por software) |
 | `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
 | `window.__ripple(idade)` | dispara a onda do chão no foco da câmera, já com essa idade em segundos |

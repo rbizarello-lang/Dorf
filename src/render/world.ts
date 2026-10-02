@@ -1261,6 +1261,9 @@ export class World {
     // Foco da profundidade de campo: o ponto que a câmera olha.
     P.focus.value = this.rig.dist;
     P.focalLength.value = this.rig.dist * 0.42;
+    // O traço é pleno em volta do foco e some antes da névoa, senão o fundo vira hachura.
+    P.inkNear.value = this.rig.dist * 1.6;
+    P.inkFar.value = this.rig.dist * 3.2;
     // Gradação: realces na cor do sol e sombras no tom oposto (frias com o sol quente da tarde).
     const day = 1 - this.sky.night;
     tintOf(this.sky.sun, -0.14 * day, P.shade.value);
