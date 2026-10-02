@@ -855,6 +855,7 @@ export class World {
     if (!geo) return;
     const m = new THREE.InstancedMesh(instGeometry(geo, 1), this.lib.material('center'), 1);
     m.setMatrixAt(0, tmpM.identity());
+    setInstColor(m, 0, tmpColor.set(this.theme.ui.accent));
     m.castShadow = this.quality !== 'low';
     m.receiveShadow = true;
     m.computeBoundingSphere();

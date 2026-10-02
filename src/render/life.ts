@@ -171,6 +171,8 @@ export class Life {
   private theme!: Theme;
   /** Cor dos animais de carroça/caravana (as partes de locomotiva ignoram a tinta). */
   private beast = new THREE.Color(1, 1, 1);
+  /** Cor da casa (destaque do tema): bandeira dos barcos e camisa de metade dos caminhantes. */
+  private house = new THREE.Color(1, 1, 1);
   private time = 0;
 
   constructor(
@@ -191,6 +193,7 @@ export class Life {
     this.scoutRide = null;
     this.theme = theme;
     this.beast.set(theme.animals.colors[0]);
+    this.house.set(theme.ui.accent);
   }
 
   private pool(key: string, shadows = true) {
@@ -287,7 +290,7 @@ export class Life {
     const speed = folk ? 0.045 + Math.random() * 0.015 : boat ? 0.16 + Math.random() * 0.06 : th.vehicle === 'maglev' ? 0.7 : th.vehicle === 'steam' ? 0.42 : 0.17;
     const { x, z } = hexToWorld(tile.q, tile.r);
     const roofs = th.houses.flatMap((h) => h.roofs);
-    const shirt = folk ? new THREE.Color(roofs[Math.floor(Math.random() * roofs.length)]) : undefined;
+    const shirt = folk ? new THREE.Color(Math.random() < 0.5 ? th.ui.accent : roofs[Math.floor(Math.random() * roofs.length)]) : undefined;
     const m: Mover = { boat, folk, shirt, tile, a, b, t: Math.random() * 0.5, len: a < 0 ? 0.87 : Math.abs(a - b) === 3 ? 1.73 : 1.45, speed, wait: 0, trail: [], x, z, heading: 0, wake: 0 };
     this.movers.push(m);
   }
@@ -533,7 +536,7 @@ export class Life {
         q4.setFromAxisAngle(UP, -m.heading);
         m4.compose(v3.set(m.x, WATER_Y - 0.001 + bob, m.z), q4, s3.setScalar(1));
         m4.multiply(m4b.makeRotationX(Math.sin(this.time * 1.6 + m.speed * 30) * 0.05));
-        boats?.set(bi++, m4);
+        boats?.set(bi++, m4, this.house);
         continue;
       }
       // Rastro para os vagões seguirem a locomotiva.

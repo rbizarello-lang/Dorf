@@ -1073,7 +1073,16 @@ function animalGeometry(kind: AnimalKind): THREE.BufferGeometry {
   }
 }
 
-function boatGeometry(kind: BoatKind, [hullC, sailC]: [string, string]): THREE.BufferGeometry {
+/** Barco com a bandeira da casa na popa (o pano recebe a cor da instância). */
+function boatGeometry(kind: BoatKind, colors: [string, string]): THREE.BufferGeometry {
+  const flag = kit([
+    { geo: cyl(0.0015, 0.0018, 0.05, 4, -0.04, 0.012), color: '#4a3a30' },
+    { geo: flagGeo(0.028, 0.016, 0.052).rotateY(Math.PI).translate(-0.04, 0, 0), color: '#ffffff', tint: 1 },
+  ]);
+  return mergeGeometries([boatBody(kind, colors), flag])!;
+}
+
+function boatBody(kind: BoatKind, [hullC, sailC]: [string, string]): THREE.BufferGeometry {
   const H = (len: number, w: number, h: number) => ({ geo: hull(len, w, h), color: hullC });
   const mast = (h: number, x = 0) => ({ geo: cyl(0.0025, 0.003, h, 4, x, 0.01), color: '#4a3a30' });
   switch (kind) {
@@ -1364,9 +1373,10 @@ function centerGeometry(era: number, theme: Theme): THREE.BufferGeometry {
   const win = theme.window, wood = theme.trunk, stone = theme.rock;
   const gable = (w: number, rh: number, d: number, y: number) => new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2).scale(w, rh / 1.5, d / 1.732).translate(0, y + rh / 3, 0);
   const pyr = (w: number, h: number, d: number, y: number) => new THREE.ConeGeometry(Math.SQRT1_2, 1, 4).rotateY(Math.PI / 4).scale(w, h, d).translate(0, y + h / 2, 0);
-  const flagpole = (x: number, y: number, z: number, h: number, c: Col): Part[] => [
+  // As bandeiras do Centro levam a cor da casa (a cor da instância, posta pelo World).
+  const flagpole = (x: number, y: number, z: number, h: number): Part[] => [
     { geo: cyl(0.003, 0.0038, h, 5, x, y, z), color: wood },
-    { geo: flagGeo(0.075, 0.04, h - 0.026).translate(x, y, z), color: c },
+    { geo: flagGeo(0.075, 0.04, h - 0.026).translate(x, y, z), color: '#ffffff', tint: 1 },
   ];
   const parts: Part[] = [];
   if (era <= 0) {
@@ -1399,7 +1409,7 @@ function centerGeometry(era: number, theme: Theme): THREE.BufferGeometry {
     parts.push({ geo: gable(0.37, 0.11, 0.19, 0.126), color: hr, grad: [0.9, 1.06, 0.126, 0.236] });
     parts.push({ geo: box(0.034, 0.06, 0.004, 0, 0.016, 0.077), color: DOOR });
     for (const x of [-0.12, -0.06, 0.06, 0.12]) for (const z of [0.0765, -0.0765]) parts.push({ geo: box(0.018, 0.022, 0.004, x, 0.06, z), color: win, glow: 1 });
-    parts.push(...flagpole(-0.2, 0, 0.1, 0.22, ld), ...flagpole(0.2, 0, -0.1, 0.22, lr));
+    parts.push(...flagpole(-0.2, 0, 0.1, 0.22), ...flagpole(0.2, 0, -0.1, 0.22));
     return kit(parts);
   }
   if (era === 2) {
@@ -1413,7 +1423,7 @@ function centerGeometry(era: number, theme: Theme): THREE.BufferGeometry {
     parts.push({ geo: pyr(0.13, 0.1, 0.13, 0.36).translate(0.11, 0, 0.04), color: lr });
     for (const y of [0.12, 0.22, 0.31]) parts.push({ geo: box(0.02, 0.03, 0.004, 0.11, y, 0.091), color: win, glow: 1 });
     parts.push({ geo: box(0.004, 0.03, 0.02, 0.161, 0.22, 0.04), color: win, glow: 1 });
-    parts.push(...flagpole(0.11, 0.46, 0.04, 0.12, ld));
+    parts.push(...flagpole(0.11, 0.46, 0.04, 0.12));
     const wall = (w: number, d: number, x: number, z: number): Part => ({ geo: box(w, 0.036, d, x, 0, z), color: stone, grad: [0.82, 1.04, 0, 0.036] });
     parts.push(wall(0.44, 0.016, 0, -0.17), wall(0.016, 0.3, -0.215, -0.02), wall(0.016, 0.3, 0.215, -0.02));
     for (const x of [-0.215, 0.215]) parts.push({ geo: box(0.028, 0.06, 0.028, x, 0, 0.13), color: stone });
