@@ -29,6 +29,14 @@ export interface Rules {
   /** A partida acaba quando todos os sítios forem achados (cada peça que sobrou vale `leftoverPoints`). */
   endOnSites: boolean;
   leftoverPoints: number;
+  /**
+   * Maravilha na última era: a próxima peça com 2+ bordas de vila vira o canteiro, e cada
+   * peça colocada depois avança uma etapa. 0 = sem maravilha.
+   */
+  wonderStages: number;
+  /** Pontos e peças ao completar a maravilha. */
+  wonderPoints: number;
+  wonderTiles: number;
 }
 
 export const DEFAULT_RULES: Rules = {
@@ -48,6 +56,9 @@ export const DEFAULT_RULES: Rules = {
   infinite: false,
   endOnSites: false,
   leftoverPoints: 20,
+  wonderStages: 6,
+  wonderPoints: 300,
+  wonderTiles: 6,
 };
 
 export interface Placed {
@@ -66,6 +77,8 @@ export interface Placed {
   eraMark?: number;
   /** Sítio descoberto nesta peça (a peça mostra a ruína, o baú, o relicário ou a torre). */
   site?: SiteKind;
+  /** Canteiro da maravilha (o meio da peça fica livre para ela). */
+  wonder?: boolean;
 }
 
 export interface Quest {
@@ -92,6 +105,8 @@ export interface Check {
   site: Site | null;
   /** Era cujo marco esta peça ergueria (o fantasma já mostra), ou null. */
   eraMark: number | null;
+  /** Esta peça viraria o canteiro da maravilha (o fantasma já mostra o meio livre). */
+  wonder: boolean;
 }
 
 export interface PlaceResult {
@@ -110,6 +125,8 @@ export interface PlaceResult {
   site: Site | null;
   /** Era alcançada nesta jogada (índice a partir de 0), ou null. */
   eraUp: number | null;
+  /** Maravilha: começou nesta peça (etapa 0), avançou ou ficou pronta nesta jogada; null se nada mudou. */
+  wonder: { stage: number; started: boolean; done: boolean } | null;
   /** Exploradores: pontos pelas peças que sobraram quando o último sítio foi achado. */
   leftoverBonus?: number;
 }
@@ -131,6 +148,8 @@ export class Board {
   sites: Site[] = [];
   /** Jogadas restantes em que o mirante mostra as próximas peças. */
   lookout = 0;
+  /** Maravilha: peça do canteiro e etapa (pronta quando chega a `rules.wonderStages`). */
+  wonder: { tile: Placed; stage: number } | null = null;
   private questSeq = 0;
   // Union-find sobre (peça, setor): refeito a cada jogada, O(n).
   private parent = new Int32Array(0);
@@ -171,7 +190,11 @@ export class Board {
         if (kind) synergies.push({ edge: i, kind });
       }
     }
-    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, synergies, site: this.siteAt(q, r), eraMark: this.markPending !== null && edges.includes(T.Village) ? this.markPending : null };
+    const eraMark = this.markPending !== null && edges.includes(T.Village) ? this.markPending : null;
+    const R = this.rules;
+    const lastEra = R.eraScores.length > 1 && this.era === R.eraScores.length - 1;
+    const wonder = !this.wonder && R.wonderStages > 0 && lastEra && eraMark === null && edges.filter((e) => e === T.Village).length >= 2;
+    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, synergies, site: this.siteAt(q, r), eraMark, wonder };
   }
 
   /** Sítio ainda não descoberto em (q, r). */
@@ -285,6 +308,23 @@ export class Board {
       }
     }
 
+    // Maravilha (só na última era): começa na próxima peça com 2+ bordas de vila que não seja
+    // a do marco da era; depois, cada peça colocada avança uma etapa.
+    let wonder: PlaceResult['wonder'] = null;
+    if (this.wonder && this.wonder.stage < R.wonderStages) {
+      const stage = ++this.wonder.stage;
+      const done = stage === R.wonderStages;
+      if (done) {
+        points += R.wonderPoints;
+        tilesGained += R.wonderTiles;
+      }
+      wonder = { stage, started: false, done };
+    } else if (c.wonder) {
+      this.wonder = { tile: placed, stage: 0 };
+      placed.wonder = true;
+      wonder = { stage: 0, started: true, done: false };
+    }
+
     this.score += points;
     // Eras: a pontuação acumulada abre a próxima, que traz peças.
     let eraUp: number | null = null;
@@ -294,7 +334,7 @@ export class Board {
       eraUp = this.era;
       this.markPending = this.era;
     }
-    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp };
+    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder };
   }
 
   private isClosedPerfect(t: Placed) {

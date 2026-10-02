@@ -29,7 +29,7 @@ type QualityMode = 'auto' | Quality;
 type MoveRec = [number, number, number];
 /** v4: modos, eras, sítios e bônus por tema. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 4;
+  v: 5;
   seed: number;
   rulesId: string;
   mode: ModeId;
@@ -38,7 +38,7 @@ interface Save {
   undone: number;
   score: number;
 }
-const SAVE_VERSION = 4;
+const SAVE_VERSION = 5;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -423,6 +423,13 @@ function announce(res: PlaceResult) {
     void el.offsetWidth;
     el.classList.add('up');
   }
+  if (res.wonder?.started) {
+    hud.toast(`Canteiro da maravilha: ${theme.wonder?.name ?? 'Maravilha'}. Cada peça colocada avança uma etapa (${game.rules.wonderStages} no total)`, 'good');
+    sfx.hammer(0.2);
+  } else if (res.wonder?.done) {
+    hud.toast(`${theme.wonder?.name ?? 'Maravilha'} concluída: +${game.rules.wonderPoints} pontos · +${game.rules.wonderTiles} peças · P para a foto`, 'good');
+    sfx.eraFanfare(game.board.era);
+  } else if (res.wonder) sfx.hammer(0.4);
   if (res.leftoverBonus) hud.toast(`Todos os sítios achados! Peças que sobraram: +${res.leftoverBonus} pontos`, 'good');
   hud.renderQuests(game.board.quests, theme);
 }
@@ -444,7 +451,7 @@ function showHelp() {
     </ul>
     <div class="synergies">${synergyLegend()}</div>
     <ul>
-      <li><b>Eras</b>: com ${game.rules.eraScores.slice(1).map((v) => v.toLocaleString('pt-BR')).join(', ')} pontos a vila muda de era e ganha +${game.rules.eraTiles} peças. O Centro, no meio da primeira peça, muda de forma, e a próxima peça com vila ergue o marco da era.</li>
+      <li><b>Eras</b>: com ${game.rules.eraScores.slice(1).map((v) => v.toLocaleString('pt-BR')).join(', ')} pontos a vila muda de era e ganha +${game.rules.eraTiles} peças. O Centro, no meio da primeira peça, muda de forma, e a próxima peça com vila ergue o marco da era.${game.rules.wonderStages > 0 && game.rules.eraScores.length > 1 ? ` Na última era, a próxima peça com 2 ou mais bordas de vila vira o canteiro da maravilha do tema: cada peça colocada depois avança uma etapa, e as ${game.rules.wonderStages} etapas rendem +${game.rules.wonderPoints} pontos e +${game.rules.wonderTiles} peças.` : ''}</li>
       <li><b>Sítios</b>: carimbos no mapa marcam ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.</li>
       <li><kbd>U</kbd> desfaz a última jogada (o número de vezes depende do modo).</li>
       <li>O botão de som alterna entre música e efeitos, só efeitos e mudo; <kbd>M</kbd> liga ou desliga a música.</li>
@@ -1294,6 +1301,12 @@ function step(now: number) {
     const s = screenOf(q.anchor.q, q.anchor.r, 0.55);
     markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: q.exact ? `=${q.target}` : `${q.target}+`, color: theme.terrainColors[q.terrain] });
   }
+  // Maravilha em obra: etiqueta com a etapa sobre o canteiro.
+  const wd = game.board.wonder;
+  if (wd && wd.stage < game.rules.wonderStages) {
+    const s = screenOf(wd.tile.q, wd.tile.r, 0.9);
+    markers.push({ id: 900000, x: s.x, y: s.y, visible: s.visible, text: `⛫ ${wd.stage}/${game.rules.wonderStages}`, color: '#8a6a3a', kind: 'wonder' });
+  }
   // Os sítios são carimbos no mapa (World); a etiqueta com a recompensa só aparece com o fantasma em cima.
   const st = hover && game.current ? game.board.siteAt(hover.q, hover.r) : null;
   if (st) {
@@ -1435,6 +1448,17 @@ function start(data: unknown) {
   world.rig.target.set(x, 0, z);
   if (zoom) world.rig.dist = world.rig.goalDist = zoom;
   return found ? `achado:${found.site}` : `escondido:${(st as { kind: string }).kind}`;
+};
+// Maravilha: centraliza no canteiro; com `stage`, mostra a obra nessa etapa (0 a 6, só a imagem).
+(window as unknown as { __wonder: (stage?: number, zoom?: number) => boolean }).__wonder = (stage, zoom) => {
+  const w = game.board.wonder;
+  if (!w) return false;
+  const { x, z } = hexToWorld(w.tile.q, w.tile.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  if (stage !== undefined) world.syncWonder({ wonder: { tile: w.tile, stage }, rules: game.rules } as typeof game.board, false);
+  return true;
 };
 (window as unknown as { __folk: (i?: number, zoom?: number) => boolean }).__folk = (i = 0, zoom) => {
   const f = world.life.workerPos(i);

@@ -10,7 +10,7 @@ import { T, rotateEdges, type TileDef } from '../core/tiles';
 import type { Theme } from '../themes/types';
 import { CameraRig } from './cameraRig';
 import { createRenderer, type Backend } from './gpu';
-import { Lib, instGeometry, setInstColor, stampGeometry } from './lib';
+import { Lib, WONDER_PODIUM, instGeometry, setInstColor, stampGeometry } from './lib';
 import { Life } from './life';
 import { U, makeVoidMaterial, softShadowFilter } from './materials';
 import { A, fogNode } from './atmosphere';
@@ -39,6 +39,10 @@ const SHADOW_MAP: Record<Quality, number> = { cinema: 4096, ultra: 4096, high: 2
  */
 const CASCADES: Record<Quality, number[]> = { cinema: [0.18, 0.34, 0.56, 1], ultra: [0.3, 0.5, 1], high: [], medium: [], low: [] };
 const tmpM = new THREE.Matrix4();
+const tmpM2 = new THREE.Matrix4();
+const tmpQ = new THREE.Matrix4();
+/** Seções de andaime em volta da maravilha (3 por lado). */
+const WONDER_SCAFFOLDS = 12;
 const tmpColor = new THREE.Color();
 const WHITE = new THREE.Color(1, 1, 1);
 /** Densidade do clima por qualidade. */
@@ -780,13 +784,13 @@ export class World {
 
   // ---------------------------------------------------------------- mapa
 
-  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind }) {
+  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean }) {
     return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, ...extra });
   }
 
   /** Peça do mapa já colocada: a inicial reserva o Centro, e a do marco o ergue. */
   private buildPlaced(p: Placed) {
-    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site });
+    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder });
   }
 
   /**
@@ -832,6 +836,8 @@ export class World {
     this.fireflies.sync(board);
     this.centerAnim = -1;
     this.setCenter(board.era);
+    this.disposeWonder();
+    this.syncWonder(board, false);
   }
 
   // ---------------------------------------------------------------- Centro da vila
@@ -898,6 +904,98 @@ export class World {
     }
     this.center?.setMatrixAt(0, tmpM.makeScale(xz, y, xz));
     if (this.center) this.center.instanceMatrix.needsUpdate = true;
+  }
+
+  // ---------------------------------------------------------------- maravilha
+
+  /** Pódio, corpo, remate e andaime da maravilha: objetos avulsos, como o Centro. */
+  private wonder: { key: number; x: number; z: number; base: THREE.InstancedMesh; body: THREE.InstancedMesh; crown: THREE.InstancedMesh; scaffold: THREE.InstancedMesh | null } | null = null;
+  /** Etapa mostrada (anda devagar até a etapa da regra) e a etapa alvo. */
+  private wonderShown = 0;
+  private wonderTarget = 0;
+
+  private disposeWonder() {
+    if (!this.wonder) return;
+    for (const m of [this.wonder.base, this.wonder.body, this.wonder.crown, this.wonder.scaffold]) {
+      if (!m) continue;
+      this.staticRoot.remove(m);
+      m.geometry.dispose();
+      m.dispose();
+    }
+    this.wonder = null;
+  }
+
+  /** Cria a maravilha quando o canteiro assenta e acompanha a etapa; com `animate`, a obra sobe aos poucos e a conclusão é festejada. */
+  syncWonder(board: Board, animate: boolean) {
+    const w = board.wonder;
+    if (!w) {
+      this.disposeWonder();
+      return;
+    }
+    if (!this.wonder || this.wonder.key !== w.tile.key) {
+      // Só depois que a peça do canteiro pousou (ela ainda pode estar caindo).
+      if (this.drops.some((d) => d.placed === w.tile)) return;
+      this.disposeWonder();
+      const mk = (key: string, shadow = true) => {
+        const geo = this.lib.geo(key);
+        const n = key === 'scaffold' ? WONDER_SCAFFOLDS : 1;
+        const m = new THREE.InstancedMesh(instGeometry(geo ?? new THREE.BufferGeometry(), n), this.lib.material(key), n);
+        for (let i = 0; i < n; i++) setInstColor(m, i, tmpColor.set(key === 'scaffold' ? '#ffffff' : this.theme.ui.accent));
+        m.castShadow = shadow && this.quality !== 'low';
+        m.receiveShadow = true;
+        m.frustumCulled = false;
+        this.staticRoot.add(m);
+        return m;
+      };
+      const { x, z } = hexToWorld(w.tile.q, w.tile.r);
+      this.wonder = { key: w.tile.key, x, z, base: mk('wonder:base'), body: mk('wonder:body'), crown: mk('wonder:crown'), scaffold: this.lib.geo('scaffold') ? mk('scaffold') : null };
+      this.wonderShown = animate ? 0 : w.stage;
+      if (animate) this.burst(x, z, 'dust', 30);
+    }
+    const before = this.wonderTarget;
+    this.wonderTarget = w.stage;
+    if (!animate) this.wonderShown = w.stage;
+    const full = board.rules.wonderStages;
+    if (animate && w.stage === full && before < full) {
+      // Maravilha pronta: anel dourado, brilhos e um bando de pássaros.
+      this.halo(this.wonder.x, this.wonder.z, 2);
+      this.flushBirds(this.wonder.x, this.wonder.z);
+      this.burst(this.wonder.x, this.wonder.z, 'sparkle', 70, 0.4);
+    }
+    this.stepWonder(0, full);
+  }
+
+  private stepWonder(dt: number, full = this.board?.rules.wonderStages ?? 6) {
+    const W = this.wonder;
+    if (!W || full <= 0) return;
+    this.wonderShown = Math.min(this.wonderTarget, this.wonderShown + dt * 1.2);
+    const k = this.wonderShown / full;
+    const { h, w } = this.lib.wonderSize;
+    const y0 = WONDER_PODIUM;
+    W.base.setMatrixAt(0, tmpM.makeTranslation(W.x, 0, W.z));
+    W.body.setMatrixAt(0, tmpM.makeTranslation(W.x, y0, W.z).multiply(tmpM2.makeScale(1, Math.max(0.001, k), 1)));
+    W.body.visible = k > 0.001;
+    const done = this.wonderShown >= full;
+    W.crown.visible = done;
+    W.crown.setMatrixAt(0, tmpM.makeTranslation(W.x, 0, W.z));
+    if (W.scaffold) {
+      // Andaime em volta da obra: três seções por lado, viradas para fora, da altura da obra.
+      W.scaffold.visible = !done;
+      const half = Math.min(0.36, w / 2 + 0.03), sy = Math.max(0.1, h * k + 0.06);
+      let i = 0;
+      for (let side = 0; side < 4; side++) {
+        const ang = (side * Math.PI) / 2;
+        for (const t of [-0.62, 0, 0.62]) {
+          const lx = t * half, lz = half;
+          const c = Math.cos(ang), sn = Math.sin(ang);
+          tmpM.makeTranslation(W.x + lx * c + lz * sn, y0, W.z - lx * sn + lz * c).multiply(tmpM2.makeRotationY(ang)).multiply(tmpQ.makeScale(1.3, sy, 0.5));
+          W.scaffold.setMatrixAt(i++, tmpM);
+        }
+      }
+      W.scaffold.count = i;
+      W.scaffold.instanceMatrix.needsUpdate = true;
+    }
+    for (const m of [W.base, W.body, W.crown]) m.instanceMatrix.needsUpdate = true;
   }
 
   private chunkFor(q: number, r: number) {
@@ -1007,7 +1105,7 @@ export class World {
   placeAnimated(p: Placed) {
     const syn = synBase(p.synergies, p.rot);
     const flow = this.settleFlow(p);
-    const sig = `${synSig(syn)}|${flow.join('')}|${p.eraMark ?? ''}|${p.site ?? ''}`;
+    const sig = `${synSig(syn)}|${flow.join('')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}`;
     let live: LiveTile;
     let y0 = 1.2;
     if (this.ghost && this.ghost.def === p.def && this.ghost.sig === sig) {
@@ -1016,7 +1114,7 @@ export class World {
       this.ghost = null;
       this.ghostKey = '';
     } else {
-      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site }), sig, this.lib, this.quality !== 'low');
+      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder }), sig, this.lib, this.quality !== 'low');
       this.scene.add(live.group);
       this.dropGhost();
     }
@@ -1035,6 +1133,7 @@ export class World {
     this.updateFrontier(board);
     this.life.sync(board);
     this.fireflies.sync(board);
+    this.syncWonder(board, false);
   }
 
   // ---------------------------------------------------------------- fantasma
@@ -1045,11 +1144,12 @@ export class World {
     // O fantasma já mostra o marco da era que a peça ergueria.
     const mark = check.valid ? (check.eraMark ?? undefined) : undefined;
     const site = check.valid ? check.site?.kind : undefined;
-    const sig = `${synSig(syn)}|${flow.join('')}|${mark ?? ''}|${site ?? ''}`;
+    const wonder = check.valid && check.wonder ? true : undefined;
+    const sig = `${synSig(syn)}|${flow.join('')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}`;
     const key = `${def.seed}:${this.theme.id}:${sig}`;
     if (!this.ghost || this.ghostKey !== key) {
       const old = this.ghost;
-      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site }), sig, this.lib, this.quality !== 'low');
+      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site, wonder }), sig, this.lib, this.quality !== 'low');
       this.ghostKey = key;
       this.scene.add(this.ghost.group);
       if (old && old.def === def) {
@@ -1383,6 +1483,7 @@ export class World {
 
     this.stepHalos(dt);
     this.stepCenter(dt);
+    this.stepWonder(dt);
 
     // Peças caindo.
     const still: Drop[] = [];
@@ -1437,6 +1538,8 @@ export class World {
           this.life.sync(this.board);
           this.fireflies.sync(this.board);
         }
+        this.drops = this.drops.filter((x) => x !== d);
+        if (this.board) this.syncWonder(this.board, true);
         this.onBaked?.(d.placed);
       } else still.push(d);
     }

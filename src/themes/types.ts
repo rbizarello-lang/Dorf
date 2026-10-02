@@ -66,6 +66,21 @@ export type MusicTimbre =
   | 'bell' // sino ou carrilhão: parciais inarmônicas
   | 'glass'; // vidro: seno com parcial aguda
 
+/** Forma da maravilha do tema (geometria paramétrica em lib.ts). */
+export type WonderCore =
+  | 'castle' // torre de menagem e 4 torres de conto
+  | 'civic' // paço municipal: bloco com frontão e lanterna
+  | 'church' // igreja colonial de duas torres
+  | 'ice' // palácio de blocos de gelo que brilham
+  | 'tree' // árvore milenar com torii
+  | 'elevator' // elevador espacial: cabo alto com anéis de luz
+  | 'pylon' // pilone, obeliscos e avenida de esfinges
+  | 'pagoda' // pagode octogonal de `stories` andares
+  | 'hall' // grande salão com cumeeiras de dragão
+  | 'dome' // cúpula de gomos com lanterna e campanário
+  | 'trestle' // ponte ferroviária de cavalete
+  | 'rings'; // terraços circulares em degraus
+
 /** Chapéu dos aldeões. */
 export type HatStyle =
   | 'straw' // palha de aba larga
@@ -261,6 +276,8 @@ export interface Theme {
   eras?: [string, string, string, string];
   /** Remate do Centro da vila na última era (padrão: 'spire'). */
   center?: CenterCrown;
+  /** Maravilha da última era: nome, forma, cores [principal, telhado, detalhe] e andares (pagode). */
+  wonder?: { name: string; core: WonderCore; colors: [string, string, string]; stories?: number };
   /** Escala da música (semitons a partir da tônica, em ordem) e timbre da melodia; a fanfarra de era também usa. */
   music?: { scale: number[]; timbre: MusicTimbre };
   /** Aldeões: cor da pele, chapéu e cor do chapéu (padrão: sem chapéu). A camisa usa as cores dos telhados. */

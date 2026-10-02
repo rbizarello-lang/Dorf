@@ -87,6 +87,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__boat(zoom?)` | centraliza a câmera num barco andando (esteiras na água) |
 | `window.__folk(i?, zoom?)` | centraliza a câmera no i-ésimo aldeão de construção |
 | `window.__site(zoom?)` | centraliza no último sítio achado (ou no primeiro escondido) e devolve qual |
+| `window.__wonder(etapa?, zoom?)` | centraliza no canteiro da maravilha; com `etapa` (0 a 6), mostra a obra nessa etapa |
 | `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` | ver o `README.md` |
 | `window.__stats` | estatísticas do último quadro |
 | `window.__pools()` | relatório dos InstancedMesh |
@@ -169,7 +170,7 @@ scripts/         capturas, teste de carga, conversão para página publicável
    Mude os três juntos ou nenhum.
 5. **Rio e estrada são estritos** (`isStrict`): só encostam neles mesmos. Os 4 terrenos comuns aceitam qualquer vizinho, mas só pontuam quando iguais. As interações pontuam pares diferentes.
 6. **Saves:**
-   - o formato é `{ v, seed, rulesId, mode, moves, undone, score }` (v4), guardado em `localStorage` com o prefixo `retalhos.`;
+   - o formato é `{ v, seed, rulesId, mode, moves, undone, score }` (v5), guardado em `localStorage` com o prefixo `retalhos.`;
    - ao carregar, a partida é **reconstruída pelo replay** das jogadas e conferida contra a pontuação.
    - Se você mudar regras, pontuação ou geração de peças de um jeito que altere o replay, **aumente `SAVE_VERSION` em `main.ts`**. Saves antigos mostram um aviso e são descartados.
 7. **Os testes têm oráculos independentes.** Ao mudar a pontuação, atualize o oráculo em `tests/logic.ts` reimplementando a regra. Nunca faça o oráculo chamar o código que ele testa.

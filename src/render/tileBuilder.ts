@@ -80,6 +80,8 @@ export interface BuildOpts {
   eraMark?: number;
   /** Sítio descoberto nesta peça: ruína, baú, relicário ou torre de vigia. */
   site?: SiteKind;
+  /** Canteiro da maravilha: o meio da peça fica livre (a maravilha é um objeto à parte, no World). */
+  wonder?: boolean;
 }
 
 type V2 = [number, number];
@@ -718,6 +720,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       reserved.push([x, z, R + 0.05]);
     }
   }
+
+  if (opts.wonder) reserved.push([0, 0, 0.6]);
 
   // --- Sítio descoberto: no meio da peça ou no meio de um setor sem rio nem estrada (sem sorteio).
   if (opts.site) {
