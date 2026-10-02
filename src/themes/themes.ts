@@ -244,8 +244,8 @@ export const BASE_THEMES: Theme[] = [
     trunk: '#4b3a30',
     treesPerSector: [5, 8],
     houses: [
-      { weight: 0.7, body: 'cottage', roof: 'gable', walls: ['#9a3b2e', '#8c4a2c', '#6b3a2e', '#b8863a', '#2f4a5c'], roofs: ['#f4f7fb', '#e9eef3', '#4f5a66', '#8a3a2a'], trim: '#f4f7fb', chimney: true },
-      { weight: 0.3, body: 'long', roof: 'gable', walls: ['#9a3b2e', '#7a2e24'], roofs: ['#f4f7fb', '#dde5ec', '#4f5a66'], trim: '#f4f7fb', chimney: true },
+      { weight: 0.7, body: 'cottage', roof: 'gable', walls: ['#9a3b2e', '#8c4a2c', '#6b3a2e', '#b8863a', '#2f4a5c'], roofs: ['#f4f7fb', '#4f5a66', '#8a3a2a', '#4f5a66', '#8a3a2a'], trim: '#f4f7fb', chimney: true },
+      { weight: 0.3, body: 'long', roof: 'gable', walls: ['#9a3b2e', '#7a2e24'], roofs: ['#4f5a66', '#8a3a2a', '#f4f7fb', '#4f5a66'], trim: '#f4f7fb', chimney: true },
     ],
     landmark: 'stave',
     landmarkChance: 0.1,

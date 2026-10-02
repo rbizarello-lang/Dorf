@@ -82,6 +82,8 @@ export const U = {
   water: uniform(new THREE.Color('#63b1dc')),
   /** Onda no chão quando uma peça assenta: (x, z, instante inicial, força). */
   ripple: uniform(new THREE.Vector4(0, 0, -100, 0)),
+  /** Depuração de legibilidade (?silhueta): 1 pinta as decorações de preto e o chão de branco. */
+  silhouette: uniform(0),
   /** Onda dourada do avanço de era: (x, z, instante inicial, força). */
   eraWave: uniform(new THREE.Vector4(0, 0, -100, 0)),
   /** Direção (para o sol) e cor da luz do sol: o caminho do sol dentro da água e a luz de contorno dos kits. */
@@ -315,7 +317,7 @@ function decoMaterial(o: DecoOpts) {
     const rows = smoothstep(0.25, 0.6, abs(fract(positionWorld.y.mul(72)).sub(0.5)).mul(2));
     base = base.mul(mix(float(1), rows.mul(0.17).add(0.85), roof.mul(smoothstep(15, 6, camDist))));
   }
-  m.colorNode = base;
+  m.colorNode = mix(base, vec3(0.02), U.silhouette);
   // Cada janela acende num momento diferente do anoitecer.
   const lit = smoothstep(0, 0.25, U.night.mul(1.25).sub(hash(instanceIndex).mul(0.5)));
   let emissive: N3 = U.glow.mul(glow).mul(varying(lit, 'vLit')).mul(2.6);
@@ -326,7 +328,7 @@ function decoMaterial(o: DecoOpts) {
     emissive = emissive.add(U.sun.mul(base).mul(rim.mul(0.35)).mul(float(1).sub(U.night)));
   }
   emissive = emissive.add(ERA_GOLD.mul(eraBand(positionWorld, U.time)).mul(2));
-  m.emissiveNode = emissive;
+  m.emissiveNode = emissive.mul(float(1).sub(U.silhouette));
   m.receivedShadowNode = shadowWithClouds;
   return m;
 }
@@ -382,7 +384,7 @@ export function makeGroundMaterial() {
   const strata = texture(noiseTex, vec2(sideP.mul(0.9), positionWorld.y.mul(7))).g;
   const stones = smoothstep(0.66, 0.8, texture(noiseTex, vec2(sideP.mul(3.1), positionWorld.y.mul(9))).b);
   const sideF = vec3(strata.mul(0.32).add(0.8)).mul(mix(vec3(1), vec3(1.22, 1.18, 1.1), stones.mul(0.8)));
-  m.colorNode = vertexColor().rgb.mul(mix(sideF, detail, top));
+  m.colorNode = mix(vertexColor().rgb.mul(mix(sideF, detail, top)), vec3(1), U.silhouette);
   // Relevo fino do prado e da mata: inclina a normal com o mapa de declive da água.
   const slope = texture(waterTex, p.mul(0.45)).rg.sub(0.5).mul(sp.x.add(sp.y).mul(0.5).add(0.12));
   const nW = vec3(slope.x.negate(), 1, slope.y.negate()).normalize();
