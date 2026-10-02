@@ -1260,7 +1260,8 @@ export class World {
 
     // Foco da profundidade de campo: o ponto que a câmera olha.
     P.focus.value = this.rig.dist;
-    P.focalLength.value = this.rig.dist * 0.42;
+    // De longe a faixa nítida estreita: o mapa inteiro vira maquete (tilt-shift).
+    P.focalLength.value = this.rig.dist * THREE.MathUtils.lerp(0.42, 0.16, THREE.MathUtils.smoothstep(this.rig.dist, 10, 30));
     // O traço é pleno em volta do foco e some antes da névoa, senão o fundo vira hachura.
     P.inkNear.value = this.rig.dist * 1.6;
     P.inkFar.value = this.rig.dist * 3.2;

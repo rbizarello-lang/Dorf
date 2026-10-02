@@ -663,10 +663,11 @@ export function makeWaterMaterial() {
   const cK = smoothstep(0.002, 0.012, depth).mul(float(1).sub(smoothstep(0.9, 2.6, texPerPx))).mul(CAUSTIC_GAIN);
   const caustic = cMix.sub(1).mul(cK).add(1).max(0);
 
-  // Espuma: uma linha fina que lambe a beira, a renda (onde dois ruídos se cruzam) no raso,
+  // Espuma: a faixa que lambe a beira, a renda (onde dois ruídos se cruzam) no raso,
   // os rastros onde a água corre e a das esteiras.
   const lap = sin(t.mul(1.1).add(big.b.mul(9))).mul(0.0011);
-  const edgeLine = float(1).sub(smoothstep(0, float(0.0026).add(lap), depth));
+  // Faixa larga e firme, como a margem branca desenhada do Dorfromantik, mais a linha fina.
+  const edgeLine = max(float(1).sub(smoothstep(0, float(0.0026).add(lap), depth)), float(1).sub(smoothstep(0.0045, float(0.0065).add(lap), depth)).mul(0.8));
   const n1 = texture(waterTex, p.mul(1.9).add(vec2(t.mul(0.021), t.mul(-0.013)))).b;
   const n2 = texture(waterTex, p.mul(2.6).add(vec2(t.mul(-0.017), t.mul(0.019))).add(0.5)).b;
   const lace = smoothstep(0.07, 0, abs(n1.sub(n2))).mul(float(1).sub(smoothstep(0.002, 0.016, depth)));
