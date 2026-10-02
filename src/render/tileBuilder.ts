@@ -645,9 +645,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     }
   }
 
-  // Camisas dos aldeões: as cores dos telhados do tema, escolhidas pela semente (sem gastar o rng).
+  // Camisas dos aldeões: metade na cor da casa, metade nas cores dos telhados, escolhidas pela
+  // semente (sem gastar o rng).
   const shirts = theme.houses.flatMap((h) => h.roofs);
-  const shirt = (k: number) => tc(shirts[((seed >>> 0) + k * 7) % shirts.length]);
+  const shirt = (k: number) => tc(((seed >>> 0) + k) % 2 ? theme.ui.accent : shirts[((seed >>> 0) + k * 7) % shirts.length]);
 
   // --- Interações nas bordas: reservam um lugar perto da borda do setor.
   for (const s of opts.synergies ?? []) {

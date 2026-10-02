@@ -19,6 +19,7 @@ import { SMOOTHING, resample, smooth, type Smoothing } from './video/path';
 import { renderVideo, type Script } from './video/render';
 import { Take, type TakeEvent } from './video/take';
 import { themeById, type Theme } from './themes/themes';
+import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor } from './ui/banner';
 import { Hud, questLabel } from './ui/hud';
 import './ui/style.css';
 
@@ -95,7 +96,16 @@ const world = await createWorld();
 }
 hud.preview.appendChild(world.preview.canvas);
 
-let theme: Theme = themeById(params.get('theme') ?? store.get('theme'));
+// Cor da casa e brasão (proposta 15): a cor troca o destaque do tema no HUD e no mundo.
+let house = validHouse(store.get('house'));
+let banner = (() => {
+  try {
+    return validBanner(JSON.parse(store.get('banner') ?? 'null'));
+  } catch {
+    return validBanner(null);
+  }
+})();
+let theme: Theme = dress(themeById(params.get('theme') ?? store.get('theme')), house);
 let rulesTheme: Theme = theme;
 let game: Game;
 let moves: MoveRec[] = [];
@@ -171,6 +181,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   world.setTheme(theme, game.board);
   sfx.setStyle(theme.music, game.board.era);
   hud.applyTheme(theme);
+  showCrest();
   hud.renderQuests(game.board.quests, theme);
   frameCamera(true);
   // Partida nova: o batedor mostra para onde fica o sítio mais perto (quando a ajuda fechar).
@@ -493,14 +504,36 @@ hud.modal.addEventListener('click', (e) => {
   }
 });
 
+/** Troca a cor da casa ou o brasão: o tema é "vestido" de novo e o mundo refeito. */
+function setHouse(color: HouseColor | null, b: Banner) {
+  const recolor = color !== house;
+  house = color;
+  banner = b;
+  store.set('house', color);
+  store.set('banner', JSON.stringify(b));
+  if (recolor) {
+    theme = dress(themeById(theme.id), house);
+    hud.applyTheme(theme);
+    world.setTheme(theme, game.board);
+    hud.renderQuests(game.board.quests, theme);
+    refreshHud(true);
+  }
+  showCrest();
+}
+
+function showCrest() {
+  hud.setCrest(bannerSvg(theme.ui.accent, banner, 34));
+}
+
 function pickTheme(t: Theme) {
   if (take) stopTake('A gravação terminou aqui: o vídeo fica no tema em que começou.');
-  theme = t;
+  theme = dress(t, house);
   store.set('theme', t.id);
-  hud.applyTheme(t);
-  world.setTheme(t, game.board);
+  hud.applyTheme(theme);
+  showCrest();
+  world.setTheme(theme, game.board);
   sfx.setStyle(t.music, game.board.era);
-  hud.renderQuests(game.board.quests, t);
+  hud.renderQuests(game.board.quests, theme);
   refreshHud(true);
   if (game.over) {
     rulesTheme = t;
@@ -756,7 +789,7 @@ document.getElementById('btn-help')!.addEventListener('click', showHelp);
 document.getElementById('btn-new')!.addEventListener('click', requestNewGame);
 document.getElementById('btn-undo')!.addEventListener('click', undo);
 hud.themeBtn.addEventListener('click', () => {
-  if (hud.themeMenu.hidden) hud.openThemeMenu(theme, pickTheme);
+  if (hud.themeMenu.hidden) hud.openThemeMenu(theme, pickTheme, { color: house, banner, themeAccent: themeById(theme.id).ui.accent, onChange: setHouse });
   else hud.closeThemeMenu();
 });
 qualityBtn.addEventListener('click', () => {
@@ -1301,7 +1334,7 @@ function step(now: number) {
 
 function start(data: unknown) {
   const hotData = data as (Partial<Save> & { theme?: string }) | undefined;
-  if (hotData?.theme) theme = themeById(hotData.theme);
+  if (hotData?.theme) theme = dress(themeById(hotData.theme), house);
   applyQuality(qualityMode);
   let saved = special ? null : (validSave(hotData) ?? readSave());
   // Um link com ?seed= (desafio) vence a partida salva de outra semente.

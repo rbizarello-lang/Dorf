@@ -108,6 +108,19 @@ kbd {
   backdrop-filter: blur(6px);
 }
 
+/* Brasão da casa, à direita do placar. */
+.score-block > :not(.crest) {
+  grid-column: 1;
+}
+.crest {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: center;
+  margin-left: 14px;
+  line-height: 0;
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.18));
+}
+
 .brand {
   font-family: var(--font-display);
   font-size: 15px;
@@ -249,6 +262,42 @@ kbd {
   font-size: 12px;
   font-weight: 800;
   color: var(--accent);
+}
+
+/* ---------- cor da casa e brasão, no topo do menu de temas */
+.house {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 14px;
+  align-items: center;
+  padding: 6px 12px 10px;
+}
+.house .crest-big {
+  grid-row: span 4;
+  line-height: 0;
+}
+.house .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.house button {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 13px;
+  border: 2px solid transparent;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  font-size: 12px;
+  font-weight: 700;
+}
+.house button.dot {
+  width: 26px;
+  padding: 0;
+  background: var(--c);
+}
+.house button[aria-pressed='true'] {
+  border-color: var(--ink);
 }
 
 /* ---------- menus de qualidade e câmera */
@@ -605,32 +654,54 @@ kbd {
   }
 }
 
+/* Estandarte de missão: flâmula de rabo de andorinha no terreno da missão, com a faixa da
+   cor da casa no alto, presa a um mastro que desce até a peça. */
 .marker {
   position: absolute;
   left: 0;
   top: 0;
-  display: grid;
-  place-items: center;
-  min-width: 40px;
-  height: 32px;
-  padding: 0 8px;
-  border-radius: 10px 10px 10px 2px;
-  background: var(--panel);
-  box-shadow: var(--shadow);
-  font-weight: 800;
-  font-size: 13px;
-  border-bottom: 4px solid var(--c, var(--accent));
+  width: 36px;
+  height: 64px;
   will-change: transform;
+  filter: drop-shadow(0 2px 2px rgb(0 0 0 / 0.25));
 }
 
-.marker::after {
+.marker::before {
   content: '';
   position: absolute;
+  left: 0;
+  top: 0;
+  width: 2px;
+  height: 64px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--ink) 75%, transparent);
+}
+
+.marker span {
+  position: absolute;
   left: 2px;
-  bottom: -9px;
-  border: 5px solid transparent;
-  border-top-color: var(--c, var(--accent));
-  border-left-color: var(--c, var(--accent));
+  top: 2px;
+  width: 34px;
+  height: 44px;
+  display: grid;
+  place-items: start center;
+  padding-top: 13px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
+  background: linear-gradient(var(--accent) 0 8px, var(--c, var(--accent)) 8px);
+  color: #fff;
+  font-weight: 800;
+  font-size: 12px;
+  text-shadow: 0 1px 1px rgb(0 0 0 / 0.35);
+}
+
+.marker i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  margin: 0 auto 2px;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.9;
 }
 
 .stats {
@@ -1140,8 +1211,12 @@ body.capture #floaters {
   border: 2px dashed #8a6a3a;
   box-shadow: none;
 }
-.marker.site::after {
+.marker.site::before {
   display: none;
+}
+.marker.site {
+  width: auto;
+  filter: none;
 }
 #btn-undo small {
   font-size: 10px;

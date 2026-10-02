@@ -2,6 +2,7 @@ import type { Quest } from '../core/board';
 import { corner } from '../core/hex';
 import type { TileDef } from '../core/tiles';
 import { PERIOD_LABEL, PERIOD_ORDER, THEMES, type Theme } from '../themes/themes';
+import { CHARGES, HOUSE_COLORS, METALS, ORDINARIES, bannerSvg, type Banner, type HouseColor } from './banner';
 
 const $ = <E extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as E;
 
@@ -23,6 +24,34 @@ function esc(s: string) {
 export function questLabel(q: Quest, theme: Theme) {
   const name = theme.terrainNames[q.terrain];
   return q.exact ? `${name}: exatamente ${q.target}` : `${name}: ${q.target} ou mais`;
+}
+
+/** Seção "Sua casa" no topo do menu de temas: cor da casa e brasão. */
+export interface HouseMenu {
+  color: HouseColor | null;
+  banner: Banner;
+  /** Destaque do próprio tema (a opção "Tema"). */
+  themeAccent: string;
+  onChange: (color: HouseColor | null, banner: Banner) => void;
+}
+
+function houseSection(h: HouseMenu) {
+  const field = h.color ? HOUSE_COLORS[h.color].hex : h.themeAccent;
+  const pressed = (on: boolean) => `aria-pressed="${on}"`;
+  const dots = [`<button class="dot" type="button" data-k="color" data-v="tema" style="--c:${h.themeAccent}" title="Cor do tema" ${pressed(!h.color)}></button>`]
+    .concat(Object.entries(HOUSE_COLORS).map(([id, c]) => `<button class="dot" type="button" data-k="color" data-v="${id}" style="--c:${c.hex}" title="${c.name}" ${pressed(h.color === id)}></button>`))
+    .join('');
+  const row = (k: keyof Banner, list: Record<string, string>) =>
+    Object.entries(list)
+      .map(([id, label]) => `<button type="button" data-k="${k}" data-v="${id}" ${pressed(h.banner[k] === id)}>${k === 'metal' ? id[0].toUpperCase() + id.slice(1) : esc(label)}</button>`)
+      .join('');
+  return `<h3>Sua casa</h3><div class="house">
+    <span class="crest-big">${bannerSvg(field, h.banner, 56)}</span>
+    <div class="row">${dots}</div>
+    <div class="row">${row('metal', METALS)}</div>
+    <div class="row">${row('ordinary', ORDINARIES)}</div>
+    <div class="row">${row('charge', CHARGES)}</div>
+  </div>`;
 }
 
 /** Opção de um menu do topo (qualidade, câmera). */
@@ -198,10 +227,20 @@ export class Hud {
         this.markers.appendChild(el);
         this.markerEls.set(m.id, el);
       }
-      if (el.textContent !== m.text) el.textContent = m.text;
+      if (el.dataset.text !== m.text) {
+        el.dataset.text = m.text;
+        if (m.kind) el.textContent = m.text;
+        else {
+          // Estandarte: o pano (com a bolinha do terreno) leva o número.
+          const span = document.createElement('span');
+          span.append(document.createElement('i'), m.text);
+          el.replaceChildren(span);
+        }
+      }
       el.style.setProperty('--c', m.color);
       el.style.display = m.visible ? '' : 'none';
-      el.style.transform = `translate(${(m.x - 4).toFixed(1)}px, ${(m.y - 44).toFixed(1)}px)`;
+      // O pé do mastro (ou a ponta da etiqueta do sítio) fica no ponto da peça.
+      el.style.transform = m.kind ? `translate(${(m.x - 4).toFixed(1)}px, ${(m.y - 44).toFixed(1)}px)` : `translate(${(m.x - 1).toFixed(1)}px, ${(m.y - 64).toFixed(1)}px)`;
     }
     for (const [id, el] of this.markerEls) {
       if (!alive.has(id)) {
@@ -244,7 +283,12 @@ export class Hud {
     return !this.modal.hidden;
   }
 
-  openThemeMenu(current: Theme, onPick: (t: Theme) => void) {
+  /** Brasão no placar. */
+  setCrest(svg: string) {
+    $('crest').innerHTML = svg;
+  }
+
+  openThemeMenu(current: Theme, onPick: (t: Theme) => void, house?: HouseMenu) {
     this.closeMenu();
     const opt = (t: Theme) => `<button class="theme-opt" type="button" data-id="${t.id}" aria-current="${t.id === current.id}" title="${esc(t.tagline)}">
         <span class="swatch">${t.terrainColors.slice(0, 5).map((c) => `<i style="background:${c}"></i>`).join('')}</span>
@@ -252,10 +296,27 @@ export class Hud {
         <span>${esc(t.era)}</span>
         ${t.ruleNote ? `<em>${esc(t.ruleNote)}</em>` : ''}
       </button>`;
-    this.themeMenu.innerHTML = PERIOD_ORDER.map((p) => {
-      const list = THEMES.filter((t) => t.period === p);
-      return list.length ? `<h3>${PERIOD_LABEL[p]}</h3>${list.map(opt).join('')}` : '';
-    }).join('');
+    this.themeMenu.innerHTML =
+      (house ? houseSection(house) : '') +
+      PERIOD_ORDER.map((p) => {
+        const list = THEMES.filter((t) => t.period === p);
+        return list.length ? `<h3>${PERIOD_LABEL[p]}</h3>${list.map(opt).join('')}` : '';
+      }).join('');
+    if (house) {
+      this.themeMenu.querySelectorAll<HTMLButtonElement>('.house button').forEach((b) =>
+        b.addEventListener('click', () => {
+          const { k, v } = b.dataset as { k: string; v: string };
+          const banner = { ...house.banner };
+          let color = house.color;
+          if (k === 'color') color = v === 'tema' ? null : (v as HouseColor);
+          else (banner as Record<string, string>)[k] = v;
+          house.onChange(color, banner);
+          const top = this.themeMenu.scrollTop;
+          this.openThemeMenu(current, onPick, { ...house, color, banner });
+          this.themeMenu.scrollTop = top;
+        }),
+      );
+    }
     this.themeMenu.hidden = false;
     this.themeBtn.setAttribute('aria-expanded', 'true');
     this.themeMenu.querySelector<HTMLElement>('[aria-current="true"]')?.scrollIntoView({ block: 'nearest' });
