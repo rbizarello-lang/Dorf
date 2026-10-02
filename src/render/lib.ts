@@ -1183,6 +1183,25 @@ function pennantGeometry(pole: Col) {
   ]);
 }
 
+/**
+ * Andaime de obra em altura 1 e planta de 0,15 × 0,15: a peça escala em y até a altura da
+ * construção (e em xz até a largura dela). Postes, duas voltas de travessas, uma diagonal e
+ * uma plataforma de tábuas.
+ */
+function scaffoldGeometry(wood: Col) {
+  const h = 0.075;
+  const parts: Part[] = [];
+  for (const [x, z] of [[-h, -h], [h, -h], [-h, h], [h, h]]) parts.push({ geo: box(0.006, 1, 0.006, x, 0, z), color: wood, grad: [0.8, 1.05, 0, 1] });
+  for (const y of [0.42, 0.84]) {
+    for (const z of [-h, h]) parts.push({ geo: box(0.156, 0.02, 0.004, 0, y, z), color: wood });
+    for (const x of [-h, h]) parts.push({ geo: box(0.004, 0.02, 0.156, x, y, 0), color: wood });
+  }
+  parts.push({ geo: strut([-h, 0.02, h + 0.002], [h, 0.82, h + 0.002], 0.004), color: wood });
+  parts.push({ geo: strut([h + 0.002, 0.02, -h], [h + 0.002, 0.4, h], 0.004), color: wood });
+  parts.push({ geo: box(0.17, 0.025, 0.05, 0, 0.84, h + 0.02), color: wood, grad: [0.9, 1.1, 0.84, 0.865] });
+  return kit(parts);
+}
+
 /** Desloca a geometria para (x, z) virando o +z dela para o centro. */
 const facing = (g: THREE.BufferGeometry, x: number, z: number) => g.rotateY(Math.atan2(-x, -z)).translate(x, 0, z);
 
@@ -1454,6 +1473,7 @@ export class Lib {
   applyTheme(theme: Theme) {
     for (const g of this.geos.values()) g.dispose();
     this.geos.clear();
+    this.litKeys.clear();
     const set = (k: string, g: THREE.BufferGeometry | null) => g && this.geos.set(k, g);
     U.water.value.set(theme.water);
     U.sparkle.value.set(theme.sparkle);
@@ -1493,6 +1513,7 @@ export class Lib {
     set('bird', birdGeometry());
     for (let e = 0; e < 4; e++) set(`center:${e}`, centerGeometry(e, theme));
     set('pennant', pennantGeometry(theme.trunk));
+    set('scaffold', scaffoldGeometry(theme.trunk));
   }
 
   geo(key: string) {
@@ -1514,6 +1535,18 @@ export class Lib {
   }
 
   private domeKeys = new Set<string>();
+  private litKeys = new Map<string, boolean>();
+
+  /** O kit tem janela que acende à noite (brilho cheio)? Esses ganham lampião (groundMap.ts). */
+  lit(key: string) {
+    let v = this.litKeys.get(key);
+    if (v === undefined) {
+      const g = this.geos.get(key)?.getAttribute('glow');
+      v = !!g && Array.prototype.some.call(g.array, (x: number) => x > 0.9);
+      this.litKeys.set(key, v);
+    }
+    return v;
+  }
 
   /** Plantas e capim não projetam sombra (economia grande, quase invisível). */
   castsShadow(key: string) {

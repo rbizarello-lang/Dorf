@@ -190,6 +190,8 @@ export interface Post {
   pipeline: THREE.RenderPipeline;
   /** A cena grava a cor difusa (saída `diffuse`) para a luz indireta. */
   gi: boolean;
+  /** Há média temporal (TRAA): o ruído que muda a cada quadro some. */
+  temporal: boolean;
   dispose(): void;
 }
 
@@ -199,8 +201,9 @@ export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'do
 /**
  * `rayLight` é a luz cujo mapa de sombra os raios percorrem. Precisa ser uma DirectionalLight
  * com sombra própria: as cascatas do sol (CSMShadowNode) não expõem um mapa único.
+ * `clouds` é a cena das nuvens, desenhada por cima da cena principal.
  */
-export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, q: Exclude<Quality, 'low'>, fx?: string[], rayLight?: THREE.DirectionalLight): Post {
+export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, q: Exclude<Quality, 'low'>, fx?: string[], rayLight?: THREE.DirectionalLight, clouds?: THREE.Scene): Post {
   const cfg: Config = fx
     ? { ao: fx.includes('ao') ? CONFIG[q].ao || 0.5 : 0, gi: fx.includes('gi'), ssr: fx.includes('ssr'), rays: fx.includes('rays'), bloom: fx.includes('bloom'), dof: fx.includes('dof'), ink: fx.includes('ink') && !fx.includes('msaa'), aa: fx.includes('traa') ? 'traa' : fx.includes('msaa') ? 'msaa' : 'fxaa' }
     : CONFIG[q];
@@ -316,7 +319,22 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
     node = vec4(mix(node.rgb, P.rayColor, lit), node.a);
   }
 
+  // O traço vem antes das nuvens: elas passam por cima do mapa sem contorno.
   if (cfg.ink) node = ink(node, depth, nrm, camera);
+
+  if (clouds) {
+    // Nuvens (clouds.ts) num passe à parte, por cima da luz indireta, da oclusão e dos reflexos:
+    // no passe da cena, elas herdariam a oclusão e o rebatimento do chão que fica embaixo delas.
+    const over = pass(clouds, camera, { depthBuffer: false });
+    // Limpa com alfa 0 (o renderizador limparia com 1): onde não há nuvem, a cena passa inteira.
+    over.setMRT(mrt({ output }).setClearColor('output', 0x000000, 0));
+    // Sem TRAA, meia resolução: a nuvem é macia, e o passe custa um quarto.
+    if (cfg.aa !== 'traa') over.setResolutionScale(0.5);
+    disposables.push(over);
+    // A mistura do material já deixa a cor multiplicada pelo alfa.
+    const c = over.getTextureNode('output');
+    node = vec4(node.rgb.mul(float(1).sub(c.a)).add(c.rgb), node.a);
+  }
 
   if (cfg.aa === 'traa') {
     const t = traa(node, depth, scenePass.getTextureNode('velocity'), camera);
@@ -347,6 +365,7 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
   return {
     pipeline,
     gi: cfg.gi,
+    temporal: cfg.aa === 'traa',
     dispose() {
       for (const d of disposables) d.dispose();
       pipeline.dispose();

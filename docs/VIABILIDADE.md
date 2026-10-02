@@ -404,6 +404,35 @@ Cinco ajustes de imagem do estudo da Lagoa e do Threetopia, quase sem custo na p
 
 **Custo.** Com 300 peças em renderização por software, os níveis com TRAA ganham 2 draw calls (o RCAS e uma cópia da saída do TRAA): 195 no Ultra e 113 na Alta. Os triângulos não mudam. A CPU por quadro fica dentro do ruído; os picos de ~0,7 s aparecem nos dois builds e vêm de shaders compilados tarde, dentro da janela da medida. Na GPU, entra uma passada de tela cheia (5 leituras por pixel) e algumas contas no pós.
 
+### Luz e céu (outubro de 2026)
+
+O terceiro pacote do estudo da Lagoa e do Threetopia: luz que não vem do sol, horas novas e céu.
+
+| Recurso | Como entrou |
+|---|---|
+| Amanhecer e hora dourada | duas horas a mais no ciclo (`L` e o botão: amanhecer, dia, hora dourada, entardecer, noite; `?time=dawn` e `golden`). No amanhecer o sol nasce rasante pelo lado, a luz é rosada e algumas janelas ainda estão acesas; na hora dourada o sol baixa a 26° e as sombras se alongam. As cores saem do tema, misturadas com a da hora, sem regra por tema. A música também ganhou as duas horas |
+| Névoa por altura | `scene.fogNode` (`atmosphere.ts`) no lugar do `THREE.Fog`. A bruma tem densidade que cai com a altura (integral exata ao longo do raio) e azula a distância, mais quente olhando para o sol; a névoa rasteira é uma camada fina colada no chão, em manchas que andam com o vento: forte no amanhecer, leve no entardecer e à noite, nenhuma de dia. Telhados e copas saem por cima dela. A névoa de alcance para a cor do fundo continua igual |
+| Lampiões | cada casa com janela acende uma poça de luz na cor das janelas do tema, no chão e no pé das paredes, tremulando devagar. As poças são pintadas num mapa visto de cima (`groundMap.ts`, canal alfa) quando a peça assenta e acendem com a noite (`U.lamps`) |
+| Luz rebatida do chão | o mesmo mapa guarda a cor do terreno e da água vista de cima (rasterizada na CPU a partir da geometria da peça). Paredes, beirais e o miolo das copas recebem a luz que o chão devolve, na cor dele: a vila de terra esquenta as paredes, a grama esverdeia as copas. Pontos mais altos leem uma mipmap mais borrada (veem mais chão) |
+| Nuvens volumétricas | com a câmera afastada além do enquadramento de jogo (`rig.dist` de 20 a 28), cúmulos brancos de base plana aparecem numa laje acima do tabuleiro, marchados por pixel (`clouds.ts`). O ruído é o mesmo da sombra das nuvens, que agora é lida onde o raio até o sol cruza a laje: cada nuvem paira sobre a própria sombra, e a sombra sob os cúmulos ficou mais funda. As nuvens nunca cobrem o tabuleiro na tela: onde o olhar do pixel chega a uma peça (uma mipmap larga do mapa do chão), elas se abrem, com folga para as vagas da fronteira. Flutuam em volta, sobre o vazio, e se abrem também em volta do foco da câmera |
+
+| Amanhecer no Vale | Hora dourada na Toscana |
+|---|---|
+| ![](screens/amanhecer.png) | ![](screens/dourada.png) |
+| **Lampiões na Holanda** | **Nuvens no zoom aberto** |
+| ![](screens/noite.png) | ![](screens/nuvens.png) |
+
+**Armadilhas:**
+- Com `scene.fogNode`, o three passa a cor do material em `output` e usa o que o nó devolver; o `scene.fog` fica nulo.
+- A luz extra entra em `builder.context.irradiance` antes da luz indireta do modelo (`SplitLighting.indirect`): assim ela conta como luz indireta para a oclusão, e a água a recebe pelo mesmo caminho.
+- Sem a máscara de altura, as laterais das peças (que olham para o vazio) pegariam a cor do topo da própria peça.
+- A pilha tem renderizador próprio e usa os mesmos materiais; ela zera `U.bounce` e `U.lamps`, como já zerava a noite.
+- As nuvens são vistas sempre de cima, então um campo de altura basta. Um ruído fino demais no topo vira paredes verticais listradas quando a câmera olha de lado; os calombos precisam ser largos.
+- O fundo do tema é claro e emissivo: nuvens iluminadas como uma superfície comum saem mais escuras que ele e parecem fumaça. O topo ao sol precisa ser um pouco mais claro que o fundo.
+- No passe da cena, a nuvem (transparente, sem profundidade nem normal) herdava a oclusão e a luz rebatida do chão de baixo: no Ultra, as casas apareciam através dela como manchas. Ela foi para uma cena própria, desenhada num passe limpo com alfa 0 e composta pelo pós antes do TRAA. Sem TRAA (Média), o passe tem meia resolução e o ruído do começo do raio fica parado.
+
+**Custo.** Com 300 peças em renderização por software, os draw calls e os triângulos não mudam com a câmera perto; com ela no alto, as nuvens somam 1 draw call e 2 triângulos. O passe das nuvens limpa um alvo a mais por quadro (cor em meia precisão, na resolução da tela; metade na Média). A montagem das peças e a CPU por quadro ficam dentro do ruído (o mapa do chão rasteriza ~600 triângulos por peça). Na GPU: a névoa custa uma leitura de textura por pixel; a luz extra, três leituras por pixel dos materiais iluminados; as nuvens, quatro leituras por pixel sem nuvem (o mapa do chão e três da cobertura) e até 22 passos de quatro leituras dentro delas, só com a câmera no alto. O mapa do chão ocupa 4 MB (1024², 0,1 unidade por texel) e é reenviado quando uma peça assenta.
+
 **Ainda não feito, do documento do AoE:** Centro que evolui com a era, arquitetura que muda por era, aldeões trabalhando, maravilha, vazio como mapa antigo, minimapa, trilha sonora por era.
 
 ## Apêndice A: revisão de código e QA pelo Sonnet

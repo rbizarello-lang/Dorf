@@ -23,6 +23,7 @@ import {
   hash,
   instanceIndex,
   length,
+  log2,
   luminance,
   max,
   min,
@@ -59,6 +60,7 @@ import {
   vec4,
   vertexColor,
 } from 'three/tsl';
+import { GROUND_EXTENT, GROUND_SIZE, groundMap } from './groundMap';
 import { CAUSTIC_FRAMES, CAUSTIC_SIZE, makeCausticTexture, makeNoiseTexture, makeWaterTexture } from './noise';
 
 // Materiais do jogo em TSL (nós do three.js), que compilam tanto para WebGPU
@@ -87,6 +89,10 @@ export const U = {
   sun: uniform(new THREE.Color('#fff0d8')),
   /** Quanto da metade fina das plantas aparece (1 = toda): o nível de detalhe muda aos poucos. */
   fine: uniform(1),
+  /** Luz que chega ao chão (sol + céu) vezes o ganho do rebatimento: o chão devolve na cor dele. */
+  bounce: uniform(new THREE.Color(0, 0, 0)),
+  /** Força dos lampiões (0 de dia): poças de luz na cor das janelas em volta das casas. */
+  lamps: uniform(0),
 };
 
 export const noiseTex = makeNoiseTexture();
@@ -99,11 +105,34 @@ type N = any;
 type N2 = N;
 type N3 = N;
 
-/** Sombra das nuvens (1 = sol pleno): só escurece a luz direta. */
+/** Camada das nuvens (clouds.ts): a base plana e o topo dos cúmulos mais altos. */
+export const CLOUD_BASE = 4.4;
+export const CLOUD_TOP = 6.6;
+
+/** Deriva das nuvens com o vento (unidades do mundo). */
+const cloudDrift = (): N => vec2(U.time.mul(0.13), U.time.mul(0.071));
+
+/** Ruído da cobertura de nuvens em (x, z): manchas grandes que andam com o vento. */
+export const cloudField = (xz: N2): N => texture(noiseTex, xz.add(cloudDrift()).div(42)).r;
+
+/**
+ * Onde há nuvem de verdade (0 a 1): cúmulos menores agrupados dentro das manchas mais densas.
+ * É o que clouds.ts desenha no céu com a câmera longe e o que faz a sombra funda no chão.
+ */
+export const cloudPuff = (xz: N2): N => {
+  const p = xz.add(cloudDrift());
+  const macro = smoothstep(0.56, 0.7, texture(noiseTex, p.div(42)).r);
+  return macro.mul(smoothstep(0.45, 0.68, texture(noiseTex, p.div(17)).g)).mul(U.clouds.div(0.16).min(1));
+};
+
+/**
+ * Sombra das nuvens (1 = sol pleno): só escurece a luz direta. Lê a cobertura no ponto em que
+ * o raio até o sol cruza a camada das nuvens, então cada sombra fica sob a sua nuvem.
+ */
 export const cloudLight = Fn(([p]: [N2]) => {
-  const uv = p.div(42).add(vec2(U.time.mul(0.0031), U.time.mul(0.0017)));
-  const n = texture(noiseTex, uv).r;
-  return float(1).sub(U.clouds.mul(smoothstep(0.47, 0.7, n)).mul(1.8));
+  const q = p.add(U.sunDir.xz.div(U.sunDir.y.max(0.15)).mul((CLOUD_BASE + CLOUD_TOP) / 2));
+  // Véu leve onde o ruído passa da metade e sombra mais funda sob os cúmulos.
+  return float(1).sub(U.clouds.mul(smoothstep(0.47, 0.7, cloudField(q))).mul(1.8)).sub(cloudPuff(q).mul(0.3));
 });
 
 /**
@@ -165,7 +194,36 @@ function displaced(extra?: (p: N, t: N, now: boolean) => N, lift = false) {
 const indirectLight = property('vec3', 'IndirectLight');
 const splitLit = new WeakSet<THREE.Material>();
 
+const GROUND_TEXEL = (GROUND_EXTENT * 2) / GROUND_SIZE;
+
+/**
+ * Luz que não vem do sol nem do céu, lida do mapa do chão visto de cima (groundMap.ts): o
+ * chão iluminado rebate a cor dele nas faces viradas para os lados e para baixo (paredes,
+ * beirais, o miolo das copas), e os lampiões acendem poças de luz em volta das casas.
+ */
+const extraLight = Fn(() => {
+  const p = positionWorld;
+  const uv = p.xz.div(GROUND_EXTENT * 2).add(0.5);
+  // Só acima do chão (as laterais das peças olham para o vazio, não para o chão) e dentro do
+  // mapa: fora dele, a borda esticada riscaria o chão com poças de lampião.
+  const above = smoothstep(-0.03, 0.02, p.y).mul(step(max(abs(p.x), abs(p.z)), GROUND_EXTENT));
+  // Quanto mais alto o ponto, mais largo o pedaço de chão que ele vê (um nível por dobra).
+  const lod = log2(max(p.y, 0.02).mul(2 / GROUND_TEXEL)).max(0);
+  const ground = texture(groundMap.texture, uv).level(lod).rgb;
+  const bounce = ground.mul(U.bounce).mul(float(1).sub(normalWorld.y).mul(0.5));
+  // Lampiões: perto do chão, mais no chão que nas paredes, tremulando devagar.
+  const pool = texture(groundMap.texture, uv).level(float(0.5)).a;
+  const flicker = texture(noiseTex, p.xz.mul(0.5).add(vec2(U.time.mul(0.37), U.time.mul(-0.29)))).g.mul(0.5).add(0.75);
+  const lamp = U.glow.mul(U.lamps.mul(pool).mul(flicker).mul(smoothstep(0.5, 0, p.y)).mul(normalWorld.y.mul(0.7).add(0.3)));
+  return bounce.add(lamp).mul(above);
+});
+
 class SplitLighting extends THREE.PhysicalLightingModel {
+  indirect(builder: N) {
+    builder.context.irradiance.addAssign(extraLight());
+    super.indirect(builder);
+  }
+
   finish(builder: N) {
     super.finish(builder);
     const { indirectDiffuse, indirectSpecular } = builder.context.reflectedLight;
