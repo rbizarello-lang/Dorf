@@ -988,7 +988,8 @@ function start(data: unknown) {
 };
 
 // Idem, escolhendo a jogada com mais interações (para ver as construções).
-(window as unknown as { __ghostSynergy: () => number }).__ghostSynergy = () => {
+// Com `commit`, coloca a peça ali (capturas da obra subindo com andaime).
+(window as unknown as { __ghostSynergy: (commit?: boolean) => number }).__ghostSynergy = (commit) => {
   if (!game.current) return 0;
   let best: { q: number; r: number; rot: number; n: number } | null = null;
   for (const k of game.board.frontier) {
@@ -1007,6 +1008,10 @@ function start(data: unknown) {
   updateGhost();
   const { x, z } = hexToWorld(best.q, best.r);
   world.rig.goal.set(x, 0, z);
+  if (commit) {
+    world.rig.target.set(x, 0, z);
+    place(best.q, best.r);
+  }
   return best.n;
 };
 

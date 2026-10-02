@@ -39,6 +39,8 @@ export interface Deco {
   sz: number;
   color: THREE.Color;
   anim?: Anim;
+  /** Só existe na peça viva (andaime de obra): o World não o grava nos blocos. */
+  transient?: boolean;
 }
 
 export interface TileBuild {
@@ -437,6 +439,11 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const [sx, sy, sz] = typeof s === 'number' ? [s, s, s] : s;
     decos.push({ key, x, y: y === 0 ? groundY(x, z) : y, z, ry, sx, sy, sz, color, anim });
   };
+  /** Andaime em volta de uma construção que sobe: `w` de largura e `h` de altura. */
+  const scaffold = (x: number, z: number, ry: number, w: number, h: number) => {
+    D('scaffold', x, 0, z, ry, [w / 0.15, h + 0.03, w / 0.15], WHITE);
+    decos[decos.length - 1].transient = true;
+  };
 
   const water = pathsFor(edges, T.Water, RIVER_HW);
   const road = pathsFor(edges, T.Rail, ROAD_HW);
@@ -640,18 +647,23 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const x = mx * 0.64, z = mz * 0.64;
     reserved.push([x, z, 0.15]);
     const ry = yawTo(mx, mz) + Math.PI / 2;
-    if (s.kind === 'lumber') D('logs', x, 0, z, ry, 1.25, WHITE);
-    else if (s.kind === 'apiary') {
+    if (s.kind === 'lumber') {
+      D('logs', x, 0, z, ry, 1.25, WHITE);
+      scaffold(x, z, ry, 0.2, 0.1);
+    } else if (s.kind === 'apiary') {
       D('apiary', x, 0, z, ry, 1.3, WHITE);
+      scaffold(x, z, ry, 0.15, 0.06);
       const c = tc(pick(rng, theme.flowers));
       for (let f = 0; f < 6; f++) D('flower', x + (rng() - 0.5) * 0.18, 0, z + (rng() - 0.5) * 0.18, 0, 1, c);
     } else if (s.kind === 'pasture') {
       D('fence', x, 0, z, ry, 1, WHITE);
+      scaffold(x, z, ry, 0.26, 0.04);
       for (let a = 0; a < 3; a++) D('animal', x + (rng() - 0.5) * 0.1, 0, z + (rng() - 0.5) * 0.1, rng() * 6, randRange(rng, 0.9, 1.15), vary(rng, tc(pick(rng, theme.animals.colors)), 0.05), 'wander');
     } else if (s.kind === 'mill') {
       const sc = theme.mill === 'windmill' ? 1.1 : theme.mill === 'windpump' ? 1 : 1.2;
       const face = Math.atan2(-mx, -mz); // +z local (porta e pás) voltado para o centro da peça
       D('mill', x, 0, z, face, sc, WHITE);
+      scaffold(x, z, face, 0.17 * sc, theme.mill === 'windmill' || theme.mill === 'windpump' ? 0.34 * sc : 0.2 * sc);
       if (theme.mill === 'windmill') {
         // Cubo das pás: à frente do capuz, na direção +z local do moinho.
         const fx = Math.sin(face) * 0.078 * sc, fz = Math.cos(face) * 0.078 * sc;
@@ -682,6 +694,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const R = 0.24 * sc;
       disc(g, x, z, R, 0.006, shade(tc(theme.rock), 1.18), 18, [0, 0, 0, 1]);
       D('landmark', x, 0.006, z, ry, sc, WHITE);
+      scaffold(x, z, ry, (wide ? 0.42 : 0.3) * sc, (wide ? 0.3 : 0.42) * sc);
       if (theme.landmark === 'windmill') D('sails', x + Math.sin(ry) * 0.078 * sc, 0.006 + 0.255 * sc, z + Math.cos(ry) * 0.078 * sc, ry, sc, WHITE, 'spin-z');
       // Flâmulas na cor de destaque do tema, espalhadas em volta do tablado.
       const flag = tc(theme.ui.accent);
