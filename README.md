@@ -88,6 +88,8 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 | Foto sem a interface | `P` (Espaço pausa, `L` muda a hora, Enter salva, Esc sai) | botão Câmera |
 | Gravar vídeo (até 2 minutos) | `V` começa e para | botão Câmera |
 
+**Som de ambiente:** vem da paisagem em volta do foco da câmera: vento nos campos abertos (mais forte de longe), água correndo perto dos rios, pássaros nas florestas de dia, grilos e coruja à noite, sinos da vila e apito de trem. Colocar a peça também soa pelo terreno (respingo, folhas, trilho), e sítios, peças especiais e o desfazer têm som próprio. Fica ligado em "só efeitos".
+
 ## Foto e vídeo
 
 O botão **Câmera** abre três opções:

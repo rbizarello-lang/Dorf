@@ -293,7 +293,7 @@ function undo() {
   if (left <= 0 || !moves.length || hud.modalOpen) return;
   const keep = moves.slice(0, -1);
   if (!newGame(game.seed, keep, undefined, undone + 1, game.specials)) return;
-  sfx.rotate();
+  sfx.undo();
   hud.toast(left - 1 > 0 && left - 1 < 99 ? `Jogada desfeita · restam ${left - 1}` : 'Jogada desfeita');
 }
 
@@ -469,6 +469,8 @@ function announce(res: PlaceResult) {
   world.placeFx(res);
   offerTips(res);
   sfx.place(res.matches);
+  const e = res.placed.edges;
+  sfx.land({ water: e.includes(T.Water), forest: e.includes(T.Forest), rail: e.includes(T.Rail) });
   if (res.points > 0) {
     hud.floater(s.x, s.y - 10, `+${res.points}`, res.perfect ? 'big' : '');
     hud.bumpScore(res.perfect || res.synergies.length ? 'big' : '');
@@ -505,7 +507,7 @@ function announce(res: PlaceResult) {
   if (res.newQuest) hud.toast(`Nova missão: ${questLabel(res.newQuest, theme)}`);
   if (res.site) {
     hud.toast(`${SITE_LABEL[res.site.kind].name} descoberta: ${siteReward(res.site.kind)}`, 'good');
-    sfx.quest();
+    sfx.discover();
   }
   if (res.eraUp !== null) {
     hud.toast(`Nova era: ${eraName(res.eraUp)} · +${game.rules.eraTiles} peças · a próxima vila ergue o marco`, 'good');
@@ -526,7 +528,7 @@ function announce(res: PlaceResult) {
   if (res.special) {
     const sp = res.special;
     hud.toast(`${SPECIAL_NAME[sp.kind]}: ${sp.count} ${sp.count === 1 ? 'peça' : 'peças'} com ${theme.terrainNames[SPECIALS[sp.kind].terrain].toLowerCase()} por perto · +${sp.points} pontos${sp.tiles ? ` · +${sp.tiles} peça${sp.tiles > 1 ? 's' : ''}` : ''}${SPECIALS[sp.kind].lookout ? ` · próximas peças à vista por ${SPECIALS[sp.kind].lookout} jogadas` : ''}`, 'good');
-    sfx.hammer(0.5);
+    sfx.special(sp.kind);
   }
   if (res.leftoverBonus) hud.toast(`Todos os sítios achados! Peças que sobraram: +${res.leftoverBonus} pontos`, 'good');
   hud.renderQuests(game.board.quests, theme);
@@ -1518,6 +1520,34 @@ let statsClock = 0;
 let frames = 0;
 let cpuAcc = 0;
 let last = performance.now();
+let ambienceAt = 0;
+
+/**
+ * Som de ambiente: a paisagem num raio de 3 casas em volta do foco da câmera. Cada terreno
+ * pesa pela fração das bordas, vezes o quanto do raio já tem peça (o vazio é só vento).
+ */
+function updateAmbience(now: number) {
+  if (now - ambienceAt < 500) return;
+  ambienceAt = now;
+  const [fq, fr] = worldToHex(world.rig.target.x, world.rig.target.z);
+  const n = [0, 0, 0, 0, 0, 0];
+  let tiles = 0;
+  for (const p of game.board.list) {
+    if (hexDistance(p.q, p.r, fq, fr) > 3) continue;
+    tiles++;
+    for (const t of p.edges) n[t]++;
+  }
+  const area = 37 * 6;
+  const share = (t: T, k: number) => Math.min(1, (n[t] / area) * k);
+  sfx.setAmbience({
+    open: Math.min(1, share(T.Grass, 1.2) + share(T.Field, 1.2)),
+    forest: share(T.Forest, 2),
+    water: share(T.Water, 4),
+    village: share(T.Village, 2.5),
+    rail: share(T.Rail, 4),
+    near: tiles ? THREE.MathUtils.clamp(1 - (world.rig.dist - world.rig.minDist) / 20, 0, 1) : 0,
+  });
+}
 
 // Bateria: em tela de toque, com o jogo parado (sem toque, tecla ou peça caindo), desenha a 30
 // quadros e, depois de 15 s, a 20. O mundo continua animado; no computador nada muda.
@@ -1555,6 +1585,7 @@ function step(now: number) {
     world.scout(game.board);
   }
   world.tick(dt);
+  updateAmbience(now);
   if (take && !take.frame(realDt, { x: world.rig.target.x, z: world.rig.target.z, dist: world.rig.dist, yaw: world.rig.yaw, tilt: world.rig.tilt })) stopTake('A gravação chegou a 2 minutos.');
   hud.tick(dt);
   const markers = [];
