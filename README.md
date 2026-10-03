@@ -149,6 +149,7 @@ npm run build
 (cd dist && python3 -m http.server 4173) &
 node scripts/screenshots.mjs   # docs/screens/*.png (SHOTS=egito,noite para escolher)
 node scripts/stress.mjs        # tabela de desempenho (RUNS=300:high para um caso)
+npm run smoke                  # abre o build em WebGPU e WebGL2 e falha com erro no console (roda na CI)
 ```
 
 Os scripts usam o Chromium com renderização por software. Para medir FPS de verdade, abra `?stress=1000&debug` num navegador com GPU. Para escolher o navegador, defina `CHROMIUM_PATH`; sem ele, os scripts usam o Chromium do Playwright (`npx playwright-core install chromium`).
