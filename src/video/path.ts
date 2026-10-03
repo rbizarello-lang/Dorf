@@ -1,12 +1,13 @@
 // Caminho da câmera do vídeo: as poses gravadas (ou planejadas) viram uma pose por quadro, com a
 // suavização escolhida. Funções puras (testes em tests/video.ts).
 
-/** Pose da câmera orbital (cameraRig.ts): alvo no chão, distância e giro. */
+/** Pose da câmera orbital (cameraRig.ts): alvo no chão, distância, giro e ajuste de inclinação (0 = curva do zoom). */
 export interface Pose {
   x: number;
   z: number;
   dist: number;
   yaw: number;
+  tilt?: number;
 }
 
 /** Suavização: segundos de desvio do filtro gaussiano (0 = como gravada). */
@@ -37,6 +38,7 @@ export function resample(times: readonly number[], poses: readonly Pose[], fps: 
       // O zoom anda em escala logarítmica: aproximar de 4 para 8 parece tão rápido quanto de 20 para 40.
       dist: a.dist * Math.pow(b.dist / a.dist, k),
       yaw: a.yaw + (b.yaw - a.yaw) * k,
+      tilt: (a.tilt ?? 0) + ((b.tilt ?? 0) - (a.tilt ?? 0)) * k,
     });
   }
   return out;
@@ -58,7 +60,7 @@ export function smooth(poses: readonly Pose[], sigma: number): Pose[] {
   }
   const n = poses.length;
   return poses.map((_, f) => {
-    let x = 0, z = 0, ld = 0, yaw = 0;
+    let x = 0, z = 0, ld = 0, yaw = 0, tilt = 0;
     for (let i = -r; i <= r; i++) {
       const p = poses[Math.min(n - 1, Math.max(0, f + i))];
       const k = w[i + r] / sum;
@@ -66,7 +68,8 @@ export function smooth(poses: readonly Pose[], sigma: number): Pose[] {
       z += p.z * k;
       ld += Math.log(p.dist) * k;
       yaw += p.yaw * k;
+      tilt += (p.tilt ?? 0) * k;
     }
-    return { x, z, dist: Math.exp(ld), yaw };
+    return { x, z, dist: Math.exp(ld), yaw, tilt };
   });
 }

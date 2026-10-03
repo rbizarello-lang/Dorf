@@ -8,11 +8,11 @@ import type { SiteKind } from '../core/sites';
 import type { SynHit, SynKind } from '../core/synergy';
 import { T, rotateEdges, type TileDef } from '../core/tiles';
 import type { Theme } from '../themes/types';
-import { CameraRig } from './cameraRig';
+import { CameraRig, FOV } from './cameraRig';
 import { createRenderer, type Backend } from './gpu';
 import { Lib, WONDER_PODIUM, instGeometry, setInstColor, stampGeometry } from './lib';
 import { Life } from './life';
-import { U, makeVoidMaterial, softShadowFilter } from './materials';
+import { CLOUD_TOP, U, makeVoidMaterial, softShadowFilter } from './materials';
 import { A, fogNode } from './atmosphere';
 import { CL, makeCloudMesh } from './clouds';
 import { groundMap } from './groundMap';
@@ -405,7 +405,7 @@ function skyFor(theme: Theme, tod: TimeOfDay): Sky {
 
 export class World {
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(32, 1, 0.1, 400);
+  readonly camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 400);
   readonly rig = new CameraRig();
   readonly life: Life;
   theme!: Theme;
@@ -1400,21 +1400,26 @@ export class World {
     this.rig.update(realDt);
     this.rig.apply(this.camera);
 
-    A.near.value = this.rig.dist * 1.5;
-    A.far.value = this.rig.dist * 4.2;
+    // Distâncias de verdade até a câmera (rig.eye), não o enquadramento (rig.dist).
+    const eye = this.rig.eye;
+    A.near.value = eye * 1.5;
+    A.far.value = eye * 4.2;
     groundMap.flush();
     // As nuvens aparecem quando a câmera sobe bem acima delas (não no nível Baixo).
-    CL.fade.value = this.quality === 'low' ? 0 : THREE.MathUtils.smoothstep(this.rig.dist, 20, 28);
+    // A laje é marchada de cima: com a câmera inclinada até perto dela, as nuvens somem.
+    const cloudHigh = THREE.MathUtils.smoothstep(this.camera.position.y, CLOUD_TOP + 1.5, CLOUD_TOP + 4);
+    CL.fade.value = this.quality === 'low' ? 0 : THREE.MathUtils.smoothstep(this.rig.dist, 20, 28) * cloudHigh;
     CL.focus.value.set(this.rig.target.x, this.rig.target.z, this.rig.dist);
     this.clouds.visible = CL.fade.value > 1e-3;
 
     // Foco da profundidade de campo: o ponto que a câmera olha.
-    P.focus.value = this.rig.dist;
+    P.focus.value = eye;
     // De longe a faixa nítida estreita: o mapa inteiro vira maquete (tilt-shift).
-    P.focalLength.value = this.rig.dist * THREE.MathUtils.lerp(0.42, 0.16, THREE.MathUtils.smoothstep(this.rig.dist, 10, 30));
+    P.focalLength.value = eye * THREE.MathUtils.lerp(0.42, 0.16, THREE.MathUtils.smoothstep(this.rig.dist, 10, 30));
     // O traço é pleno em volta do foco e some antes da névoa, senão o fundo vira hachura.
-    P.inkNear.value = this.rig.dist * 1.6;
-    P.inkFar.value = this.rig.dist * 3.2;
+    // Com a câmera baixa o fundo fica longe: o traço vai até perto de onde a névoa fecha (4,2×).
+    P.inkNear.value = eye * 2;
+    P.inkFar.value = eye * 3.8;
     // Gradação: realces na cor do sol e sombras no tom oposto (frias com o sol quente da tarde).
     const day = 1 - this.sky.night;
     tintOf(this.sky.sun, -0.14 * day, P.shade.value);
@@ -1430,7 +1435,7 @@ export class World {
     this.sun.position.set(t.x + sd.x * 20, t.y + sd.y * 20, t.z + sd.z * 20);
     if (this.csm) {
       // As cascatas vão da câmera até onde a névoa fecha; acompanham o zoom.
-      const far = Math.round(this.rig.dist * 4.7 * 4) / 4;
+      const far = Math.round(this.rig.eye * 4.7 * 4) / 4;
       if (this.csm.maxFar !== far && this.csm.camera) {
         this.csm.maxFar = far;
         this.csm.updateFrustums();
@@ -1548,12 +1553,14 @@ export class World {
 
     // Nível de detalhe: de longe, metade das plantas basta (as parcelas já têm a cor da cultura).
     // Entre 11,5 e 14,5 de distância, cada planta dessa metade afunda no chão na sua vez.
-    const fine = 1 - THREE.MathUtils.smoothstep(this.rig.dist, 11.5, 14.5);
+    // Ultra e Cinema guardam o detalhe fino até mais longe (a mesma conta da densidade de decoração).
+    const reach = this.quality === 'cinema' ? 1.6 : this.quality === 'ultra' ? 1.35 : 1;
+    const fine = 1 - THREE.MathUtils.smoothstep(this.rig.dist, 11.5 * reach, 14.5 * reach);
     U.fine.value = fine;
     for (const [k, p] of this.pools) if (k.endsWith('~')) p.mesh.visible = fine > 0;
 
     // Aldeões só de perto, com o mesmo limiar da metade fina das plantas.
-    this.life.folkNear = this.rig.dist < 13;
+    this.life.folkNear = this.rig.dist < 13 * reach;
     this.life.night = U.night.value;
     this.life.update(dt);
     this.life.wakes(this.rig.target.x, this.rig.target.z);

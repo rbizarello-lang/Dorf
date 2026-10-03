@@ -76,6 +76,7 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 | Mover câmera | arrastar, `WASD` ou setas | arrastar |
 | Zoom | roda do mouse, `+` / `-` | pinça |
 | Girar câmera | `Q` / `E`, ou arrastar com o botão direito | — |
+| Inclinar câmera (do horizonte à vista de mapa) | arrastar com o botão direito para cima ou para baixo, `PgUp` / `PgDn`; `Home` volta ao ângulo padrão | dois dedos para cima ou para baixo |
 | Amanhecer, dia, hora dourada, entardecer e noite | `L` ou botão ☀ | botão ☀ |
 | Som: música e efeitos, só efeitos, mudo | botão Som; `M` liga ou desliga a música | botão ♫ |
 | Ajuda, nova partida, estatísticas | `H`, `N`, `F` | botões no topo |
@@ -127,6 +128,8 @@ O botão de qualidade abre a lista: **Auto**, **Cinema**, **Ultra**, **Alta**, *
 | `?demo` | a IA joga sozinha, com animação |
 | `?stress=1000` | teste de carga com 1.000 peças |
 | `?gallery` | mostra todos os kits do tema lado a lado (depuração visual) |
+| `?zoom=12` `?yaw=0.5` | distância e giro iniciais da câmera |
+| `?pitch=25` | inclinação inicial em graus acima do chão, de 18 a 75 (fora disso, ignorado) |
 
 ## Estrutura
 

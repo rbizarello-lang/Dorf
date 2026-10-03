@@ -89,7 +89,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__folk(i?, zoom?)` | centraliza a câmera no i-ésimo aldeão de construção |
 | `window.__site(zoom?)` | centraliza no último sítio achado (ou no primeiro escondido) e devolve qual |
 | `window.__wonder(etapa?, zoom?)` | centraliza no canteiro da maravilha; com `etapa` (0 a 6), mostra a obra nessa etapa |
-| `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` | ver o `README.md` |
+| `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` `?pitch=` | ver o `README.md` |
 | `window.__stats` | estatísticas do último quadro |
 | `window.__pools()` | relatório dos InstancedMesh |
 | `window.__ghostBest()` | põe o fantasma na melhor jogada |
@@ -132,7 +132,8 @@ src/render/
   sky.ts         céu procedural para a luz de ambiente (IBL)
   preview.ts     a peça da vez sobre a pilha, com canvas e renderizador próprios
   life.ts        Life: barcos, veículos, animais, aldeões, moinhos e pássaros que se movem
-  cameraRig.ts   câmera orbital
+  cameraRig.ts   câmera orbital: inclinação baixa pela curva do zoom mais o ajuste de quem joga (`tilt`);
+                 lente de 40° com `rig.eye` = distância real (`rig.dist` é o enquadramento)
   gpuTier.ts     nível inicial do Auto pelo nome da placa de vídeo (puro)
   dynres.ts      resolução dinâmica do Auto: degraus de resolução antes de descer o nível (puro)
 src/video/       foto e vídeo (o modo foto fica no main.ts)
@@ -188,7 +189,7 @@ scripts/         capturas, teste de carga, conversão para página publicável
    - As nuvens do céu (`clouds.ts`) e a sombra delas no chão (`cloudLight`) leem o mesmo ruído (`cloudField`, `cloudPuff`); a sombra é lida no ponto em que o raio até o sol cruza a camada das nuvens. As nuvens ficam numa cena própria, que o pós compõe antes do TRAA (`buildPost(..., clouds)`): no passe da cena, um transparente não grava profundidade nem normal, e a oclusão e a luz rebatida do chão de baixo vazariam nele.
    - Sem tone mapping do renderizador: o pós-processamento aplica um ombro suave que preserva as paletas dos temas.
    - Se um nó falhar ao compilar, o erro aparece no console das capturas.
-10. **Blocos estáticos só crescem** (append-only), e o mapa do chão (`groundMap.ts`) também: cada peça pinta a sua parte quando assenta. Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim (nível de detalhe): entre `rig.dist` 11,5 e 14,5 cada planta dessa metade afunda no chão na sua vez (`U.fine`, material `cropFine`), e mais longe o pool fica escondido. Quem consulta geometria pela chave precisa tirar o `~`.
+10. **Blocos estáticos só crescem** (append-only), e o mapa do chão (`groundMap.ts`) também: cada peça pinta a sua parte quando assenta. Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim (nível de detalhe): entre `rig.dist` 11,5 e 14,5 cada planta dessa metade afunda no chão na sua vez (`U.fine`, material `cropFine`), e mais longe o pool fica escondido. No Ultra e no Cinema a faixa vai 1,35× e 1,6× mais longe. Quem consulta geometria pela chave precisa tirar o `~`.
 11. **Construções internas não pontuam.** A roda d'água (vila na beira do rio), a irrigação, a estação e o silo (junto à ferrovia) são só visuais. Pontos de interação vêm apenas de `synergy.ts` × `Rules.synergyPoints`.
 12. **Parâmetros de URL e valores salvos são validados** contra listas fixas (ver `pickQ` e o uso de `Object.hasOwn` para `time`). Mantenha esse padrão ao criar um parâmetro novo.
 13. **O mundo anda pelo `dt` do `World.tick`.** O vídeo é desenhado depois da gravação, quadro a quadro, cada um com `world.tick(1/60)`, e o modo foto congela o mundo com `world.timeScale = 0`.
