@@ -34,7 +34,7 @@ type QualityMode = 'auto' | Quality;
 type MoveRec = [number, number, number];
 /** v4: modos, eras, sítios e bônus por tema. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 7;
+  v: 8;
   seed: number;
   rulesId: string;
   mode: ModeId;
@@ -45,7 +45,7 @@ interface Save {
   /** Peças especiais que entraram nesta partida (mudam a sequência da pilha). */
   specials: SpecialKind[];
 }
-const SAVE_VERSION = 7;
+const SAVE_VERSION = 8;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;

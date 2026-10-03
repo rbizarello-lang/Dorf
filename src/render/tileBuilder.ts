@@ -17,9 +17,24 @@ export const TILE_T = 0.28;
 export const WATER_Y = -0.02;
 const BED_Y = 0.004;
 export const RIVER_HW = 0.19;
+/** Meia-largura do rio na borda (estreito, normal, largo), com o peso de cada uma. */
+const RIVER_WIDTHS: ReadonlyArray<readonly [number, number]> = [
+  [0.13, 0.3],
+  [0.19, 0.45],
+  [0.25, 0.25],
+];
+/**
+ * Meia-largura da boca de um lago: quase a borda inteira, para lagos vizinhos virarem um só.
+ * Sobra terra perto dos cantos (com a margem inclinada), então a emenda nunca chega ao canto.
+ */
+const LAKE_MOUTH = 0.36;
 /** Raio do lago no fim de um rio. */
 const LAKE_R = 0.3;
-/** Afastamento que a decoração guarda da água (antiga faixa de margem). */
+/** Fundo extra no meio dos lagos e dos rios largos (a cor da água escurece com a coluna). */
+const LAKE_DEEP = 0.035;
+/** Faixa junto à borda em que o perfil da água vira o da borda (é o que casa com a vizinha). */
+const SEAM_W = 0.16;
+/** Afastamento extra que a decoração guarda dos lagos. */
 const BANK_EXTRA = 0.055;
 /** Profundidade do leito e largura da margem inclinada (a partir da linha d'água nominal). */
 const BED_DEPTH = 0.048;
@@ -75,6 +90,11 @@ export interface BuildOpts {
    * da peça, -1 entra. Sem isso (pilha), vale a regra padrão de `resolveFlow`.
    */
   flow?: readonly number[];
+  /**
+   * Meia-largura da água em cada borda, na orientação de origem: a da peça vizinha onde ela
+   * já existe. Sem isso (pilha), vale a de `waterShape`.
+   */
+  widths?: readonly number[];
   /** Peça inicial: o meio fica livre para o Centro da vila (objeto à parte, no World). */
   center?: boolean;
   /** Marco da era erguido nesta peça (índice da era: uma flâmula por era). */
@@ -140,6 +160,8 @@ const LUSH = new THREE.Color('#5fa83a');
 export interface Path {
   pts: V2[];
   hw: number;
+  /** Meia-largura em cada ponto (rios de largura variável); sem isso, vale `hw`. */
+  hws?: number[];
 }
 
 function bezier(a: V2, c: V2, b: V2, n: number): V2[] {
@@ -237,7 +259,7 @@ export function railPaths(edges: readonly T[], seed: number, straight = false): 
 }
 
 function nearestOnPaths(x: number, z: number, paths: Path[]) {
-  let best = { d: Infinity, p: [0, 0] as V2, t: [1, 0] as V2 };
+  let best = { d: Infinity, p: [0, 0] as V2, t: [1, 0] as V2, hw: 0 };
   for (const p of paths) {
     for (let k = 0; k < p.pts.length - 1; k++) {
       const [ax, az] = p.pts[k];
@@ -246,10 +268,11 @@ function nearestOnPaths(x: number, z: number, paths: Path[]) {
       const len2 = dx * dx + dz * dz || 1;
       const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2));
       const px = ax + dx * t, pz = az + dz * t;
-      const d = Math.hypot(x - px, z - pz) - p.hw;
+      const hw = p.hws ? p.hws[k] + (p.hws[k + 1] - p.hws[k]) * t : p.hw;
+      const d = Math.hypot(x - px, z - pz) - hw;
       if (d < best.d) {
         const l = Math.sqrt(len2);
-        best = { d, p: [px, pz], t: [dx / l, dz / l] };
+        best = { d, p: [px, pz], t: [dx / l, dz / l], hw };
       }
     }
   }
@@ -287,8 +310,12 @@ export function resolveFlow(edges: readonly T[], known?: readonly number[]): num
   return out;
 }
 
-/** Ponto mais próximo num caminho, com o parâmetro t (0 no início, 1 no fim) e a tangente. */
-function nearestParam(x: number, z: number, pts: V2[]) {
+/**
+ * Ponto do caminho mais perto da margem: d é a distância até a linha d'água (negativa dentro),
+ * com o parâmetro t (0 no início, 1 no fim) e a tangente.
+ */
+function nearestParam(x: number, z: number, p: Path) {
+  const pts = p.pts;
   let best = { d: Infinity, t: 0, tx: 1, tz: 0 };
   const n = pts.length - 1;
   for (let k = 0; k < n; k++) {
@@ -297,7 +324,8 @@ function nearestParam(x: number, z: number, pts: V2[]) {
     const dx = bx - ax, dz = bz - az;
     const len2 = dx * dx + dz * dz || 1;
     const u = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2));
-    const d = Math.hypot(x - ax - dx * u, z - az - dz * u);
+    const hw = p.hws ? p.hws[k] + (p.hws[k + 1] - p.hws[k]) * u : p.hw;
+    const d = Math.hypot(x - ax - dx * u, z - az - dz * u) - hw;
     if (d < best.d) {
       const l = Math.sqrt(len2);
       best = { d, t: (k + u) / n, tx: dx / l, tz: dz / l };
@@ -311,43 +339,134 @@ const smooth = (a: number, b: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
+export interface WaterShape {
+  /** Bordas de água. */
+  idx: number[];
+  /** Meia-largura preferida em cada borda (0 onde não há água). */
+  widths: number[];
+  /** Lago da peça (centro e raio), ou null quando a água é só rio. */
+  lake: { x: number; z: number; r: number } | null;
+}
+
+/**
+ * Forma da água pela semente, com um gerador à parte (não mexe no resto da decoração):
+ * se a peça tem lago e a meia-largura de cada borda. Água num trecho só de bordas vizinhas
+ * vira lago quase sempre, com bocas largas que emendam com os lagos ao lado; rio que passa
+ * de um lado a outro às vezes atravessa um lago no meio da peça. O World troca a largura
+ * das bordas que encostam numa peça já colocada pela dela (`BuildOpts.widths`).
+ */
+export function waterShape(edges: readonly T[], seed: number): WaterShape {
+  const idx: number[] = [];
+  for (let i = 0; i < 6; i++) if (edges[i] === T.Water) idx.push(i);
+  const widths = [0, 0, 0, 0, 0, 0];
+  const n = idx.length;
+  if (!n) return { idx, widths, lake: null };
+  const r = mulberry32(seed ^ 0x1a6e5);
+  const runs = idx.filter((i) => edges[(i + 5) % 6] !== T.Water).length;
+  const bay = n >= 2 && runs === 1;
+  const roll = r();
+  let lake: WaterShape['lake'] = null;
+  if (n === 1) lake = { x: 0, z: 0, r: LAKE_R };
+  else if (bay ? n >= 3 || roll < 0.65 : roll < (n === 2 ? 0.22 : 0.35)) {
+    let x = 0, z = 0;
+    if (bay) {
+      for (const i of idx) {
+        const [mx, mz] = edgeMid(i);
+        x += mx / n;
+        z += mz / n;
+      }
+      x *= 0.45;
+      z *= 0.45;
+    }
+    lake = { x, z, r: bay ? [0, 0, 0.4, 0.48, 0.54, 0.58][n] + r() * 0.06 : 0.34 + r() * 0.08 };
+  }
+  for (const i of idx) widths[i] = lake && bay ? LAKE_MOUTH : weighted(r, RIVER_WIDTHS);
+  return { idx, widths, lake };
+}
+
+/** Caminhos da água: rio de 2 bordas em curva; lago, nascente e junção com raios até o meio. */
+function waterPaths(shape: WaterShape, widths: readonly number[], seed: number): Path[] {
+  const { idx, lake } = shape;
+  const r = mulberry32(seed ^ 0x77a1);
+  if (idx.length === 2 && !lake) {
+    const [a, b] = idx;
+    const pts = bezier(edgeMid(a), [0, 0], edgeMid(b), 16);
+    // Remanso ou estreito no meio da peça: a largura das bordas fica igual à da vizinha.
+    const bulge = -0.25 + r() * 0.7;
+    const hws = pts.map((_, k) => {
+      const t = k / (pts.length - 1);
+      return Math.max(0.1, (widths[a] + (widths[b] - widths[a]) * smooth(0, 1, t)) * (1 + bulge * Math.sin(Math.PI * t)));
+    });
+    return [{ pts, hw: widths[a], hws }];
+  }
+  const cx = lake ? lake.x : 0, cz = lake ? lake.z : 0;
+  const inner = lake ? lake.r * 0.8 : Math.max(...widths) * 1.05;
+  return idx.map((i) => {
+    const pts = line(edgeMid(i), [cx, cz], 10);
+    const hws = pts.map((_, k) => {
+      const t = k / (pts.length - 1);
+      return widths[i] + (Math.max(widths[i], inner) - widths[i]) * smooth(0.15, 1, t);
+    });
+    return { pts, hw: widths[i], hws };
+  });
+}
+
 /**
  * Campo da água de uma peça: distância assinada até a linha d'água nominal (negativa
- * dentro do rio), perfil do leito e correnteza. Tudo função da posição, então peças
- * vizinhas concordam na borda comum.
+ * dentro do rio), perfil do leito e correnteza. Junto a cada borda o campo vira o perfil
+ * da própria borda (só a largura dela), então peças vizinhas concordam na emenda.
  */
-function waterField(water: { paths: Path[]; idx: number[] }, flow: readonly number[], seed: number) {
-  const n = water.idx.length;
-  const discR = n === 1 ? LAKE_R : n >= 3 ? RIVER_HW : 0;
-  // Margem orgânica: ondula no interior da peça e volta a ser reta perto da borda,
-  // onde o rio precisa casar com o da vizinha.
+function waterField(shape: WaterShape, paths: Path[], widths: readonly number[], flow: readonly number[], seed: number) {
+  const { idx, lake } = shape;
+  const n = idx.length;
+  const junction = n >= 3 && !lake ? Math.max(...widths) * 1.05 : 0;
+  // Margem orgânica: ondula no interior da peça; lagos ganham lóbulos.
   const r = mulberry32(seed ^ 0x51ed);
-  const o = [r() * 6.3, r() * 6.3, r() * 6.3, r() * 6.3];
+  const o = [r() * 6.3, r() * 6.3, r() * 6.3, r() * 6.3, r() * 6.3, r() * 6.3];
   const wiggle = (x: number, z: number) => {
-    let border = Infinity;
-    for (let i = 0; i < 6; i++) {
-      const [mx, mz] = edgeMid(i);
-      border = Math.min(border, INR - (x * mx + z * mz) / INR);
-    }
     const w = Math.sin(x * 9.1 + o[0]) * Math.sin(z * 8.3 + o[1]) + Math.sin((x - z) * 15.7 + o[2]) * 0.45 + Math.sin((x + z) * 23 + o[3]) * 0.2;
-    return w * 0.026 * smooth(0.02, 0.22, border);
+    return w * 0.026;
+  };
+  const interior = (x: number, z: number) => {
+    let d = Infinity;
+    for (const p of paths) d = Math.min(d, nearestParam(x, z, p).d);
+    if (lake) {
+      const a = Math.atan2(z - lake.z, x - lake.x);
+      const lobes = 1 + 0.1 * Math.sin(3 * a + o[4]) + 0.06 * Math.sin(5 * a + o[5]);
+      d = Math.min(d, Math.hypot(x - lake.x, z - lake.z) - lake.r * lobes);
+    }
+    if (junction) d = Math.min(d, Math.hypot(x, z) - junction);
+    return d + wiggle(x, z);
   };
   const e = (x: number, z: number) => {
-    let d = Infinity;
-    for (const p of water.paths) d = Math.min(d, nearestParam(x, z, p.pts).d - p.hw);
-    if (discR) d = Math.min(d, Math.hypot(x, z) - discR);
-    return d + wiggle(x, z);
+    // Perfil das bordas próximas, misturado pelo inverso do quadrado da distância: na borda
+    // vale exatamente o perfil dela (|s| − largura, ou terra), igual ao da vizinha.
+    let A = 0, sw = 0, se = 0;
+    for (let i = 0; i < 6; i++) {
+      const [mx, mz] = edgeMid(i);
+      const b = INR - (x * mx + z * mz) / INR;
+      if (b >= SEAM_W) continue;
+      const a = 1 - smooth(0, SEAM_W, b);
+      const s = (z * mx - x * mz) / INR;
+      const prof = widths[i] > 0 ? Math.abs(s) - widths[i] : 0.3;
+      const w = a / Math.max(b, 1e-5) ** 2;
+      sw += w;
+      se += w * prof;
+      A = Math.max(A, a);
+    }
+    const fi = interior(x, z);
+    return A > 0 ? A * (se / sw) + (1 - A) * fi : fi;
   };
   const ground = (x: number, z: number) => {
     const d = e(x, z);
-    return d >= BANK_W ? 0 : -BED_DEPTH * smooth(BANK_W, -0.05, d);
+    return d >= BANK_W ? 0 : -BED_DEPTH * smooth(BANK_W, -0.05, d) - LAKE_DEEP * smooth(-0.08, -0.35, d);
   };
   /** Correnteza [fx, fz] num ponto da superfície. */
   const at = (x: number, z: number): [number, number] => {
     let best: ReturnType<typeof nearestParam> | null = null;
     let bi = 0;
-    water.paths.forEach((p, i) => {
-      const r = nearestParam(x, z, p.pts);
+    paths.forEach((p, i) => {
+      const r = nearestParam(x, z, p);
       if (!best || r.d < best.d) {
         best = r;
         bi = i;
@@ -356,8 +475,8 @@ function waterField(water: { paths: Path[]; idx: number[] }, flow: readonly numb
     const b = best as ReturnType<typeof nearestParam> | null;
     if (!b) return [0, 0];
     let dir = 1, speed = 1;
-    if (n === 2) {
-      const sa = flow[water.idx[0]], sb = flow[water.idx[1]];
+    if (paths.length === 1 && n === 2) {
+      const sa = flow[idx[0]], sb = flow[idx[1]];
       if (sa < 0 && sb > 0) dir = 1;
       else if (sa > 0 && sb < 0) dir = -1;
       else {
@@ -367,9 +486,10 @@ function waterField(water: { paths: Path[]; idx: number[] }, flow: readonly numb
         speed = smooth(0, 0.45, Math.abs(b.t - 0.5) * 2);
       }
     } else {
-      dir = flow[water.idx[bi]] < 0 ? 1 : -1; // t cresce da borda para o centro
+      dir = flow[idx[bi]] < 0 ? 1 : -1; // t cresce da borda para o centro
       speed = smooth(0, 0.5, 1 - b.t);
-      if (n === 1) speed *= smooth(LAKE_R * 0.5, LAKE_R * 1.25, Math.hypot(x, z));
+      // No lago a água quase para.
+      if (lake) speed *= 0.15 + 0.85 * smooth(lake.r * 0.4, lake.r * 1.2, Math.hypot(x - lake.x, z - lake.z));
     }
     return [b.tx * dir * speed, b.tz * dir * speed];
   };
@@ -522,13 +642,17 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     decos[decos.length - 1].transient = true;
   };
 
-  const water = pathsFor(edges, T.Water, RIVER_HW);
+  const shape = waterShape(edges, seed);
+  // O moinho especial precisa do rio passando reto, sem lago no meio.
+  if (opts.special === 'watermill') shape.lake = null;
+  const widths = shape.widths.map((w, i) => (w > 0 ? (opts.widths?.[i] || w) : 0));
+  const water = { idx: shape.idx, paths: waterPaths(shape, widths, seed) };
   const road = railPaths(edges, seed, opts.special === 'station');
-  const allPaths = [...water.paths, ...road.paths];
-  if (water.idx.length === 1) allPaths.push({ pts: [[0, 0], [0.001, 0]], hw: LAKE_R + BANK_EXTRA });
   const hasWater = water.idx.length > 0;
   const flow = opts.flow ?? resolveFlow(edges);
-  const field = hasWater ? waterField(water, flow, seed) : null;
+  const field = hasWater ? waterField(shape, water.paths, widths, flow, seed) : null;
+  /** Distância até a água ou a via mais próxima (negativa dentro): a decoração desvia. */
+  const clear = (x: number, z: number) => Math.min(road.paths.length ? distToPaths(x, z, road.paths) : Infinity, field ? field.e(x, z) - (shape.lake ? BANK_EXTRA : 0) : Infinity);
   /** Altura do chão: 0, exceto no leito e nas margens dos rios. */
   const groundY = (x: number, z: number) => (field ? field.ground(x, z) : 0);
   const bank = tc(theme.bank);
@@ -634,22 +758,22 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
 
   // --- Rios e lagos: plantas na água e na margem (a superfície já saiu com o leito).
   if (field) {
-    const n = water.idx.length;
-    // Vitórias-régias e juncos na margem.
-    for (let k = randInt(rng, 0, n >= 3 ? 3 : 1); k > 0; k--) {
-      const p = pick(rng, water.paths);
-      const pt = p.pts[randInt(rng, 2, p.pts.length - 2)];
-      D('lily', pt[0] + (rng() - 0.5) * 0.14, WATER_Y - 0.0095, pt[1] + (rng() - 0.5) * 0.14, rng() * 6, 1, vary(rng, tc(theme.lily)));
+    const lake = shape.lake && water.idx.length >= 2;
+    // Vitórias-régias na água parada: no lago, ou perto da margem do rio.
+    let lilies = randInt(rng, 0, lake ? 4 : water.idx.length >= 3 ? 3 : 1) + (lake ? 1 : 0);
+    for (let tries = 0; lilies > 0 && tries < 40; tries++) {
+      const x = (rng() - 0.5) * 1.7, z = (rng() - 0.5) * 1.7;
+      const d = field.e(x, z);
+      if (d > -0.035 || (!lake && d < -0.09) || Math.hypot(x, z) > INR - 0.08) continue;
+      D('lily', x, WATER_Y - 0.0095, z, rng() * 6, 1, vary(rng, tc(theme.lily)));
+      lilies--;
     }
-    for (const p of water.paths) {
-      alongPath(p.pts, 0.05 + rng() * 0.05, 0.075 / Math.max(0.35, detail), (x, z, tx, tz) => {
-        if (rng() < 0.45) return;
-        const s = rng() < 0.5 ? 1 : -1;
-        const o = p.hw + 0.012 + rng() * 0.02;
-        const rx = x - tz * o * s, rz = z + tx * o * s;
-        if (Math.hypot(rx, rz) > INR - 0.03 || distToPaths(rx, rz, allPaths) < -0.005) return;
-        D('reed', rx, 0, rz, rng() * 6, randRange(rng, 0.8, 1.3), WHITE);
-      });
+    // Juncos na beira: pontos sorteados que caem na faixa logo fora da linha d'água.
+    for (let tries = Math.round(320 * Math.max(0.35, detail)); tries > 0; tries--) {
+      const x = (rng() - 0.5) * 2, z = (rng() - 0.5) * 2;
+      const d = field.e(x, z);
+      if (d < 0.004 || d > 0.032 || Math.hypot(x, z) > INR - 0.03) continue;
+      D('reed', x, 0, z, rng() * 6, randRange(rng, 0.8, 1.3), WHITE);
     }
   }
 
@@ -787,9 +911,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         // As casas desviam pelo centro delas: o raio cobre a estação e meia casa.
         reserved.push([sx, sz, 0.34]);
       } else {
-        const wx = px + nx * (RIVER_HW + 0.012), wz = pz + nz * (RIVER_HW + 0.012);
+        const wx = px + nx * (n.hw + 0.012), wz = pz + nz * (n.hw + 0.012);
         D('wheel', wx, WATER_Y + 0.08, wz, yawTo(nx, nz), 1.7, WHITE, 'spin-x');
-        const hx = px + nx * (RIVER_HW + 0.17), hz = pz + nz * (RIVER_HW + 0.17);
+        const hx = px + nx * (n.hw + 0.17), hz = pz + nz * (n.hw + 0.17);
         D('special:watermill', hx, 0, hz, yawTo(nx, nz) + Math.PI, 1.25, WHITE);
         reserved.push([wx, wz, 0.14], [hx, hz, 0.3]);
       }
@@ -807,7 +931,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const [mx, mz] = edgeMid(i);
       spots.push([mx * 0.5, mz * 0.5, wide ? 0.8 : 1]);
     }
-    const spot = spots.find(([x, z, sc]) => distToPaths(x, z, allPaths) > 0.27 * sc + 0.04 && free(x, z, 0.2));
+    const spot = spots.find(([x, z, sc]) => clear(x, z) > 0.27 * sc + 0.04 && free(x, z, 0.2));
     if (spot) {
       const [x, z, sc] = spot;
       const [fx, fz] = edgeMid(villages[0] ?? 0);
@@ -837,7 +961,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const [mx, mz] = edgeMid(i);
       spots.push([mx * 0.5, mz * 0.5]);
     }
-    const spot = spots.find(([x, z]) => distToPaths(x, z, allPaths) > 0.17 && free(x, z, 0.16)) ?? spots[spots.length - 1];
+    const spot = spots.find(([x, z]) => clear(x, z) > 0.17 && free(x, z, 0.16)) ?? spots[spots.length - 1];
     const [x, z] = spot;
     const ry = x === 0 && z === 0 ? 0.4 : yawTo(-x, -z);
     disc(g, x, z, 0.15, 0.004, shade(tc(theme.ground[T.Village]), 0.9), 14);
@@ -856,17 +980,17 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const [cx, cz] = corner(shared);
       const tx0 = cx * 0.46, tz0 = cz * 0.46;
       if (edges[i] === T.Field && edges[j] === T.Water) lush.add(i);
-      if (edges[i] === T.Village && edges[j] === T.Water && !watermill && water.paths.length) {
+      if (edges[i] === T.Village && edges[j] === T.Water && !watermill && water.paths.length && !(shape.lake && water.idx.length >= 2)) {
         const n = nearestOnPaths(tx0, tz0, water.paths);
         let px = tx0 - n.p[0], pz = tz0 - n.p[1];
         const l = Math.hypot(px, pz) || 1;
         px /= l;
         pz /= l;
-        const wx = n.p[0] + px * (RIVER_HW + 0.012), wz = n.p[1] + pz * (RIVER_HW + 0.012);
+        const wx = n.p[0] + px * (n.hw + 0.012), wz = n.p[1] + pz * (n.hw + 0.012);
         if (Math.hypot(wx, wz) > INR - 0.08) continue;
         watermill = true;
         D('wheel', wx, WATER_Y + 0.05, wz, yawTo(px, pz), 1, WHITE, 'spin-x');
-        const hx = n.p[0] + px * (RIVER_HW + 0.11), hz = n.p[1] + pz * (RIVER_HW + 0.11);
+        const hx = n.p[0] + px * (n.hw + 0.11), hz = n.p[1] + pz * (n.hw + 0.11);
         const ry = yawTo(n.t[0], n.t[1]);
         D('wall:0', hx, 0, hz, ry, 1.15, WHITE.clone().multiply(tc(theme.houses[0].walls[0])));
         D('roof:0', hx, 0, hz, ry, 1.15, tc(theme.houses[0].roofs[0]).clone());
@@ -898,7 +1022,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
 
   // --- Ponte: rio de duas bordas com vila numa margem e terra na outra. Sem sorteio,
   // para não mudar o resto da peça.
-  if (theme.bridge && water.idx.length === 2) {
+  // Rio largo demais para o vão da ponte (ou que vira lago) fica sem ela.
+  if (theme.bridge && water.idx.length === 2 && !shape.lake && (water.paths[0].hws?.[8] ?? RIVER_HW) <= 0.215) {
     const [a, b] = water.idx;
     const sideA = edges.slice(a + 1, b), sideB = [...edges.slice(b + 1), ...edges.slice(0, a)];
     if (sideA.length && sideB.length && (sideA.includes(T.Village) || sideB.includes(T.Village))) {
@@ -919,7 +1044,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // --- Marco no centro das vilas grandes.
   const villageCount = edges.filter((e) => e === T.Village).length;
   const landmarkRoll = rng();
-  if (theme.landmark !== 'none' && villageCount >= 2 && distToPaths(0, 0, allPaths) > 0.2 && free(0, 0, 0.2) && landmarkRoll < theme.landmarkChance * (villageCount - 1) * 0.8) {
+  if (theme.landmark !== 'none' && villageCount >= 2 && clear(0, 0) > 0.2 && free(0, 0, 0.2) && landmarkRoll < theme.landmarkChance * (villageCount - 1) * 0.8) {
     const ry = rng() * Math.PI * 2;
     const sc = LANDMARK_SCALE;
     D('landmark', 0, 0, 0, ry, sc, WHITE);
@@ -943,7 +1068,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     for (let k = 0, tries = 0; k < want && tries < want * 5; tries++) {
       const p = samplePoint(rng, i, 0.04, 0.03);
       const rad = randRange(rng, 0.15, 0.22);
-      if (!p || distToPaths(p[0], p[1], allPaths) < rad * 1.1) continue;
+      if (!p || clear(p[0], p[1]) < rad * 1.1) continue;
       if (plots.some(([x, z]) => (x - p[0]) ** 2 + (z - p[1]) ** 2 < 0.2 * 0.2)) continue;
       if (!free(p[0], p[1], 0.05)) continue;
       plots.push(p);
@@ -1050,53 +1175,53 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const n = Math.max(2, Math.round(randInt(rng, theme.treesPerSector[0], theme.treesPerSector[1]) * 0.7));
       for (let k = 0, tries = 0; k < n && tries < n * 5; tries++) {
         const p = samplePoint(rng, i, 0.1, 0.07);
-        if (!p || !free(p[0], p[1], 0.125) || distToPaths(p[0], p[1], allPaths) < 0.05) continue;
+        if (!p || !free(p[0], p[1], 0.125) || clear(p[0], p[1]) < 0.05) continue;
         addTree(p[0], p[1]);
         k++;
       }
       for (let k = Math.round(4 * detail); k > 0; k--) {
         const p = samplePoint(rng, i, 0.1, 0.05);
-        if (p && distToPaths(p[0], p[1], allPaths) > 0.03 && free(p[0], p[1], 0.03)) D('grass', p[0], 0, p[1], rng() * 6, randRange(rng, 0.9, 1.4), shade(tc(pick(rng, theme.grass)), 0.8));
+        if (p && clear(p[0], p[1]) > 0.03 && free(p[0], p[1], 0.03)) D('grass', p[0], 0, p[1], rng() * 6, randRange(rng, 0.9, 1.4), shade(tc(pick(rng, theme.grass)), 0.8));
       }
     } else if (terr === T.Village) {
       const n = randInt(rng, 1, 2);
       for (let k = 0, tries = 0; k < n && tries < n * 6; tries++) {
         const p = samplePoint(rng, i, 0.15, 0.13);
-        if (!p || !free(p[0], p[1], 0.27) || distToPaths(p[0], p[1], allPaths) < 0.16) continue;
+        if (!p || !free(p[0], p[1], 0.27) || clear(p[0], p[1]) < 0.16) continue;
         addHouse(p[0], p[1], sectorAng, i);
         k++;
       }
       for (let k = Math.round(3 * detail); k > 0; k--) {
         const p = samplePoint(rng, i, 0.12, 0.05);
-        if (p && free(p[0], p[1], 0.1) && distToPaths(p[0], p[1], allPaths) > 0.03) D('grass', p[0], 0, p[1], rng() * 6, randRange(rng, 0.8, 1.2), tc(pick(rng, theme.grass)));
+        if (p && free(p[0], p[1], 0.1) && clear(p[0], p[1]) > 0.03) D('grass', p[0], 0, p[1], rng() * 6, randRange(rng, 0.8, 1.2), tc(pick(rng, theme.grass)));
       }
     } else if (terr === T.Grass) {
       for (let k = grassN; k > 0; k--) {
         const p = samplePoint(rng, i, 0.08, 0.03);
-        if (!p || distToPaths(p[0], p[1], allPaths) < 0.02 || !free(p[0], p[1], 0.035)) continue;
+        if (!p || clear(p[0], p[1]) < 0.02 || !free(p[0], p[1], 0.035)) continue;
         D('grass', p[0], 0, p[1], rng() * 6, randRange(rng, 0.8, 1.35), vary(rng, tc(pick(rng, theme.grass)), 0.08));
       }
       if (rng() < 0.45) {
         const p = samplePoint(rng, i, 0.15, 0.1);
-        if (p && free(p[0], p[1], 0.08) && distToPaths(p[0], p[1], allPaths) > 0.04) {
+        if (p && free(p[0], p[1], 0.08) && clear(p[0], p[1]) > 0.04) {
           D('bush', p[0], 0, p[1], rng() * 6, randRange(rng, 0.8, 1.4), vary(rng, tc(pick(rng, theme.bush))));
           taken.push(p);
         }
       }
       if (rng() < 0.45) {
         const p = samplePoint(rng, i, 0.15, 0.12);
-        if (p && distToPaths(p[0], p[1], allPaths) > 0.06 && free(p[0], p[1], 0.05)) {
+        if (p && clear(p[0], p[1]) > 0.06 && free(p[0], p[1], 0.05)) {
           const c = tc(pick(rng, theme.flowers));
           for (let f = randInt(rng, 3, 6); f > 0; f--) D('flower', p[0] + (rng() - 0.5) * 0.14, 0, p[1] + (rng() - 0.5) * 0.14, 0, randRange(rng, 0.8, 1.2), c);
         }
       }
       if (rng() < 0.18) {
         const p = samplePoint(rng, i, 0.15, 0.1);
-        if (p && free(p[0], p[1], 0.08) && distToPaths(p[0], p[1], allPaths) > 0.04) D('rock', p[0], 0, p[1], rng() * 6, randRange(rng, 0.7, 1.5), vary(rng, tc(theme.rock)));
+        if (p && free(p[0], p[1], 0.08) && clear(p[0], p[1]) > 0.04) D('rock', p[0], 0, p[1], rng() * 6, randRange(rng, 0.7, 1.5), vary(rng, tc(theme.rock)));
       }
       if (rng() < 0.12) {
         const p = samplePoint(rng, i, 0.18, 0.14);
-        if (p && free(p[0], p[1], 0.1) && distToPaths(p[0], p[1], allPaths) > 0.08) {
+        if (p && free(p[0], p[1], 0.1) && clear(p[0], p[1]) > 0.08) {
           for (let a = randInt(rng, 1, 2); a > 0; a--) D('animal', p[0] + (rng() - 0.5) * 0.06, 0, p[1] + (rng() - 0.5) * 0.06, rng() * 6, randRange(rng, 0.9, 1.1), vary(rng, tc(pick(rng, theme.animals.colors)), 0.05), 'wander');
         }
       }
@@ -1110,7 +1235,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   }
 
   // Centro: segue o terreno dominante, quando não há rio, estrada ou marco.
-  if (distToPaths(0, 0, allPaths) > 0.08) {
+  if (clear(0, 0) > 0.08) {
     const count = new Map<T, number>();
     for (const e of edges) count.set(e, (count.get(e) ?? 0) + 1);
     const [top, n] = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
@@ -1162,7 +1287,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         strip(g, bezier([h.x, h.z], [mx - (dz / l) * bend, mz + (dx / l) * bend], [px, pz], 6), 0.024, 0.0045, trail, VILLAGE);
       }
       disc(g, px, pz, 0.065, 0.005, trail, 10, VILLAGE);
-      if (hs.length >= 3 && free(px, pz, 0.05) && distToPaths(px, pz, allPaths) > 0.08) {
+      if (hs.length >= 3 && free(px, pz, 0.05) && clear(px, pz) > 0.08) {
         D('well', px, 0, pz, Math.atan2(pz, px), 1, WHITE);
         taken.push([px, pz]);
       }

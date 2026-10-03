@@ -21,7 +21,7 @@ import { SkyEnv } from './sky';
 import { FX, Fireflies, Sprites, Weather } from './fx';
 import { LiveTile } from './liveTile';
 import { PreviewView } from './preview';
-import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, type TileBuild } from './tileBuilder';
+import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, type TileBuild } from './tileBuilder';
 import { NIGHT_LIGHT } from './nightLight';
 
 export type { Quality };
@@ -786,13 +786,13 @@ export class World {
 
   // ---------------------------------------------------------------- mapa
 
-  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean }) {
+  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[] }) {
     return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, special: def.special, ...extra });
   }
 
   /** Peça do mapa já colocada: a inicial reserva o Centro, e a do marco o ergue. */
   private buildPlaced(p: Placed) {
-    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder });
+    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths: this.settleWidths(p) });
   }
 
   /**
@@ -818,6 +818,32 @@ export class World {
     return flowBase(wf, p.rot);
   }
 
+  /**
+   * Meia-largura da água por borda (mundo) de uma peça em (q, r): a da vizinha já colocada
+   * onde ela existe, senão a da própria peça. Assim o rio muda de largura de peça em peça
+   * sem degrau, e a boca larga de um lago emenda com o lago ao lado.
+   */
+  private widths = new Map<number, number[]>();
+  private widthsAt(q: number, r: number, def: TileDef, rot: number) {
+    const own = waterShape(def.edges, def.seed).widths;
+    const out = [0, 0, 0, 0, 0, 0];
+    for (let i = 0; i < 6; i++) {
+      const s = (i + rot) % 6;
+      out[s] = own[i];
+      if (!own[i]) continue;
+      const nw = this.widths.get(hkey(q + DIRS[s][0], r + DIRS[s][1]));
+      if (nw && nw[opposite(s)]) out[s] = nw[opposite(s)];
+    }
+    return out;
+  }
+
+  /** Registra a largura da água de uma peça colocada e devolve a versão na orientação de origem. */
+  private settleWidths(p: Placed) {
+    const w = this.widthsAt(p.q, p.r, p.def, p.rot);
+    this.widths.set(p.key, w);
+    return flowBase(w, p.rot);
+  }
+
   rebuild(board: Board) {
     this.board = board;
     for (const c of this.chunks.values()) c.dispose(this.staticRoot);
@@ -830,6 +856,7 @@ export class World {
     this.sprites.clear();
     this.life.reset(this.theme);
     this.flows.clear();
+    this.widths.clear();
     groundMap.clear();
     for (const p of board.list) this.bake(p, this.buildPlaced(p), false);
     for (const pool of this.pools.values()) pool.flush();
@@ -1107,7 +1134,8 @@ export class World {
   placeAnimated(p: Placed) {
     const syn = synBase(p.synergies, p.rot);
     const flow = this.settleFlow(p);
-    const sig = `${synSig(syn)}|${flow.join('')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}`;
+    const widths = this.settleWidths(p);
+    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}`;
     let live: LiveTile;
     let y0 = 1.2;
     if (this.ghost && this.ghost.def === p.def && this.ghost.sig === sig) {
@@ -1116,7 +1144,7 @@ export class World {
       this.ghost = null;
       this.ghostKey = '';
     } else {
-      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder }), sig, this.lib, this.quality !== 'low');
+      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths }), sig, this.lib, this.quality !== 'low');
       this.scene.add(live.group);
       this.dropGhost();
     }
@@ -1143,16 +1171,17 @@ export class World {
   setGhost(def: TileDef, rot: number, angle: number, q: number, r: number, check: Check) {
     const syn = check.valid ? synBase(check.synergies, rot) : [];
     const flow = flowBase(this.flowAt(q, r, rotateEdges(def.edges, rot)), rot);
+    const widths = flowBase(this.widthsAt(q, r, def, rot), rot);
     // O fantasma já mostra o marco da era que a peça ergueria.
     // A peça especial não ergue marco nem começa a maravilha (Board.place): o fantasma também não.
     const mark = check.valid && !def.special ? (check.eraMark ?? undefined) : undefined;
     const site = check.valid ? check.site?.kind : undefined;
     const wonder = check.valid && check.wonder && !def.special ? true : undefined;
-    const sig = `${synSig(syn)}|${flow.join('')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}`;
+    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}`;
     const key = `${def.seed}:${this.theme.id}:${sig}`;
     if (!this.ghost || this.ghostKey !== key) {
       const old = this.ghost;
-      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site, wonder }), sig, this.lib, this.quality !== 'low');
+      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site, wonder, widths }), sig, this.lib, this.quality !== 'low');
       this.ghostKey = key;
       this.scene.add(this.ghost.group);
       if (old && old.def === def) {

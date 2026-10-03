@@ -98,14 +98,17 @@ function fillLand(e: (T | null)[], rng: Rng) {
   }
 }
 
+// Bordas de água vizinhas viram lago no render (tileBuilder.waterShape); lagos encostados
+// pela boca viram um lago só.
 const WATER_PATTERNS: ReadonlyArray<readonly [number[], number]> = [
   [[0, 3], 4],
   [[0, 2], 3],
-  [[0, 1], 1],
+  [[0, 1], 1.4],
   [[0], 1.1],
   [[0, 2, 4], 1],
-  [[0, 1, 2], 0.9],
-  [[0, 1, 2, 3], 0.5],
+  [[0, 1, 2], 1.2],
+  [[0, 1, 2, 3], 0.6],
+  [[0, 1, 2, 3, 4], 0.25],
 ];
 const RAIL_PATTERNS: ReadonlyArray<readonly [number[], number]> = [
   [[0, 3], 4],
@@ -117,8 +120,8 @@ const RAIL_PATTERNS: ReadonlyArray<readonly [number[], number]> = [
 export function generateEdges(rng: Rng): T[] {
   const e: (T | null)[] = Array<T | null>(6).fill(null);
   const roll = rng();
-  if (roll < 0.15) for (const i of weighted(rng, WATER_PATTERNS)) e[i] = T.Water;
-  else if (roll < 0.24) for (const i of weighted(rng, RAIL_PATTERNS)) e[i] = T.Rail;
+  if (roll < 0.17) for (const i of weighted(rng, WATER_PATTERNS)) e[i] = T.Water;
+  else if (roll < 0.26) for (const i of weighted(rng, RAIL_PATTERNS)) e[i] = T.Rail;
   fillLand(e, rng);
   return rotateEdges(e as T[], randInt(rng, 0, 5));
 }
