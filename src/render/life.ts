@@ -439,7 +439,7 @@ export class Life {
       const rot = m.tile.rot;
       const c = Math.cos((rot * Math.PI) / 3), s = Math.sin((rot * Math.PI) / 3);
       // Rotação em y de -rot·60°: no plano XZ (atan2(z, x)) o ângulo cresce rot·60°.
-      pts = railCurve(m.tile.def.edges, m.tile.def.seed, (m.a - rot + 6) % 6, (m.b - rot + 6) % 6).map(([x, z]) => [x * c - z * s, x * s + z * c]);
+      pts = railCurve(m.tile.def.edges, m.tile.def.seed, (m.a - rot + 6) % 6, (m.b - rot + 6) % 6, m.tile.def.special === 'station').map(([x, z]) => [x * c - z * s, x * s + z * c]);
     } else if (strictEdges(m.tile, T.Water).length === 2) {
       const [A, B] = [end(m.a), end(m.b)];
       pts = [];

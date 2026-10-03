@@ -179,11 +179,12 @@ const CROWD: Record<number, number> = { [T.Grass]: 0, [T.Field]: 1, [T.Forest]: 
  * no meio da borda e perpendicular a ela, então emenda com a vizinha sem quebra. Entre bordas
  * vizinhas e a 120° é um arco de círculo (com raio sorteado em ±15%); entre bordas opostas,
  * em vez da reta, um arco que se desvia para o lado mais aberto (prado, plantação) ou, se os
- * dois lados pesam igual, um S. Não gasta o rng da peça: o Life refaz o mesmo traçado para os
+ * dois lados pesam igual, um S (`straight` mantém a reta: a plataforma da peça estação é reta).
+ * Não gasta o rng da peça: o Life refaz o mesmo traçado para os
  * trens. A ordem (a, b) só inverte o sentido dos pontos.
  */
-export function railCurve(edges: readonly T[], seed: number, a: number, b: number, n = 20): V2[] {
-  if (a > b) return railCurve(edges, seed, b, a, n).reverse();
+export function railCurve(edges: readonly T[], seed: number, a: number, b: number, straight = false, n = 20): V2[] {
+  if (a > b) return railCurve(edges, seed, b, a, straight, n).reverse();
   const rng = mulberry32(((seed ^ 0x2c1b3c6d) + a * 7 + b * 131) >>> 0);
   const A = edgeMid(a), B = edgeMid(b);
   const sep = Math.min(b - a, 6 - (b - a));
@@ -212,7 +213,7 @@ export function railCurve(edges: readonly T[], seed: number, a: number, b: numbe
   }
   const side1 = CROWD[edges[(a + 1) % 6]] + CROWD[edges[(a + 2) % 6]];
   const side2 = CROWD[edges[(a + 4) % 6]] + CROWD[edges[(a + 5) % 6]];
-  const amp = randRange(rng, 0.12, 0.2);
+  const amp = straight ? 0 : randRange(rng, 0.12, 0.2);
   const sign = side1 === side2 ? (rng() < 0.5 ? -1 : 1) : side1 < side2 ? 1 : -1;
   const s = side1 === side2 && rng() < 0.6;
   for (let i = 0; i <= n; i++) {
@@ -227,12 +228,12 @@ export function railCurve(edges: readonly T[], seed: number, a: number, b: numbe
 
 /** Vias da peça: uma curva entre duas bordas; com 3 ou mais, um triângulo de curvas (como uma
  * triangular de manobra) ligando cada borda à seguinte; com uma só, reta até a estação. */
-export function railPaths(edges: readonly T[], seed: number): { paths: Path[]; idx: number[] } {
+export function railPaths(edges: readonly T[], seed: number, straight = false): { paths: Path[]; idx: number[] } {
   const idx: number[] = [];
   for (let i = 0; i < 6; i++) if (edges[i] === T.Rail) idx.push(i);
   if (idx.length < 2) return { paths: idx.map((i) => ({ pts: line(edgeMid(i), [0, 0], 8), hw: ROAD_HW })), idx };
   const pairs = idx.length === 2 ? [[idx[0], idx[1]]] : idx.map((i, j) => [i, idx[(j + 1) % idx.length]]);
-  return { paths: pairs.map(([a, b]) => ({ pts: railCurve(edges, seed, a, b), hw: ROAD_HW })), idx };
+  return { paths: pairs.map(([a, b]) => ({ pts: railCurve(edges, seed, a, b, straight), hw: ROAD_HW })), idx };
 }
 
 function nearestOnPaths(x: number, z: number, paths: Path[]) {
@@ -522,7 +523,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   };
 
   const water = pathsFor(edges, T.Water, RIVER_HW);
-  const road = railPaths(edges, seed);
+  const road = railPaths(edges, seed, opts.special === 'station');
   const allPaths = [...water.paths, ...road.paths];
   if (water.idx.length === 1) allPaths.push({ pts: [[0, 0], [0.001, 0]], hw: LAKE_R + BANK_EXTRA });
   const hasWater = water.idx.length > 0;
