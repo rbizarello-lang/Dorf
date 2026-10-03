@@ -575,6 +575,7 @@ function showHelp(tab = 'basico') {
         <li><b>Sítios</b>: carimbos no mapa marcam ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.</li>
       </ul>`,
     ],
+    ['almanaque', 'Almanaque', almanac()],
     [
       'controles',
       'Controles',
@@ -593,6 +594,52 @@ function showHelp(tab = 'basico') {
     <div class="tabs" role="tablist">${tabs.map(([id, name]) => `<button type="button" role="tab" data-tab="${id}" aria-selected="${id === pick}">${name}</button>`).join('')}</div>
     ${tabs.map(([id, , html]) => `<section class="tab" data-tab="${id}"${id === pick ? '' : ' hidden'}>${html}</section>`).join('')}
     <div class="row"><button class="primary" type="button" data-act="close">Jogar</button><button class="secondary" type="button" data-act="tips">Rever as dicas</button></div>`);
+}
+
+/** Maior recorde do tema entre os modos (cada modo guarda o seu). */
+function themeBest(id: string) {
+  let top = 0;
+  for (const m of MODES) {
+    try {
+      const v = JSON.parse(store.get(`best.${m.id}.${id}`) ?? 'null') as { score?: unknown } | null;
+      if (v && Number.isSafeInteger(v.score)) top = Math.max(top, v.score as number);
+    } catch {
+      // valor corrompido: ignora
+    }
+  }
+  return top;
+}
+
+/** Almanaque: o que já se fez em todas as partidas, lido do progresso guardado no navegador. */
+function almanac() {
+  const d = progress.data;
+  const t = d.totals;
+  const n = (v: number) => v.toLocaleString('pt-BR');
+  const cell = (v: number, label: string) => `<div><b>${n(v)}</b><span>${label}</span></div>`;
+  const left = new Map(progress.pending(special ? null : game.board).map((p) => [p.kind, p]));
+  const specials = SPECIAL_KINDS.map((k) => {
+    const p = left.get(k);
+    return p
+      ? `<li class="locked"><b>${SPECIAL_NAME[k]}</b>: presa, ${p.have} de ${p.need} ${p.label}.</li>`
+      : `<li><b>${SPECIAL_NAME[k]}</b>: liberada, colocada ${n(d.specialsPlaced[k])} ${d.specialsPlaced[k] === 1 ? 'vez' : 'vezes'}. ${specialRule(k)}</li>`;
+  }).join('');
+  const sites = (Object.keys(SITE_LABEL) as SiteKind[]).map((k) => `<span><i>${SITE_LABEL[k].icon}</i>${SITE_LABEL[k].name} <b>${n(d.siteKinds[k])}</b></span>`).join('');
+  const rows = THEMES.map((th) => {
+    const r = d.themes[th.id];
+    const top = themeBest(th.id);
+    if (!r && !top) return `<tr class="locked"><td>${th.name}</td><td colspan="3" class="none">ainda não jogado</td></tr>`;
+    const era = (th.eras ?? ERA_NAMES)[r?.era ?? 0] ?? ERA_NAMES[0];
+    const wonder = r?.wonder ? ` · ${th.wonder?.name ?? 'maravilha'}` : '';
+    return `<tr><td>${th.name}</td><td>${n(r?.games ?? 0)}</td><td>${era}${wonder}</td><td>${top ? n(top) : '–'}</td></tr>`;
+  }).join('');
+  return `<p class="muted">Tudo o que você já fez, somado entre as partidas (a atual entra quando acaba).</p>
+    <div class="final small">${cell(t.games, 'partidas')}${cell(t.tiles, 'peças')}${cell(t.quests, 'missões')}${cell(t.synergies, 'interações')}${cell(t.perfects, 'perfeitos')}${cell(t.wonders, 'maravilhas')}</div>
+    <h3>Sítios descobertos</h3>
+    <div class="legend sites">${sites}</div>
+    <h3>Peças especiais</h3>
+    <ul class="almanac-specials">${specials}</ul>
+    <h3>Temas</h3>
+    <table class="almanac"><thead><tr><th>Tema</th><th>Partidas</th><th>Maior era</th><th>Recorde</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function synergyLegend() {
@@ -620,6 +667,7 @@ function showGameOver() {
       <button class="primary" type="button" data-act="new">Jogar de novo</button>
       ${mode.daily ? '' : `<button class="secondary" type="button" data-act="replay-seed">Repetir a semente</button>`}
       <button class="secondary" type="button" data-act="theme">Trocar tema</button>
+      ${special ? '' : `<button class="secondary" type="button" data-act="almanac">Almanaque</button>`}
     </div>
     ${moves.length ? `<div class="row"><button class="secondary" type="button" data-act="film">Gravar o filme da partida</button></div>` : ''}`);
   if (record) hud.modalBody.querySelector('h2')!.classList.add('record');
@@ -642,6 +690,10 @@ hud.modal.addEventListener('click', (e) => {
   if (act === 'film') {
     // O diálogo de exportação toma o lugar do placar final.
     showExportDialog('film');
+    return;
+  }
+  if (act === 'almanac') {
+    showHelp('almanaque');
     return;
   }
   if (act === 'tips') {

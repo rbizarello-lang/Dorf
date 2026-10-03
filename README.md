@@ -47,6 +47,8 @@ O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Re
 
 **Peças especiais:** liberadas jogando, valem para as partidas seguintes e entram duas vezes em cada uma (menos no Desafio do dia, que é igual para todos). A **Estação** (8 missões cumpridas no total) vale +12 por peça com trilho a até 2 casas e +2 peças; o **Moinho d'água** (30 interações) vale +20 por vizinha com plantação e +1 peça; o **Farol** (6 sítios descobertos) vale +10 por peça com rio a até 2 casas e mostra as próximas peças por 5 jogadas. O fim da partida mostra quanto falta para a próxima.
 
+**Almanaque:** a aba Almanaque da ajuda (`H`, ou o botão no fim da partida) soma tudo o que já se fez entre as partidas: peças, missões, interações, sítios por tipo, peças especiais (liberadas e quanto falta para as outras) e, por tema, partidas, maior era, maravilha e recorde.
+
 **Bônus de cada tema:** cada época tem uma regra curta, como a Dádiva do Nilo (borda de rio encaixada vale +5) no Egito ou os Moinhos de pôlder (+5 por moinho) na Holanda. Aparece no menu de temas.
 
 **Desfazer:** `U` ou o botão desfaz a última jogada (3 vezes no Clássico).

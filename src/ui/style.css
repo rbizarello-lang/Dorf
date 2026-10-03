@@ -921,6 +921,78 @@ kbd {
   color: var(--soft);
 }
 
+/* Almanaque */
+.almanac tr td.none {
+  text-align: left;
+}
+
+.final.small {
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 10px;
+}
+
+.final.small b {
+  font-size: 20px;
+}
+
+.sheet h3 {
+  margin: 16px 0 6px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--soft);
+}
+
+.legend.sites {
+  grid-template-columns: repeat(2, 1fr);
+  margin: 0;
+}
+
+.legend.sites i {
+  font-style: normal;
+  width: 1.2em;
+  text-align: center;
+}
+
+.almanac-specials {
+  margin: 0;
+  font-size: 14px;
+}
+
+.almanac-specials .locked,
+.almanac .locked {
+  color: var(--soft);
+}
+
+.almanac {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.almanac th {
+  text-align: left;
+  font-size: 11px;
+  color: var(--soft);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.almanac td,
+.almanac th {
+  padding: 4px 6px 4px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+.almanac td:nth-child(2),
+.almanac td:nth-child(4),
+.almanac th:nth-child(2),
+.almanac th:nth-child(4) {
+  text-align: right;
+}
+
 .legend {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
