@@ -32,7 +32,7 @@ type QualityMode = 'auto' | Quality;
 type MoveRec = [number, number, number];
 /** v4: modos, eras, sítios e bônus por tema. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 6;
+  v: 7;
   seed: number;
   rulesId: string;
   mode: ModeId;
@@ -41,7 +41,7 @@ interface Save {
   undone: number;
   score: number;
 }
-const SAVE_VERSION = 6;
+const SAVE_VERSION = 7;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
