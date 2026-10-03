@@ -37,7 +37,7 @@ function questCard(q: Quest, theme: Theme) {
     const open = q.open ?? 0;
     return { title: `Fechar ${theme.terrainNames[q.terrain]}`, sub: open === 1 ? 'falta 1 borda aberta' : `faltam ${open} bordas abertas`, color };
   }
-  if (q.kind === 'perfect') return { title: 'Encaixes perfeitos', sub: `todas as bordas combinando · ${count}`, color: theme.ui.accent };
+  if (q.kind === 'perfect') return { title: 'Encaixes perfeitos', sub: count, color: theme.ui.accent };
   if (q.kind === 'synergy') return { title: theme.synergy[q.syn!], sub: `interações · ${count}`, color };
   return { title: theme.terrainNames[q.terrain], sub: `${q.exact ? `exatamente ${q.target}` : `${q.target} ou mais`} · ${count}`, color };
 }
