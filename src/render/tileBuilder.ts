@@ -193,6 +193,71 @@ export function pathsFor(edges: readonly T[], terr: T, hw: number): { paths: Pat
   return { paths, idx };
 }
 
+/** Peso de cada terreno ao escolher para que lado a via se curva: ela foge da vila e da mata. */
+const CROWD: Record<number, number> = { [T.Grass]: 0, [T.Field]: 1, [T.Forest]: 2, [T.Village]: 3, [T.Water]: 3, [T.Rail]: 3 };
+
+/**
+ * Traçado da via entre as bordas a e b, em coordenadas locais. Nas duas pontas a via sai
+ * no meio da borda e perpendicular a ela, então emenda com a vizinha sem quebra. Entre bordas
+ * vizinhas e a 120° é um arco de círculo (com raio sorteado em ±15%); entre bordas opostas,
+ * em vez da reta, um arco que se desvia para o lado mais aberto (prado, plantação) ou, se os
+ * dois lados pesam igual, um S (`straight` mantém a reta: a plataforma da peça estação é reta).
+ * Não gasta o rng da peça: o Life refaz o mesmo traçado para os
+ * trens. A ordem (a, b) só inverte o sentido dos pontos.
+ */
+export function railCurve(edges: readonly T[], seed: number, a: number, b: number, straight = false, n = 20): V2[] {
+  if (a > b) return railCurve(edges, seed, b, a, straight, n).reverse();
+  const rng = mulberry32(((seed ^ 0x2c1b3c6d) + a * 7 + b * 131) >>> 0);
+  const A = edgeMid(a), B = edgeMid(b);
+  const sep = Math.min(b - a, 6 - (b - a));
+  const out: V2[] = [];
+  if (sep < 3) {
+    // Alça do arco cúbico: 4/3·tan(θ/4)·raio, com θ = 120° (raio 0,5) ou 60° (raio 1,5).
+    const h = (sep === 1 ? 0.385 : 0.536) * randRange(rng, 0.85, 1.15);
+    const k = 1 - h / INR;
+    const c1: V2 = [A[0] * k, A[1] * k], c2: V2 = [B[0] * k, B[1] * k];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n, u = 1 - t;
+      const w0 = u * u * u, w1 = 3 * u * u * t, w2 = 3 * u * t * t, w3 = t * t * t;
+      out.push([w0 * A[0] + w1 * c1[0] + w2 * c2[0] + w3 * B[0], w0 * A[1] + w1 * c1[1] + w2 * c2[1] + w3 * B[1]]);
+    }
+    return out;
+  }
+  // Bordas opostas: lado 1 são os setores a+1 e a+2; a normal (nx, nz) aponta para ele.
+  let nx = -(B[1] - A[1]), nz = B[0] - A[0];
+  const l = Math.hypot(nx, nz);
+  nx /= l;
+  nz /= l;
+  const [sx, sz] = edgeMid(a + 1);
+  if (nx * sx + nz * sz < 0) {
+    nx = -nx;
+    nz = -nz;
+  }
+  const side1 = CROWD[edges[(a + 1) % 6]] + CROWD[edges[(a + 2) % 6]];
+  const side2 = CROWD[edges[(a + 4) % 6]] + CROWD[edges[(a + 5) % 6]];
+  const amp = straight ? 0 : randRange(rng, 0.12, 0.2);
+  const sign = side1 === side2 ? (rng() < 0.5 ? -1 : 1) : side1 < side2 ? 1 : -1;
+  const s = side1 === side2 && rng() < 0.6;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const sp = Math.sin(Math.PI * t);
+    // sen²: derivada nula nas pontas (sai perpendicular à borda).
+    const f = sign * amp * (s ? 1.3 * Math.sin(2 * Math.PI * t) * sp : sp * sp);
+    out.push([A[0] + (B[0] - A[0]) * t + nx * f, A[1] + (B[1] - A[1]) * t + nz * f]);
+  }
+  return out;
+}
+
+/** Vias da peça: uma curva entre duas bordas; com 3 ou mais, um triângulo de curvas (como uma
+ * triangular de manobra) ligando cada borda à seguinte; com uma só, reta até a estação. */
+export function railPaths(edges: readonly T[], seed: number, straight = false): { paths: Path[]; idx: number[] } {
+  const idx: number[] = [];
+  for (let i = 0; i < 6; i++) if (edges[i] === T.Rail) idx.push(i);
+  if (idx.length < 2) return { paths: idx.map((i) => ({ pts: line(edgeMid(i), [0, 0], 8), hw: ROAD_HW })), idx };
+  const pairs = idx.length === 2 ? [[idx[0], idx[1]]] : idx.map((i, j) => [i, idx[(j + 1) % idx.length]]);
+  return { paths: pairs.map(([a, b]) => ({ pts: railCurve(edges, seed, a, b, straight), hw: ROAD_HW })), idx };
+}
+
 function nearestOnPaths(x: number, z: number, paths: Path[]) {
   let best = { d: Infinity, p: [0, 0] as V2, t: [1, 0] as V2, hw: 0 };
   for (const p of paths) {
@@ -582,7 +647,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   if (opts.special === 'watermill') shape.lake = null;
   const widths = shape.widths.map((w, i) => (w > 0 ? (opts.widths?.[i] || w) : 0));
   const water = { idx: shape.idx, paths: waterPaths(shape, widths, seed) };
-  const road = pathsFor(edges, T.Rail, ROAD_HW);
+  const road = railPaths(edges, seed, opts.special === 'station');
   const hasWater = water.idx.length > 0;
   const flow = opts.flow ?? resolveFlow(edges);
   const field = hasWater ? waterField(shape, water.paths, widths, flow, seed) : null;
@@ -758,7 +823,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         alongPath(p.pts, 0.06, 0.16, (cx, cz, tx, tz) => beam(g, [cx - tx * 0.012, cz - tz * 0.012], [cx + tx * 0.012, cz + tz * 0.012], 0.012, 0, 0.052, shade(beamC, 0.8), shade(beamC, 0.6)));
       }
     }
-    if (road.idx.length !== 2) disc(g, 0, 0, ROAD_HW * 1.05, BED_Y + 0.001, bed);
+    // Junção: pátio de cascalho cobrindo o miolo do triângulo de curvas.
+    if (road.idx.length !== 2) disc(g, 0, 0, road.idx.length > 2 ? 0.3 : ROAD_HW * 1.05, BED_Y + 0.001, bed, road.idx.length > 2 ? 18 : 12);
     if (road.idx.length === 1) {
       // Estação (ou pousada) no fim da linha.
       const [mx, mz] = edgeMid(road.idx[0]);

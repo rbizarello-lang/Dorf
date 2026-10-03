@@ -20,6 +20,28 @@ export interface MusicStyle {
   timbre: 'flute' | 'reed' | 'pluck' | 'bell' | 'glass';
 }
 
+/**
+ * Paisagem perto do foco da câmera, de 0 a 1 por camada (fração das bordas por terreno).
+ * `near` é 1 com a câmera rente ao chão e 0 no zoom mais aberto: de longe só se ouve o vento.
+ */
+export interface Ambience {
+  open: number;
+  forest: number;
+  water: number;
+  village: number;
+  rail: number;
+  near: number;
+}
+
+/** O que a peça colocada tem, para o som de assentar (respingo, folhas, trilho). */
+export interface Landing {
+  water: boolean;
+  forest: boolean;
+  rail: boolean;
+}
+
+export type SpecialSound = 'station' | 'watermill' | 'lighthouse';
+
 export class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -33,6 +55,11 @@ export class Sfx {
   /** Era da vila (0 a 3): a música ganha bordão, cordas e sinos, como a trilha do AoE IV. */
   private era = 0;
   private plucks = new Map<number, AudioBuffer>();
+  /** Som de ambiente: vento e água em laço contínuo, pássaros, grilos e vila sorteados. */
+  private amb: { bus: GainNode; wind: GainNode; windF: BiquadFilterNode; water: GainNode } | null = null;
+  private noise: AudioBuffer | null = null;
+  private mix: Ambience = { open: 0, forest: 0, water: 0, village: 0, rail: 0, near: 0 };
+  private nextGust = 0;
   enabled = true;
   /** Música ambiente ligada (só toca com `enabled`). */
   music = true;
@@ -61,8 +88,12 @@ export class Sfx {
       this.musicBus.gain.value = this.enabled && this.music ? 1 : 0;
       this.musicBus.connect(this.master);
       this.nextBeat = this.ctx.currentTime + 0.4;
+      this.buildAmbience();
       // Agenda com folga de meio segundo: um quadro lento não atrasa a música.
-      window.setInterval(() => this.scheduleMusic(), 200);
+      window.setInterval(() => {
+        this.scheduleMusic();
+        this.scheduleAmbience();
+      }, 200);
     } catch {
       this.ctx = null;
     }
@@ -77,6 +108,197 @@ export class Sfx {
     g.cancelScheduledValues(t);
     g.setValueAtTime(g.value, t);
     g.linearRampToValueAtTime(enabled && music ? 1 : 0, t + 0.6);
+    // O ambiente segue os efeitos: tem som mesmo com a música desligada.
+    if (this.amb) this.amb.bus.gain.setTargetAtTime(enabled ? 1 : 0, t, 0.2);
+  }
+
+  /** Paisagem perto do foco da câmera (o jogo chama algumas vezes por segundo). */
+  setAmbience(m: Ambience) {
+    this.mix = m;
+  }
+
+  /** Ruído branco de 2 s em laço, a matéria do vento, da água e dos respingos. */
+  private noiseBuffer(ctx: AudioContext) {
+    if (this.noise) return this.noise;
+    const len = ctx.sampleRate * 2;
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    return (this.noise = buf);
+  }
+
+  private buildAmbience() {
+    const ctx = this.ctx!;
+    const bus = ctx.createGain();
+    bus.gain.value = this.enabled ? 1 : 0;
+    bus.connect(this.master!);
+    // Vento: ruído num passa-banda largo cuja frequência passeia (rajadas).
+    const windSrc = ctx.createBufferSource();
+    windSrc.buffer = this.noiseBuffer(ctx);
+    windSrc.loop = true;
+    const windF = ctx.createBiquadFilter();
+    windF.type = 'bandpass';
+    windF.frequency.value = 420;
+    windF.Q.value = 0.8;
+    const wind = ctx.createGain();
+    wind.gain.value = 0;
+    windSrc.connect(windF).connect(wind).connect(bus);
+    windSrc.start();
+    // Água: ruído entre 400 Hz e 2 kHz com o volume tremendo em duas frequências que não
+    // batem entre si, o que soa como correnteza borbulhando em vez de chiado.
+    const waterSrc = ctx.createBufferSource();
+    waterSrc.buffer = this.noiseBuffer(ctx);
+    waterSrc.loop = true;
+    waterSrc.loopStart = 0.7;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 400;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 2000;
+    const babble = ctx.createGain();
+    babble.gain.value = 0.7;
+    for (const [hz, depth] of [[5.3, 0.18], [8.9, 0.12]]) {
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = hz;
+      const g = ctx.createGain();
+      g.gain.value = depth;
+      lfo.connect(g).connect(babble.gain);
+      lfo.start();
+    }
+    const water = ctx.createGain();
+    water.gain.value = 0;
+    waterSrc.connect(hp).connect(lp).connect(babble).connect(water).connect(bus);
+    waterSrc.start(0, 0.7);
+    this.amb = { bus, wind, windF, water };
+  }
+
+  /** Ajusta os laços à paisagem e sorteia os sons soltos da próxima fração de segundo. */
+  private scheduleAmbience() {
+    const ctx = this.ctx, a = this.amb;
+    if (!ctx || !a || ctx.state !== 'running' || !this.enabled) return;
+    const m = this.mix, t = ctx.currentTime;
+    const night = this.mood === 'night';
+    a.wind.gain.setTargetAtTime(0.05 + 0.07 * m.open + 0.1 * (1 - m.near), t, 1.2);
+    a.water.gain.setTargetAtTime(0.14 * m.water * (0.35 + 0.65 * m.near), t, 0.8);
+    if (t > this.nextGust) {
+      this.nextGust = t + 1.5 + Math.random() * 3;
+      a.windF.frequency.setTargetAtTime(260 + Math.random() * 520, t, 1.4);
+    }
+    const near = 0.25 + 0.75 * m.near;
+    if (night) {
+      if (Math.random() < 0.22 * (m.open + 0.5 * m.forest) * near) this.crickets();
+      if (Math.random() < 0.012 * m.forest * near) this.owl();
+    } else {
+      if (Math.random() < (0.14 * m.forest + 0.04 * m.open) * near) this.chirp();
+      if (Math.random() < 0.02 * m.village * near) this.villageBell();
+    }
+    if (Math.random() < 0.004 * m.rail * near) this.whistle(0.35, a.bus, 0.012);
+  }
+
+  /** Som solto do ambiente: um panorama aleatório e o volume do ambiente. */
+  private ambOut(vol: number) {
+    const ctx = this.ctx!;
+    const g = ctx.createGain();
+    g.gain.value = vol;
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = Math.random() * 1.6 - 0.8;
+    g.connect(pan).connect(this.amb!.bus);
+    return g;
+  }
+
+  /** Pássaro: 2 a 4 assobios curtos que descem. */
+  private chirp() {
+    const ctx = this.ctx!;
+    const out = this.ambOut(1);
+    const f0 = 2600 + Math.random() * 1800;
+    const n = 2 + Math.floor(Math.random() * 3);
+    let t = ctx.currentTime + Math.random() * 0.2;
+    for (let i = 0; i < n; i++, t += 0.09 + Math.random() * 0.06) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.frequency.setValueAtTime(f0 * (1 + 0.15 * Math.random()), t);
+      o.frequency.exponentialRampToValueAtTime(f0 * 0.7, t + 0.07);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.022, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+      o.connect(g).connect(out);
+      o.start(t);
+      o.stop(t + 0.1);
+    }
+  }
+
+  /** Grilos: trem de pulsos agudos. */
+  private crickets() {
+    const ctx = this.ctx!;
+    const out = this.ambOut(0.5);
+    const f = 4200 + Math.random() * 900;
+    let t = ctx.currentTime + Math.random() * 0.2;
+    for (let i = 0; i < 3 + Math.floor(Math.random() * 4); i++, t += 0.045) this.voice(f, t, 0.025, 'sine', 0.02, out, 0.004, false);
+  }
+
+  /** Coruja: dois pios graves, o segundo mais longo. */
+  private owl() {
+    const t = this.ctx!.currentTime;
+    const out = this.ambOut(1);
+    this.voice(392, t, 0.3, 'sine', 0.025, out, 0.06, false);
+    this.voice(349, t + 0.45, 0.6, 'sine', 0.025, out, 0.08, false);
+  }
+
+  /** Vila ao longe: um sino pequeno, abafado. */
+  private villageBell() {
+    const ctx = this.ctx!;
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 1800;
+    f.connect(this.ambOut(1));
+    this.bell(660 * Math.pow(2, PENTA[Math.floor(Math.random() * 5)] / 12), ctx.currentTime, 1.6, 0.012, f);
+  }
+
+  /** Apito de trem: duas notas em quinta, com vibrato leve. */
+  private whistle(dur: number, dest: AudioNode, vol: number) {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 6;
+    const depth = ctx.createGain();
+    depth.gain.value = 8;
+    lfo.connect(depth);
+    for (const fr of [740, 1109]) {
+      const o = ctx.createOscillator();
+      o.frequency.value = fr;
+      depth.connect(o.detune);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.05);
+      g.gain.setValueAtTime(vol, t + dur);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.25);
+      o.connect(g).connect(dest);
+      o.start(t);
+      o.stop(t + dur + 0.3);
+    }
+    lfo.start(t);
+    lfo.stop(t + dur + 0.3);
+  }
+
+  /** Rajada de ruído filtrado: a base do respingo, das folhas e do estalo do trilho. */
+  private burst(at: number, dur: number, type: BiquadFilterType, from: number, to: number, vol: number, dest: AudioNode) {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime + at;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    const f = ctx.createBiquadFilter();
+    f.type = type;
+    f.Q.value = 1.2;
+    f.frequency.setValueAtTime(from, t);
+    f.frequency.exponentialRampToValueAtTime(to, t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f).connect(g).connect(dest);
+    src.start(t, Math.random() * 1.5);
+    src.stop(t + dur + 0.05);
   }
 
   setMood(m: Mood) {
@@ -286,6 +508,54 @@ export class Sfx {
     src.start(t);
     this.tone(150 + Math.random() * 20, 0, 0.14, 'sine', 0.35);
     for (let i = 0; i < Math.min(matches, 6); i++) this.note(PENTA[i], 0.05 + i * 0.055, 0.35, 0.07);
+  }
+
+  /** O terreno da peça no pouso: respingo no rio, folhas na floresta, estalo no trilho. */
+  land(l: Landing) {
+    if (!this.ready()) return;
+    const out = this.master!;
+    if (l.water) {
+      this.burst(0, 0.35, 'bandpass', 2400, 500, 0.28, out);
+      this.burst(0.07, 0.2, 'bandpass', 3200, 1200, 0.12, out);
+    }
+    if (l.forest) this.burst(0.02, 0.4, 'highpass', 5000, 2500, 0.1, out);
+    if (l.rail) [0.03, 0.15].forEach((at) => this.burst(at, 0.05, 'bandpass', 2600, 2200, 0.3, out));
+  }
+
+  /** Sítio descoberto: arpejo de sinos que sobe, mais brilhante que o da missão. */
+  discover() {
+    const ctx = this.ready();
+    if (!ctx) return;
+    [0, 4, 7, 11, 14].forEach((s, i) => this.bell(784 * Math.pow(2, s / 12), ctx.currentTime + 0.1 + i * 0.07, 1.4, 0.035, this.master!));
+  }
+
+  /** Peça especial assentada: o apito da estação, a roda do moinho, a buzina do farol. */
+  special(kind: SpecialSound) {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const out = this.master!;
+    if (kind === 'station') this.whistle(0.6, out, 0.05);
+    else if (kind === 'watermill') {
+      // Pás batendo na água em ritmo, e o rangido grave do eixo.
+      for (let i = 0; i < 4; i++) this.burst(0.1 + i * 0.28, 0.22, 'bandpass', 1800, 600, 0.2, out);
+      this.voice(98, ctx.currentTime + 0.1, 1.2, 'sawtooth', 0.02, out, 0.2, false);
+    } else {
+      // Buzina de nevoeiro: dente-de-serra grave abafado, longo.
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 380;
+      f.connect(out);
+      if (this.echo) f.connect(this.echo);
+      this.voice(110, ctx.currentTime + 0.1, 1.8, 'sawtooth', 0.12, f, 0.25, false);
+      this.voice(110.8, ctx.currentTime + 0.1, 1.8, 'sawtooth', 0.08, f, 0.25, false);
+    }
+  }
+
+  /** Desfazer: um sopro curto que sobe, como a peça voltando para a mão. */
+  undo() {
+    if (!this.ready()) return;
+    this.burst(0, 0.22, 'bandpass', 500, 2400, 0.15, this.master!);
+    this.tone(523.25, 0.08, 0.12, 'sine', 0.05);
   }
 
   /** Três batidas de martelo (construção que sobe ao assentar a peça). */
