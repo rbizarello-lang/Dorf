@@ -219,7 +219,7 @@ Números de 2026-10-02, depois do traço, do pincel, dos aldeões, dos estandart
 ### Novo tema
 
 1. Copie um tema de `src/themes/eras.ts`.
-2. Troque `id`, nomes, cores e kits. Os campos estão comentados em `types.ts`.
+2. Troque `id`, nomes, cores e kits, e a gradação (`grade`: tom das sombras, dos realces e saturação). Os campos estão comentados em `types.ts`.
 3. Confira as formas com `?gallery&theme=<id>`.
 4. Adicione o tema em `scripts/screenshots.mjs` e gere a captura.
 

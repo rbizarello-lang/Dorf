@@ -269,6 +269,8 @@ export interface Theme {
   weather: { kind: WeatherKind; colors: [string, string]; density: number };
   sparkle: string;
   ui: { accent: string; panel: string; ink: string; soft: string };
+  /** Gradação de cor do tema na imagem final: matiz puxado nas sombras e nos realces (só o tom conta, não o brilho) e saturação (1 = neutra). */
+  grade: { shadow: string; light: string; saturation: number };
   /** Nomes das interações entre bordas neste tema. */
   synergy: { lumber: string; mill: string; pasture: string; apiary: string };
   rules?: Partial<Rules>;
