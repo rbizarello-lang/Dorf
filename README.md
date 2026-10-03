@@ -22,7 +22,20 @@ npm run check      # typecheck + testes + build (o mesmo que a CI roda em cada p
 
 ## Como jogar
 
-Coloque peças encostadas no mapa. Cada borda que combina com a vizinha vale 10 pontos. **Rio e estrada** precisam continuar: só encostam neles mesmos. Quando a peça encosta em 2 ou mais vizinhas e todas as bordas combinam, o encaixe é **perfeito**. Cercar uma peça com 6 vizinhas encaixadas devolve uma peça à pilha. **Missões** pedem grupos de certo tamanho ("9 ou mais", "exatamente 8") e dão peças extras. A partida acaba quando a pilha esvazia.
+Coloque peças encostadas no mapa. A pilha começa com 50 peças. Cada borda que combina com a vizinha vale 10 pontos. **Rio e estrada** precisam continuar: só encostam neles mesmos. Quando a peça encosta em 2 ou mais vizinhas e todas as bordas combinam, o encaixe é **perfeito**. Cercar uma peça com 6 vizinhas encaixadas devolve uma peça à pilha. A partida acaba quando a pilha esvazia.
+
+**Missões** chegam em algumas peças (marcadas com "!") e dão peças extras:
+
+| Missão | O que pede | Recompensa |
+|---|---|---|
+| Grupo ("9 ou mais", "exatamente 8") | o grupo do terreno chegar ao tamanho; "exatamente" falha se passar | 10 pontos por peça pedida e +5 peças (mais 1 a cada 6), ou +7 na exata |
+| Fechar | nenhuma borda do grupo virada para o vazio | 10 pontos por peça do grupo e +6 peças |
+| Encaixes perfeitos | N encaixes perfeitos a partir dali | 20 pontos por encaixe pedido e +5 peças |
+| Interação ("3× Serraria") | N interações daquele tipo a partir dali | 15 pontos por interação pedida e +5 peças |
+
+Nas primeiras partidas, um cartão curto explica cada coisa na primeira vez que ela acontece (encaixe perfeito, missão, interação, sítio, era, maravilha). A ajuda (`?`) tem abas por assunto e um botão para rever as dicas.
+
+O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Repetir a semente" joga a mesma sequência de peças de novo.
 
 **Eras da vila:** com 500, 1.500 e 3.000 pontos a vila muda de era (os nomes mudam por tema, como Borgo → Comune → Signoria → Rinascimento na Toscana) e ganha +3 peças. A cada era, o Centro da vila (no meio da primeira peça) muda de forma, de fogueira com cabanas a palácio, e uma onda dourada corre pelo mapa. A próxima peça com vila ergue o marco da era, que o fantasma já mostra antes de colocar.
 
@@ -43,7 +56,7 @@ Coloque peças encostadas no mapa. Cada borda que combina com a vizinha vale 10 
 | Clássico | missões, eras e sítios; acaba quando a pilha esvazia |
 | Zen | peças sem fim; pontos e eras por gosto |
 | Desafio do dia | semente do dia e regras padrão, iguais para todo mundo; sem desfazer |
-| Exploradores | 10 sítios e 50 peças; achar o último encerra, e cada peça que sobrou vale 20 pontos |
+| Exploradores | 10 sítios e 60 peças; achar o último encerra, e cada peça que sobrou vale 20 pontos |
 
 **Interações:** algumas bordas diferentes também "conversam". Quando se encostam, rendem +5 e erguem uma construção na borda. A prévia acende em dourado antes de você colocar a peça.
 
@@ -86,6 +99,7 @@ Durante a gravação, o jogo anota só a câmera e as jogadas, então não fica 
 O botão de qualidade abre a lista: **Auto**, **Cinema**, **Ultra**, **Alta**, **Média** e **Baixa**, cada uma com uma linha dizendo para que placa serve.
 
 - **Auto** escolhe o começo pelo nome da placa de vídeo (por exemplo, Alta numa RX 580 e Ultra numa RTX 3060). Se o quadro ficar lento, primeiro baixa a resolução interna, em degraus até 60%, e só depois desce de nível. O nome da placa e o nível escolhido aparecem no título do botão.
+- **Celular e tablet:** com a tela parada (sem toque e sem peça caindo), o jogo desenha a 30 quadros e, depois de 15 s, a 20, para poupar bateria; o mundo continua animado. No computador nada muda. Em tela estreita, as missões viram linhas finas (um toque abre os detalhes) e os estandartes encolhem.
 - **Cinema** é para placas de topo e para fotos e vídeos: desenha 1,5× acima da tela, com mais amostras de luz e de reflexo, sombras mais finas, mais vegetação, grão de filme e uma leve aberração de lente. O Auto nunca escolhe o Cinema.
 
 ## Temas
@@ -152,6 +166,7 @@ npm run build
 (cd dist && python3 -m http.server 4173) &
 node scripts/screenshots.mjs   # docs/screens/*.png (SHOTS=egito,noite para escolher)
 node scripts/stress.mjs        # tabela de desempenho (RUNS=300:high para um caso)
+npm run smoke                  # abre o build em WebGPU e WebGL2 e falha com erro no console (roda na CI)
 ```
 
 Os scripts usam o Chromium com renderização por software. Para medir FPS de verdade, abra `?stress=1000&debug` num navegador com GPU. Para escolher o navegador, defina `CHROMIUM_PATH`; sem ele, os scripts usam o Chromium do Playwright (`npx playwright-core install chromium`).

@@ -1,7 +1,7 @@
 import { DIRS, hkey, opposite } from './hex';
 import { LOOKOUT_MOVES, SITE_REWARD, type Site, type SiteKind } from './sites';
 import { type SynHit, type SynKind, synergyOf } from './synergy';
-import { T, isStrict, rotateEdges, type TileDef } from './tiles';
+import { T, isStrict, rotateEdges, type QuestKind, type TileDef } from './tiles';
 
 export interface Rules {
   startTiles: number;
@@ -37,15 +37,20 @@ export interface Rules {
   /** Pontos e peças ao completar a maravilha. */
   wonderPoints: number;
   wonderTiles: number;
+  /** Peças por missão: grupo (mais 1 a cada 6 peças pedidas), grupo exato, fechar, contagem (perfeitos, interações). */
+  groupQuestTiles: number;
+  exactQuestTiles: number;
+  closeQuestTiles: number;
+  countQuestTiles: number;
 }
 
 export const DEFAULT_RULES: Rules = {
-  startTiles: 40,
+  startTiles: 50,
   matchPoints: 10,
   perfectBonus: 20,
   closedBonus: 30,
   closedTiles: 1,
-  questChance: 0.24,
+  questChance: 0.32,
   maxQuests: 4,
   synergyPoints: 5,
   eraScores: [0, 500, 1500, 3000],
@@ -59,6 +64,10 @@ export const DEFAULT_RULES: Rules = {
   wonderStages: 6,
   wonderPoints: 300,
   wonderTiles: 6,
+  groupQuestTiles: 5,
+  exactQuestTiles: 7,
+  closeQuestTiles: 6,
+  countQuestTiles: 5,
 };
 
 export interface Placed {
@@ -83,14 +92,29 @@ export interface Placed {
 
 export interface Quest {
   id: number;
+  kind: QuestKind;
   terrain: T;
+  /**
+   * group: tamanho pedido; close: bordas abertas quando a missão nasceu;
+   * perfect e synergy: quantas vezes.
+   */
   target: number;
   exact: boolean;
   anchor: Placed;
+  /** Setor do grupo na peça âncora (group e close); -1 nas missões de contagem. */
   sector: number;
+  /** group: tamanho atual; close: bordas já fechadas (target − abertas); perfect e synergy: contagem. */
   progress: number;
   state: 'active' | 'done' | 'failed';
   reward: number;
+  /** close: bordas do grupo ainda viradas para o vazio. */
+  open?: number;
+  /** synergy: o tipo de interação pedido. */
+  syn?: SynKind;
+  /** perfect e synergy: a contagem do tabuleiro quando a missão nasceu. */
+  base?: number;
+  /** Pontos que a missão rendeu ao ser cumprida. */
+  points?: number;
 }
 
 export interface Check {
@@ -274,39 +298,53 @@ export class Board {
     const questsFailed: Quest[] = [];
     for (const quest of this.quests) {
       if (quest.state !== 'active') continue;
-      quest.progress = this.groupSize(quest.anchor, quest.sector);
-      if (quest.exact) {
-        if (quest.progress === quest.target) quest.state = 'done';
-        else if (quest.progress > quest.target) quest.state = 'failed';
-      } else if (quest.progress >= quest.target) quest.state = 'done';
+      let gain = 0;
+      if (quest.kind === 'group') {
+        quest.progress = this.groupSize(quest.anchor, quest.sector);
+        if (quest.exact) {
+          if (quest.progress === quest.target) quest.state = 'done';
+          else if (quest.progress > quest.target) quest.state = 'failed';
+        } else if (quest.progress >= quest.target) quest.state = 'done';
+        gain = quest.target * 10;
+      } else if (quest.kind === 'close') {
+        quest.open = this.openEdges(quest.anchor, quest.sector);
+        quest.progress = Math.max(0, quest.target - quest.open);
+        if (quest.open === 0) quest.state = 'done';
+        gain = this.groupSize(quest.anchor, quest.sector) * 10;
+      } else {
+        quest.progress = this.counter(quest) - quest.base!;
+        if (quest.progress >= quest.target) quest.state = 'done';
+        gain = quest.target * (quest.kind === 'perfect' ? 20 : 15);
+      }
       if (quest.state === 'done') {
         questsDone.push(quest);
         tilesGained += quest.reward;
-        points += quest.target * 10;
+        quest.points = gain;
+        points += gain;
         this.questsCompleted++;
       } else if (quest.state === 'failed') questsFailed.push(quest);
     }
 
     let newQuest: Quest | null = null;
-    if (def.quest) {
-      const sector = this.bestSector(placed, def.quest.terrain);
+    const spec = def.quest;
+    if (spec && (spec.kind === 'group' || spec.kind === 'close')) {
+      const sector = this.bestSector(placed, spec.terrain);
       if (sector >= 0) {
         const size = this.groupSize(placed, sector);
-        const target = size + def.quest.delta;
-        newQuest = {
-          id: ++this.questSeq,
-          terrain: def.quest.terrain,
-          target,
-          exact: def.quest.exact,
-          anchor: placed,
-          sector,
-          progress: size,
-          state: 'active',
-          reward: def.quest.exact ? 6 : 4 + Math.floor(target / 8),
-        };
-        this.quests.push(newQuest);
+        if (spec.kind === 'group') {
+          const target = size + spec.delta;
+          newQuest = { id: ++this.questSeq, kind: 'group', terrain: spec.terrain, target, exact: spec.exact, anchor: placed, sector, progress: size, state: 'active', reward: spec.exact ? R.exactQuestTiles : R.groupQuestTiles + Math.floor(target / 6) };
+        } else {
+          // Peça num buraco cercado pode já nascer com o grupo fechado: aí não há o que pedir.
+          const open = this.openEdges(placed, sector);
+          if (open > 0) newQuest = { id: ++this.questSeq, kind: 'close', terrain: spec.terrain, target: open, exact: false, anchor: placed, sector, progress: 0, state: 'active', reward: R.closeQuestTiles, open };
+        }
       }
+    } else if (spec) {
+      newQuest = { id: ++this.questSeq, kind: spec.kind, terrain: spec.terrain, target: spec.delta, exact: false, anchor: placed, sector: -1, progress: 0, state: 'active', reward: R.countQuestTiles, syn: spec.syn };
+      newQuest.base = this.counter(newQuest);
     }
+    if (newQuest) this.quests.push(newQuest);
 
     // Maravilha (só na última era): começa na próxima peça com 2+ bordas de vila que não seja
     // a do marco da era; depois, cada peça colocada avança uma etapa.
@@ -335,6 +373,19 @@ export class Board {
       this.markPending = this.era;
     }
     return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder };
+  }
+
+  /** Contagem do tabuleiro que uma missão de contagem acompanha. */
+  private counter(q: Quest) {
+    return q.kind === 'perfect' ? this.perfects : this.synergyCount[q.syn!];
+  }
+
+  /** Bordas do grupo de (p, setor) viradas para uma casa vazia. */
+  openEdges(p: Placed, sector: number) {
+    const root = this.find(p.index * 6 + sector);
+    let open = 0;
+    for (const t of this.list) for (let s = 0; s < 6; s++) if (this.find(t.index * 6 + s) === root && !this.get(t.q + DIRS[s][0], t.r + DIRS[s][1])) open++;
+    return open;
   }
 
   private isClosedPerfect(t: Placed) {

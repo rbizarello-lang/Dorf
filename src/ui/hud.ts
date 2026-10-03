@@ -15,15 +15,64 @@ export interface MarkerView {
   color: string;
   /** Sítio escondido (estilo de carimbo), em vez de missão. */
   kind?: string;
+  /** Estandarte apagado: a peça da vez está passando por baixo dele. */
+  dim?: boolean;
 }
 
 function esc(s: string) {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 }
 
+// Desenho de cada terreno (e das missões de contagem), em traço claro sobre a cor: a cor
+// sozinha não basta (daltonismo; no Cerrado a Mata é amarela e a Roça é verde).
+const GLYPH: Record<string, string> = {
+  t0: '<path d="M7 19c0-4 1-7 2-10M12 19c0-5 0-9 1-12M17 19c0-4-1-6-2-9"/>',
+  t1: '<path d="M12 4l6 9h-3.5l3.5 5H6l3.5-5H6z" fill="#fff"/><path d="M12 18v3"/>',
+  t2: '<path d="M12 21V8M12 9l-3-3M12 9l3-3M12 13l-3-3M12 13l3-3M12 17l-3-3M12 17l3-3"/>',
+  t3: '<path d="M5 12l7-6 7 6v8H5z" fill="#fff"/>',
+  t4: '<path d="M4 10c3-3 5 3 8 0s5 3 8 0M4 16c3-3 5 3 8 0s5 3 8 0"/>',
+  t5: '<path d="M8 3v18M16 3v18M6 7h12M6 12h12M6 17h12"/>',
+  perfect: '<path d="M12 4l2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z" fill="#fff"/>',
+  synergy: '<path d="M9 7l-4 5 4 5M15 7l4 5-4 5"/>',
+};
+
+/** Ícone do terreno (ou da missão) em SVG, claro ou escuro conforme a cor de fundo `bg` (#rrggbb). */
+export function glyph(key: string, bg: string) {
+  const n = parseInt(bg.slice(1, 7), 16) || 0;
+  const lum = 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  const ink = lum > 165 ? '#3b2a24' : '#fff';
+  return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="${ink}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${(GLYPH[key] ?? '').replaceAll('#fff', ink)}</svg>`;
+}
+
+const questGlyph = (q: Quest) => (q.kind === 'perfect' || q.kind === 'synergy' ? q.kind : `t${q.terrain}`);
+
 export function questLabel(q: Quest, theme: Theme) {
   const name = theme.terrainNames[q.terrain];
+  if (q.kind === 'close') return `Fechar ${name}`;
+  if (q.kind === 'perfect') return `${q.target} encaixes perfeitos`;
+  if (q.kind === 'synergy') return `${q.target}× ${theme.synergy[q.syn!]}`;
   return q.exact ? `${name}: exatamente ${q.target}` : `${name}: ${q.target} ou mais`;
+}
+
+/** Título, linha de baixo e cor do cartão de uma missão. */
+function questCard(q: Quest, theme: Theme) {
+  const count = `${Math.min(q.progress, q.target)}/${q.target}`;
+  const color = theme.terrainColors[q.terrain];
+  if (q.kind === 'close') {
+    const open = q.open ?? 0;
+    return { title: `Fechar ${theme.terrainNames[q.terrain]}`, sub: open === 1 ? 'falta 1 borda aberta' : `faltam ${open} bordas abertas`, color };
+  }
+  if (q.kind === 'perfect') return { title: 'Encaixes perfeitos', sub: count, color: theme.ui.accent };
+  if (q.kind === 'synergy') return { title: theme.synergy[q.syn!], sub: `interações · ${count}`, color };
+  return { title: theme.terrainNames[q.terrain], sub: `${q.exact ? `exatamente ${q.target}` : `${q.target} ou mais`} · ${count}`, color };
+}
+
+/** Texto curto do estandarte da missão no mapa. */
+export function questMarker(q: Quest) {
+  if (q.kind === 'close') return `◯${q.open ?? 0}`;
+  if (q.kind === 'perfect') return `★${q.target - q.progress}`;
+  if (q.kind === 'synergy') return `✦${q.target - q.progress}`;
+  return q.exact ? `=${q.target}` : `${q.target}+`;
 }
 
 /** Seção "Sua casa" no topo do menu de temas: cor da casa e brasão. */
@@ -196,15 +245,16 @@ export class Hud {
       if (q.state === 'active' && !el) {
         el = document.createElement('div');
         el.className = 'quest';
-        el.innerHTML = `<i class="ico" style="background:${theme.terrainColors[q.terrain]}"></i><b></b><span class="reward">+${q.reward} peças</span><span class="bar"><i></i></span>`;
+        el.innerHTML = `<i class="ico" style="background:${questCard(q, theme).color}">${glyph(questGlyph(q), questCard(q, theme).color)}</i><b></b><span class="reward">+${q.reward} peças</span><span class="bar"><i></i></span>`;
         this.quests.appendChild(el);
         this.questEls.set(q.id, el);
       }
       if (!el) continue;
       const b = el.querySelector('b')!;
-      b.textContent = theme.terrainNames[q.terrain];
+      const card = questCard(q, theme);
+      b.textContent = card.title;
       const sub = document.createElement('small');
-      sub.textContent = `${q.exact ? `exatamente ${q.target}` : `${q.target} ou mais`} · ${Math.min(q.progress, q.target)}/${q.target}`;
+      sub.textContent = card.sub;
       b.appendChild(sub);
       (el.querySelector('.bar i') as HTMLElement).style.width = `${Math.min(100, (q.progress / q.target) * 100)}%`;
       if (q.state !== 'active' && !el.classList.contains('done') && !el.classList.contains('failed')) {
@@ -218,6 +268,7 @@ export class Hud {
 
   updateMarkers(list: MarkerView[]) {
     const alive = new Set<number>();
+    const narrow = window.innerWidth <= 520;
     for (const m of list) {
       alive.add(m.id);
       let el = this.markerEls.get(m.id);
@@ -239,8 +290,10 @@ export class Hud {
       }
       el.style.setProperty('--c', m.color);
       el.style.display = m.visible ? '' : 'none';
+      el.classList.toggle('dim', !!m.dim);
       // O pé do mastro (ou a ponta da etiqueta do sítio) fica no ponto da peça.
-      el.style.transform = m.kind ? `translate(${(m.x - 4).toFixed(1)}px, ${(m.y - 44).toFixed(1)}px)` : `translate(${(m.x - 1).toFixed(1)}px, ${(m.y - 64).toFixed(1)}px)`;
+      // No celular o estandarte encolhe em volta do pé do mastro, para tapar menos peças.
+      el.style.transform = m.kind ? `translate(${(m.x - 4).toFixed(1)}px, ${(m.y - 44).toFixed(1)}px)` : `translate(${(m.x - 1).toFixed(1)}px, ${(m.y - 64).toFixed(1)}px)${narrow ? ' scale(0.7)' : ''}`;
     }
     for (const [id, el] of this.markerEls) {
       if (!alive.has(id)) {
