@@ -45,6 +45,8 @@ O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Re
 
 **Sítios escondidos:** carimbos no mapa marcam ruínas (+60 pontos), tesouros (+2 peças), relíquias (+100 pontos e +1 peça) e mirantes (+20 pontos e as próximas 3 peças à vista por 10 jogadas). Com a peça em cima, uma etiqueta mostra a recompensa; coloque para descobrir, e o sítio vira uma ruína, um baú, um relicário ou uma torre de vigia na peça. Ficam em anéis cada vez mais longe do centro. O vazio é um mapa antigo: a tinta desbota longe das peças e uma névoa clara cobre o desconhecido. No começo da partida, um batedor sai do Centro na direção do sítio mais perto.
 
+**Peças especiais:** liberadas jogando, valem para as partidas seguintes e entram duas vezes em cada uma (menos no Desafio do dia, que é igual para todos). A **Estação** (8 missões cumpridas no total) vale +12 por peça com trilho a até 2 casas e +2 peças; o **Moinho d'água** (30 interações) vale +20 por vizinha com plantação e +1 peça; o **Farol** (6 sítios descobertos) vale +10 por peça com rio a até 2 casas e mostra as próximas peças por 5 jogadas. O fim da partida mostra quanto falta para a próxima.
+
 **Bônus de cada tema:** cada época tem uma regra curta, como a Dádiva do Nilo (borda de rio encaixada vale +5) no Egito ou os Moinhos de pôlder (+5 por moinho) na Holanda. Aparece no menu de temas.
 
 **Desfazer:** `U` ou o botão desfaz a última jogada (3 vezes no Clássico).
@@ -128,6 +130,7 @@ O botão de qualidade abre a lista: **Auto**, **Cinema**, **Ultra**, **Alta**, *
 | `?demo` | a IA joga sozinha, com animação |
 | `?stress=1000` | teste de carga com 1.000 peças |
 | `?gallery` | mostra todos os kits do tema lado a lado (depuração visual) |
+| `?specials=all` | põe as peças especiais na partida sem liberá-las (`station`, `watermill`, `lighthouse`, separadas por ponto) |
 | `?zoom=12` `?yaw=0.5` | distância e giro iniciais da câmera |
 | `?pitch=25` | inclinação inicial em graus acima do chão, de 18 a 75 (fora disso, ignorado) |
 

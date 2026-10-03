@@ -2,6 +2,7 @@ import { Board, type PlaceResult, type Rules } from './board';
 import { unkey } from './hex';
 import { mulberry32, type Rng } from './rng';
 import { generateSites } from './sites';
+import { type SpecialKind, specialSlots, specialTile } from './specials';
 import { T, generateTile, rotateEdges, type TileDef } from './tiles';
 
 export interface Move {
@@ -21,12 +22,17 @@ export class Game {
   placedCount = 0;
   discarded = 0;
   private drawn = 0;
+  /** Índice da pilha → peça especial liberada que sai nele. */
+  private slots: Map<number, SpecialKind>;
 
   constructor(
     readonly seed: number,
     readonly rules: Rules,
+    /** Peças especiais liberadas que entram nesta partida (vazio no Desafio do dia). */
+    readonly specials: readonly SpecialKind[] = [],
   ) {
     this.rng = mulberry32(seed);
+    this.slots = specialSlots(seed, specials);
     this.board = new Board(rules);
     const starter: TileDef = {
       edges: [T.Grass, T.Grass, T.Forest, T.Forest, T.Field, T.Village],
@@ -48,10 +54,13 @@ export class Game {
   /**
    * Cada peça tem um gerador próprio (semente + índice) e sempre consome os mesmos
    * sorteios. Assim, a mesma semente dá a mesma sequência de peças para qualquer
-   * jogador; só a presença da missão depende do estado da partida.
+   * jogador; só a presença da missão depende do estado da partida. Uma peça especial
+   * liberada toma o lugar da peça do seu índice, sem mexer nas outras.
    */
   private draw(): TileDef {
     const rng = mulberry32((this.seed + Math.imul(++this.drawn, 0x9e3779b1)) >>> 0);
+    const kind = this.slots.get(this.drawn);
+    if (kind) return specialTile(rng, kind);
     const roll = rng();
     const def = generateTile(rng, true);
     // Missões ainda na mão (atual e próxima) contam para o limite.
@@ -70,6 +79,11 @@ export class Game {
     const out: TileDef[] = [];
     for (let k = 1; k <= n; k++) {
       const rng = mulberry32((this.seed + Math.imul(this.drawn + k, 0x9e3779b1)) >>> 0);
+      const kind = this.slots.get(this.drawn + k);
+      if (kind) {
+        out.push(specialTile(rng, kind));
+        continue;
+      }
       rng();
       out.push({ ...generateTile(rng, true), quest: null });
     }

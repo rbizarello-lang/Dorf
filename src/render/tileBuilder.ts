@@ -3,6 +3,7 @@ import { corner, edgeMid, INR } from '../core/hex';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
 import type { SynKind } from '../core/synergy';
 import type { SiteKind } from '../core/sites';
+import type { SpecialKind } from '../core/specials';
 import { isStrict, T } from '../core/tiles';
 import type { CropKind, Theme } from '../themes/types';
 import { CROP_LAYOUT, type HouseMeta } from './lib';
@@ -80,6 +81,8 @@ export interface BuildOpts {
   eraMark?: number;
   /** Sítio descoberto nesta peça: ruína, baú, relicário ou torre de vigia. */
   site?: SiteKind;
+  /** Peça especial: a construção dela (estação, moinho d'água ou farol). */
+  special?: SpecialKind;
   /** Canteiro da maravilha: o meio da peça fica livre (a maravilha é um objeto à parte, no World). */
   wonder?: boolean;
 }
@@ -693,6 +696,40 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     }
   }
 
+  // --- Peça especial: a construção dela, sem sorteio. A estação e o moinho ficam na beira do
+  // trilho ou do rio, de frente para ele e do lado da vila; o farol, numa ilhota no meio do lago.
+  if (opts.special === 'lighthouse' && water.idx.length === 1) {
+    const [ex, ez] = edgeMid(water.idx[0]);
+    D('special:lighthouse', 0, WATER_Y - 0.035, 0, yawTo(ex, ez), 1.4, WHITE);
+    reserved.push([0, 0, 0.24]);
+  } else if (opts.special === 'station' || opts.special === 'watermill') {
+    const along = opts.special === 'station' ? road : water;
+    const path = along.paths[0];
+    if (path) {
+      const [px, pz] = path.pts[Math.floor(path.pts.length / 2)];
+      const n = nearestOnPaths(px, pz, [path]);
+      // Normal do caminho apontando para o lado da primeira borda de vila.
+      const vi = edges.findIndex((t) => t === T.Village);
+      const [vx, vz] = edgeMid(vi < 0 ? 1 : vi);
+      let nx = -n.t[1], nz = n.t[0];
+      if (nx * (vx - px) + nz * (vz - pz) < 0) [nx, nz] = [-nx, -nz];
+      if (opts.special === 'station') {
+        // A plataforma (até +0,12 em z no kit, ×1,4) encosta no trilho.
+        const sx = px + nx * (ROAD_HW + 0.17), sz = pz + nz * (ROAD_HW + 0.17);
+        // O trilho fica em +z do kit: a frente do kit olha para -n.
+        D('special:station', sx, BED_Y, sz, yawTo(-nz, nx), 1.4, WHITE);
+        // As casas desviam pelo centro delas: o raio cobre a estação e meia casa.
+        reserved.push([sx, sz, 0.34]);
+      } else {
+        const wx = px + nx * (RIVER_HW + 0.012), wz = pz + nz * (RIVER_HW + 0.012);
+        D('wheel', wx, WATER_Y + 0.08, wz, yawTo(nx, nz), 1.7, WHITE, 'spin-x');
+        const hx = px + nx * (RIVER_HW + 0.17), hz = pz + nz * (RIVER_HW + 0.17);
+        D('special:watermill', hx, 0, hz, yawTo(nx, nz) + Math.PI, 1.25, WHITE);
+        reserved.push([wx, wz, 0.14], [hx, hz, 0.3]);
+      }
+    }
+  }
+
   // --- Marco da era: o marco do tema maior, num tablado de pedra, com uma flâmula por era.
   // Fica no meio da peça ou, se um rio ou estrada passa ali, no meio de um setor de vila.
   // Sem sorteio, para o resto da peça não mudar.
@@ -744,8 +781,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
 
   // --- Construções internas (sem pontos): moinho d'água, estação, silo, irrigação.
   const lush = new Set<number>();
-  let watermill = false;
-  let station = road.idx.length === 1;
+  // A peça especial já tem a sua construção: nada de roda ou estação pequenas ao lado.
+  let watermill = !!opts.special;
+  let station = road.idx.length === 1 || !!opts.special;
   for (let i = 0; i < 6; i++) {
     for (const j of [(i + 1) % 6, (i + 5) % 6]) {
       const shared = j === (i + 1) % 6 ? (i + 1) % 6 : i; // canto comum aos dois setores

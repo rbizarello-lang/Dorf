@@ -1785,7 +1785,53 @@ function specialsFor(theme: Theme, walls: string, roofs: string) {
     { geo: cyl(0.006, 0.005, 0.009, 6, 0.008, 0.03, 0), color: '#6a4a32' },
   ];
 
+  // --- Peças especiais: maiores que as construções das interações, para lerem de longe.
+  /** Telhado de duas águas: prisma de `w` (ao longo de x) por `d`, com cumeeira a `h` acima de `y`. */
+  const gable = (w: number, d: number, h: number, y: number, x = 0, z = 0) => new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2).scale(w, h * 1.5, d / 1.732).translate(x, y + h * 0.5, z);
+  // Estação grande: saguão comprido, torre do relógio e cobertura da plataforma (o trilho passa em +z).
+  const bigStation: Part[] = [
+    { geo: box(0.32, 0.012, 0.2, 0, 0, 0.02), color: '#9a9082' },
+    { geo: box(0.22, 0.085, 0.09, 0, 0.012, -0.03), color: walls, grad: [0.85, 1.05, 0.012, 0.1] },
+    { geo: gable(0.24, 0.11, 0.05, 0.097, 0, -0.03), color: roofs },
+    { geo: box(0.05, 0.17, 0.05, -0.06, 0.012, -0.03), color: walls },
+    { geo: cone(0.042, 0.06, 4, -0.06, 0.182, -0.03).rotateY(Math.PI / 4), color: roofs },
+    { geo: cyl(0.016, 0.016, 0.004, 10).rotateX(Math.PI / 2).translate(-0.06, 0.15, -0.003), color: '#f5ecd2', glow: 0.6 },
+    ...[-0.09, -0.03, 0.03, 0.09].map((x) => ({ geo: box(0.026, 0.034, 0.004, x, 0.04, 0.016), color: theme.window, glow: 1 })),
+    { geo: box(0.03, 0.05, 0.004, 0.0, 0.012, 0.017), color: DOOR },
+    ...[-0.12, -0.04, 0.04, 0.12].map((x) => ({ geo: box(0.005, 0.07, 0.005, x, 0.012, 0.085), color: wood })),
+    { geo: box(0.29, 0.008, 0.08, 0, 0.082, 0.07).rotateX(-0.12).translate(0, 0.008, 0), color: roofs },
+  ];
+  // Moinho d'água: casa de pedra com andar de madeira e telhado alto; a roda é um kit à parte (gira).
+  const bigMill: Part[] = [
+    { geo: box(0.13, 0.06, 0.12), color: theme.rock, grad: [0.8, 1.05, 0, 0.06] },
+    { geo: box(0.13, 0.07, 0.12, 0, 0.06), color: walls, grad: [0.9, 1.05, 0.06, 0.13] },
+    { geo: gable(0.15, 0.14, 0.08, 0.13), color: roofs },
+    { geo: box(0.004, 0.04, 0.03, 0.066, 0.0, 0.0), color: DOOR },
+    ...[-0.03, 0.03].map((z) => ({ geo: box(0.004, 0.022, 0.02, 0.066, 0.08, z), color: theme.window, glow: 1 })),
+    { geo: box(0.05, 0.06, 0.004, 0, 0.13, 0.06), color: walls },
+    { geo: box(0.08, 0.01, 0.03, 0.1, 0.1, 0), color: wood },
+  ];
+  // Farol numa ilhota de pedra no meio do lago: torre listrada, varanda e lanterna que acende à noite.
+  const lighthouse: Part[] = [
+    { geo: jitter(cyl(0.1, 0.13, 0.08, 9), 0.012, 11), color: theme.rock, grad: [0.7, 1.05, 0, 0.08] },
+    { geo: cyl(0.055, 0.06, 0.012, 10, 0, 0.08), color: theme.rock },
+  ];
+  for (let i = 0; i < 5; i++) {
+    const y = 0.092 + i * 0.056, r0 = 0.05 - i * 0.004;
+    lighthouse.push({ geo: cyl(r0 - 0.004, r0, 0.056, 12, 0, y), color: i % 2 ? roofs : '#f4efe6', grad: [0.9, 1.05, y, y + 0.056] });
+  }
+  const top = 0.092 + 5 * 0.056;
+  lighthouse.push(
+    { geo: cyl(0.05, 0.05, 0.008, 12, 0, top), color: '#3a3634' },
+    { geo: cyl(0.03, 0.03, 0.05, 8, 0, top + 0.008), color: '#fff2c0', glow: 1 },
+    { geo: cone(0.04, 0.04, 10, 0, top + 0.058), color: roofs },
+    { geo: oct(0.007).translate(0, top + 0.102, 0), color: '#3a3634' },
+  );
+
   return {
+    'special:station': kit(bigStation),
+    'special:watermill': kit(bigMill),
+    'special:lighthouse': kit(lighthouse),
     well: kit(well),
     logs: kit(logs),
     fence: kit(fence),
