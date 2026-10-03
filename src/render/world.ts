@@ -22,6 +22,7 @@ import { FX, Fireflies, Sprites, Weather } from './fx';
 import { LiveTile } from './liveTile';
 import { PreviewView } from './preview';
 import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, type TileBuild } from './tileBuilder';
+import { NIGHT_LIGHT } from './nightLight';
 
 export type { Quality };
 export type TimeOfDay = 'dawn' | 'day' | 'golden' | 'dusk' | 'night';
@@ -376,12 +377,12 @@ function skyFor(theme: Theme, tod: TimeOfDay): Sky {
       bg: mix(theme.bg, '#18203e', 0.9),
       fill: mix(theme.voidFill, '#1f2848', 0.88),
       line: mix(theme.voidLine, '#34426e', 0.82),
-      sun: C('#b4c6ff'),
-      sunI: 0.75,
+      sun: C(NIGHT_LIGHT.sun),
+      sunI: NIGHT_LIGHT.sunI,
       sunDir: new THREE.Vector3(-dx, 0.9, -dz),
-      hemiSky: C('#51639c'),
-      hemiGround: C('#1c2130'),
-      hemiI: 1.05,
+      hemiSky: C(NIGHT_LIGHT.hemiSky),
+      hemiGround: C(NIGHT_LIGHT.hemiGround),
+      hemiI: NIGHT_LIGHT.hemiI,
       night: 1,
       haze: 0.02,
       mist: 0.3,
