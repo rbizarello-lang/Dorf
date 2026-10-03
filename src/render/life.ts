@@ -5,7 +5,7 @@ import { T } from '../core/tiles';
 import type { Theme } from '../themes/types';
 import { instGeometry, setInstColor, type Lib } from './lib';
 import { WAKES, WAKE_MAX, WAKE_N } from './materials';
-import { ROAD_Y, WATER_Y } from './tileBuilder';
+import { railCurve, ROAD_Y, WATER_Y } from './tileBuilder';
 
 // Vida do mapa: tudo que se move depois de assentado.
 // - pás de moinho e rodas d'água girando
@@ -125,6 +125,9 @@ interface Mover {
   b: number;
   t: number;
   len: number;
+  /** Traçado na peça atual, em coordenadas do mundo (x, z intercalados), e o comprimento acumulado. */
+  route: number[];
+  cum: number[];
   speed: number;
   wait: number;
   trail: { x: number; z: number }[];
@@ -291,7 +294,8 @@ export class Life {
     const { x, z } = hexToWorld(tile.q, tile.r);
     const roofs = th.houses.flatMap((h) => h.roofs);
     const shirt = folk ? new THREE.Color(Math.random() < 0.5 ? th.ui.accent : roofs[Math.floor(Math.random() * roofs.length)]) : undefined;
-    const m: Mover = { boat, folk, shirt, tile, a, b, t: Math.random() * 0.5, len: a < 0 ? 0.87 : Math.abs(a - b) === 3 ? 1.73 : 1.45, speed, wait: 0, trail: [], x, z, heading: 0, wake: 0 };
+    const m: Mover = { boat, folk, shirt, tile, a, b, t: Math.random() * 0.5, len: 1, route: [], cum: [], speed, wait: 0, trail: [], x, z, heading: 0, wake: 0 };
+    this.setRoute(m);
     this.movers.push(m);
   }
 
@@ -424,24 +428,45 @@ export class Life {
     for (const [k, c] of Object.entries(n)) pools[k as keyof typeof n]?.commit(c);
   }
 
-  private pathPos(m: Mover, t: number, out: { x: number; z: number }) {
+  /** Monta o traçado de borda a borda na peça atual. A via de trem refaz a curva do
+   * tileBuilder (mesmas bordas locais e semente) e gira com a peça. */
+  private setRoute(m: Mover) {
     const { x: cx, z: cz } = hexToWorld(m.tile.q, m.tile.r);
-    const A = m.a < 0 ? [cx, cz] : [cx + edgeMid(m.a)[0], cz + edgeMid(m.a)[1]];
-    const B = m.b < 0 ? [cx, cz] : [cx + edgeMid(m.b)[0], cz + edgeMid(m.b)[1]];
-    if (m.a < 0 || m.b < 0) {
-      out.x = A[0] + (B[0] - A[0]) * t;
-      out.z = A[1] + (B[1] - A[1]) * t;
-    } else if (m.boat || strictEdges(m.tile, T.Rail).length === 2) {
-      const u = 1 - t;
-      out.x = u * u * A[0] + 2 * u * t * cx + t * t * B[0];
-      out.z = u * u * A[1] + 2 * u * t * cz + t * t * B[1];
-    } else if (t < 0.5) {
-      out.x = A[0] + (cx - A[0]) * t * 2;
-      out.z = A[1] + (cz - A[1]) * t * 2;
-    } else {
-      out.x = cx + (B[0] - cx) * (t - 0.5) * 2;
-      out.z = cz + (B[1] - cz) * (t - 0.5) * 2;
-    }
+    const end = (e: number): [number, number] => (e < 0 ? [0, 0] : edgeMid(e));
+    let pts: [number, number][];
+    if (m.a < 0 || m.b < 0) pts = [end(m.a), end(m.b)];
+    else if (!m.boat) {
+      const rot = m.tile.rot;
+      const c = Math.cos((rot * Math.PI) / 3), s = Math.sin((rot * Math.PI) / 3);
+      // Rotação em y de -rot·60°: no plano XZ (atan2(z, x)) o ângulo cresce rot·60°.
+      pts = railCurve(m.tile.def.edges, m.tile.def.seed, (m.a - rot + 6) % 6, (m.b - rot + 6) % 6).map(([x, z]) => [x * c - z * s, x * s + z * c]);
+    } else if (strictEdges(m.tile, T.Water).length === 2) {
+      const [A, B] = [end(m.a), end(m.b)];
+      pts = [];
+      for (let k = 0; k <= 16; k++) {
+        const t = k / 16, u = 1 - t;
+        pts.push([u * u * A[0] + t * t * B[0], u * u * A[1] + t * t * B[1]]);
+      }
+    } else pts = [end(m.a), [0, 0], end(m.b)];
+    m.route.length = 0;
+    m.cum.length = 0;
+    let acc = 0;
+    pts.forEach(([x, z], k) => {
+      if (k) acc += Math.hypot(x - pts[k - 1][0], z - pts[k - 1][1]);
+      m.route.push(cx + x, cz + z);
+      m.cum.push(acc);
+    });
+    m.len = Math.max(acc, 0.05);
+  }
+
+  private pathPos(m: Mover, t: number, out: { x: number; z: number }) {
+    const d = t * m.cum[m.cum.length - 1];
+    let k = 1;
+    while (k < m.cum.length - 1 && m.cum[k] < d) k++;
+    const seg = m.cum[k] - m.cum[k - 1];
+    const f = seg > 0 ? (d - m.cum[k - 1]) / seg : 0;
+    out.x = m.route[2 * k - 2] + (m.route[2 * k] - m.route[2 * k - 2]) * f;
+    out.z = m.route[2 * k - 1] + (m.route[2 * k + 1] - m.route[2 * k - 1]) * f;
   }
 
   /** Posição de um barco andando, ou null (capturas das esteiras). */
@@ -497,7 +522,7 @@ export class Life {
       }
     }
     m.t = 0;
-    m.len = m.a < 0 || m.b < 0 ? 0.87 : Math.abs(m.a - m.b) === 3 ? 1.73 : 1.45;
+    this.setRoute(m);
   }
 
   private updateMovers(dt: number) {
