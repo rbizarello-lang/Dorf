@@ -20,7 +20,7 @@ import { renderVideo, type Script } from './video/render';
 import { Take, type TakeEvent } from './video/take';
 import { themeById, type Theme } from './themes/themes';
 import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor } from './ui/banner';
-import { Hud, questLabel } from './ui/hud';
+import { Hud, questLabel, questMarker } from './ui/hud';
 import './ui/style.css';
 
 // ------------------------------------------------------------------ estado
@@ -29,7 +29,7 @@ type QualityMode = 'auto' | Quality;
 type MoveRec = [number, number, number];
 /** v4: modos, eras, sítios e bônus por tema. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 5;
+  v: 6;
   seed: number;
   rulesId: string;
   mode: ModeId;
@@ -38,7 +38,7 @@ interface Save {
   undone: number;
   score: number;
 }
-const SAVE_VERSION = 5;
+const SAVE_VERSION = 6;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -112,7 +112,23 @@ let moves: MoveRec[] = [];
 let rotSteps = 0;
 let hover: { q: number; r: number } | null = null;
 let scoutPending = false;
-let best = Number(store.get('best')) || 0;
+/** Recorde por modo e por tema (o Exploradores e o Clássico não disputam o mesmo número), com a semente. */
+let best = 0;
+let bestSeed = 0;
+const bestKey = () => `best.${mode.id}.${rulesTheme.id}`;
+function loadBest() {
+  best = 0;
+  bestSeed = 0;
+  try {
+    const v = JSON.parse(store.get(bestKey()) ?? 'null') as unknown;
+    if (v && typeof v === 'object' && Number.isSafeInteger((v as { score: unknown }).score) && Number.isSafeInteger((v as { seed: unknown }).seed)) {
+      best = Math.max(0, (v as { score: number }).score);
+      bestSeed = (v as { seed: number }).seed;
+    }
+  } catch {
+    // valor salvo corrompido: começa sem recorde
+  }
+}
 const QUALITIES: QualityMode[] = ['auto', 'cinema', 'ultra', 'high', 'medium', 'low'];
 const pickQ = (v: string | null) => (v && (QUALITIES as string[]).includes(v) ? (v as QualityMode) : null);
 let qualityMode: QualityMode = pickQ(params.get('quality')) ?? pickQ(store.get('quality')) ?? 'auto';
@@ -174,6 +190,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   rotSteps = 0;
   hover = null;
   gameOverShown = false;
+  loadBest();
   bestAtStart = best;
   recordCheered = false;
   hud.hint.style.opacity = moves.length >= 6 ? '0' : '';
@@ -344,7 +361,8 @@ function place(q: number, r: number) {
   if (discarded) hud.toast(discarded === 1 ? 'Uma peça não cabia em lugar nenhum e foi descartada.' : `${discarded} peças sem encaixe foram descartadas.`, 'bad');
   if (game.board.score > best) {
     best = game.board.score;
-    if (!special) store.set('best', String(best));
+    bestSeed = game.seed;
+    if (!special) store.set(bestKey(), JSON.stringify({ score: best, seed: bestSeed }));
   }
   // Passar do recorde é um momento: comemora uma vez por partida (não na primeira partida).
   if (!recordCheered && bestAtStart > 0 && game.board.score > bestAtStart && !special) {
@@ -446,7 +464,7 @@ function showHelp() {
       <li><b>${theme.terrainNames[4]}</b> e <b>${theme.terrainNames[5]}</b> precisam continuar: só encostam neles mesmos.</li>
       <li><b>Encaixe perfeito</b>: a peça encosta em 2 ou mais vizinhas e todas as bordas combinam (+${game.rules.perfectBonus}).</li>
       <li>Cercar uma peça com 6 vizinhas encaixadas rende <b>+1 peça</b>.</li>
-      <li><b>Missões</b> pedem grupos de certo tamanho e dão peças extras. "Exatamente N" falha se passar.</li>
+      <li><b>Missões</b> dão peças extras. Umas pedem um grupo de certo tamanho ("exatamente N" falha se passar), outras pedem para <b>fechar</b> um grupo (nenhuma borda dele para o vazio), fazer encaixes perfeitos ou erguer interações de um tipo.</li>
       <li><b>Interações</b>: bordas diferentes que se encostam também contam (+${game.rules.synergyPoints}) e erguem construções. A borda acende em dourado.</li>
     </ul>
     <div class="synergies">${synergyLegend()}</div>
@@ -480,9 +498,11 @@ function showGameOver() {
       <div><b>${game.placedCount}</b><span>peças</span></div>
       <div><b>${b.questsCompleted}</b><span>missões</span></div>
     </div>
-    <p class="muted">Era ${eraName(b.era)}, ${b.sites.filter((x) => x.found).length} de ${b.sites.length} sítios, ${b.perfects} encaixes perfeitos, ${Object.values(b.synergyCount).reduce((a, c) => a + c, 0)} interações. Recorde: ${best.toLocaleString('pt-BR')}.</p>
+    <p class="muted">Era ${eraName(b.era)}, ${b.sites.filter((x) => x.found).length} de ${b.sites.length} sítios, ${b.perfects} encaixes perfeitos, ${Object.values(b.synergyCount).reduce((a, c) => a + c, 0)} interações.</p>
+    <p class="muted">Recorde em ${mode.name} · ${rulesTheme.name}: ${best.toLocaleString('pt-BR')} pontos (semente ${bestSeed}).</p>
     <div class="row">
       <button class="primary" type="button" data-act="new">Jogar de novo</button>
+      ${mode.daily ? '' : `<button class="secondary" type="button" data-act="replay-seed">Repetir a semente</button>`}
       <button class="secondary" type="button" data-act="theme">Trocar tema</button>
     </div>`);
   if (record) hud.modalBody.querySelector('h2')!.classList.add('record');
@@ -498,6 +518,13 @@ hud.modal.addEventListener('click', (e) => {
   } else if (act === 'new') {
     hud.hideModal();
     startFresh();
+  } else if (act === 'replay-seed') {
+    // A mesma sequência de peças, para tentar de novo com o que se aprendeu.
+    hud.hideModal();
+    const seed = game.seed;
+    rulesTheme = theme;
+    newGame(seed);
+    hud.toast(`Mesma semente (${seed}) · ${mode.name} · ${theme.name}`);
   } else if (act === 'mode') {
     hud.hideModal();
     startFresh(modeById((e.target as HTMLElement).closest('button')?.dataset.mode));
@@ -1299,7 +1326,7 @@ function step(now: number) {
   for (const q of game.board.quests) {
     if (q.state !== 'active') continue;
     const s = screenOf(q.anchor.q, q.anchor.r, 0.55);
-    markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: q.exact ? `=${q.target}` : `${q.target}+`, color: theme.terrainColors[q.terrain] });
+    markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: questMarker(q), color: q.kind === 'perfect' ? theme.ui.accent : theme.terrainColors[q.terrain] });
   }
   // Maravilha em obra: etiqueta com a etapa sobre o canteiro.
   const wd = game.board.wonder;

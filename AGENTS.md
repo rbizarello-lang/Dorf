@@ -171,7 +171,7 @@ scripts/         capturas, teste de carga, conversão para página publicável
    Mude os três juntos ou nenhum.
 5. **Rio e estrada são estritos** (`isStrict`): só encostam neles mesmos. Os 4 terrenos comuns aceitam qualquer vizinho, mas só pontuam quando iguais. As interações pontuam pares diferentes.
 6. **Saves:**
-   - o formato é `{ v, seed, rulesId, mode, moves, undone, score }` (v5), guardado em `localStorage` com o prefixo `retalhos.`;
+   - o formato é `{ v, seed, rulesId, mode, moves, undone, score }` (v6), guardado em `localStorage` com o prefixo `retalhos.`;
    - ao carregar, a partida é **reconstruída pelo replay** das jogadas e conferida contra a pontuação.
    - Se você mudar regras, pontuação ou geração de peças de um jeito que altere o replay, **aumente `SAVE_VERSION` em `main.ts`**. Saves antigos mostram um aviso e são descartados.
 7. **Os testes têm oráculos independentes.** Ao mudar a pontuação, atualize o oráculo em `tests/logic.ts` reimplementando a regra. Nunca faça o oráculo chamar o código que ele testa.

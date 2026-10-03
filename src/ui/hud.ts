@@ -23,7 +23,31 @@ function esc(s: string) {
 
 export function questLabel(q: Quest, theme: Theme) {
   const name = theme.terrainNames[q.terrain];
+  if (q.kind === 'close') return `Fechar ${name}`;
+  if (q.kind === 'perfect') return `${q.target} encaixes perfeitos`;
+  if (q.kind === 'synergy') return `${q.target}× ${theme.synergy[q.syn!]}`;
   return q.exact ? `${name}: exatamente ${q.target}` : `${name}: ${q.target} ou mais`;
+}
+
+/** Título, linha de baixo e cor do cartão de uma missão. */
+function questCard(q: Quest, theme: Theme) {
+  const count = `${Math.min(q.progress, q.target)}/${q.target}`;
+  const color = theme.terrainColors[q.terrain];
+  if (q.kind === 'close') {
+    const open = q.open ?? 0;
+    return { title: `Fechar ${theme.terrainNames[q.terrain]}`, sub: open === 1 ? 'falta 1 borda aberta' : `faltam ${open} bordas abertas`, color };
+  }
+  if (q.kind === 'perfect') return { title: 'Encaixes perfeitos', sub: `todas as bordas combinando · ${count}`, color: theme.ui.accent };
+  if (q.kind === 'synergy') return { title: theme.synergy[q.syn!], sub: `interações · ${count}`, color };
+  return { title: theme.terrainNames[q.terrain], sub: `${q.exact ? `exatamente ${q.target}` : `${q.target} ou mais`} · ${count}`, color };
+}
+
+/** Texto curto do estandarte da missão no mapa. */
+export function questMarker(q: Quest) {
+  if (q.kind === 'close') return `◯${q.open ?? 0}`;
+  if (q.kind === 'perfect') return `★${q.target - q.progress}`;
+  if (q.kind === 'synergy') return `✦${q.target - q.progress}`;
+  return q.exact ? `=${q.target}` : `${q.target}+`;
 }
 
 /** Seção "Sua casa" no topo do menu de temas: cor da casa e brasão. */
@@ -196,15 +220,16 @@ export class Hud {
       if (q.state === 'active' && !el) {
         el = document.createElement('div');
         el.className = 'quest';
-        el.innerHTML = `<i class="ico" style="background:${theme.terrainColors[q.terrain]}"></i><b></b><span class="reward">+${q.reward} peças</span><span class="bar"><i></i></span>`;
+        el.innerHTML = `<i class="ico" style="background:${questCard(q, theme).color}"></i><b></b><span class="reward">+${q.reward} peças</span><span class="bar"><i></i></span>`;
         this.quests.appendChild(el);
         this.questEls.set(q.id, el);
       }
       if (!el) continue;
       const b = el.querySelector('b')!;
-      b.textContent = theme.terrainNames[q.terrain];
+      const card = questCard(q, theme);
+      b.textContent = card.title;
       const sub = document.createElement('small');
-      sub.textContent = `${q.exact ? `exatamente ${q.target}` : `${q.target} ou mais`} · ${Math.min(q.progress, q.target)}/${q.target}`;
+      sub.textContent = card.sub;
       b.appendChild(sub);
       (el.querySelector('.bar i') as HTMLElement).style.width = `${Math.min(100, (q.progress / q.target) * 100)}%`;
       if (q.state !== 'active' && !el.classList.contains('done') && !el.classList.contains('failed')) {

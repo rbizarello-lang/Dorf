@@ -1,4 +1,5 @@
 import { type Rng, pick, randInt, weighted } from './rng';
+import type { SynKind } from './synergy';
 
 /** Tipos de borda. Os nomes exibidos vêm do tema (ex.: Floresta → Cristais em Marte). */
 export enum T {
@@ -14,10 +15,23 @@ export const LAND: readonly T[] = [T.Grass, T.Forest, T.Field, T.Village];
 /** Bordas que exigem continuidade (rio só encosta em rio, trilho só em trilho). */
 export const isStrict = (t: T) => t === T.Water || t === T.Rail;
 
+/**
+ * Tipos de missão:
+ *   group   → grupo do terreno com N peças (ou exatamente N);
+ *   close   → fechar o grupo do terreno (nenhuma borda dele virada para o vazio);
+ *   perfect → N encaixes perfeitos a partir de agora;
+ *   synergy → N interações de um tipo a partir de agora.
+ */
+export type QuestKind = 'group' | 'close' | 'perfect' | 'synergy';
+
 export interface QuestSpec {
+  kind: QuestKind;
   terrain: T;
+  /** group: quanto o grupo precisa crescer; perfect e synergy: quantas vezes. */
   delta: number;
   exact: boolean;
+  /** synergy: o tipo de interação pedido. */
+  syn?: SynKind;
 }
 
 export interface TileDef {
@@ -114,6 +128,15 @@ const QUEST_DELTA: Record<number, [number, number]> = {
   [T.Rail]: [3, 6],
 };
 
+/** Interações que envolvem cada terreno (a missão de interação usa um terreno da própria peça). */
+const SYN_BY_TERRAIN: Record<number, SynKind[]> = {
+  [T.Forest]: ['lumber'],
+  [T.Field]: ['mill', 'apiary'],
+  [T.Village]: ['lumber', 'mill', 'pasture'],
+  [T.Water]: [],
+  [T.Rail]: [],
+};
+
 export function generateTile(rng: Rng, withQuest: boolean): TileDef {
   const edges = generateEdges(rng);
   let quest: QuestSpec | null = null;
@@ -122,8 +145,20 @@ export function generateTile(rng: Rng, withQuest: boolean): TileDef {
     if (options.length) {
       const terrain = pick(rng, options);
       const [lo, hi] = QUEST_DELTA[terrain];
-      quest = { terrain, delta: randInt(rng, lo, hi), exact: rng() < 0.22 };
+      quest = { kind: 'group', terrain, delta: randInt(rng, lo, hi), exact: rng() < 0.22 };
     }
   }
-  return { edges, seed: Math.floor(rng() * 2 ** 31), quest };
+  const seed = Math.floor(rng() * 2 ** 31);
+  // O tipo da missão é sorteado depois da semente da decoração: bordas e aparência da peça
+  // ficam iguais às de antes dos tipos novos.
+  if (quest) {
+    const roll = rng();
+    const syns = SYN_BY_TERRAIN[quest.terrain];
+    if (roll < 0.55) {
+      // grupo (o tipo de sempre)
+    } else if (roll < 0.75 && LAND.includes(quest.terrain)) quest = { kind: 'close', terrain: quest.terrain, delta: 0, exact: false };
+    else if (roll < 0.87) quest = { kind: 'perfect', terrain: quest.terrain, delta: randInt(rng, 3, 5), exact: false };
+    else if (syns.length) quest = { kind: 'synergy', terrain: quest.terrain, delta: randInt(rng, 3, 6), exact: false, syn: pick(rng, syns) };
+  }
+  return { edges, seed, quest };
 }

@@ -60,12 +60,12 @@ Valores do original segundo guias da comunidade (ver [PESQUISA.md §1](PESQUISA.
 
 | Regra | Dorfromantik (Classic) | Retalhos (protótipo) |
 |---|---|---|
-| Pilha inicial | 40 peças | 40 (varia por tema: Inverno 45, Marte 36) |
+| Pilha inicial | 40 peças | 50 (varia por tema: Inverno 55, Marte 46) |
 | Encaixe obrigatório | rio e trilho | rio e trilho (os nomes mudam por tema: canal, ferrovia, maglev) |
 | Ponto por borda | +10 | +10 |
 | Encaixe perfeito | 6/6 bordas: +60 e +1 peça | todas as bordas **vizinhas** combinam (mínimo 2): +20 (Cerrado: +25) |
 | Peça cercada | parte do "perfeito" | peça com 6 vizinhos encaixados: +30 e +1 peça, inclusive peças antigas que você "fecha" |
-| Missões | N+ / exatamente N: +100 e +5 peças | N+ / exatamente N: +10×N pontos e +4 a +6 peças |
+| Missões | N+ / exatamente N: +100 e +5 peças | grupo N+ ou exatamente N, fechar um grupo, N encaixes perfeitos, N interações de um tipo: +5 a +7 peças |
 | Bandeiras, peças especiais, desfazer | sim | ainda não (próximos passos) |
 
 Essas mudanças mostram o que o usuário pediu com "pequenas adaptações": os números são configuração, não código. Ideias de twists por tema estão na seção 6.
@@ -508,3 +508,5 @@ Nota de balanceamento: como o encaixe perfeito exige todas as bordas iguais, uma
 ## Apêndice B: o que as simulações dizem sobre o balanceamento
 
 Nas 3.000 partidas simuladas, jogadores automáticos que **não** perseguem missões (guloso, aleatório e "pior jogada") duraram em média **40 a 50 peças** e cumpriram **cerca de 0,5 missão por partida**. Um humano que mira as missões vai mais longe. Mesmo assim, é um sinal de que as recompensas atuais (+4 a +6 peças por missão, +1 por peça cercada) talvez sejam avaras para partidas longas e relaxantes como as do gênero. Esse é o primeiro ajuste a testar com jogadores reais, e hoje basta mudar números em `Rules`.
+
+**Ajuste de 2026-10-03.** A simulação ganhou um jogador que persegue as missões ativas (`quest` em `tests/logic.ts`) e uma tabela da duração da partida no Clássico por jogador. Com missões de quatro tipos (grupo, fechar, perfeitos, interações), chance de missão de 0,24 para 0,32, recompensas de +5 a +7 peças e pilha de 40 para 50, a mediana passou de 61 para 92 peças com a IA gulosa e de 67 para 100 com o jogador de missões, sem partidas sem fim (máximo de ~200). Jogadores ruins (aleatório, pior jogada) ficam em ~55 peças: a habilidade continua fazendo diferença.
