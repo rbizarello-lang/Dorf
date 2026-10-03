@@ -293,6 +293,7 @@ interface Sky {
 }
 
 const tmpSnap = new THREE.Vector3();
+const tmpGrade = new THREE.Color();
 const axX = new THREE.Vector3();
 const axY = new THREE.Vector3();
 const axZ = new THREE.Vector3();
@@ -1424,6 +1425,11 @@ export class World {
     const day = 1 - this.sky.night;
     tintOf(this.sky.sun, -0.14 * day, P.shade.value);
     tintOf(this.sky.sun, 0.08 * day, P.light.value);
+    // Gradação do tema por cima da hora: mais leve à noite, que já tem a cor do luar.
+    const g = this.theme.grade, gk = 0.55 + 0.45 * day;
+    P.shade.value.multiply(tintOf(tmpColor.set(g.shadow), 0.16 * gk, tmpGrade));
+    P.light.value.multiply(tintOf(tmpColor.set(g.light), 0.09 * gk, tmpGrade));
+    P.saturation.value = 1.06 * g.saturation;
 
     // Sol acompanha o alvo; área da sombra acompanha o zoom.
     const sd = this.sky.sunDir;
