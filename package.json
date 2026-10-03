@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "shots": "node scripts/screenshots.mjs",
+    "smoke": "node scripts/smoke.mjs",
     "test": "rolldown tests/logic.ts --file .cache/logic.mjs --format esm --platform node --logLevel silent && node .cache/logic.mjs 600 && rolldown tests/synthetic.ts --file .cache/synthetic.mjs --format esm --platform node --logLevel silent && node .cache/synthetic.mjs && rolldown tests/legibility.ts --file .cache/legibility.mjs --format esm --platform node --logLevel silent && node .cache/legibility.mjs && rolldown tests/video.ts --file .cache/video.mjs --format esm --platform node --logLevel silent && node .cache/video.mjs",
     "check": "npm run typecheck && npm test && npm run build"
   },

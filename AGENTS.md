@@ -40,10 +40,11 @@ npm run check        # typecheck + testes + build: rode antes de todo commit
 npm run typecheck    # tsc --noEmit
 npm test             # 600 partidas simuladas com oráculos independentes, cenários sintéticos e legibilidade das cores (tests/legibility.ts)
 npm run build        # dist/index.html (arquivo único)
+npm run smoke        # depois do build: abre o jogo em WebGPU e WebGL2 e falha com erro no console
 node scripts/artifact.mjs   # depois do build: dist/artifact/retalhos.html (formato de página publicável)
 ```
 
-A CI (`.github/workflows/ci.yml`) roda typecheck, testes e build em todo pull request e em todo push na `main`. No Claude Code na web, o hook `.claude/hooks/session-start.sh` roda `npm install` no início da sessão.
+A CI (`.github/workflows/ci.yml`) roda typecheck, testes e build em todo pull request e em todo push na `main`, e depois `npm run smoke` (`scripts/smoke.mjs`): abre o build no Chromium em WebGPU e em WebGL2, deixa a IA pôr 12 peças e falha com qualquer erro no console. Rode o mesmo localmente depois do build quando mexer em `src/render/` ou no `main.ts`. No Claude Code na web, o hook `.claude/hooks/session-start.sh` roda `npm install` no início da sessão.
 
 ### Verificação visual (Playwright, sem GPU)
 
@@ -200,9 +201,12 @@ scripts/         capturas, teste de carga, conversão para página publicável
 
 Medido com `RUNS=300:high node scripts/stress.mjs`, renderização por software:
 
-| Peças | Qualidade | Draw calls | Triângulos | CPU JS/quadro |
+| Peças | Qualidade | Draw calls | Triângulos | Instâncias |
 |---|---|---|---|---|
-| 300 | alta | ~94 | ~1,37 milhão | ~4,3 ms |
+| 300 | alta | ~136 | ~1,46 milhão | ~53 mil |
+| 300 | ultra | ~248 | ~2,82 milhões | ~69 mil |
+
+Números de 2026-10-02, depois do traço, do pincel, dos aldeões, dos estandartes e da maravilha (a Alta tinha ~94 draw calls na v4 e ~111 no PR #5). No WebGPU por software, a CPU por quadro inclui a espera pelo SwiftShader e não serve de medida.
 
 - **Regra prática:** uma mudança visual não deve subir triângulos ou draw calls em mais de ~10% sem justificativa escrita no commit.
 - **Qualidade:** Cinema (placas de topo, fotos e vídeos: desenha 1,5× acima da tela e reduz, SSGI e reflexos com mais amostras, 4 cascatas de sombra, 60% mais vegetação, grão de filme e aberração de lente), Ultra (pensado para GPUs acima da RX 580: sombras em 3 cascatas de 4096, luz indireta SSGI, reflexos na água, raios de luz no entardecer, TRAA, bloom, profundidade de campo, DPR até 2 e 35% mais vegetação), Alta (GTAO em meia resolução, sombra única de 2048), Média (MSAA, sem pós pesado) e Baixa (sem pós e sem sombras). Cada nível tem um teto de pixels desenhados (Cinema 4K × 2,25, Ultra 4K, Alta 1440p, Média e Baixa 1080p; `PIXELS` em `world.ts`): numa tela 4K, descer de nível também reduz a resolução interna. A densidade de decoração é multiplicada por 1,6 (cinema), 1,35 (ultra), 1 (alta), 0,65 (média) ou 0,4 (baixa).

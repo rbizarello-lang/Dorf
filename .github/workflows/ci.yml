@@ -1,4 +1,5 @@
-# Confere tipos, regras (600 partidas simuladas) e build a cada push na main e em cada pull request.
+# Confere tipos, regras (600 partidas simuladas) e build a cada push na main e em cada pull request,
+# e abre o build no Chromium (WebGPU e WebGL2 por software) para pegar erro de shader ou de inicialização.
 name: CI
 
 on:
@@ -21,3 +22,5 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: npx playwright-core install --with-deps chromium
+      - run: npm run smoke
