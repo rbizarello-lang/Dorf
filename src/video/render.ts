@@ -3,6 +3,7 @@
 // Nada depende do relógio real, então o vídeo sai liso mesmo que cada quadro leve um segundo.
 import type { Rules } from '../core/board';
 import { Game } from '../core/game';
+import type { SpecialKind } from '../core/specials';
 import type { Quality, TimeOfDay, World } from '../render/world';
 import type { Theme } from '../themes/types';
 import { Mp4Writer, type CodecPick, type VideoSize } from './encoder';
@@ -15,6 +16,8 @@ export interface Script {
   theme: Theme;
   seed: number;
   rules: Rules;
+  /** Peças especiais da partida (mudam a sequência da pilha). */
+  specials: readonly SpecialKind[];
   /** Jogadas já feitas quando o vídeo começa. */
   prefix: readonly MoveRec[];
   tod: TimeOfDay;
@@ -65,7 +68,7 @@ function breathe(): Promise<void> {
  * jogo. Devolve null se `cancelled` virar verdadeiro no meio.
  */
 export async function renderVideo(world: World, s: Script, o: RenderOptions, pick: CodecPick, progress: (frame: number, total: number) => void, cancelled: () => boolean): Promise<Blob | null> {
-  const game = new Game(s.seed, s.rules);
+  const game = new Game(s.seed, s.rules, s.specials);
   for (const [q, r, rot] of s.prefix) {
     game.rot = rot;
     if (!game.place(q, r)) break;
