@@ -1,5 +1,6 @@
-import { DIRS, hkey, opposite } from './hex';
+import { DIRS, hexDistance, hkey, opposite } from './hex';
 import { LOOKOUT_MOVES, SITE_REWARD, type Site, type SiteKind } from './sites';
+import { SPECIALS, type SpecialKind } from './specials';
 import { type SynHit, type SynKind, synergyOf } from './synergy';
 import { T, isStrict, rotateEdges, type QuestKind, type TileDef } from './tiles';
 
@@ -153,6 +154,8 @@ export interface PlaceResult {
   wonder: { stage: number; started: boolean; done: boolean } | null;
   /** Exploradores: pontos pelas peças que sobraram quando o último sítio foi achado. */
   leftoverBonus?: number;
+  /** Peça especial colocada: quantas peças à volta contaram, pontos e peças ganhos. */
+  special: { kind: SpecialKind; count: number; points: number; tiles: number } | null;
 }
 
 export class Board {
@@ -257,7 +260,8 @@ export class Board {
       this.perfects++;
     }
     placed.synergies = c.synergies;
-    if (c.eraMark !== null) {
+    // A peça especial tem a sua construção no meio: o marco da era e a maravilha esperam a próxima.
+    if (c.eraMark !== null && !def.special) {
       placed.eraMark = c.eraMark;
       this.markPending = null;
     }
@@ -282,6 +286,17 @@ export class Board {
       points += SITE_REWARD[site.kind].points;
       tilesGained += SITE_REWARD[site.kind].tiles;
       if (site.kind === 'lookout') this.lookout = LOOKOUT_MOVES;
+    }
+    // Peça especial: pontos por peça à volta com o terreno dela (contadas na hora de colocar).
+    let special: PlaceResult['special'] = null;
+    if (def.special) {
+      const sp = SPECIALS[def.special];
+      let count = 0;
+      for (const t of this.list) if (t !== placed && hexDistance(q, r, t.q, t.r) <= sp.radius && t.edges.includes(sp.terrain)) count++;
+      special = { kind: def.special, count, points: count * sp.per, tiles: sp.tiles };
+      points += special.points;
+      tilesGained += sp.tiles;
+      if (sp.lookout) this.lookout = Math.max(this.lookout, sp.lookout);
     }
     const candidates = [placed, ...DIRS.map(([dq, dr]) => this.get(q + dq, r + dr)).filter((x): x is Placed => !!x)];
     for (const t of candidates) {
@@ -357,7 +372,7 @@ export class Board {
         tilesGained += R.wonderTiles;
       }
       wonder = { stage, started: false, done };
-    } else if (c.wonder) {
+    } else if (c.wonder && !def.special) {
       this.wonder = { tile: placed, stage: 0 };
       placed.wonder = true;
       wonder = { stage: 0, started: true, done: false };
@@ -372,7 +387,7 @@ export class Board {
       eraUp = this.era;
       this.markPending = this.era;
     }
-    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder };
+    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special };
   }
 
   /** Contagem do tabuleiro que uma missão de contagem acompanha. */

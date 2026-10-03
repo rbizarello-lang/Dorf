@@ -88,6 +88,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__boat(zoom?)` | centraliza a câmera num barco andando (esteiras na água) |
 | `window.__folk(i?, zoom?)` | centraliza a câmera no i-ésimo aldeão de construção |
 | `window.__site(zoom?)` | centraliza no último sítio achado (ou no primeiro escondido) e devolve qual |
+| `?specials=all` / `window.__special(i?, zoom?)` | põe as peças especiais na partida sem liberá-las; centraliza na i-ésima colocada e devolve qual |
 | `window.__wonder(etapa?, zoom?)` | centraliza no canteiro da maravilha; com `etapa` (0 a 6), mostra a obra nessa etapa |
 | `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` `?pitch=` | ver o `README.md` |
 | `window.__stats` | estatísticas do último quadro |
@@ -107,6 +108,7 @@ src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em
   game.ts        Game: semente, pilha, sorteio por peça, descarte, bestMove (IA gulosa), upcoming (mirante)
   sites.ts       sítios escondidos (ruína, tesouro, relíquia, mirante), da semente por um gerador à parte
   modes.ts       modos: Clássico, Zen, Desafio do dia, Exploradores (regras + desfazer)
+  specials.ts    peças especiais (estação, moinho d'água, farol): bordas, pontos e posições na pilha
   rng.ts         mulberry32 e utilitários de sorteio
 src/themes/      temas como DADOS
   types.ts       esquema Theme, com cada kit comentado: é a referência de tudo que um tema pode escolher
@@ -143,8 +145,8 @@ src/video/       foto e vídeo (o modo foto fica no main.ts)
   render.ts      desenha o vídeo quadro a quadro, com world.tick(1/60), e entrega ao codificador
   encoder.ts     WebCodecs: escolhe H.264 ou VP9 e guarda os quadros codificados em Blobs
   mp4.ts         cabeçalho MP4 (ftyp, moov, mdat) escrito à mão, sem biblioteca
-src/ui/          HUD em HTML/CSS (hud.ts, style.css); banner.ts: cor da casa e brasão (troca o `ui.accent` do tema); tutorial.ts: dicas das primeiras partidas; a página é o index.html
-src/audio.ts     sons sintetizados com WebAudio
+src/ui/          HUD em HTML/CSS (hud.ts, style.css); banner.ts: cor da casa e brasão (troca o `ui.accent` do tema); tutorial.ts: dicas das primeiras partidas; progress.ts: progresso entre partidas e liberação das peças especiais; a página é o index.html
+src/audio.ts     sons sintetizados com WebAudio: música, efeitos e ambiente (paisagem perto do foco da câmera, `setAmbience`)
 src/main.ts      entrada: fluxo da partida, entrada de mouse/toque/teclado, salvamento, parâmetros de URL, ganchos de depuração
 tests/logic.ts      simulação de partidas contra oráculos independentes (grupos por BFS, pontuação recalculada, replay)
 tests/synthetic.ts  cenários montados à mão (peça travada, descarte, fim de jogo, semente → sequência)
@@ -162,7 +164,7 @@ scripts/         capturas, teste de carga, conversão para página publicável
 ## Invariantes: não quebre
 
 1. **`src/core` é puro e determinístico.** Nada de three.js, DOM ou `Math.random`. A única exceção é `Game.bestMove`, que usa `Math.random` de propósito para não mexer na sequência de peças.
-2. **A sequência de peças depende só da semente e do índice** (`Game.draw`). A mesma semente dá as mesmas peças para qualquer jogador. Só a presença da missão depende do estado da partida.
+2. **A sequência de peças depende só da semente, do índice e das peças especiais liberadas** (`Game.draw`, `specialSlots`). A mesma semente com as mesmas peças liberadas dá as mesmas peças para qualquer jogador; a peça especial só toma o lugar da peça do seu índice. Só a presença da missão depende do estado da partida.
 3. **A aparência de uma peça depende só de `(edges, def.seed, theme, opts)`.** `buildTile` usa `mulberry32(seed)`, então fantasma, queda e mapa mostram a mesma peça. `Math.random` no render é aceitável só em efeitos passageiros, como partículas.
 4. **Rotação:**
    - lógica: `rotateEdges` faz `out[(i + rot) % 6] = base[i]`;
@@ -172,7 +174,8 @@ scripts/         capturas, teste de carga, conversão para página publicável
    Mude os três juntos ou nenhum.
 5. **Rio e estrada são estritos** (`isStrict`): só encostam neles mesmos. Os 4 terrenos comuns aceitam qualquer vizinho, mas só pontuam quando iguais. As interações pontuam pares diferentes.
 6. **Saves:**
-   - o formato é `{ v, seed, rulesId, mode, moves, undone, score }` (v6), guardado em `localStorage` com o prefixo `retalhos.`;
+   - o formato é `{ v, seed, rulesId, mode, moves, undone, score, specials }` (v7), guardado em `localStorage` com o prefixo `retalhos.`;
+   - o progresso entre partidas (totais, registro por tema e peças especiais liberadas) fica em `retalhos.progress` (`src/ui/progress.ts`), validado campo a campo ao ler;
    - ao carregar, a partida é **reconstruída pelo replay** das jogadas e conferida contra a pontuação.
    - Se você mudar regras, pontuação ou geração de peças de um jeito que altere o replay, **aumente `SAVE_VERSION` em `main.ts`**. Saves antigos mostram um aviso e são descartados.
 7. **Os testes têm oráculos independentes.** Ao mudar a pontuação, atualize o oráculo em `tests/logic.ts` reimplementando a regra. Nunca faça o oráculo chamar o código que ele testa.
@@ -262,6 +265,6 @@ São opcionais no tema (`gate`, `bridge`) e não pontuam. O `buildTile` decide o
 - **Pendente:**
   - medir o FPS numa GPU real (`?stress=1000&debug`) no PC e no celular;
   - kits de fidelidade histórica que ainda faltam (`docs/TEMAS.md`, fim): roda-d'água como `MillStyle`, cipreste em alameda, estação de fim de linha por tema;
-  - funções de jogo: bandeiras e peças especiais (`docs/VIABILIDADE.md` §12). Desfazer e as 3 próximas peças já existem na v4: as próximas peças aparecem como recompensa do mirante;
+  - funções de jogo: bandeiras (`docs/VIABILIDADE.md` §12); as peças especiais já existem (`specials.ts`). Desfazer e as 3 próximas peças já existem na v4: as próximas peças aparecem como recompensa do mirante;
   - otimizações com folga conhecida: culling por super-bloco, sombra em cache, renderizar sob demanda (`docs/VIABILIDADE.md` §5).
 - **Publicação:** o build de página única (`scripts/artifact.mjs`) é o que vai para o link público do protótipo.

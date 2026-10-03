@@ -3,7 +3,7 @@
 // a leitura da ajuda inteira antes de jogar.
 
 /** Assuntos das dicas, na ordem em que costumam aparecer. A lista fixa valida o que vem do armazenamento. */
-export const TIP_IDS = ['inicio', 'estrito', 'perfeito', 'missao', 'interacao', 'sitio', 'era', 'pilha', 'maravilha'] as const;
+export const TIP_IDS = ['inicio', 'estrito', 'perfeito', 'missao', 'interacao', 'sitio', 'era', 'pilha', 'maravilha', 'especial'] as const;
 export type TipId = (typeof TIP_IDS)[number];
 
 export interface TipStore {

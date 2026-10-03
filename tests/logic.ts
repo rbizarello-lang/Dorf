@@ -8,6 +8,7 @@ import { T, isStrict, rotateEdges, type TileDef } from '../src/core/tiles';
 import { mulberry32 } from '../src/core/rng';
 import { MODES, type Mode } from '../src/core/modes';
 import { generateSites } from '../src/core/sites';
+import { SPECIAL_KINDS, type SpecialKind } from '../src/core/specials';
 import { THEMES } from '../src/themes/themes';
 
 const rulesFor = (t: { rules?: Partial<Rules> }, mode?: Mode): Rules => ({ ...DEFAULT_RULES, ...(mode?.daily ? {} : t.rules), ...mode?.rules });
@@ -18,6 +19,14 @@ const ORACLE_SITE: Record<string, { points: number; tiles: number }> = {
   treasure: { points: 0, tiles: 2 },
   relic: { points: 100, tiles: 1 },
   lookout: { points: 20, tiles: 0 },
+};
+
+// Peças especiais (cópia independente de src/core/specials.ts): bordas, terreno contado, raio,
+// pontos por peça contada, peças ganhas e jogadas de mirante.
+const ORACLE_SPECIAL: Record<SpecialKind, { edges: T[]; terrain: T; radius: number; per: number; tiles: number; lookout: number }> = {
+  station: { edges: [T.Rail, T.Village, T.Village, T.Rail, T.Field, T.Grass], terrain: T.Rail, radius: 2, per: 12, tiles: 2, lookout: 0 },
+  watermill: { edges: [T.Water, T.Village, T.Field, T.Water, T.Field, T.Field], terrain: T.Field, radius: 1, per: 20, tiles: 1, lookout: 0 },
+  lighthouse: { edges: [T.Water, T.Grass, T.Grass, T.Forest, T.Grass, T.Grass], terrain: T.Water, radius: 2, per: 10, tiles: 0, lookout: 5 },
 };
 
 // Math.random determinístico para tornar bestMove reprodutível nos testes.
@@ -134,6 +143,7 @@ interface GameLog {
   seed: number;
   themeId: string;
   rules: Rules;
+  specials: SpecialKind[];
   moves: [number, number, number][];
   snapshots: { score: number; stack: number; cur: number | null; next: number; tiles: number; active: number; discarded: number; perfects: number; qc: number }[];
   finalScore: number;
@@ -212,7 +222,7 @@ function questMove(game: Game, def: TileDef, rnd: () => number) {
   return best;
 }
 
-function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: Policy = 'greedy', mode: Mode = MODES[0]): GameLog {
+function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: Policy = 'greedy', mode: Mode = MODES[0], specials: SpecialKind[] = []): GameLog {
   const prnd = mulberry32(seed ^ 0x5bd1e995);
   const theme = THEMES[themeIdx];
   const rules = rulesFor(theme, mode);
@@ -223,9 +233,10 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
   // Maravilha (oráculo): índice da peça do canteiro e etapa.
   let wonderAt: number | null = null;
   let wonderStage = 0;
-  const game = new Game(seed, rules);
+  const game = new Game(seed, rules, specials);
   const b = game.board;
-  const log: GameLog = { seed, themeId: theme.id, rules, moves: [], snapshots: [], finalScore: 0, finalStack: 0, placed: 0, discarded: 0, quests: 0, mode: mode.id };
+  const specialsSeen = new Set<SpecialKind>();
+  const log: GameLog = { seed, themeId: theme.id, rules, specials, moves: [], snapshots: [], finalScore: 0, finalStack: 0, placed: 0, discarded: 0, quests: 0, mode: mode.id };
   const ts = (themeStats[theme.id] ??= { games: 0, moves: 0, score: 0, discards: 0, questsDone: 0, questsFailed: 0, exactDone: 0, exactFailed: 0, closed: 0, perfects: 0, maxActive: 0, overshootGames: 0 });
   ts.games++;
 
@@ -258,7 +269,8 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     }
     const edges = rotateEdges(cur.edges, m.rot);
     // Marco da era: a primeira peça com vila depois de um avanço.
-    const expectedMark = pendingMark !== null && edges.some((e) => e === T.Village) ? pendingMark : null;
+    // A peça especial tem a construção dela no meio: o marco espera a próxima peça com vila.
+    const expectedMark = pendingMark !== null && !cur.special && edges.some((e) => e === T.Village) ? pendingMark : null;
     assert(oracleValid(b, m.q, m.r, edges), `seed ${seed}: bestMove inválida pelo oráculo`);
     // Estado prévio para o oráyculo de pontuação
     const closedBefore = new Set(b.list.filter((t) => oracleClosed(b, t)).map((t) => t.index));
@@ -410,6 +422,25 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       gained += ORACLE_SITE[siteKind].tiles;
       inc('sitios_' + siteKind);
     }
+    // --- peça especial: pontos por peça a até `radius` hexágonos com ao menos uma borda do terreno dela
+    let specialExp: { kind: SpecialKind; count: number; points: number; tiles: number } | null = null;
+    if (cur.special) {
+      const O = ORACLE_SPECIAL[cur.special];
+      assert(cur.edges.every((e, i) => e === O.edges[i]) && !cur.quest, `seed ${seed}: peça especial ${cur.special} com bordas ou missão erradas`);
+      let count = 0;
+      for (const t of b.list) {
+        if (t === res.placed) continue;
+        const dq = t.q - res.placed.q, dr = t.r - res.placed.r;
+        if ((Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2 <= O.radius && t.edges.includes(O.terrain)) count++;
+      }
+      pts += count * O.per;
+      gained += O.tiles;
+      specialExp = { kind: cur.special, count, points: count * O.per, tiles: O.tiles };
+      if (O.lookout) assert(b.lookout >= O.lookout, `seed ${seed}: farol não abriu o mirante`);
+      specialsSeen.add(cur.special);
+      inc('especiais_' + cur.special);
+    }
+    assert(JSON.stringify(res.special) === JSON.stringify(specialExp), `seed ${seed}: especial ${JSON.stringify(res.special)} != oráculo ${JSON.stringify(specialExp)}`);
     assert((res.site?.kind ?? null) === siteKind, `seed ${seed}: sítio ${res.site?.kind} != oráculo ${siteKind}`);
     assert(b.sites.filter((st) => st.found).length === foundBefore + (siteKind ? 1 : 0), `seed ${seed}: contagem de sítios achados`);
 
@@ -425,7 +456,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
         inc('maravilhas');
       }
       wonderExp = { stage: wonderStage, started: false, done };
-    } else if (wonderAt === null && rules.wonderStages > 0 && rules.eraScores.length > 1 && expectedEra === rules.eraScores.length - 1 && expectedMark === null && edges.filter((e) => e === T.Village).length >= 2) {
+    } else if (wonderAt === null && !cur.special && rules.wonderStages > 0 && rules.eraScores.length > 1 && expectedEra === rules.eraScores.length - 1 && expectedMark === null && edges.filter((e) => e === T.Village).length >= 2) {
       wonderAt = res.placed.index;
       wonderStage = 0;
       wonderExp = { stage: 0, started: true, done: false };
@@ -537,13 +568,16 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     assert(game.stack <= 0, `seed ${seed}: fim de jogo com pilha ${game.stack}`);
   } else assert(!game.over && game.stack === rules.startTiles, `seed ${seed}: zen terminou ou mexeu na pilha`);
   assert(game.placedCount === log.moves.length, `seed ${seed}: placedCount != moves`);
+  // Toda peça liberada sai até a 16ª peça depois do início: quem jogou mais que isso a viu.
+  for (const k of specials) if (log.moves.length + log.discarded >= 16 + 13 * SPECIAL_KINDS.indexOf(k)) assert(specialsSeen.has(k) || log.discarded > 0, `seed ${seed}: peça especial ${k} liberada não saiu`);
+  for (const k of specialsSeen) assert(specials.includes(k), `seed ${seed}: peça especial ${k} saiu sem estar liberada`);
   return log;
 }
 
 // ------------------------------------------------------------------ replay (mesmo fluxo de main.ts:newGame)
 
 function replay(log: GameLog, upTo = log.moves.length) {
-  const game = new Game(log.seed, log.rules);
+  const game = new Game(log.seed, log.rules, log.specials);
   const moves: [number, number, number][] = [];
   for (const [q, r, rot] of log.moves.slice(0, upTo)) {
     game.rot = rot;
@@ -567,7 +601,9 @@ for (let g = 0; g < N_GAMES; g++) {
   seedMathRandom(seed ^ 0xabcdef);
   // Um quinto das partidas em cada modo alternativo (o resto no clássico).
   const mode = g % 5 === 4 ? MODES[1 + Math.floor(g / 5) % (MODES.length - 1)] : MODES[0];
-  const lg = simulate(seed, themeIdx, g < 60, policy, mode);
+  // Um terço das partidas com todas as peças especiais liberadas e um terço só com a primeira.
+  const specials = g % 3 === 1 ? [...SPECIAL_KINDS] : g % 3 === 2 ? [SPECIAL_KINDS[0]] : [];
+  const lg = simulate(seed, themeIdx, g < 60, policy, mode, specials);
   (lg as GameLog & { policy?: string }).policy = policy;
   inc('partidas_' + policy);
   inc('modo_' + mode.id);
@@ -704,6 +740,18 @@ if (contBad) fail(`continuação pós-replay divergiu em ${contBad} partidas`);
     const g1 = new Game(seed, { ...DEFAULT_RULES, sites: 0 });
     const g2 = new Game(seed, { ...DEFAULT_RULES, sites: 10 });
     if (g1.current?.seed !== g2.current?.seed || g1.next.seed !== g2.next.seed) bad++;
+  }
+  // As peças especiais só trocam a peça dos seus índices: o resto da sequência é igual.
+  for (let seed = 1; seed <= 50; seed++) {
+    const g1 = new Game(seed, { ...DEFAULT_RULES, startTiles: 200 });
+    const g2 = new Game(seed, { ...DEFAULT_RULES, startTiles: 200 }, [...SPECIAL_KINDS]);
+    const a = g1.upcoming(80), c = g2.upcoming(80);
+    let specials = 0;
+    for (let i = 0; i < 80; i++) {
+      if (c[i].special) specials++;
+      else if (a[i].seed !== c[i].seed || a[i].edges.join() !== c[i].edges.join()) bad++;
+    }
+    if (specials !== 6) bad++;
   }
   console.log(`Sítios: ${total} gerações conferidas, erros ${bad}`);
   if (bad) fail(`sítios: ${bad} erros de geração`);

@@ -787,7 +787,7 @@ export class World {
   // ---------------------------------------------------------------- mapa
 
   private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean }) {
-    return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, ...extra });
+    return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, special: def.special, ...extra });
   }
 
   /** Peça do mapa já colocada: a inicial reserva o Centro, e a do marco o ergue. */
@@ -1144,9 +1144,10 @@ export class World {
     const syn = check.valid ? synBase(check.synergies, rot) : [];
     const flow = flowBase(this.flowAt(q, r, rotateEdges(def.edges, rot)), rot);
     // O fantasma já mostra o marco da era que a peça ergueria.
-    const mark = check.valid ? (check.eraMark ?? undefined) : undefined;
+    // A peça especial não ergue marco nem começa a maravilha (Board.place): o fantasma também não.
+    const mark = check.valid && !def.special ? (check.eraMark ?? undefined) : undefined;
     const site = check.valid ? check.site?.kind : undefined;
-    const wonder = check.valid && check.wonder ? true : undefined;
+    const wonder = check.valid && check.wonder && !def.special ? true : undefined;
     const sig = `${synSig(syn)}|${flow.join('')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}`;
     const key = `${def.seed}:${this.theme.id}:${sig}`;
     if (!this.ghost || this.ghostKey !== key) {
