@@ -574,6 +574,62 @@ kbd {
   width: min(420px, calc(100vw - 2 * var(--gutter)));
 }
 
+/* Dica das primeiras partidas: um cartão por vez, acima da linha de controles. */
+.tip {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 58px);
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 14px;
+  align-items: end;
+  width: min(440px, calc(100vw - 2 * var(--gutter)));
+  padding: 14px 16px 14px 18px;
+  border-radius: 18px;
+  border-left: 5px solid var(--accent);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  z-index: 6;
+  animation: tip-in 0.35s ease;
+}
+
+.tip[hidden] {
+  display: none;
+}
+
+.tip b {
+  grid-column: 1 / -1;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 19px;
+}
+
+.tip p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.tip button {
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+@keyframes tip-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+}
+
 .toast {
   padding: 8px 16px;
   border-radius: 999px;
@@ -788,6 +844,34 @@ kbd {
   background: color-mix(in srgb, var(--ink) 9%, transparent);
 }
 
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+
+.tabs button {
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tabs button[aria-selected='true'] {
+  background: var(--accent);
+  color: var(--panel);
+}
+
+.sheet .tab[hidden] {
+  display: none;
+}
+
 .final {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -869,6 +953,7 @@ body.capture .hud-top,
 body.capture .quests,
 body.capture .stack,
 body.capture .hint,
+body.capture .tip,
 body.capture .stats,
 body.capture #markers,
 body.capture #floaters {
@@ -1015,6 +1100,11 @@ body.capture #floaters {
 
 /* ---------- telas pequenas */
 @media (max-width: 720px) {
+  .tip {
+    top: calc(env(safe-area-inset-top, 0px) + 150px);
+    bottom: auto;
+  }
+
   .hint {
     display: none;
   }

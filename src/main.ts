@@ -5,6 +5,7 @@ import { Game } from './core/game';
 import { MODES, dailySeed, modeById, type Mode, type ModeId } from './core/modes';
 import { LOOKOUT_MOVES, SITE_REWARD, type SiteKind } from './core/sites';
 import { mulberry32 } from './core/rng';
+import { T } from './core/tiles';
 import { DIRS, hexToWorld, hkey, worldToHex } from './core/hex';
 import type { Quality, TimeOfDay } from './render/world';
 import { DynRes } from './render/dynres';
@@ -21,6 +22,7 @@ import { Take, type TakeEvent } from './video/take';
 import { themeById, type Theme } from './themes/themes';
 import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor } from './ui/banner';
 import { Hud, questLabel, questMarker } from './ui/hud';
+import { Tutorial } from './ui/tutorial';
 import './ui/style.css';
 
 // ------------------------------------------------------------------ estado
@@ -137,6 +139,8 @@ let overTimer = 0;
 let bestAtStart = 0;
 let recordCheered = false;
 const special = params.has('stress') || params.has('auto') || params.has('demo');
+const tutorial = new Tutorial(store);
+tutorial.enabled = !special;
 /** O que a tela está fazendo: o jogo, o modo foto, ou um vídeo sendo desenhado (o laço não desenha). */
 let stage: 'play' | 'photo' | 'export' = 'play';
 /** Gravação em andamento (tecla V) e o estado do jogo quando ela começou. */
@@ -203,6 +207,12 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   frameCamera(true);
   // Partida nova: o batedor mostra para onde fica o sítio mais perto (quando a ajuda fechar).
   scoutPending = !replay.length;
+  if (!replay.length)
+    tutorial.offer(
+      'inicio',
+      'Monte a paisagem',
+      `Coloque a peça encostada no mapa: cada borda igual à vizinha vale ${game.rules.matchPoints} pontos. Gire com <kbd>R</kbd> ou o botão direito (no toque, os botões de girar). A partida acaba quando a pilha esvazia.`,
+    );
   refreshHud(true);
   persist();
   return true;
@@ -308,6 +318,8 @@ function refreshHud(instant = false) {
   hud.renderNext(game.stack <= 1 && !game.rules.infinite ? null : game.next, theme, game.board.lookout > 0 ? game.upcoming(3) : []);
   world.setPreview(game.current, rotSteps * (Math.PI / 3), game.stack);
   updateGhost();
+  if (game.current?.edges.some((e) => e === T.Water || e === T.Rail))
+    tutorial.offer('estrito', `${theme.terrainNames[T.Water]} e ${theme.terrainNames[T.Rail]}`, `Estas bordas precisam continuar: só encostam nelas mesmas. Uma borda de ${theme.terrainNames[T.Water].toLowerCase()} não pode encostar num ${theme.terrainNames[T.Grass].toLowerCase()}, por exemplo.`);
 }
 
 function updateGhost() {
@@ -390,9 +402,23 @@ function place(q: number, r: number) {
   }
 }
 
+/** Dicas das primeiras partidas, conforme o que a jogada fez acontecer. */
+function offerTips(res: PlaceResult) {
+  const R = game.rules;
+  if (res.perfect) tutorial.offer('perfeito', 'Encaixe perfeito', `Todas as bordas que encostam em vizinhas combinaram: +${R.perfectBonus}. Cercar uma peça com 6 vizinhas encaixadas devolve uma peça à pilha.`);
+  if (res.newQuest)
+    tutorial.offer('missao', 'Nova missão', `${questLabel(res.newQuest, theme)}: cumprida, rende +${res.newQuest.reward} peças. Peças com "!" trazem missões; as ativas ficam no canto e com um estandarte no mapa.`);
+  if (res.synergies.length) tutorial.offer('interacao', 'Interação', `Bordas diferentes que "conversam" também pontuam (+${R.synergyPoints}) e erguem uma construção. A prévia acende em dourado antes de colocar.`);
+  if (res.site) tutorial.offer('sitio', 'Sítio descoberto', 'Os carimbos no mapa escondem ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.');
+  if (res.eraUp !== null) tutorial.offer('era', 'Nova era', `A vila mudou de era e ganhou +${R.eraTiles} peças. O Centro mudou de forma, e a próxima peça com vila ergue o marco da era.`);
+  if (res.wonder?.started) tutorial.offer('maravilha', 'Maravilha', `Esta peça virou o canteiro da maravilha. Cada peça colocada depois avança uma etapa; pronta, rende +${R.wonderPoints} pontos e +${R.wonderTiles} peças.`);
+  if (!R.infinite && game.stack > 0 && game.stack <= 10) tutorial.offer('pilha', 'Pilha acabando', 'Missões, peças cercadas, sítios e eras devolvem peças à pilha. Vale mirar a missão mais perto de terminar.');
+}
+
 function announce(res: PlaceResult) {
   const s = screenOf(res.placed.q, res.placed.r);
   world.placeFx(res);
+  offerTips(res);
   sfx.place(res.matches);
   if (res.points > 0) {
     hud.floater(s.x, s.y - 10, `+${res.points}`, res.perfect ? 'big' : '');
@@ -454,30 +480,63 @@ function announce(res: PlaceResult) {
 
 // ------------------------------------------------------------------ telas
 
-function showHelp() {
+/** Ajuda em abas: o básico primeiro, o resto por assunto. */
+function showHelp(tab = 'basico') {
+  const R = game.rules;
   const legend = theme.terrainNames.map((n, i) => `<span><i style="background:${theme.terrainColors[i]}"></i>${n}</span>`).join('');
+  const wonder = R.wonderStages > 0 && R.eraScores.length > 1;
+  const tabs: [string, string, string][] = [
+    [
+      'basico',
+      'Básico',
+      `<p>Monte uma paisagem peça por peça. Cada borda que combina com a vizinha vale ${R.matchPoints} pontos.</p>
+      <div class="legend">${legend}</div>
+      <ul>
+        <li><b>${theme.terrainNames[4]}</b> e <b>${theme.terrainNames[5]}</b> precisam continuar: só encostam neles mesmos.</li>
+        <li><b>Encaixe perfeito</b>: a peça encosta em 2 ou mais vizinhas e todas as bordas combinam (+${R.perfectBonus}).</li>
+        <li>Cercar uma peça com 6 vizinhas encaixadas rende <b>+${R.closedTiles} peça</b>.</li>
+        <li>A partida acaba quando a pilha esvazia. <kbd>U</kbd> desfaz a última jogada (o número de vezes depende do modo).</li>
+      </ul>`,
+    ],
+    [
+      'missoes',
+      'Missões',
+      `<p>Peças marcadas com "!" trazem uma missão. Cumprida, ela devolve peças à pilha.</p>
+      <ul>
+        <li><b>Grupo</b>: o terreno chegar a N peças. "Exatamente N" falha se passar.</li>
+        <li><b>Fechar</b>: nenhuma borda do grupo virada para o vazio.</li>
+        <li><b>Encaixes perfeitos</b>: N encaixes perfeitos a partir dali.</li>
+        <li><b>Interação</b>: N interações daquele tipo a partir dali.</li>
+      </ul>
+      <p><b>Interações</b>: bordas diferentes que se encostam também contam (+${R.synergyPoints}) e erguem construções. A borda acende em dourado.</p>
+      <div class="synergies">${synergyLegend()}</div>`,
+    ],
+    [
+      'eras',
+      'Eras',
+      `<ul>
+        <li>Com ${R.eraScores.slice(1).map((v) => v.toLocaleString('pt-BR')).join(', ')} pontos a vila muda de era e ganha +${R.eraTiles} peças. O Centro, no meio da primeira peça, muda de forma, e a próxima peça com vila ergue o marco da era.</li>
+        ${wonder ? `<li><b>Maravilha</b>: na última era, a próxima peça com 2 ou mais bordas de vila vira o canteiro da maravilha do tema. Cada peça colocada depois avança uma etapa, e as ${R.wonderStages} etapas rendem +${R.wonderPoints} pontos e +${R.wonderTiles} peças.</li>` : ''}
+        <li><b>Sítios</b>: carimbos no mapa marcam ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.</li>
+      </ul>`,
+    ],
+    [
+      'controles',
+      'Controles',
+      `<ul>
+        <li>Mouse: clique coloca, botão direito ou <kbd>R</kbd> gira a peça, arrastar move, roda dá zoom, <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera.</li>
+        <li>Toque: toque num espaço para ver a peça, toque de novo (ou ✓) para colocar.</li>
+        <li>O botão de som alterna entre música e efeitos, só efeitos e mudo; <kbd>M</kbd> liga ou desliga a música.</li>
+        <li>O botão Câmera tira fotos sem a interface (<kbd>P</kbd>) e grava vídeos de até 2 minutos (<kbd>V</kbd>), salvos em MP4 de até 4K.</li>
+      </ul>`,
+    ],
+  ];
+  const pick = tabs.some(([id]) => id === tab) ? tab : 'basico';
   hud.showModal(`
     <h2 id="modal-title">Retalhos</h2>
-    <p>Monte uma paisagem peça por peça. Cada borda que combina com a vizinha vale ${game.rules.matchPoints} pontos.</p>
-    <div class="legend">${legend}</div>
-    <ul>
-      <li><b>${theme.terrainNames[4]}</b> e <b>${theme.terrainNames[5]}</b> precisam continuar: só encostam neles mesmos.</li>
-      <li><b>Encaixe perfeito</b>: a peça encosta em 2 ou mais vizinhas e todas as bordas combinam (+${game.rules.perfectBonus}).</li>
-      <li>Cercar uma peça com 6 vizinhas encaixadas rende <b>+1 peça</b>.</li>
-      <li><b>Missões</b> dão peças extras. Umas pedem um grupo de certo tamanho ("exatamente N" falha se passar), outras pedem para <b>fechar</b> um grupo (nenhuma borda dele para o vazio), fazer encaixes perfeitos ou erguer interações de um tipo.</li>
-      <li><b>Interações</b>: bordas diferentes que se encostam também contam (+${game.rules.synergyPoints}) e erguem construções. A borda acende em dourado.</li>
-    </ul>
-    <div class="synergies">${synergyLegend()}</div>
-    <ul>
-      <li><b>Eras</b>: com ${game.rules.eraScores.slice(1).map((v) => v.toLocaleString('pt-BR')).join(', ')} pontos a vila muda de era e ganha +${game.rules.eraTiles} peças. O Centro, no meio da primeira peça, muda de forma, e a próxima peça com vila ergue o marco da era.${game.rules.wonderStages > 0 && game.rules.eraScores.length > 1 ? ` Na última era, a próxima peça com 2 ou mais bordas de vila vira o canteiro da maravilha do tema: cada peça colocada depois avança uma etapa, e as ${game.rules.wonderStages} etapas rendem +${game.rules.wonderPoints} pontos e +${game.rules.wonderTiles} peças.` : ''}</li>
-      <li><b>Sítios</b>: carimbos no mapa marcam ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.</li>
-      <li><kbd>U</kbd> desfaz a última jogada (o número de vezes depende do modo).</li>
-      <li>O botão de som alterna entre música e efeitos, só efeitos e mudo; <kbd>M</kbd> liga ou desliga a música.</li>
-      <li>O botão Câmera tira fotos sem a interface (<kbd>P</kbd>) e grava vídeos de até 2 minutos (<kbd>V</kbd>), salvos em MP4 de até 4K.</li>
-      <li>A partida acaba quando a pilha esvazia.</li>
-    </ul>
-    <p class="muted">Mouse: clique coloca, botão direito ou <kbd>R</kbd> gira a peça, arrastar move, roda dá zoom, <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera. Toque: toque num espaço para ver a peça, toque de novo (ou ✓) para colocar.</p>
-    <div class="row"><button class="primary" type="button" data-act="close">Jogar</button></div>`);
+    <div class="tabs" role="tablist">${tabs.map(([id, name]) => `<button type="button" role="tab" data-tab="${id}" aria-selected="${id === pick}">${name}</button>`).join('')}</div>
+    ${tabs.map(([id, , html]) => `<section class="tab" data-tab="${id}"${id === pick ? '' : ' hidden'}>${html}</section>`).join('')}
+    <div class="row"><button class="primary" type="button" data-act="close">Jogar</button><button class="secondary" type="button" data-act="tips">Rever as dicas</button></div>`);
 }
 
 function synergyLegend() {
@@ -504,14 +563,37 @@ function showGameOver() {
       <button class="primary" type="button" data-act="new">Jogar de novo</button>
       ${mode.daily ? '' : `<button class="secondary" type="button" data-act="replay-seed">Repetir a semente</button>`}
       <button class="secondary" type="button" data-act="theme">Trocar tema</button>
-    </div>`);
+    </div>
+    ${moves.length ? `<div class="row"><button class="secondary" type="button" data-act="film">Gravar o filme da partida</button></div>` : ''}`);
   if (record) hud.modalBody.querySelector('h2')!.classList.add('record');
   sfx.gameOver(record);
   hud.countUp(hud.modalBody.querySelector<HTMLElement>('[data-count]')!, b.score);
 }
 
 hud.modal.addEventListener('click', (e) => {
-  const act = (e.target as HTMLElement).closest('button')?.dataset.act;
+  const btn = (e.target as HTMLElement).closest('button');
+  const act = btn?.dataset.act;
+  if (btn?.dataset.tab) {
+    // Abas da ajuda: troca a seção visível sem refazer o modal.
+    for (const el of hud.modalBody.querySelectorAll<HTMLElement>('[data-tab]')) {
+      const on = el.dataset.tab === btn.dataset.tab;
+      if (el.tagName === 'SECTION') el.hidden = !on;
+      else el.setAttribute('aria-selected', String(on));
+    }
+    return;
+  }
+  if (act === 'film') {
+    // O diálogo de exportação toma o lugar do placar final.
+    showExportDialog('film');
+    return;
+  }
+  if (act === 'tips') {
+    tutorial.reset();
+    hud.hideModal();
+    store.set('seenHelp', '1');
+    hud.toast('As dicas voltam a aparecer conforme você joga.');
+    return;
+  }
   if (e.target === hud.modal || act === 'close') {
     hud.hideModal();
     store.set('seenHelp', '1');
@@ -819,7 +901,7 @@ document.getElementById('rot-right')!.addEventListener('click', () => {
 hud.confirm.addEventListener('click', () => {
   if (hover) place(hover.q, hover.r);
 });
-document.getElementById('btn-help')!.addEventListener('click', showHelp);
+document.getElementById('btn-help')!.addEventListener('click', () => showHelp());
 document.getElementById('btn-new')!.addEventListener('click', requestNewGame);
 document.getElementById('btn-undo')!.addEventListener('click', undo);
 hud.themeBtn.addEventListener('click', () => {
@@ -1312,6 +1394,7 @@ function step(now: number) {
   last = now;
   // A foto e o vídeo desenham por conta própria.
   if (stage === 'export' || shooting) return;
+  tutorial.tick(hud.modalOpen || stage !== 'play' || take !== null);
   const c0 = performance.now();
   keyboardCamera(dt);
   if (params.has('demo')) demoStep(dt);

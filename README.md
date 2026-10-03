@@ -33,6 +33,8 @@ Coloque peças encostadas no mapa. A pilha começa com 50 peças. Cada borda que
 | Encaixes perfeitos | N encaixes perfeitos a partir dali | 20 pontos por encaixe pedido e +5 peças |
 | Interação ("3× Serraria") | N interações daquele tipo a partir dali | 15 pontos por interação pedida e +5 peças |
 
+Nas primeiras partidas, um cartão curto explica cada coisa na primeira vez que ela acontece (encaixe perfeito, missão, interação, sítio, era, maravilha). A ajuda (`?`) tem abas por assunto e um botão para rever as dicas.
+
 O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Repetir a semente" joga a mesma sequência de peças de novo.
 
 **Eras da vila:** com 500, 1.500 e 3.000 pontos a vila muda de era (os nomes mudam por tema, como Borgo → Comune → Signoria → Rinascimento na Toscana) e ganha +3 peças. A cada era, o Centro da vila (no meio da primeira peça) muda de forma, de fogueira com cabanas a palácio, e uma onda dourada corre pelo mapa. A próxima peça com vila ergue o marco da era, que o fantasma já mostra antes de colocar.

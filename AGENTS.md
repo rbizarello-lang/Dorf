@@ -142,7 +142,7 @@ src/video/       foto e vídeo (o modo foto fica no main.ts)
   render.ts      desenha o vídeo quadro a quadro, com world.tick(1/60), e entrega ao codificador
   encoder.ts     WebCodecs: escolhe H.264 ou VP9 e guarda os quadros codificados em Blobs
   mp4.ts         cabeçalho MP4 (ftyp, moov, mdat) escrito à mão, sem biblioteca
-src/ui/          HUD em HTML/CSS (hud.ts, style.css); banner.ts: cor da casa e brasão (troca o `ui.accent` do tema); a página é o index.html
+src/ui/          HUD em HTML/CSS (hud.ts, style.css); banner.ts: cor da casa e brasão (troca o `ui.accent` do tema); tutorial.ts: dicas das primeiras partidas; a página é o index.html
 src/audio.ts     sons sintetizados com WebAudio
 src/main.ts      entrada: fluxo da partida, entrada de mouse/toque/teclado, salvamento, parâmetros de URL, ganchos de depuração
 tests/logic.ts      simulação de partidas contra oráculos independentes (grupos por BFS, pontuação recalculada, replay)
