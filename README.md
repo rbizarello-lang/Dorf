@@ -98,6 +98,7 @@ Durante a gravação, o jogo anota só a câmera e as jogadas, então não fica 
 O botão de qualidade abre a lista: **Auto**, **Cinema**, **Ultra**, **Alta**, **Média** e **Baixa**, cada uma com uma linha dizendo para que placa serve.
 
 - **Auto** escolhe o começo pelo nome da placa de vídeo (por exemplo, Alta numa RX 580 e Ultra numa RTX 3060). Se o quadro ficar lento, primeiro baixa a resolução interna, em degraus até 60%, e só depois desce de nível. O nome da placa e o nível escolhido aparecem no título do botão.
+- **Celular e tablet:** com a tela parada (sem toque e sem peça caindo), o jogo desenha a 30 quadros e, depois de 15 s, a 20, para poupar bateria; o mundo continua animado. No computador nada muda. Em tela estreita, as missões viram linhas finas (um toque abre os detalhes) e os estandartes encolhem.
 - **Cinema** é para placas de topo e para fotos e vídeos: desenha 1,5× acima da tela, com mais amostras de luz e de reflexo, sombras mais finas, mais vegetação, grão de filme e uma leve aberração de lente. O Auto nunca escolhe o Cinema.
 
 ## Temas

@@ -6,7 +6,7 @@ import { MODES, dailySeed, modeById, type Mode, type ModeId } from './core/modes
 import { LOOKOUT_MOVES, SITE_REWARD, type SiteKind } from './core/sites';
 import { mulberry32 } from './core/rng';
 import { T } from './core/tiles';
-import { DIRS, hexToWorld, hkey, worldToHex } from './core/hex';
+import { DIRS, hexDistance, hexToWorld, hkey, worldToHex } from './core/hex';
 import type { Quality, TimeOfDay } from './render/world';
 import { DynRes } from './render/dynres';
 import { readGpuInfo } from './render/gpu';
@@ -21,7 +21,7 @@ import { renderVideo, type Script } from './video/render';
 import { Take, type TakeEvent } from './video/take';
 import { themeById, type Theme } from './themes/themes';
 import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor } from './ui/banner';
-import { Hud, questLabel, questMarker } from './ui/hud';
+import { Hud, glyph, questLabel, questMarker } from './ui/hud';
 import { Tutorial } from './ui/tutorial';
 import './ui/style.css';
 
@@ -349,6 +349,7 @@ function screenOf(q: number, r: number, y = 0.4) {
 }
 
 function place(q: number, r: number) {
+  lastInput = performance.now();
   if (!game.current || hud.modalOpen) return;
   const check = game.check(q, r);
   if (!check?.valid) {
@@ -483,7 +484,7 @@ function announce(res: PlaceResult) {
 /** Ajuda em abas: o básico primeiro, o resto por assunto. */
 function showHelp(tab = 'basico') {
   const R = game.rules;
-  const legend = theme.terrainNames.map((n, i) => `<span><i style="background:${theme.terrainColors[i]}"></i>${n}</span>`).join('');
+  const legend = theme.terrainNames.map((n, i) => `<span><i style="background:${theme.terrainColors[i]}">${glyph(`t${i}`, theme.terrainColors[i])}</i>${n}</span>`).join('');
   const wonder = R.wonderStages > 0 && R.eraScores.length > 1;
   const tabs: [string, string, string][] = [
     [
@@ -902,6 +903,8 @@ hud.confirm.addEventListener('click', () => {
   if (hover) place(hover.q, hover.r);
 });
 document.getElementById('btn-help')!.addEventListener('click', () => showHelp());
+// No celular as missões ficam em linhas finas; um toque abre ou fecha os detalhes.
+hud.quests.addEventListener('click', () => hud.quests.classList.toggle('open'));
 document.getElementById('btn-new')!.addEventListener('click', requestNewGame);
 document.getElementById('btn-undo')!.addEventListener('click', undo);
 hud.themeBtn.addEventListener('click', () => {
@@ -1377,9 +1380,19 @@ let frames = 0;
 let cpuAcc = 0;
 let last = performance.now();
 
+// Bateria: em tela de toque, com o jogo parado (sem toque, tecla ou peça caindo), desenha a 30
+// quadros e, depois de 15 s, a 20. O mundo continua animado; no computador nada muda.
+const saveBattery = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+let lastInput = 0;
+let frameNo = 0;
+for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart'])
+  window.addEventListener(ev, () => (lastInput = performance.now()), { capture: true, passive: true });
+
 function frame(now: number) {
   try {
-    step(now);
+    const idle = now - lastInput;
+    const skip = saveBattery && !special && stage === 'play' && !take && !shooting && idle > 4000 ? (idle > 15000 ? 3 : 2) : 1;
+    if (++frameNo % skip === 0) step(now);
   } finally {
     requestAnimationFrame(frame);
   }
@@ -1409,7 +1422,9 @@ function step(now: number) {
   for (const q of game.board.quests) {
     if (q.state !== 'active') continue;
     const s = screenOf(q.anchor.q, q.anchor.r, 0.55);
-    markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: questMarker(q), color: q.kind === 'perfect' ? theme.ui.accent : theme.terrainColors[q.terrain] });
+    // O estandarte não tapa a jogada: apaga quando o fantasma passa na peça dele ou numa vizinha.
+    const dim = !!hover && hexDistance(hover.q, hover.r, q.anchor.q, q.anchor.r) <= 1;
+    markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: questMarker(q), color: q.kind === 'perfect' ? theme.ui.accent : theme.terrainColors[q.terrain], dim });
   }
   // Maravilha em obra: etiqueta com a etapa sobre o canteiro.
   const wd = game.board.wonder;
