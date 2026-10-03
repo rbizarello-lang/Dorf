@@ -4,6 +4,7 @@ import { DEFAULT_RULES, type PlaceResult, type Rules } from './core/board';
 import { Game } from './core/game';
 import { MODES, dailySeed, modeById, type Mode, type ModeId } from './core/modes';
 import { LOOKOUT_MOVES, SITE_REWARD, type SiteKind } from './core/sites';
+import { SPECIALS, SPECIAL_KINDS, type SpecialKind } from './core/specials';
 import { mulberry32 } from './core/rng';
 import { T } from './core/tiles';
 import { DIRS, hexDistance, hexToWorld, hkey, worldToHex } from './core/hex';
@@ -20,9 +21,10 @@ import { planFilm } from './video/film';
 import { SMOOTHING, resample, smooth, type Smoothing } from './video/path';
 import { renderVideo, type Script } from './video/render';
 import { Take, type TakeEvent } from './video/take';
-import { themeById, type Theme } from './themes/themes';
+import { THEMES, themeById, type Theme } from './themes/themes';
 import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor } from './ui/banner';
 import { Hud, glyph, questLabel, questMarker } from './ui/hud';
+import { Progress, SPECIAL_NAME, UNLOCKS } from './ui/progress';
 import { Tutorial } from './ui/tutorial';
 import './ui/style.css';
 
@@ -32,7 +34,7 @@ type QualityMode = 'auto' | Quality;
 type MoveRec = [number, number, number];
 /** v4: modos, eras, sítios e bônus por tema. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 6;
+  v: 7;
   seed: number;
   rulesId: string;
   mode: ModeId;
@@ -40,8 +42,10 @@ interface Save {
   /** Quantas vezes já desfez nesta partida (o limite vem do modo). */
   undone: number;
   score: number;
+  /** Peças especiais que entraram nesta partida (mudam a sequência da pilha). */
+  specials: SpecialKind[];
 }
-const SAVE_VERSION = 6;
+const SAVE_VERSION = 7;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -142,11 +146,16 @@ let recordCheered = false;
 const special = params.has('stress') || params.has('auto') || params.has('demo');
 const tutorial = new Tutorial(store);
 tutorial.enabled = !special;
+const progress = new Progress(store, THEMES.map((t) => t.id));
+/** A partida atual já entrou no progresso (ao acabar ou ao ser trocada por outra). */
+let committed = false;
+// ?specials=station.watermill.lighthouse (ou all) põe peças especiais na partida sem liberá-las (capturas).
+const forcedSpecials: SpecialKind[] | null = params.has('specials') ? (params.get('specials') === 'all' ? [...SPECIAL_KINDS] : SPECIAL_KINDS.filter((k) => params.get('specials')!.split('.').includes(k))) : null;
 /** O que a tela está fazendo: o jogo, o modo foto, ou um vídeo sendo desenhado (o laço não desenha). */
 let stage: 'play' | 'photo' | 'export' = 'play';
 /** Gravação em andamento (tecla V) e o estado do jogo quando ela começou. */
 let take: Take | null = null;
-type TakeStart = Pick<Script, 'theme' | 'seed' | 'rules' | 'prefix' | 'tod'>;
+type TakeStart = Pick<Script, 'theme' | 'seed' | 'rules' | 'specials' | 'prefix' | 'tod'>;
 let takeStart: TakeStart | null = null;
 
 // Regras: padrão ← tema ← modo. O desafio do dia ignora as regras do tema (é igual para todos).
@@ -176,12 +185,15 @@ const siteReward = (kind: SiteKind) => {
  */
 const synTimers: number[] = [];
 
-function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number, undos = 0): boolean {
+function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number, undos = 0, specials?: readonly SpecialKind[]): boolean {
   // A gravação vale para uma partida só (desfazer refaz a partida pelo replay).
   if (take) stopTake('A gravação terminou aqui: o vídeo não acompanha o desfazer nem uma partida nova.');
   clearTimeout(overTimer);
   for (const t of synTimers.splice(0)) clearTimeout(t);
-  game = new Game(seed, rulesFor(rulesTheme));
+  // Peças especiais: as liberadas entram em toda partida nova, menos no Desafio do dia (igual para todos).
+  game = new Game(seed, rulesFor(rulesTheme), specials ?? forcedSpecials ?? (mode.daily ? [] : progress.unlocked));
+  // Partida nova (não um replay do desfazer ou do save): ainda não entrou no progresso.
+  if (!replay.length) committed = false;
   undone = undos;
   moves = [];
   for (const [q, r, rot] of replay) {
@@ -226,14 +238,14 @@ function persist() {
 }
 
 function snapshot(): Save {
-  return { v: SAVE_VERSION, seed: game.seed, rulesId: rulesTheme.id, mode: mode.id, moves, undone, score: game.board.score };
+  return { v: SAVE_VERSION, seed: game.seed, rulesId: rulesTheme.id, mode: mode.id, moves, undone, score: game.board.score, specials: [...game.specials] };
 }
 
 /** Aceita só saves completos e da versão atual; qualquer outra coisa é descartada. */
 function validSave(raw: unknown): Save | null {
   const s = raw as Partial<Save> | null;
   const okMove = (m: unknown) => Array.isArray(m) && m.length === 3 && m.every(Number.isInteger) && m[2] >= 0 && m[2] < 6;
-  if (s && s.v === SAVE_VERSION && Number.isInteger(s.seed) && s.seed! > 0 && typeof s.rulesId === 'string' && MODES.some((m) => m.id === s.mode) && Number.isInteger(s.undone) && s.undone! >= 0 && Array.isArray(s.moves) && s.moves.every(okMove) && Number.isFinite(s.score)) return s as Save;
+  if (s && s.v === SAVE_VERSION && Number.isInteger(s.seed) && s.seed! > 0 && typeof s.rulesId === 'string' && MODES.some((m) => m.id === s.mode) && Number.isInteger(s.undone) && s.undone! >= 0 && Array.isArray(s.moves) && s.moves.every(okMove) && Number.isFinite(s.score) && Array.isArray(s.specials) && s.specials.every((k) => SPECIAL_KINDS.includes(k))) return s as Save;
   return null;
 }
 
@@ -267,6 +279,7 @@ function requestNewGame() {
 }
 
 function startFresh(m: Mode = mode) {
+  commitProgress();
   mode = m;
   store.set('mode', m.id);
   rulesTheme = theme;
@@ -279,7 +292,7 @@ function undo() {
   const left = mode.undos - undone;
   if (left <= 0 || !moves.length || hud.modalOpen) return;
   const keep = moves.slice(0, -1);
-  if (!newGame(game.seed, keep, undefined, undone + 1)) return;
+  if (!newGame(game.seed, keep, undefined, undone + 1, game.specials)) return;
   sfx.rotate();
   hud.toast(left - 1 > 0 && left - 1 < 99 ? `Jogada desfeita · restam ${left - 1}` : 'Jogada desfeita');
 }
@@ -370,9 +383,15 @@ function place(q: number, r: number) {
   rotSteps = 0;
   hud.confirm.hidden = true;
   announce(res);
+  if (!special) for (const k of progress.unlockLive(game.board)) unlockedToast(k);
   let discarded = 0;
   while (game.discardIfStuck()) discarded++;
   if (discarded) hud.toast(discarded === 1 ? 'Uma peça não cabia em lugar nenhum e foi descartada.' : `${discarded} peças sem encaixe foram descartadas.`, 'bad');
+  const sp = game.current?.special;
+  if (sp) {
+    hud.toast(`Peça especial: ${SPECIAL_NAME[sp]}. ${specialRule(sp)}`, 'good');
+    tutorial.offer('especial', 'Peça especial', `${SPECIAL_NAME[sp]}: ${specialRule(sp).toLowerCase()} As peças especiais são liberadas jogando e entram duas vezes em cada partida.`);
+  }
   if (game.board.score > best) {
     best = game.board.score;
     bestSeed = game.seed;
@@ -393,6 +412,7 @@ function place(q: number, r: number) {
   persist();
   if (game.over && !gameOverShown) {
     gameOverShown = true;
+    commitProgress();
     overTimer = window.setTimeout(() => {
       if (!game.over) return;
       // A câmera recua devagar até mostrar o mapa inteiro antes do placar final.
@@ -415,6 +435,33 @@ function offerTips(res: PlaceResult) {
   if (res.eraUp !== null) tutorial.offer('era', 'Nova era', `A vila mudou de era e ganhou +${R.eraTiles} peças. O Centro mudou de forma, e a próxima peça com vila ergue o marco da era.`);
   if (res.wonder?.started) tutorial.offer('maravilha', 'Maravilha', `Esta peça virou o canteiro da maravilha. Cada peça colocada depois avança uma etapa; pronta, rende +${R.wonderPoints} pontos e +${R.wonderTiles} peças.`);
   if (!R.infinite && game.stack > 0 && game.stack <= 10) tutorial.offer('pilha', 'Pilha acabando', 'Missões, peças cercadas, sítios e eras devolvem peças à pilha. Vale mirar a missão mais perto de terminar.');
+}
+
+/** O que a peça especial rende, em uma frase (os nomes dos terrenos vêm do tema). */
+function specialRule(k: SpecialKind) {
+  const s = SPECIALS[k];
+  const near = s.radius === 1 ? 'vizinha' : `a até ${s.radius} casas`;
+  return `Vale +${s.per} por peça ${near} com ${theme.terrainNames[s.terrain].toLowerCase()}${s.tiles ? ` e +${s.tiles} peça${s.tiles > 1 ? 's' : ''}` : ''}${s.lookout ? ` e mostra as próximas peças por ${s.lookout} jogadas` : ''}.`;
+}
+
+function unlockedToast(k: SpecialKind) {
+  hud.toast(`Peça especial liberada: ${SPECIAL_NAME[k]}! Entra na pilha a partir da próxima partida.`, 'good');
+  sfx.quest();
+}
+
+/** Soma a partida ao progresso uma vez: ao acabar, ou ao ser trocada por outra depois de 5 jogadas. */
+function commitProgress() {
+  if (special || committed || (!game.over && moves.length < 5)) return;
+  committed = true;
+  const w = game.board.wonder;
+  for (const k of progress.commit(game.board, rulesTheme.id, !!w && w.stage >= game.rules.wonderStages)) unlockedToast(k);
+}
+
+/** Fim de partida: as peças especiais que faltam liberar e quanto falta para cada uma. */
+function specialsLine() {
+  const left = progress.pending(null);
+  if (!left.length) return `<p class="muted">Todas as peças especiais liberadas: ${progress.unlocked.map((k) => SPECIAL_NAME[k]).join(', ')}.</p>`;
+  return `<p class="muted">Peças especiais a liberar: ${left.map((n) => `<b>${SPECIAL_NAME[n.kind]}</b> ${n.have} de ${n.need} ${n.label}`).join(' · ')}.</p>`;
 }
 
 function announce(res: PlaceResult) {
@@ -476,6 +523,11 @@ function announce(res: PlaceResult) {
     hud.toast(`${theme.wonder?.name ?? 'Maravilha'} concluída: +${game.rules.wonderPoints} pontos · +${game.rules.wonderTiles} peças · P para a foto`, 'good');
     sfx.eraFanfare(game.board.era);
   } else if (res.wonder) sfx.hammer(0.4);
+  if (res.special) {
+    const sp = res.special;
+    hud.toast(`${SPECIAL_NAME[sp.kind]}: ${sp.count} ${sp.count === 1 ? 'peça' : 'peças'} com ${theme.terrainNames[SPECIALS[sp.kind].terrain].toLowerCase()} por perto · +${sp.points} pontos${sp.tiles ? ` · +${sp.tiles} peça${sp.tiles > 1 ? 's' : ''}` : ''}${SPECIALS[sp.kind].lookout ? ` · próximas peças à vista por ${SPECIALS[sp.kind].lookout} jogadas` : ''}`, 'good');
+    sfx.hammer(0.5);
+  }
   if (res.leftoverBonus) hud.toast(`Todos os sítios achados! Peças que sobraram: +${res.leftoverBonus} pontos`, 'good');
   hud.renderQuests(game.board.quests, theme);
 }
@@ -519,6 +571,7 @@ function showHelp(tab = 'basico') {
       `<ul>
         <li>Com ${R.eraScores.slice(1).map((v) => v.toLocaleString('pt-BR')).join(', ')} pontos a vila muda de era e ganha +${R.eraTiles} peças. O Centro, no meio da primeira peça, muda de forma, e a próxima peça com vila ergue o marco da era.</li>
         ${wonder ? `<li><b>Maravilha</b>: na última era, a próxima peça com 2 ou mais bordas de vila vira o canteiro da maravilha do tema. Cada peça colocada depois avança uma etapa, e as ${R.wonderStages} etapas rendem +${R.wonderPoints} pontos e +${R.wonderTiles} peças.</li>` : ''}
+        <li><b>Peças especiais</b>: ${SPECIAL_KINDS.map((k) => `${SPECIAL_NAME[k]} (${specialRule(k).toLowerCase().replace(/\.$/, '')}; libera com ${UNLOCKS[k].need} ${UNLOCKS[k].label})`).join('; ')}. Liberadas, entram duas vezes em cada partida, menos no Desafio do dia.</li>
         <li><b>Sítios</b>: carimbos no mapa marcam ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.</li>
       </ul>`,
     ],
@@ -562,6 +615,7 @@ function showGameOver() {
     </div>
     <p class="muted">Era ${eraName(b.era)}, ${b.sites.filter((x) => x.found).length} de ${b.sites.length} sítios, ${b.perfects} encaixes perfeitos, ${Object.values(b.synergyCount).reduce((a, c) => a + c, 0)} interações.</p>
     <p class="muted">Recorde em ${mode.name} · ${rulesTheme.name}: ${best.toLocaleString('pt-BR')} pontos (semente ${bestSeed}).</p>
+    ${special ? '' : specialsLine()}
     <div class="row">
       <button class="primary" type="button" data-act="new">Jogar de novo</button>
       ${mode.daily ? '' : `<button class="secondary" type="button" data-act="replay-seed">Repetir a semente</button>`}
@@ -606,6 +660,7 @@ hud.modal.addEventListener('click', (e) => {
   } else if (act === 'replay-seed') {
     // A mesma sequência de peças, para tentar de novo com o que se aprendeu.
     hud.hideModal();
+    commitProgress();
     const seed = game.seed;
     rulesTheme = theme;
     newGame(seed);
@@ -1200,7 +1255,7 @@ async function shootPhoto() {
 function startTake() {
   if (stage !== 'play' || take || hud.modalOpen) return;
   take = new Take();
-  takeStart = { theme, seed: game.seed, rules: game.rules, prefix: moves.slice(), tod: world.timeOfDay };
+  takeStart = { theme, seed: game.seed, rules: game.rules, specials: game.specials, prefix: moves.slice(), tod: world.timeOfDay };
   // A peça que já está flutuando entra na gravação desde o começo.
   updateGhost();
   updateCameraBtn();
@@ -1281,7 +1336,7 @@ function buildScript(kind: 'take' | 'film', cam: Smoothing, tod: TimeOfDay, fps:
   const plan = planFilm(moves, world.rig.yaw);
   const poses = smooth(resample(plan.times, plan.poses, fps, plan.duration), 0.8 * fps);
   const events: TakeEvent[] = moves.map(([q, r, rot], i) => ({ t: plan.placeAt[i], kind: 'place', q, r, rot }));
-  return { theme, seed: game.seed, rules: game.rules, prefix: [], tod, events, poses, gameUi: false };
+  return { theme, seed: game.seed, rules: game.rules, specials: game.specials, prefix: [], tod, events, poses, gameUi: false };
 }
 
 const exportBar = document.createElement('div');
@@ -1514,7 +1569,7 @@ function start(data: unknown) {
   if (saved) {
     rulesTheme = themeById(saved.rulesId);
     mode = modeById(saved.mode);
-    resumed = newGame(saved.seed, saved.moves, saved.score, saved.undone);
+    resumed = newGame(saved.seed, saved.moves, saved.score, saved.undone, saved.specials);
     if (resumed && saved.moves.length) hud.toast(`Partida retomada · ${saved.moves.length} peças`);
     else if (!resumed) hud.toast('A partida salva é de uma versão anterior e não pôde ser retomada. Começando outra.');
   }
@@ -1612,6 +1667,16 @@ function start(data: unknown) {
   world.rig.target.set(x, 0, z);
   if (zoom) world.rig.dist = world.rig.goalDist = zoom;
   return found ? `achado:${found.site}` : `escondido:${(st as { kind: string }).kind}`;
+};
+// Peça especial: centraliza na i-ésima colocada (estação, moinho d'água ou farol) e devolve qual.
+(window as unknown as { __special: (i?: number, zoom?: number) => string | null }).__special = (i = 0, zoom) => {
+  const p = game.board.list.filter((t) => t.def.special)[i];
+  if (!p) return null;
+  const { x, z } = hexToWorld(p.q, p.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return p.def.special!;
 };
 // Maravilha: centraliza no canteiro; com `stage`, mostra a obra nessa etapa (0 a 6, só a imagem).
 (window as unknown as { __wonder: (stage?: number, zoom?: number) => boolean }).__wonder = (stage, zoom) => {

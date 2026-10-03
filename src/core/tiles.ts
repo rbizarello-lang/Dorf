@@ -1,3 +1,4 @@
+import type { SpecialKind } from './specials';
 import { type Rng, pick, randInt, weighted } from './rng';
 import type { SynKind } from './synergy';
 
@@ -40,6 +41,8 @@ export interface TileDef {
   /** Semente da decoração: a peça fica igual no fantasma, na queda e no mapa. */
   seed: number;
   quest: QuestSpec | null;
+  /** Peça especial (estação, moinho d'água, farol): bordas fixas e pontos pelo terreno à volta. */
+  special?: SpecialKind;
 }
 
 export function rotateEdges(edges: readonly T[], rot: number): T[] {
