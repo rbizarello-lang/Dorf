@@ -282,6 +282,11 @@ interface DecoOpts {
   shingles?: boolean;
   /** Contorno luminoso nas bordas das copas, na cor do sol. */
   rim?: boolean;
+  /**
+   * Luz de borda só do lado do sol (casas e marcos): destaca a silhueta contra o chão de longe e
+   * com a câmera baixa, como a máscara de fresnel do Dorfromantik. O valor é a intensidade.
+   */
+  rimSun?: number;
   /** Normais da geometria (copas arredondadas em lib.ts), em vez da normal plana de cada face. */
   smooth?: boolean;
   /** Pincelada nas partes tingidas: toques nas copas, traços verticais nas paredes. */
@@ -349,6 +354,12 @@ function decoMaterial(o: DecoOpts) {
     const rim = float(1).sub(max(dot(normalWorld, v), 0)).pow(3);
     emissive = emissive.add(U.sun.mul(base).mul(rim.mul(0.35)).mul(float(1).sub(U.night)));
   }
+  if (o.rimSun) {
+    const v = toCam.div(camDist);
+    // Faces de lado para a câmera e viradas para o sol; o telhado visto de cima fica de fora.
+    const rim = float(1).sub(max(dot(normalWorld, v), 0)).pow(2).mul(smoothstep(-0.1, 0.5, dot(normalWorld, U.sunDir)));
+    emissive = emissive.add(U.sun.mul(base).mul(rim.mul(o.rimSun)).mul(float(1).sub(U.night)));
+  }
   emissive = emissive.add(ERA_GOLD.mul(eraBand(positionWorld, U.time)).mul(2));
   m.emissiveNode = emissive.mul(float(1).sub(U.silhouette));
   m.receivedShadowNode = shadowWithClouds;
@@ -359,7 +370,7 @@ export type MatKey = 'deco' | 'foliage' | 'crop' | 'cropFine' | 'crystal' | 'gla
 
 export function makeDecoMaterials(): Record<MatKey, THREE.MeshStandardNodeMaterial> {
   return {
-    deco: decoMaterial({ shingles: true, paint: 'wall' }),
+    deco: decoMaterial({ shingles: true, paint: 'wall', rimSun: 0.3 }),
     foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy' }),
     crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide }),
     cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true }),

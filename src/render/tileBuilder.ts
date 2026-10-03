@@ -129,6 +129,9 @@ class Buf {
 
 const UP: V3 = [0, 1, 0];
 const WHITE = new THREE.Color(1, 1, 1);
+/** Árvores e marcos maiores que a escala natural: com a câmera baixa, o que conta a história da peça precisa ler de longe. */
+const TREE_SCALE = 1.3;
+const LANDMARK_SCALE = 1.25;
 const LUSH = new THREE.Color('#5fa83a');
 
 export interface Path {
@@ -675,7 +678,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       scaffold(x, z, ry, 0.26, 0.04);
       for (let a = 0; a < 3; a++) D('animal', x + (rng() - 0.5) * 0.1, 0, z + (rng() - 0.5) * 0.1, rng() * 6, randRange(rng, 0.9, 1.15), vary(rng, tc(pick(rng, theme.animals.colors)), 0.05), 'wander');
     } else if (s.kind === 'mill') {
-      const sc = theme.mill === 'windmill' ? 1.1 : theme.mill === 'windpump' ? 1 : 1.2;
+      const sc = (theme.mill === 'windmill' ? 1.1 : theme.mill === 'windpump' ? 1 : 1.2) * LANDMARK_SCALE;
       const face = Math.atan2(-mx, -mz); // +z local (porta e pás) voltado para o centro da peça
       D('mill', x, 0, z, face, sc, WHITE);
       scaffold(x, z, face, 0.17 * sc, theme.mill === 'windmill' || theme.mill === 'windpump' ? 0.34 * sc : 0.2 * sc);
@@ -814,12 +817,13 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const landmarkRoll = rng();
   if (theme.landmark !== 'none' && villageCount >= 2 && distToPaths(0, 0, allPaths) > 0.2 && free(0, 0, 0.2) && landmarkRoll < theme.landmarkChance * (villageCount - 1) * 0.8) {
     const ry = rng() * Math.PI * 2;
-    D('landmark', 0, 0, 0, ry, 1, WHITE);
+    const sc = LANDMARK_SCALE;
+    D('landmark', 0, 0, 0, ry, sc, WHITE);
     if (theme.landmark === 'windmill') {
-      const fx = Math.sin(ry) * 0.078, fz = Math.cos(ry) * 0.078;
-      D('sails', fx, 0.255, fz, ry, 1, WHITE, 'spin-z');
+      const fx = Math.sin(ry) * 0.078 * sc, fz = Math.cos(ry) * 0.078 * sc;
+      D('sails', fx, 0.255 * sc, fz, ry, sc, WHITE, 'spin-z');
     }
-    reserved.push([0, 0, WIDE_LANDMARKS.has(theme.landmark) ? 0.3 : 0.2]);
+    reserved.push([0, 0, (WIDE_LANDMARKS.has(theme.landmark) ? 0.3 : 0.2) * sc]);
   }
 
   // --- Plantações: parcelas de terra com fileiras de plantas.
@@ -900,7 +904,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const forestKinds = theme.forest.map((k) => [k, k.weight] as const);
   const addTree = (x: number, z: number) => {
     const kind = weighted(rng, forestKinds);
-    const s = randRange(rng, 0.9, 1.4) * (kind.geo === 'crystal' ? 1.4 : kind.geo === 'cactus' ? 1.1 : 1);
+    const s = randRange(rng, 0.9, 1.4) * TREE_SCALE * (kind.geo === 'crystal' ? 1.4 : kind.geo === 'cactus' ? 1.1 : 1);
     D(`tree:${kind.geo}`, x, 0, z, rng() * Math.PI * 2, [s, s * randRange(rng, 0.9, 1.15), s], vary(rng, tc(pick(rng, kind.colors))));
     taken.push([x, z]);
     trees.push([x, z, s]);
@@ -932,10 +936,11 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const terr = edges[i];
     const sectorAng = -(Math.PI / 6 + (Math.PI / 3) * i);
     if (terr === T.Forest) {
-      const n = randInt(rng, theme.treesPerSector[0], theme.treesPerSector[1]);
+      // Árvores maiores e menos numerosas: cada copa se lê sozinha, como as casas.
+      const n = Math.max(2, Math.round(randInt(rng, theme.treesPerSector[0], theme.treesPerSector[1]) * 0.7));
       for (let k = 0, tries = 0; k < n && tries < n * 5; tries++) {
         const p = samplePoint(rng, i, 0.1, 0.07);
-        if (!p || !free(p[0], p[1], 0.1) || distToPaths(p[0], p[1], allPaths) < 0.05) continue;
+        if (!p || !free(p[0], p[1], 0.125) || distToPaths(p[0], p[1], allPaths) < 0.05) continue;
         addTree(p[0], p[1]);
         k++;
       }

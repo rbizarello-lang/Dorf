@@ -7,6 +7,7 @@ import { LOOKOUT_MOVES, SITE_REWARD, type SiteKind } from './core/sites';
 import { mulberry32 } from './core/rng';
 import { DIRS, hexToWorld, hkey, worldToHex } from './core/hex';
 import type { Quality, TimeOfDay } from './render/world';
+import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
 import { DynRes } from './render/dynres';
 import { readGpuInfo } from './render/gpu';
 import { gpuName, tierForGpu } from './render/gpuTier';
@@ -458,7 +459,7 @@ function showHelp() {
       <li>O botão Câmera tira fotos sem a interface (<kbd>P</kbd>) e grava vídeos de até 2 minutos (<kbd>V</kbd>), salvos em MP4 de até 4K.</li>
       <li>A partida acaba quando a pilha esvazia.</li>
     </ul>
-    <p class="muted">Mouse: clique coloca, botão direito ou <kbd>R</kbd> gira a peça, arrastar move, roda dá zoom, <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera. Toque: toque num espaço para ver a peça, toque de novo (ou ✓) para colocar.</p>
+    <p class="muted">Mouse: clique coloca, botão direito ou <kbd>R</kbd> gira a peça, arrastar move, roda dá zoom, <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera; arrastar com o botão direito para cima ou para baixo (ou <kbd>PgUp</kbd>/<kbd>PgDn</kbd>) inclina, e <kbd>Home</kbd> volta ao ângulo padrão. Toque: dois dedos para cima ou para baixo inclinam; toque num espaço para ver a peça, toque de novo (ou ✓) para colocar.</p>
     <div class="row"><button class="primary" type="button" data-act="close">Jogar</button></div>`);
 }
 
@@ -610,7 +611,16 @@ function adaptQuality(dt: number, now: number) {
 
 const pointers = new Map<number, { x: number; y: number }>();
 let drag: { button: number; x: number; y: number; moved: boolean; ground: THREE.Vector3 | null; touch: boolean } | null = null;
-let pinch: { d: number; mx: number; my: number } | null = null;
+// Dois dedos: decide no começo do gesto se é pinça (zoom e pan) ou arraste vertical (inclinação).
+let pinch: { d: number; mx: number; my: number; mode: 'pending' | 'zoom' | 'tilt'; ad: number; ax: number; ay: number } | null = null;
+
+/** Inclina a câmera e guarda o ajuste para a próxima partida (gravado quando o gesto para). */
+let tiltSave = 0;
+function tiltBy(d: number) {
+  world.rig.incline(d);
+  clearTimeout(tiltSave);
+  tiltSave = window.setTimeout(() => store.set('tilt', world.rig.goalTilt.toFixed(3)), 400);
+}
 
 function hoverAt(clientX: number, clientY: number) {
   const p = world.groundPoint(clientX, clientY);
@@ -633,7 +643,7 @@ canvas.addEventListener('pointerdown', (e) => {
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (pointers.size === 2) {
     const [a, b] = [...pointers.values()];
-    pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+    pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, mode: 'pending', ad: 0, ax: 0, ay: 0 };
     drag = null;
     return;
   }
@@ -646,18 +656,31 @@ canvas.addEventListener('pointermove', (e) => {
     const [a, b] = [...pointers.values()];
     const d = Math.hypot(a.x - b.x, a.y - b.y);
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    world.rig.zoom(pinch.d / Math.max(d, 1));
-    const before = world.groundPoint(pinch.mx, pinch.my);
-    const after = world.groundPoint(mx, my);
-    if (before && after) world.rig.panWorld(before.x - after.x, before.z - after.z, true);
-    pinch = { d, mx, my };
+    if (pinch.mode === 'pending') {
+      // Os dois dedos subindo ou descendo juntos, sem abrir nem fechar: inclinação.
+      pinch.ad += d - pinch.d;
+      pinch.ax += mx - pinch.mx;
+      pinch.ay += my - pinch.my;
+      if (Math.hypot(pinch.ad, pinch.ax, pinch.ay) > 14) pinch.mode = Math.abs(pinch.ay) > 2 * Math.abs(pinch.ad) && Math.abs(pinch.ay) > Math.abs(pinch.ax) ? 'tilt' : 'zoom';
+    } else if (pinch.mode === 'tilt') tiltBy((my - pinch.my) * 0.006);
+    else {
+      world.rig.zoom(pinch.d / Math.max(d, 1));
+      const before = world.groundPoint(pinch.mx, pinch.my);
+      const after = world.groundPoint(mx, my);
+      if (before && after) world.rig.panWorld(before.x - after.x, before.z - after.z, true);
+    }
+    pinch.d = d;
+    pinch.mx = mx;
+    pinch.my = my;
     return;
   }
   if (drag) {
     if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > (drag.touch ? 10 : 5)) drag.moved = true;
     if (drag.moved) {
       if (drag.button === 2 || (drag.button === 0 && e.shiftKey)) {
+        // Na horizontal gira; na vertical inclina (arrastar para cima abaixa a câmera rumo ao horizonte, como nos mapas).
         world.rig.rotate(-(e.movementX || 0) * 0.006);
+        if (e.movementY) tiltBy(e.movementY * 0.004);
       } else if (drag.ground) {
         const now = world.groundPoint(e.clientX, e.clientY);
         if (now) {
@@ -734,6 +757,7 @@ window.addEventListener('keydown', (e) => {
     else if (k === 'enter') void shootPhoto();
     else if (k === '+' || k === '=') world.rig.zoom(0.85);
     else if (k === '-') world.rig.zoom(1.18);
+    else if (k === 'home') tiltBy(-world.rig.goalTilt);
     else held.add(k);
     return;
   }
@@ -761,7 +785,11 @@ window.addEventListener('keydown', (e) => {
     else startTake();
   } else if (k === '+' || k === '=') world.rig.zoom(0.85);
   else if (k === '-') world.rig.zoom(1.18);
-  else held.add(k);
+  else if (k === 'home') tiltBy(-world.rig.goalTilt);
+  else {
+    if (k === 'pageup' || k === 'pagedown') e.preventDefault();
+    held.add(k);
+  }
 });
 window.addEventListener('keyup', (e) => {
   // Com Cmd pressionado o macOS não envia keyup das outras teclas: evita câmera "presa".
@@ -779,6 +807,8 @@ function keyboardCamera(dt: number) {
   if (dx || dy) world.rig.panScreen(dx * dt * 12, dy * dt * 12);
   if (held.has('q')) world.rig.rotate(dt * 1.6);
   if (held.has('e')) world.rig.rotate(-dt * 1.6);
+  if (held.has('pageup')) tiltBy(dt * 0.9);
+  if (held.has('pagedown')) tiltBy(-dt * 0.9);
 }
 
 document.getElementById('rot-left')!.addEventListener('click', () => {
@@ -1164,7 +1194,7 @@ async function exportVideo(kind: 'take' | 'film', height: number, quality: Quali
   const script = buildScript(kind, cam, tod, size.fps);
   if (!script) return null;
   const rig = world.rig;
-  const live = { tod: world.timeOfDay, goal: rig.goal.clone(), target: rig.target.clone(), dist: rig.goalDist, yaw: rig.goalYaw };
+  const live = { tod: world.timeOfDay, goal: rig.goal.clone(), target: rig.target.clone(), dist: rig.goalDist, yaw: rig.goalYaw, tilt: rig.goalTilt };
   stage = 'export';
   exportCancel = false;
   setCaptureUi(true);
@@ -1208,6 +1238,7 @@ async function exportVideo(kind: 'take' | 'film', height: number, quality: Quali
     rig.target.copy(live.target);
     rig.dist = rig.goalDist = live.dist;
     rig.yaw = rig.goalYaw = live.yaw;
+    rig.tilt = rig.goalTilt = live.tilt;
     dynres.reset();
     world.setResolutionScale(1);
     stage = 'play';
@@ -1293,7 +1324,7 @@ function step(now: number) {
     world.scout(game.board);
   }
   world.tick(dt);
-  if (take && !take.frame(realDt, { x: world.rig.target.x, z: world.rig.target.z, dist: world.rig.dist, yaw: world.rig.yaw })) stopTake('A gravação chegou a 2 minutos.');
+  if (take && !take.frame(realDt, { x: world.rig.target.x, z: world.rig.target.z, dist: world.rig.dist, yaw: world.rig.yaw, tilt: world.rig.tilt })) stopTake('A gravação chegou a 2 minutos.');
   hud.tick(dt);
   const markers = [];
   for (const q of game.board.quests) {
@@ -1378,6 +1409,13 @@ function start(data: unknown) {
   if (params.has('gallery')) (window as unknown as { __gallery: string[] }).__gallery = world.showGallery();
   if (params.has('yaw')) world.rig.yaw = world.rig.goalYaw = Number(params.get('yaw'));
   if (params.has('zoom')) world.rig.dist = world.rig.goalDist = Number(params.get('zoom'));
+  // Inclinação guardada (ajuste em radianos) ou pedida pela URL (graus acima do chão, para capturas).
+  const savedTilt = Number(store.get('tilt'));
+  if (store.get('tilt') !== null && Number.isFinite(savedTilt) && Math.abs(savedTilt) <= 1) world.rig.tilt = world.rig.goalTilt = world.rig.clampTilt(savedTilt);
+  const pitchDeg = Number(params.get('pitch'));
+  if (params.has('pitch') && Number.isFinite(pitchDeg) && pitchDeg >= PITCH_MIN * THREE.MathUtils.RAD2DEG - 1e-6 && pitchDeg <= PITCH_MAX * THREE.MathUtils.RAD2DEG + 1e-6) {
+    world.rig.tilt = world.rig.goalTilt = pitchDeg * THREE.MathUtils.DEG2RAD - world.rig.basePitch(world.rig.goalDist);
+  }
   if (params.has('focus')) (window as unknown as { __focus: (t: number) => boolean }).__focus(Number(params.get('focus')));
   if (!special && !store.get('seenHelp') && !(resumed && moves.length)) showHelp();
   requestAnimationFrame((t) => {

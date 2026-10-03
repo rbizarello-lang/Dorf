@@ -239,6 +239,10 @@ console.log('Caminho da câmera');
   const step = Array.from({ length: 101 }, (_, i) => ({ x: i < 50 ? 0 : i > 50 ? 1 : 0.5, z: 0, dist: 10, yaw: 0 }));
   const ss = smooth(step, 6);
   ok(Math.abs(ss[50].x - 0.5) < 1e-9 && Math.abs(ss[40].x + ss[60].x - 1) < 1e-9, 'filtro simétrico: um degrau fica centrado (sem atraso)');
+  const tilted = resample([0, 1], [{ x: 0, z: 0, dist: 10, yaw: 0, tilt: -0.2 }, { x: 0, z: 0, dist: 10, yaw: 0, tilt: 0.2 }], 60, 1);
+  ok(Math.abs(tilted[30].tilt! - 0) < 1e-9 && Math.abs(tilted[15].tilt! + 0.1) < 1e-9, 'a inclinação gravada anda linear entre as poses');
+  ok(Math.abs(resample([0, 1], [{ x: 0, z: 0, dist: 10, yaw: 0 }, { x: 0, z: 0, dist: 10, yaw: 0, tilt: 0.4 }], 60, 1)[30].tilt! - 0.2) < 1e-9, 'pose sem inclinação (gravação antiga) conta como 0');
+  ok(smooth(Array.from({ length: 50 }, () => ({ x: 0, z: 0, dist: 9, yaw: 0, tilt: 0.3 })), 10).every((p) => Math.abs(p.tilt! - 0.3) < 1e-9), 'suavizar não muda uma inclinação parada');
 }
 
 console.log('Filme da partida');

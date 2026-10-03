@@ -119,6 +119,7 @@ export async function renderVideo(world: World, s: Script, o: RenderOptions, pic
       rig.target.copy(rig.goal);
       rig.dist = rig.goalDist = p.dist;
       rig.yaw = rig.goalYaw = p.yaw;
+      rig.tilt = rig.goalTilt = p.tilt ?? 0;
       world.tick(dt);
       // O canvas tem o tamanho com supersamplagem; a cópia reduz para o tamanho do vídeo. O
       // aquecimento também copia: no Chromium com WebGPU, as primeiras cópias depois da troca de
