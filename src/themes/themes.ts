@@ -282,7 +282,7 @@ export const BASE_THEMES: Theme[] = [
     music: { scale: [0, 2, 3, 5, 7, 8, 10], timbre: 'glass' },
     wonder: { name: 'Palácio de Gelo', core: 'ice', colors: ['#cfe6f5', '#e8f4fb', '#9fd0ef'] },
     eras: ['Fazenda', 'Aldeia', 'Vila', 'Cidade'],
-    rules: { startTiles: 45, questChance: 0.2, synergyBonus: { lumber: 3 } },
+    rules: { startTiles: 55, questChance: 0.28, synergyBonus: { lumber: 3 } },
     ruleNote: 'Começa com 45 peças e missões um pouco mais raras. Lareira: os lenhadores (aldeia + pinhal) valem 3 pontos a mais.',
   },
   {
@@ -413,7 +413,7 @@ export const BASE_THEMES: Theme[] = [
     wonder: { name: 'Elevador Espacial', core: 'elevator', colors: ['#e8e6ea', '#9aa3b2', '#36d1d1'] },
     eras: ['Módulo', 'Posto', 'Colônia', 'Cidade-domo'],
     center: 'dome',
-    rules: { startTiles: 36, questChance: 0.32, maxQuests: 5 },
+    rules: { startTiles: 46, questChance: 0.4, maxQuests: 5 },
     ruleNote: 'Começa com 36 peças, mas recebe mais missões.',
   },
 ];

@@ -43,7 +43,7 @@ export const MODES: readonly Mode[] = [
     id: 'exploradores',
     name: 'Exploradores',
     tagline: 'Dez sítios escondidos. Ache todos com o mínimo de peças: cada uma que sobrar vale 20 pontos.',
-    rules: { sites: 10, startTiles: 50, endOnSites: true },
+    rules: { sites: 10, startTiles: 60, endOnSites: true },
     undos: 1,
   },
 ];

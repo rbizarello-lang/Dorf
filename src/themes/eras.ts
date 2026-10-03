@@ -77,7 +77,7 @@ export const ERA_THEMES: Theme[] = [
     wonder: { name: 'Pilone de Karnak', core: 'pylon', colors: ['#e8d3a0', '#c9b088', '#3a5a8a'] },
     eras: ['Pré-dinástico', 'Antigo Império', 'Médio Império', 'Novo Império'],
     center: 'pyramid',
-    rules: { startTiles: 38, questChance: 0.28, matchBonus: { [T.Water]: 5 } },
+    rules: { startTiles: 48, questChance: 0.36, matchBonus: { [T.Water]: 5 } },
     ruleNote: 'Dádiva do Nilo: cada borda de rio encaixada vale 5 pontos a mais. Começa com 38 peças, e o faraó pede obras com mais frequência.',
   },
 

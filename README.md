@@ -22,7 +22,18 @@ npm run check      # typecheck + testes + build (o mesmo que a CI roda em cada p
 
 ## Como jogar
 
-Coloque peças encostadas no mapa. Cada borda que combina com a vizinha vale 10 pontos. **Rio e estrada** precisam continuar: só encostam neles mesmos. Quando a peça encosta em 2 ou mais vizinhas e todas as bordas combinam, o encaixe é **perfeito**. Cercar uma peça com 6 vizinhas encaixadas devolve uma peça à pilha. **Missões** pedem grupos de certo tamanho ("9 ou mais", "exatamente 8") e dão peças extras. A partida acaba quando a pilha esvazia.
+Coloque peças encostadas no mapa. A pilha começa com 50 peças. Cada borda que combina com a vizinha vale 10 pontos. **Rio e estrada** precisam continuar: só encostam neles mesmos. Quando a peça encosta em 2 ou mais vizinhas e todas as bordas combinam, o encaixe é **perfeito**. Cercar uma peça com 6 vizinhas encaixadas devolve uma peça à pilha. A partida acaba quando a pilha esvazia.
+
+**Missões** chegam em algumas peças (marcadas com "!") e dão peças extras:
+
+| Missão | O que pede | Recompensa |
+|---|---|---|
+| Grupo ("9 ou mais", "exatamente 8") | o grupo do terreno chegar ao tamanho; "exatamente" falha se passar | 10 pontos por peça pedida e +5 peças (mais 1 a cada 6), ou +7 na exata |
+| Fechar | nenhuma borda do grupo virada para o vazio | 10 pontos por peça do grupo e +6 peças |
+| Encaixes perfeitos | N encaixes perfeitos a partir dali | 20 pontos por encaixe pedido e +5 peças |
+| Interação ("3× Serraria") | N interações daquele tipo a partir dali | 15 pontos por interação pedida e +5 peças |
+
+O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Repetir a semente" joga a mesma sequência de peças de novo.
 
 **Eras da vila:** com 500, 1.500 e 3.000 pontos a vila muda de era (os nomes mudam por tema, como Borgo → Comune → Signoria → Rinascimento na Toscana) e ganha +3 peças. A cada era, o Centro da vila (no meio da primeira peça) muda de forma, de fogueira com cabanas a palácio, e uma onda dourada corre pelo mapa. A próxima peça com vila ergue o marco da era, que o fantasma já mostra antes de colocar.
 
@@ -43,7 +54,7 @@ Coloque peças encostadas no mapa. Cada borda que combina com a vizinha vale 10 
 | Clássico | missões, eras e sítios; acaba quando a pilha esvazia |
 | Zen | peças sem fim; pontos e eras por gosto |
 | Desafio do dia | semente do dia e regras padrão, iguais para todo mundo; sem desfazer |
-| Exploradores | 10 sítios e 50 peças; achar o último encerra, e cada peça que sobrou vale 20 pontos |
+| Exploradores | 10 sítios e 60 peças; achar o último encerra, e cada peça que sobrou vale 20 pontos |
 
 **Interações:** algumas bordas diferentes também "conversam". Quando se encostam, rendem +5 e erguem uma construção na borda. A prévia acende em dourado antes de você colocar a peça.
 

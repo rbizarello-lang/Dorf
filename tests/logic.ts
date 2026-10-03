@@ -70,17 +70,29 @@ function oracleAnyMove(b: Board, def: TileDef) {
   return false;
 }
 
+/** Bordas do grupo de (peça, setor) viradas para uma casa vazia (missão de fechar). */
+function oracleOpenEdges(b: Board, anchor: Placed, sector: number) {
+  let open = 0;
+  for (const [p, s] of oracleGroupMembers(b, anchor, sector)) if (!b.get(p.q + DIRS[s][0], p.r + DIRS[s][1])) open++;
+  return open;
+}
+
 /** BFS sobre (peça, setor): tamanho do grupo em nº de peças distintas. */
 function oracleGroupSize(b: Board, anchor: Placed, sector: number) {
+  return new Set(oracleGroupMembers(b, anchor, sector).map(([p]) => p)).size;
+}
+
+/** BFS sobre (peça, setor): todos os setores do grupo. */
+function oracleGroupMembers(b: Board, anchor: Placed, sector: number): Array<[Placed, number]> {
   const idx = new Map<Placed, number>();
   b.list.forEach((p, i) => idx.set(p, i));
   const seen = new Set<number>();
   const stack: Array<[Placed, number]> = [[anchor, sector]];
   seen.add(idx.get(anchor)! * 6 + sector);
-  const tiles = new Set<Placed>();
+  const members: Array<[Placed, number]> = [];
   while (stack.length) {
     const [p, s] = stack.pop()!;
-    tiles.add(p);
+    members.push([p, s]);
     const terr = p.edges[s];
     const push = (pp: Placed, ss: number) => {
       const k = idx.get(pp)! * 6 + ss;
@@ -99,7 +111,7 @@ function oracleGroupSize(b: Board, anchor: Placed, sector: number) {
     const nb = b.get(p.q + DIRS[s][0], p.r + DIRS[s][1]);
     if (nb && nb.edges[opposite(s)] === terr) push(nb, opposite(s));
   }
-  return tiles.size;
+  return members;
 }
 
 function oracleClosed(b: Board, t: Placed) {
@@ -128,15 +140,20 @@ interface GameLog {
   finalStack: number;
   placed: number;
   discarded: number;
+  quests: number;
+  mode: string;
 }
 
 const themeStats: Record<string, { games: number; moves: number; score: number; discards: number; questsDone: number; questsFailed: number; exactDone: number; exactFailed: number; closed: number; perfects: number; maxActive: number; overshootGames: number }> = {};
 
-type Policy = 'greedy' | 'random' | 'worst';
+// greedy: a IA do jogo; quest: a mesma IA, mas que também persegue as missões ativas (como uma
+// pessoa faria); random e worst: jogadores ruins, para achar travas e casos extremos.
+type Policy = 'greedy' | 'quest' | 'random' | 'worst';
 function chooseMove(game: Game, policy: Policy, rnd: () => number): { q: number; r: number; rot: number } | null {
   if (policy === 'greedy') return game.bestMove();
   const def = game.current;
   if (!def) return null;
+  if (policy === 'quest') return questMove(game, def, rnd);
   const all: { q: number; r: number; rot: number; score: number }[] = [];
   for (const k of game.board.frontier) {
     const [q, r] = unkey(k);
@@ -154,6 +171,47 @@ function chooseMove(game: Game, policy: Policy, rnd: () => number): { q: number;
   return best;
 }
 
+/** Jogada gulosa com um empurrão para as missões ativas (não usa o código das missões do Board). */
+function questMove(game: Game, def: TileDef, rnd: () => number) {
+  const b = game.board;
+  // Casas vizinhas de cada grupo de missão, com o terreno que o grupo pede.
+  const want = new Map<number, number>();
+  const counts = { perfect: 0, syn: new Set<string>() };
+  for (const q of b.activeQuests()) {
+    if (q.kind === 'perfect') counts.perfect++;
+    else if (q.kind === 'synergy') counts.syn.add(q.syn!);
+    else if (!(q.exact && q.target - q.progress <= 1)) {
+      for (const [p, s] of oracleGroupMembers(b, q.anchor, q.sector)) {
+        const k = hkey(p.q + DIRS[s][0], p.r + DIRS[s][1]);
+        if (!b.tiles.has(k)) want.set(k * 8 + opposite(s), q.terrain);
+      }
+    }
+  }
+  const PAIR_KIND = ['lumber', 'mill', 'pasture', 'apiary'];
+  const PAIRS = [[T.Village, T.Forest], [T.Village, T.Field], [T.Village, T.Grass], [T.Field, T.Grass]];
+  let best: { q: number; r: number; rot: number; score: number } | null = null;
+  for (const k of b.frontier) {
+    const [q, r] = unkey(k);
+    for (let rot = 0; rot < 6; rot++) {
+      const edges = rotateEdges(def.edges, rot);
+      const c = b.check(q, r, edges);
+      if (!c.valid) continue;
+      let score = c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) + rnd() * 0.5;
+      for (let i = 0; i < 6; i++) {
+        const t = want.get(k * 8 + i);
+        if (t !== undefined && edges[i] === t) score += 3;
+        const n = b.get(q + DIRS[i][0], r + DIRS[i][1]);
+        if (!n || !counts.syn.size) continue;
+        const pair = PAIRS.findIndex(([x, y]) => (edges[i] === x && n.edges[opposite(i)] === y) || (edges[i] === y && n.edges[opposite(i)] === x));
+        if (pair >= 0 && counts.syn.has(PAIR_KIND[pair])) score += 2;
+      }
+      if (counts.perfect && c.neighbors >= 2 && c.matches === c.neighbors) score += 2;
+      if (!best || score > best.score) best = { q, r, rot, score };
+    }
+  }
+  return best;
+}
+
 function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: Policy = 'greedy', mode: Mode = MODES[0]): GameLog {
   const prnd = mulberry32(seed ^ 0x5bd1e995);
   const theme = THEMES[themeIdx];
@@ -167,11 +225,15 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
   let wonderStage = 0;
   const game = new Game(seed, rules);
   const b = game.board;
-  const log: GameLog = { seed, themeId: theme.id, rules, moves: [], snapshots: [], finalScore: 0, finalStack: 0, placed: 0, discarded: 0 };
+  const log: GameLog = { seed, themeId: theme.id, rules, moves: [], snapshots: [], finalScore: 0, finalStack: 0, placed: 0, discarded: 0, quests: 0, mode: mode.id };
   const ts = (themeStats[theme.id] ??= { games: 0, moves: 0, score: 0, discards: 0, questsDone: 0, questsFailed: 0, exactDone: 0, exactFailed: 0, closed: 0, perfects: 0, maxActive: 0, overshootGames: 0 });
   ts.games++;
 
   const hist = new Map<number, QuestHist>();
+  // Contagens próprias do oráculo para as missões de contagem (perfeitos e interações por tipo).
+  let oraclePerfects = 0;
+  const oracleSyn: Record<string, number> = { lumber: 0, mill: 0, pasture: 0, apiary: 0 };
+  const questBase = new Map<number, number>();
   let expectedScore = 0;
   let expectedStack = rules.startTiles;
   let maxActive = 0;
@@ -202,6 +264,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     const closedBefore = new Set(b.list.filter((t) => oracleClosed(b, t)).map((t) => t.index));
     // vizinhos/encaixes pelo oráculo
     let nbs = 0, mt = 0, syn = 0;
+    const synKinds: string[] = [];
     // Interações (oráculo próprio): bordas comuns diferentes que formam um dos 4 pares.
     const SYN_PAIRS = [
       [T.Village, T.Forest],
@@ -215,7 +278,13 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       nbs++;
       const a = edges[i], c = n.edges[(i + 3) % 6];
       if (c === a) mt++;
-      else if (SYN_PAIRS.some(([x, y]) => (a === x && c === y) || (a === y && c === x))) syn++;
+      else {
+        const pair = SYN_PAIRS.findIndex(([x, y]) => (a === x && c === y) || (a === y && c === x));
+        if (pair >= 0) {
+          syn++;
+          synKinds.push(['lumber', 'mill', 'pasture', 'apiary'][pair]);
+        }
+      }
     }
     const prevQuestStates = b.quests.map((q) => q.state);
     const listBefore = b.list.length;
@@ -252,6 +321,8 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     const perfect = nbs >= 2 && mt === nbs;
     if (perfect) pts += rules.perfectBonus;
     assert(res.perfect === perfect, `seed ${seed}: perfect diverge`);
+    if (perfect) oraclePerfects++;
+    for (const k of synKinds) oracleSyn[k]++;
     assert(res.matches === mt && res.neighbors === nbs, `seed ${seed}: matches/neighbors divergem (${res.matches}/${res.neighbors} vs ${mt}/${nbs})`);
     const closedAfter = new Set(b.list.filter((t) => oracleClosed(b, t)).map((t) => t.index));
     const newlyClosed = [...closedAfter].filter((i) => !closedBefore.has(i));
@@ -269,36 +340,68 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
         assert(q.state === prevQuestStates[qi], `seed ${seed}: missão ${q.id} mudou de estado depois de encerrada`);
         continue;
       }
-      const size = oracleGroupSize(b, q.anchor, q.sector);
-      hist.get(q.id)!.sizes.push(size);
       let expected: 'active' | 'done' | 'failed' = 'active';
-      if (q.exact) {
-        if (size === q.target) expected = 'done';
-        else if (size > q.target) expected = 'failed';
-      } else if (size >= q.target) expected = 'done';
-      assert(q.state === expected, `seed ${seed}: missão ${q.id} (${q.exact ? 'exata' : 'N+'}) alvo ${q.target} tam ${size} estado ${q.state} esperado ${expected}`);
+      let progress: number;
+      let gain: number;
+      if (q.kind === 'group') {
+        const size = oracleGroupSize(b, q.anchor, q.sector);
+        hist.get(q.id)!.sizes.push(size);
+        if (q.exact) {
+          if (size === q.target) expected = 'done';
+          else if (size > q.target) expected = 'failed';
+        } else if (size >= q.target) expected = 'done';
+        progress = size;
+        gain = q.target * 10;
+      } else if (q.kind === 'close') {
+        const open = oracleOpenEdges(b, q.anchor, q.sector);
+        if (open === 0) expected = 'done';
+        progress = Math.max(0, q.target - open);
+        gain = oracleGroupSize(b, q.anchor, q.sector) * 10;
+        inc('missao_fechar_' + expected);
+      } else {
+        const count = q.kind === 'perfect' ? oraclePerfects : oracleSyn[q.syn!];
+        progress = count - questBase.get(q.id)!;
+        if (progress >= q.target) expected = 'done';
+        gain = q.target * (q.kind === 'perfect' ? 20 : 15);
+      }
+      assert(q.state === expected, `seed ${seed}: missão ${q.id} (${q.kind}${q.exact ? ' exata' : ''}) alvo ${q.target} progresso ${progress} estado ${q.state} esperado ${expected}`);
       if (expected === 'done') {
-        pts += q.target * 10;
+        pts += gain;
         gained += q.reward;
         ts.questsDone++;
         if (q.exact) ts.exactDone++;
+        inc('missao_ok_' + q.kind);
       } else if (expected === 'failed') {
         ts.questsFailed++;
         if (q.exact) ts.exactFailed++;
       }
-      if (q.state === 'active') assert(q.progress === size, `seed ${seed}: progresso da missão ${q.id} ${q.progress} != oráculo ${size}`);
+      if (q.state === 'active') assert(q.progress === progress, `seed ${seed}: progresso da missão ${q.id} ${q.progress} != oráculo ${progress}`);
     }
     if (res.newQuest) {
       const nq = res.newQuest;
-      const size = oracleGroupSize(b, nq.anchor, nq.sector);
-      assert(nq.progress === size && nq.target > size, `seed ${seed}: nova missão inconsistente`);
-      assert(nq.anchor === res.placed && nq.anchor.edges[nq.sector] === nq.terrain, `seed ${seed}: setor/terreno da missão incoerentes`);
-      // o setor escolhido deve ser o de maior grupo
-      let bestSize = -1;
-      for (let s = 0; s < 6; s++) if (nq.anchor.edges[s] === nq.terrain) bestSize = Math.max(bestSize, oracleGroupSize(b, nq.anchor, s));
-      assert(size === bestSize, `seed ${seed}: missão não usou o maior grupo`);
-      hist.set(nq.id, { quest: nq, sizes: [size], createdAtMove: log.moves.length });
-    }
+      assert(nq.kind === cur.quest?.kind && nq.anchor === res.placed && nq.state === 'active', `seed ${seed}: nova missão não veio da peça`);
+      if (nq.kind === 'group' || nq.kind === 'close') {
+        const size = oracleGroupSize(b, nq.anchor, nq.sector);
+        assert(nq.anchor.edges[nq.sector] === nq.terrain, `seed ${seed}: setor/terreno da missão incoerentes`);
+        // o setor escolhido deve ser o de maior grupo
+        let bestSize = -1;
+        for (let s = 0; s < 6; s++) if (nq.anchor.edges[s] === nq.terrain) bestSize = Math.max(bestSize, oracleGroupSize(b, nq.anchor, s));
+        assert(size === bestSize, `seed ${seed}: missão não usou o maior grupo`);
+        if (nq.kind === 'group') {
+          assert(nq.progress === size && nq.target > size, `seed ${seed}: nova missão inconsistente`);
+          assert(nq.reward === (nq.exact ? rules.exactQuestTiles : rules.groupQuestTiles + Math.floor(nq.target / 6)), `seed ${seed}: recompensa da missão de grupo`);
+        } else {
+          const open = oracleOpenEdges(b, nq.anchor, nq.sector);
+          assert(open > 0 && nq.target === open && nq.progress === 0 && nq.reward === rules.closeQuestTiles, `seed ${seed}: nova missão de fechar inconsistente`);
+        }
+        hist.set(nq.id, { quest: nq, sizes: [size], createdAtMove: log.moves.length });
+      } else {
+        assert(nq.target >= 3 && nq.progress === 0 && nq.reward === rules.countQuestTiles && (nq.kind === 'perfect' || !!nq.syn), `seed ${seed}: nova missão de contagem inconsistente`);
+        questBase.set(nq.id, nq.kind === 'perfect' ? oraclePerfects : oracleSyn[nq.syn!]);
+        hist.set(nq.id, { quest: nq, sizes: [], createdAtMove: log.moves.length });
+      }
+      inc('missao_nova_' + nq.kind);
+    } else if (cur.quest && (cur.quest.kind === 'perfect' || cur.quest.kind === 'synergy')) fail(`seed ${seed}: missão de contagem não nasceu`);
     for (const q of b.quests) if (!hist.has(q.id)) fail(`seed ${seed}: missão ${q.id} sem histórico`);
 
     // --- sítio
@@ -406,6 +509,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
   // Missões: estado final coerente com o histórico
   for (const h of hist.values()) {
     const q = h.quest;
+    if (q.kind !== 'group') continue;
     let exp: 'active' | 'done' | 'failed' = 'active';
     for (const s of h.sizes.slice(1)) {
       if (exp !== 'active') break;
@@ -423,6 +527,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
   log.finalScore = b.score;
   log.finalStack = game.stack;
   log.placed = game.placedCount;
+  log.quests = b.questsCompleted;
   ts.score += b.score;
   ts.maxActive = Math.max(ts.maxActive, maxActive);
   if (maxActive > rules.maxQuests) ts.overshootGames++;
@@ -454,7 +559,7 @@ function replay(log: GameLog, upTo = log.moves.length) {
 const N_GAMES = Number(process.argv[2] ?? 300);
 const t0 = Date.now();
 const logs: GameLog[] = [];
-const POLICIES: Policy[] = ['greedy', 'random', 'worst'];
+const POLICIES: Policy[] = ['greedy', 'quest', 'random', 'worst'];
 for (let g = 0; g < N_GAMES; g++) {
   const themeIdx = g % THEMES.length;
   const policy = POLICIES[Math.floor(g / THEMES.length) % POLICIES.length];
@@ -606,6 +711,15 @@ if (contBad) fail(`continuação pós-replay divergiu em ${contBad} partidas`);
 
 // ------------------------------------------------------------------ resumo
 console.log('\nContadores:', JSON.stringify(counters));
+// Duração da partida no modo clássico, por jogador: é a medida do balanceamento (pilha, missões, recompensas).
+console.log('\nClássico, por jogador (mediana de peças colocadas · média de missões cumpridas):');
+for (const p of POLICIES) {
+  const ls = logs.filter((l) => (l as GameLog & { policy?: string }).policy === p && l.mode === 'classico');
+  if (!ls.length) continue;
+  const placed = ls.map((l) => l.placed).sort((a, b) => a - b);
+  const med = placed[Math.floor(placed.length / 2)];
+  console.log(`  ${p.padEnd(7)} partidas ${String(ls.length).padStart(3)}  peças ${String(med).padStart(4)} (de ${placed[0]} a ${placed[placed.length - 1]})  missões ${(ls.reduce((a, l) => a + l.quests, 0) / ls.length).toFixed(1)}  pontos ${(ls.reduce((a, l) => a + l.finalScore, 0) / ls.length).toFixed(0)}`);
+}
 console.log('\nPor tema:');
 for (const [id, s] of Object.entries(themeStats)) {
   console.log(
