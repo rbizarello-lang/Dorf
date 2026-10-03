@@ -908,6 +908,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const trees: [number, number, number][] = [];
   const houseKinds = theme.houses.map((h, i) => [i, h.weight] as const);
   const houses: { x: number; z: number; s: number; sector: number }[] = [];
+  // Cor do telhado por peça (uma por tipo de casa), com uma ou outra exceção: de longe a vila lê
+  // como um bloco de cor, não como confete de telhados vermelhos, azuis e amarelos misturados.
+  const tileRoof = new Map<number, string>();
   const addHouse = (x: number, z: number, baseAng: number, sector = -1) => {
     const i = weighted(rng, houseKinds);
     const kind = theme.houses[i];
@@ -917,7 +920,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const sy = randRange(rng, 0.92, 1.12);
     const ry = baseAng + (rng() < 0.5 ? 0 : Math.PI / 2) + (rng() - 0.5) * 0.12;
     D(`wall:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(pick(rng, kind.walls)), 0.04));
-    D(`roof:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(pick(rng, kind.roofs)), 0.05));
+    let roof = tileRoof.get(i);
+    if (roof === undefined) tileRoof.set(i, (roof = pick(rng, kind.roofs)));
+    else if (rng() < 0.2) roof = pick(rng, kind.roofs);
+    D(`roof:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(roof), 0.05));
     if (meta?.chimney && rng() < 0.85) {
       const [cx, cy, cz] = meta.chimney;
       const c = Math.cos(ry), sn = Math.sin(ry);
