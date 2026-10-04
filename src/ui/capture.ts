@@ -333,7 +333,7 @@ export class Capture {
     const game = this.h.game();
     const plan = planFilm(moves, this.h.world.rig.yaw);
     const poses = smooth(resample(plan.times, plan.poses, fps, plan.duration), 0.8 * fps);
-    const events: TakeEvent[] = moves.map(([q, r, rot], i) => ({ t: plan.placeAt[i], kind: 'place', q, r, rot }));
+    const events: TakeEvent[] = moves.map(([q, r, rot, ...picks], i) => ({ t: plan.placeAt[i], kind: 'place', q, r, rot, picks }));
     return { theme: this.h.theme(), seed: game.seed, rules: game.rules, specials: game.specials, prefix: [], tod, events, poses, gameUi: false };
   }
 

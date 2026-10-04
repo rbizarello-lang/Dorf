@@ -1,3 +1,4 @@
+import { type BlessingId, blessingOffer } from './blessings';
 import { Board, type PlaceResult, type Rules } from './board';
 import { unkey } from './hex';
 import { mulberry32, type Rng } from './rng';
@@ -22,6 +23,12 @@ export class Game {
   placedCount = 0;
   discarded = 0;
   private drawn = 0;
+  /**
+   * Escolhas de era ainda por fazer, a mais antiga primeiro. Não travam a partida: a carta
+   * vale da jogada seguinte à escolha em diante, e o save guarda a escolha junto da jogada
+   * depois da qual ela foi feita.
+   */
+  offers: [BlessingId, BlessingId][] = [];
   /** Índice da pilha → peça especial liberada que sai nele. */
   private slots: Map<number, SpecialKind>;
 
@@ -108,8 +115,12 @@ export class Game {
     if (!def) return null;
     const c = this.check(q, r);
     if (!c?.valid) return null;
+    const era = this.board.era;
     const res = this.board.place(q, r, def, this.rot);
     this.placedCount++;
+    // Uma jogada pode abrir mais de uma era; cada uma traz a sua escolha. Cartas já escolhidas
+    // ou ainda na mesa não voltam.
+    if (this.rules.blessings) for (let e = era + 1; e <= this.board.era; e++) this.offers.push(blessingOffer(this.seed, e, [...this.board.blessings, ...this.offers.flat()]));
     if (!this.rules.infinite) this.stack += res.tilesGained - 1;
     // Exploradores: achou o último sítio, a partida acaba e cada peça que sobrou vale pontos.
     if (this.rules.endOnSites && this.board.sites.length && this.board.sitesLeft() === 0) {
@@ -121,6 +132,15 @@ export class Game {
     }
     this.advance();
     return res;
+  }
+
+  /** Escolhe a carta 0 ou 1 da escolha de era mais antiga; devolve a carta, ou null se não havia escolha. */
+  choose(pick: number): BlessingId | null {
+    const offer = this.offers.shift();
+    if (!offer) return null;
+    const id = offer[pick === 1 ? 1 : 0];
+    this.board.bless(id);
+    return id;
   }
 
   /** Avança para a próxima peça. */

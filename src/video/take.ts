@@ -7,7 +7,9 @@ import type { Pose } from './path';
 export const TAKE_MAX = 120;
 
 export type TakeEvent =
-  | { t: number; kind: 'place'; q: number; r: number; rot: number }
+  | { t: number; kind: 'place'; q: number; r: number; rot: number; picks?: number[] }
+  /** Escolha de era feita depois da jogada (a carta muda a pontuação, e a pontuação, as eras). */
+  | { t: number; kind: 'choose'; pick: number }
   | { t: number; kind: 'time'; tod: string }
   | { t: number; kind: 'ghost'; q: number; r: number; rot: number; angle: number }
   | { t: number; kind: 'noghost' };
