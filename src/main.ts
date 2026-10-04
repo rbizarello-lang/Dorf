@@ -4,22 +4,36 @@ import { DEFAULT_RULES, type PlaceResult, type Rules } from './core/board';
 import { Game } from './core/game';
 import { MODES, dailySeed, modeById, type Mode, type ModeId } from './core/modes';
 import { LOOKOUT_MOVES, SITE_REWARD, type SiteKind } from './core/sites';
+import { SPECIALS, SPECIAL_KINDS, type SpecialKind } from './core/specials';
 import { mulberry32 } from './core/rng';
-import { DIRS, hexToWorld, hkey, worldToHex } from './core/hex';
+import { T } from './core/tiles';
+import { DIRS, hexDistance, hexToWorld, hkey, unkey, worldToHex } from './core/hex';
 import type { Quality, TimeOfDay } from './render/world';
+import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
+import { DynRes } from './render/dynres';
+import { readGpuInfo } from './render/gpu';
+import { gpuName, tierForGpu } from './render/gpuTier';
 import { FX_FLAGS } from './render/post';
+import { U } from './render/materials';
 import { World } from './render/world';
-import { themeById, type Theme } from './themes/themes';
-import { Hud, questLabel } from './ui/hud';
+import { THEMES, themeById, type Theme } from './themes/themes';
+import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor } from './ui/banner';
+import { Capture, VIDEO_QUALITIES } from './ui/capture';
+import { Hud, TIME_ICON, TIME_LABEL, TIME_ORDER, glyph, questLabel, questMarker } from './ui/hud';
+import { bindInput } from './ui/input';
+import { Progress, SPECIAL_NAME, UNLOCKS } from './ui/progress';
+import { Tutorial } from './ui/tutorial';
+import { blessingName, blessingRule, choiceHtml } from './ui/eraChoice';
 import './ui/style.css';
 
 // ------------------------------------------------------------------ estado
 
 type QualityMode = 'auto' | Quality;
-type MoveRec = [number, number, number];
+/** q, r, giro e as escolhas de era (0 ou 1) feitas logo depois da jogada. */
+type MoveRec = number[];
 /** v4: modos, eras, sítios e bônus por tema. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 4;
+  v: 9;
   seed: number;
   rulesId: string;
   mode: ModeId;
@@ -27,8 +41,10 @@ interface Save {
   /** Quantas vezes já desfez nesta partida (o limite vem do modo). */
   undone: number;
   score: number;
+  /** Peças especiais que entraram nesta partida (mudam a sequência da pilha). */
+  specials: SpecialKind[];
 }
-const SAVE_VERSION = 4;
+const SAVE_VERSION = 9;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -80,20 +96,46 @@ async function createWorld(): Promise<World> {
 }
 const world = await createWorld();
 {
-  // ?fx=ao.traa.bloom.dof liga os efeitos um a um (medir custo); só nomes conhecidos.
+  // ?fx=ao.traa.bloom.dof.ink liga os efeitos um a um (medir custo); só nomes conhecidos.
   const fx = params.get('fx');
   if (fx !== null) world.fx = fx.split('.').filter((f) => (FX_FLAGS as readonly string[]).includes(f));
 }
 hud.preview.appendChild(world.preview.canvas);
 
-let theme: Theme = themeById(params.get('theme') ?? store.get('theme'));
+// Cor da casa e brasão (proposta 15): a cor troca o destaque do tema no HUD e no mundo.
+let house = validHouse(store.get('house'));
+let banner = (() => {
+  try {
+    return validBanner(JSON.parse(store.get('banner') ?? 'null'));
+  } catch {
+    return validBanner(null);
+  }
+})();
+let theme: Theme = dress(themeById(params.get('theme') ?? store.get('theme')), house);
 let rulesTheme: Theme = theme;
 let game: Game;
 let moves: MoveRec[] = [];
 let rotSteps = 0;
 let hover: { q: number; r: number } | null = null;
-let best = Number(store.get('best')) || 0;
-const QUALITIES: QualityMode[] = ['auto', 'ultra', 'high', 'medium', 'low'];
+let scoutPending = false;
+/** Recorde por modo e por tema (o Exploradores e o Clássico não disputam o mesmo número), com a semente. */
+let best = 0;
+let bestSeed = 0;
+const bestKey = () => `best.${mode.id}.${rulesTheme.id}`;
+function loadBest() {
+  best = 0;
+  bestSeed = 0;
+  try {
+    const v = JSON.parse(store.get(bestKey()) ?? 'null') as unknown;
+    if (v && typeof v === 'object' && Number.isSafeInteger((v as { score: unknown }).score) && Number.isSafeInteger((v as { seed: unknown }).seed)) {
+      best = Math.max(0, (v as { score: number }).score);
+      bestSeed = (v as { seed: number }).seed;
+    }
+  } catch {
+    // valor salvo corrompido: começa sem recorde
+  }
+}
+const QUALITIES: QualityMode[] = ['auto', 'cinema', 'ultra', 'high', 'medium', 'low'];
 const pickQ = (v: string | null) => (v && (QUALITIES as string[]).includes(v) ? (v as QualityMode) : null);
 let qualityMode: QualityMode = pickQ(params.get('quality')) ?? pickQ(store.get('quality')) ?? 'auto';
 let gameOverShown = false;
@@ -101,6 +143,13 @@ let overTimer = 0;
 let bestAtStart = 0;
 let recordCheered = false;
 const special = params.has('stress') || params.has('auto') || params.has('demo');
+const tutorial = new Tutorial(store);
+tutorial.enabled = !special;
+const progress = new Progress(store, THEMES.map((t) => t.id));
+/** A partida atual já entrou no progresso (ao acabar ou ao ser trocada por outra). */
+let committed = false;
+// ?specials=station.watermill.lighthouse (ou all) põe peças especiais na partida sem liberá-las (capturas).
+const forcedSpecials: SpecialKind[] | null = params.has('specials') ? (params.get('specials') === 'all' ? [...SPECIAL_KINDS] : SPECIAL_KINDS.filter((k) => params.get('specials')!.split('.').includes(k))) : null;
 
 // Regras: padrão ← tema ← modo. O desafio do dia ignora as regras do tema (é igual para todos).
 const rulesFor = (t: Theme, m: Mode = mode): Rules => ({ ...DEFAULT_RULES, ...(m.daily ? {} : t.rules), ...m.rules });
@@ -115,6 +164,11 @@ const SITE_LABEL: Record<SiteKind, { name: string; icon: string }> = {
   lookout: { name: 'Mirante', icon: '◉' },
 };
 
+const siteReward = (kind: SiteKind) => {
+  const r = SITE_REWARD[kind];
+  return [r.points ? `+${r.points} pontos` : '', r.tiles ? `+${r.tiles} peça${r.tiles > 1 ? 's' : ''}` : '', kind === 'lookout' ? `próximas peças à vista por ${LOOKOUT_MOVES} jogadas` : ''].filter(Boolean).join(' · ');
+};
+
 // ------------------------------------------------------------------ partida
 
 /**
@@ -124,16 +178,22 @@ const SITE_LABEL: Record<SiteKind, { name: string; icon: string }> = {
  */
 const synTimers: number[] = [];
 
-function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number, undos = 0): boolean {
+function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number, undos = 0, specials?: readonly SpecialKind[]): boolean {
+  // A gravação vale para uma partida só (desfazer refaz a partida pelo replay).
+  if (capture.take) capture.stopTake('A gravação terminou aqui: o vídeo não acompanha o desfazer nem uma partida nova.');
   clearTimeout(overTimer);
   for (const t of synTimers.splice(0)) clearTimeout(t);
-  game = new Game(seed, rulesFor(rulesTheme));
+  // Peças especiais: as liberadas entram em toda partida nova, menos no Desafio do dia (igual para todos).
+  game = new Game(seed, rulesFor(rulesTheme), specials ?? forcedSpecials ?? (mode.daily ? [] : progress.unlocked));
+  // Partida nova (não um replay do desfazer ou do save): ainda não entrou no progresso.
+  if (!replay.length) committed = false;
   undone = undos;
   moves = [];
-  for (const [q, r, rot] of replay) {
+  for (const [q, r, rot, ...picks] of replay) {
     game.rot = rot;
     if (!game.place(q, r)) break;
-    moves.push([q, r, rot]);
+    for (const p of picks) game.choose(p);
+    moves.push([q, r, rot, ...picks]);
     while (game.discardIfStuck());
   }
   game.rot = 0;
@@ -141,14 +201,25 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   rotSteps = 0;
   hover = null;
   gameOverShown = false;
+  loadBest();
   bestAtStart = best;
   recordCheered = false;
   hud.hint.style.opacity = moves.length >= 6 ? '0' : '';
   world.dropGhost();
   world.setTheme(theme, game.board);
+  sfx.setStyle(theme.music, game.board.era);
   hud.applyTheme(theme);
+  showCrest();
   hud.renderQuests(game.board.quests, theme);
   frameCamera(true);
+  // Partida nova: o batedor mostra para onde fica o sítio mais perto (quando a ajuda fechar).
+  scoutPending = !replay.length;
+  if (!replay.length)
+    tutorial.offer(
+      'inicio',
+      'Monte a paisagem',
+      `Coloque a peça encostada no mapa: cada borda igual à vizinha vale ${game.rules.matchPoints} pontos. Gire com <kbd>R</kbd> ou o botão direito (no toque, os botões de girar). A partida acaba quando a pilha esvazia.`,
+    );
   refreshHud(true);
   persist();
   return true;
@@ -161,14 +232,14 @@ function persist() {
 }
 
 function snapshot(): Save {
-  return { v: SAVE_VERSION, seed: game.seed, rulesId: rulesTheme.id, mode: mode.id, moves, undone, score: game.board.score };
+  return { v: SAVE_VERSION, seed: game.seed, rulesId: rulesTheme.id, mode: mode.id, moves, undone, score: game.board.score, specials: [...game.specials] };
 }
 
 /** Aceita só saves completos e da versão atual; qualquer outra coisa é descartada. */
 function validSave(raw: unknown): Save | null {
   const s = raw as Partial<Save> | null;
-  const okMove = (m: unknown) => Array.isArray(m) && m.length === 3 && m.every(Number.isInteger) && m[2] >= 0 && m[2] < 6;
-  if (s && s.v === SAVE_VERSION && Number.isInteger(s.seed) && s.seed! > 0 && typeof s.rulesId === 'string' && MODES.some((m) => m.id === s.mode) && Number.isInteger(s.undone) && s.undone! >= 0 && Array.isArray(s.moves) && s.moves.every(okMove) && Number.isFinite(s.score)) return s as Save;
+  const okMove = (m: unknown) => Array.isArray(m) && m.length >= 3 && m.length <= 6 && m.every(Number.isInteger) && m[2] >= 0 && m[2] < 6 && m.slice(3).every((p) => p === 0 || p === 1);
+  if (s && s.v === SAVE_VERSION && Number.isInteger(s.seed) && s.seed! > 0 && typeof s.rulesId === 'string' && MODES.some((m) => m.id === s.mode) && Number.isInteger(s.undone) && s.undone! >= 0 && Array.isArray(s.moves) && s.moves.every(okMove) && Number.isFinite(s.score) && Array.isArray(s.specials) && s.specials.every((k) => SPECIAL_KINDS.includes(k))) return s as Save;
   return null;
 }
 
@@ -202,6 +273,7 @@ function requestNewGame() {
 }
 
 function startFresh(m: Mode = mode) {
+  commitProgress();
   mode = m;
   store.set('mode', m.id);
   rulesTheme = theme;
@@ -214,8 +286,8 @@ function undo() {
   const left = mode.undos - undone;
   if (left <= 0 || !moves.length || hud.modalOpen) return;
   const keep = moves.slice(0, -1);
-  if (!newGame(game.seed, keep, undefined, undone + 1)) return;
-  sfx.rotate();
+  if (!newGame(game.seed, keep, undefined, undone + 1, game.specials)) return;
+  sfx.undo();
   hud.toast(left - 1 > 0 && left - 1 < 99 ? `Jogada desfeita · restam ${left - 1}` : 'Jogada desfeita');
 }
 
@@ -253,17 +325,34 @@ function refreshHud(instant = false) {
   // Com 1 peça na pilha, a "próxima" só entraria se a jogada render peças: não mostra.
   hud.renderNext(game.stack <= 1 && !game.rules.infinite ? null : game.next, theme, game.board.lookout > 0 ? game.upcoming(3) : []);
   world.setPreview(game.current, rotSteps * (Math.PI / 3), game.stack);
+  showInfluence();
   updateGhost();
+  if (game.current?.edges.some((e) => e === T.Water || e === T.Rail))
+    tutorial.offer('estrito', `${theme.terrainNames[T.Water]} e ${theme.terrainNames[T.Rail]}`, `Estas bordas precisam continuar: só encostam nelas mesmas. Uma borda de ${theme.terrainNames[T.Water].toLowerCase()} não pode encostar num ${theme.terrainNames[T.Grass].toLowerCase()}, por exemplo.`);
+}
+
+/** Casas da fronteira onde a peça da vez aproveita a influência de construções (não depende do giro). */
+function showInfluence() {
+  const cur = game.current;
+  const cells: [number, number][] = [];
+  if (cur && game.rules.influence) for (const k of game.board.frontier) {
+    const [q, r] = unkey(k);
+    if (game.board.influenceAt(q, r, cur.edges).points > 0) cells.push([q, r]);
+  }
+  world.setInfluence(cells);
+  if (cells.length) tutorial.offer('influencia', 'Influência', `As casas com contorno dourado ficam perto de construções de interação: uma peça ali ganha pontos por setor do terreno que elas trabalham (${theme.synergy.mill.toLowerCase()} com ${theme.terrainNames[T.Field].toLowerCase()}, ${theme.synergy.lumber.toLowerCase()} com ${theme.terrainNames[T.Forest].toLowerCase()}...). O valor cresce com a era.`);
 }
 
 function updateGhost() {
-  if (!game.current || !hover || !game.board.frontier.has(hkey(hover.q, hover.r)) || hud.modalOpen) {
+  if (!game.current || !hover || !game.board.frontier.has(hkey(hover.q, hover.r)) || hud.modalOpen || capture.stage !== 'play') {
     world.clearGhost();
     hud.confirm.hidden = true;
+    capture.take?.event({ kind: 'noghost' });
     return;
   }
   const check = game.check(hover.q, hover.r)!;
   world.setGhost(game.current, game.rot, rotSteps * (Math.PI / 3), hover.q, hover.r, check);
+  capture.take?.event({ kind: 'ghost', q: hover.q, r: hover.r, rot: game.rot, angle: rotSteps * (Math.PI / 3) });
 }
 
 function rotate(dir: 1 | -1) {
@@ -281,7 +370,13 @@ function screenOf(q: number, r: number, y = 0.4) {
 }
 
 function place(q: number, r: number) {
+  lastInput = performance.now();
   if (!game.current || hud.modalOpen) return;
+  // A escolha de era fica na mesa até a vila escolher: a próxima peça espera.
+  if (game.offers.length) {
+    showChoice();
+    return;
+  }
   const check = game.check(q, r);
   if (!check?.valid) {
     if (check && !check.occupied && check.neighbors > 0) {
@@ -294,17 +389,25 @@ function place(q: number, r: number) {
   const rot = game.rot;
   const res = game.place(q, r)!;
   moves.push([q, r, rot]);
+  capture.take?.event({ kind: 'place', q, r, rot });
   world.placeAnimated(res.placed);
   world.updateFrontier(game.board);
   rotSteps = 0;
   hud.confirm.hidden = true;
   announce(res);
+  if (!special) for (const k of progress.unlockLive(game.board)) unlockedToast(k);
   let discarded = 0;
   while (game.discardIfStuck()) discarded++;
   if (discarded) hud.toast(discarded === 1 ? 'Uma peça não cabia em lugar nenhum e foi descartada.' : `${discarded} peças sem encaixe foram descartadas.`, 'bad');
+  const sp = game.current?.special;
+  if (sp) {
+    hud.toast(`Peça especial: ${SPECIAL_NAME[sp]}. ${specialRule(sp)}`, 'good');
+    tutorial.offer('especial', 'Peça especial', `${SPECIAL_NAME[sp]}: ${specialRule(sp).toLowerCase()} As peças especiais são liberadas jogando e entram duas vezes em cada partida.`);
+  }
   if (game.board.score > best) {
     best = game.board.score;
-    if (!special) store.set('best', String(best));
+    bestSeed = game.seed;
+    if (!special) store.set(bestKey(), JSON.stringify({ score: best, seed: bestSeed }));
   }
   // Passar do recorde é um momento: comemora uma vez por partida (não na primeira partida).
   if (!recordCheered && bestAtStart > 0 && game.board.score > bestAtStart && !special) {
@@ -319,8 +422,14 @@ function place(q: number, r: number) {
   refreshHud();
   hud.say(`${res.points > 0 ? `Mais ${res.points} pontos. ` : ''}Total ${game.board.score.toLocaleString('pt-BR')}. ${game.rules.infinite ? '' : `${game.stack} peças na pilha.`}`);
   persist();
+  if (res.eraUp !== null && game.offers.length && !game.over) {
+    clearTimeout(choiceTimer);
+    // Primeiro a onda dourada e a fanfarra, depois as cartas.
+    choiceTimer = window.setTimeout(() => !hud.modalOpen && showChoice(), 1500);
+  }
   if (game.over && !gameOverShown) {
     gameOverShown = true;
+    commitProgress();
     overTimer = window.setTimeout(() => {
       if (!game.over) return;
       // A câmera recua devagar até mostrar o mapa inteiro antes do placar final.
@@ -332,18 +441,85 @@ function place(q: number, r: number) {
   }
 }
 
+let choiceTimer = 0;
+
+/** As duas cartas da escolha de era mais antiga ainda na mesa. */
+function showChoice() {
+  const offer = game.offers[0];
+  if (!offer || game.over) return;
+  clearTimeout(choiceTimer);
+  // A era da carta: a atual menos as escolhas que ainda vêm depois desta.
+  hud.showModal(choiceHtml(offer, `Era ${eraName(game.board.era - game.offers.length + 1)}`, theme));
+}
+
+/** Escolhe a carta 0 ou 1; a escolha fica gravada junto da última jogada (replay e desfazer). */
+function chooseBlessing(pick: number) {
+  if (!game.offers.length || !moves.length) return false;
+  const id = game.choose(pick)!;
+  moves[moves.length - 1].push(pick);
+  capture.take?.event({ kind: 'choose', pick });
+  hud.hideModal();
+  sfx.quest();
+  hud.toast(`${blessingName(id, theme)}: ${blessingRule(id, theme)}`, 'good');
+  refreshHud();
+  persist();
+  if (game.offers.length) showChoice();
+  return true;
+}
+
+/** Dicas das primeiras partidas, conforme o que a jogada fez acontecer. */
+function offerTips(res: PlaceResult) {
+  const R = game.rules;
+  if (res.perfect) tutorial.offer('perfeito', 'Encaixe perfeito', `Todas as bordas que encostam em vizinhas combinaram: +${R.perfectBonus}. Cercar uma peça com 6 vizinhas encaixadas devolve uma peça à pilha.`);
+  if (res.newQuest)
+    tutorial.offer('missao', 'Nova missão', `${questLabel(res.newQuest, theme)}: cumprida, rende +${res.newQuest.reward} peças. Peças com "!" trazem missões; as ativas ficam no canto e com um estandarte no mapa.`);
+  if (res.synergies.length) tutorial.offer('interacao', 'Interação', `Bordas diferentes que "conversam" também pontuam (+${R.synergyPoints}) e erguem uma construção. A prévia acende em dourado antes de colocar.`);
+  if (res.site) tutorial.offer('sitio', 'Sítio descoberto', 'Os carimbos no mapa escondem ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.');
+  if (res.eraUp !== null) tutorial.offer('era', 'Nova era', `A vila mudou de era e ganhou +${R.eraTiles} peças. O Centro mudou de forma, e a próxima peça com vila ergue o marco da era.`);
+  if (res.wonder?.started) tutorial.offer('maravilha', 'Maravilha', `Esta peça virou o canteiro da maravilha. Cada peça colocada depois avança uma etapa; pronta, rende +${R.wonderPoints} pontos e +${R.wonderTiles} peças.`);
+  if (!R.infinite && game.stack > 0 && game.stack <= 10) tutorial.offer('pilha', 'Pilha acabando', 'Missões, peças cercadas, sítios e eras devolvem peças à pilha. Vale mirar a missão mais perto de terminar.');
+}
+
+/** O que a peça especial rende, em uma frase (os nomes dos terrenos vêm do tema). */
+function specialRule(k: SpecialKind) {
+  const s = SPECIALS[k];
+  const near = s.radius === 1 ? 'vizinha' : `a até ${s.radius} casas`;
+  return `Vale +${s.per} por peça ${near} com ${theme.terrainNames[s.terrain].toLowerCase()}${s.tiles ? ` e +${s.tiles} peça${s.tiles > 1 ? 's' : ''}` : ''}${s.lookout ? ` e mostra as próximas peças por ${s.lookout} jogadas` : ''}.`;
+}
+
+function unlockedToast(k: SpecialKind) {
+  hud.toast(`Peça especial liberada: ${SPECIAL_NAME[k]}! Entra na pilha a partir da próxima partida.`, 'good');
+  sfx.quest();
+}
+
+/** Soma a partida ao progresso uma vez: ao acabar, ou ao ser trocada por outra depois de 5 jogadas. */
+function commitProgress() {
+  if (special || committed || (!game.over && moves.length < 5)) return;
+  committed = true;
+  const w = game.board.wonder;
+  for (const k of progress.commit(game.board, rulesTheme.id, !!w && w.stage >= game.rules.wonderStages)) unlockedToast(k);
+}
+
+/** Fim de partida: as peças especiais que faltam liberar e quanto falta para cada uma. */
+function specialsLine() {
+  const left = progress.pending(null);
+  if (!left.length) return `<p class="muted">Todas as peças especiais liberadas: ${progress.unlocked.map((k) => SPECIAL_NAME[k]).join(', ')}.</p>`;
+  return `<p class="muted">Peças especiais a liberar: ${left.map((n) => `<b>${SPECIAL_NAME[n.kind]}</b> ${n.have} de ${n.need} ${n.label}`).join(' · ')}.</p>`;
+}
+
 function announce(res: PlaceResult) {
   const s = screenOf(res.placed.q, res.placed.r);
+  world.placeFx(res);
+  offerTips(res);
   sfx.place(res.matches);
+  const e = res.placed.edges;
+  sfx.land({ water: e.includes(T.Water), forest: e.includes(T.Forest), rail: e.includes(T.Rail) });
   if (res.points > 0) {
     hud.floater(s.x, s.y - 10, `+${res.points}`, res.perfect ? 'big' : '');
     hud.bumpScore(res.perfect || res.synergies.length ? 'big' : '');
   }
-  const { x, z } = hexToWorld(res.placed.q, res.placed.r);
   if (res.perfect) {
     sfx.perfect();
-    world.burst(x, z, 'sparkle', 26);
-    world.halo(x, z);
     hud.floater(s.x, s.y - 46, 'Perfeito!', 'big');
   }
   // Interações: um aviso por borda, perto dela.
@@ -357,18 +533,15 @@ function announce(res: PlaceResult) {
       sfx.note(7 + k * 2, 0, 0.5, 0.08);
     }, 250 + k * 160));
   });
-  if (res.synergies.length) sfx.hammer(0.3);
+  if (res.synergies.length || res.placed.eraMark !== undefined) sfx.hammer(0.3);
+  if (res.placed.eraMark !== undefined) hud.toast(`Marco da era erguido: ${eraName(res.placed.eraMark)}`, 'good');
   for (const t of res.closed) {
     const p = screenOf(t.q, t.r);
     hud.floater(p.x, p.y - 20, '+1 peça', 'tiles');
-    const w = hexToWorld(t.q, t.r);
-    world.burst(w.x, w.z, 'sparkle', 16);
   }
   for (const q of res.questsDone) {
     sfx.quest();
     hud.toast(`Missão cumprida: ${questLabel(q, theme)} · +${q.reward} peças`, 'good');
-    const w = hexToWorld(q.anchor.q, q.anchor.r);
-    world.burst(w.x, w.z, 'sparkle', 40);
   }
   for (const q of res.questsFailed) {
     sfx.fail();
@@ -376,24 +549,29 @@ function announce(res: PlaceResult) {
   }
   if (res.newQuest) hud.toast(`Nova missão: ${questLabel(res.newQuest, theme)}`);
   if (res.site) {
-    const r = SITE_REWARD[res.site.kind];
-    const what = [r.points ? `+${r.points} pontos` : '', r.tiles ? `+${r.tiles} peça${r.tiles > 1 ? 's' : ''}` : '', res.site.kind === 'lookout' ? `próximas peças à vista por ${LOOKOUT_MOVES} jogadas` : ''].filter(Boolean).join(' · ');
-    hud.toast(`${SITE_LABEL[res.site.kind].name} descoberta: ${what}`, 'good');
-    sfx.quest();
-    world.burst(x, z, 'sparkle', 46);
+    hud.toast(`${SITE_LABEL[res.site.kind].name} descoberta: ${siteReward(res.site.kind)}`, 'good');
+    sfx.discover();
   }
   if (res.eraUp !== null) {
-    hud.toast(`Nova era: ${eraName(res.eraUp)} · +${game.rules.eraTiles} peças`, 'good');
-    sfx.perfect();
-    sfx.quest();
-    world.ripple(x, z, 2.2);
-    world.burst(x, z, 'sparkle', 60);
-    world.halo(x, z, 2);
-    world.flushBirds(x, z);
+    hud.toast(`Nova era: ${eraName(res.eraUp)} · +${game.rules.eraTiles} peças · a próxima vila ergue o marco`, 'good');
+    sfx.eraFanfare(res.eraUp);
+    sfx.hammer(0.45);
     const el = document.getElementById('era')!;
     el.classList.remove('up');
     void el.offsetWidth;
     el.classList.add('up');
+  }
+  if (res.wonder?.started) {
+    hud.toast(`Canteiro da maravilha: ${theme.wonder?.name ?? 'Maravilha'}. Cada peça colocada avança uma etapa (${game.rules.wonderStages} no total)`, 'good');
+    sfx.hammer(0.2);
+  } else if (res.wonder?.done) {
+    hud.toast(`${theme.wonder?.name ?? 'Maravilha'} concluída: +${game.rules.wonderPoints} pontos · +${game.rules.wonderTiles} peças · P para a foto`, 'good');
+    sfx.eraFanfare(game.board.era);
+  } else if (res.wonder) sfx.hammer(0.4);
+  if (res.special) {
+    const sp = res.special;
+    hud.toast(`${SPECIAL_NAME[sp.kind]}: ${sp.count} ${sp.count === 1 ? 'peça' : 'peças'} com ${theme.terrainNames[SPECIALS[sp.kind].terrain].toLowerCase()} por perto · +${sp.points} pontos${sp.tiles ? ` · +${sp.tiles} peça${sp.tiles > 1 ? 's' : ''}` : ''}${SPECIALS[sp.kind].lookout ? ` · próximas peças à vista por ${SPECIALS[sp.kind].lookout} jogadas` : ''}`, 'good');
+    sfx.special(sp.kind);
   }
   if (res.leftoverBonus) hud.toast(`Todos os sítios achados! Peças que sobraram: +${res.leftoverBonus} pontos`, 'good');
   hud.renderQuests(game.board.quests, theme);
@@ -401,29 +579,114 @@ function announce(res: PlaceResult) {
 
 // ------------------------------------------------------------------ telas
 
-function showHelp() {
-  const legend = theme.terrainNames.map((n, i) => `<span><i style="background:${theme.terrainColors[i]}"></i>${n}</span>`).join('');
+/** Ajuda em abas: o básico primeiro, o resto por assunto. */
+function showHelp(tab = 'basico') {
+  const R = game.rules;
+  const legend = theme.terrainNames.map((n, i) => `<span><i style="background:${theme.terrainColors[i]}">${glyph(`t${i}`, theme.terrainColors[i])}</i>${n}</span>`).join('');
+  const wonder = R.wonderStages > 0 && R.eraScores.length > 1;
+  const tabs: [string, string, string][] = [
+    [
+      'basico',
+      'Básico',
+      `<p>Monte uma paisagem peça por peça. Cada borda que combina com a vizinha vale ${R.matchPoints} pontos.</p>
+      <div class="legend">${legend}</div>
+      <ul>
+        <li><b>${theme.terrainNames[4]}</b> e <b>${theme.terrainNames[5]}</b> precisam continuar: só encostam neles mesmos.</li>
+        <li><b>Encaixe perfeito</b>: a peça encosta em 2 ou mais vizinhas e todas as bordas combinam (+${R.perfectBonus}).</li>
+        <li>Cercar uma peça com 6 vizinhas encaixadas rende <b>+${R.closedTiles} peça</b>.</li>
+        <li>A partida acaba quando a pilha esvazia. <kbd>U</kbd> desfaz a última jogada (o número de vezes depende do modo).</li>
+      </ul>`,
+    ],
+    [
+      'missoes',
+      'Missões',
+      `<p>Peças marcadas com "!" trazem uma missão. Cumprida, ela devolve peças à pilha.</p>
+      <ul>
+        <li><b>Grupo</b>: o terreno chegar a N peças. "Exatamente N" falha se passar.</li>
+        <li><b>Fechar</b>: nenhuma borda do grupo virada para o vazio.</li>
+        <li><b>Encaixes perfeitos</b>: N encaixes perfeitos a partir dali.</li>
+        <li><b>Interação</b>: N interações daquele tipo a partir dali.</li>
+      </ul>
+      <p><b>Interações</b>: bordas diferentes que se encostam também contam (+${R.synergyPoints}) e erguem construções. A borda acende em dourado.</p>
+      <div class="synergies">${synergyLegend()}</div>`,
+    ],
+    [
+      'eras',
+      'Eras',
+      `<ul>
+        <li>Com ${R.eraScores.slice(1).map((v) => v.toLocaleString('pt-BR')).join(', ')} pontos a vila muda de era e ganha +${R.eraTiles} peças. O Centro, no meio da primeira peça, muda de forma, as casas mudam de estilo, e a próxima peça com vila ergue o marco da era.</li>
+        ${R.influence ? `<li><b>Influência</b>: cada interação marca as casas em volta da peça dela, com contorno dourado. Uma peça colocada ali ganha pontos por setor do terreno que a construção trabalha (até +8), e o valor cresce com a era.</li>` : ''}
+        ${R.blessings ? `<li><b>Escolha da era</b>: a cada era nova a vila escolhe 1 de 2 cartas (teclas <kbd>1</kbd> e <kbd>2</kbd>), como ${blessingName('mill', theme)} ou ${blessingName('surveyors', theme)}. A carta vale até o fim da partida.</li>` : ''}
+        ${wonder ? `<li><b>Maravilha</b>: na última era, a próxima peça com 2 ou mais bordas de vila vira o canteiro da maravilha do tema. Cada peça colocada depois avança uma etapa, e as ${R.wonderStages} etapas rendem +${R.wonderPoints} pontos e +${R.wonderTiles} peças.</li>` : ''}
+        <li><b>Peças especiais</b>: ${SPECIAL_KINDS.map((k) => `${SPECIAL_NAME[k]} (${specialRule(k).toLowerCase().replace(/\.$/, '')}; libera com ${UNLOCKS[k].need} ${UNLOCKS[k].label})`).join('; ')}. Liberadas, entram duas vezes em cada partida, menos no Desafio do dia.</li>
+        <li><b>Sítios</b>: carimbos no mapa marcam ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.</li>
+      </ul>`,
+    ],
+    ['almanaque', 'Almanaque', almanac()],
+    [
+      'controles',
+      'Controles',
+      `<ul>
+        <li>Mouse: clique coloca, botão direito ou <kbd>R</kbd> gira a peça, arrastar move, roda dá zoom, <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera.</li>
+        <li>Inclinar a câmera: arrastar com o botão direito para cima ou para baixo, ou <kbd>PgUp</kbd>/<kbd>PgDn</kbd>; <kbd>Home</kbd> volta ao ângulo padrão. No toque, dois dedos para cima ou para baixo.</li>
+        <li>Toque: toque num espaço para ver a peça, toque de novo (ou ✓) para colocar.</li>
+        <li>O botão de som alterna entre música e efeitos, só efeitos e mudo; <kbd>M</kbd> liga ou desliga a música.</li>
+        <li>O botão Câmera tira fotos sem a interface (<kbd>P</kbd>) e grava vídeos de até 2 minutos (<kbd>V</kbd>), salvos em MP4 de até 4K.</li>
+      </ul>`,
+    ],
+  ];
+  const pick = tabs.some(([id]) => id === tab) ? tab : 'basico';
   hud.showModal(`
     <h2 id="modal-title">Retalhos</h2>
-    <p>Monte uma paisagem peça por peça. Cada borda que combina com a vizinha vale ${game.rules.matchPoints} pontos.</p>
-    <div class="legend">${legend}</div>
-    <ul>
-      <li><b>${theme.terrainNames[4]}</b> e <b>${theme.terrainNames[5]}</b> precisam continuar: só encostam neles mesmos.</li>
-      <li><b>Encaixe perfeito</b>: a peça encosta em 2 ou mais vizinhas e todas as bordas combinam (+${game.rules.perfectBonus}).</li>
-      <li>Cercar uma peça com 6 vizinhas encaixadas rende <b>+1 peça</b>.</li>
-      <li><b>Missões</b> pedem grupos de certo tamanho e dão peças extras. "Exatamente N" falha se passar.</li>
-      <li><b>Interações</b>: bordas diferentes que se encostam também contam (+${game.rules.synergyPoints}) e erguem construções. A borda acende em dourado.</li>
-    </ul>
-    <div class="synergies">${synergyLegend()}</div>
-    <ul>
-      <li><b>Eras</b>: com ${game.rules.eraScores.slice(1).map((v) => v.toLocaleString('pt-BR')).join(', ')} pontos a vila muda de era e ganha +${game.rules.eraTiles} peças.</li>
-      <li><b>Sítios</b>: carimbos no mapa marcam ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.</li>
-      <li><kbd>U</kbd> desfaz a última jogada (o número de vezes depende do modo).</li>
-      <li>O botão de som alterna entre música e efeitos, só efeitos e mudo; <kbd>M</kbd> liga ou desliga a música.</li>
-      <li>A partida acaba quando a pilha esvazia.</li>
-    </ul>
-    <p class="muted">Mouse: clique coloca, botão direito ou <kbd>R</kbd> gira a peça, arrastar move, roda dá zoom, <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera. Toque: toque num espaço para ver a peça, toque de novo (ou ✓) para colocar.</p>
-    <div class="row"><button class="primary" type="button" data-act="close">Jogar</button></div>`);
+    <div class="tabs" role="tablist">${tabs.map(([id, name]) => `<button type="button" role="tab" data-tab="${id}" aria-selected="${id === pick}">${name}</button>`).join('')}</div>
+    ${tabs.map(([id, , html]) => `<section class="tab" data-tab="${id}"${id === pick ? '' : ' hidden'}>${html}</section>`).join('')}
+    <div class="row"><button class="primary" type="button" data-act="close">Jogar</button><button class="secondary" type="button" data-act="tips">Rever as dicas</button></div>`);
+}
+
+/** Maior recorde do tema entre os modos (cada modo guarda o seu). */
+function themeBest(id: string) {
+  let top = 0;
+  for (const m of MODES) {
+    try {
+      const v = JSON.parse(store.get(`best.${m.id}.${id}`) ?? 'null') as { score?: unknown } | null;
+      if (v && Number.isSafeInteger(v.score)) top = Math.max(top, v.score as number);
+    } catch {
+      // valor corrompido: ignora
+    }
+  }
+  return top;
+}
+
+/** Almanaque: o que já se fez em todas as partidas, lido do progresso guardado no navegador. */
+function almanac() {
+  const d = progress.data;
+  const t = d.totals;
+  const n = (v: number) => v.toLocaleString('pt-BR');
+  const cell = (v: number, label: string) => `<div><b>${n(v)}</b><span>${label}</span></div>`;
+  const left = new Map(progress.pending(special ? null : game.board).map((p) => [p.kind, p]));
+  const specials = SPECIAL_KINDS.map((k) => {
+    const p = left.get(k);
+    return p
+      ? `<li class="locked"><b>${SPECIAL_NAME[k]}</b>: presa, ${p.have} de ${p.need} ${p.label}.</li>`
+      : `<li><b>${SPECIAL_NAME[k]}</b>: liberada, colocada ${n(d.specialsPlaced[k])} ${d.specialsPlaced[k] === 1 ? 'vez' : 'vezes'}. ${specialRule(k)}</li>`;
+  }).join('');
+  const sites = (Object.keys(SITE_LABEL) as SiteKind[]).map((k) => `<span><i>${SITE_LABEL[k].icon}</i>${SITE_LABEL[k].name} <b>${n(d.siteKinds[k])}</b></span>`).join('');
+  const rows = THEMES.map((th) => {
+    const r = d.themes[th.id];
+    const top = themeBest(th.id);
+    if (!r && !top) return `<tr class="locked"><td>${th.name}</td><td colspan="3" class="none">ainda não jogado</td></tr>`;
+    const era = (th.eras ?? ERA_NAMES)[r?.era ?? 0] ?? ERA_NAMES[0];
+    const wonder = r?.wonder ? ` · ${th.wonder?.name ?? 'maravilha'}` : '';
+    return `<tr><td>${th.name}</td><td>${n(r?.games ?? 0)}</td><td>${era}${wonder}</td><td>${top ? n(top) : '–'}</td></tr>`;
+  }).join('');
+  return `<p class="muted">Tudo o que você já fez, somado entre as partidas (a atual entra quando acaba).</p>
+    <div class="final small">${cell(t.games, 'partidas')}${cell(t.tiles, 'peças')}${cell(t.quests, 'missões')}${cell(t.synergies, 'interações')}${cell(t.perfects, 'perfeitos')}${cell(t.wonders, 'maravilhas')}</div>
+    <h3>Sítios descobertos</h3>
+    <div class="legend sites">${sites}</div>
+    <h3>Peças especiais</h3>
+    <ul class="almanac-specials">${specials}</ul>
+    <h3>Temas</h3>
+    <table class="almanac"><thead><tr><th>Tema</th><th>Partidas</th><th>Maior era</th><th>Recorde</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function synergyLegend() {
@@ -444,39 +707,111 @@ function showGameOver() {
       <div><b>${game.placedCount}</b><span>peças</span></div>
       <div><b>${b.questsCompleted}</b><span>missões</span></div>
     </div>
-    <p class="muted">Era ${eraName(b.era)}, ${b.sites.filter((x) => x.found).length} de ${b.sites.length} sítios, ${b.perfects} encaixes perfeitos, ${Object.values(b.synergyCount).reduce((a, c) => a + c, 0)} interações. Recorde: ${best.toLocaleString('pt-BR')}.</p>
+    <p class="muted">Era ${eraName(b.era)}, ${b.sites.filter((x) => x.found).length} de ${b.sites.length} sítios, ${b.perfects} encaixes perfeitos, ${Object.values(b.synergyCount).reduce((a, c) => a + c, 0)} interações.</p>
+    ${b.blessings.length ? `<p class="muted">Cartas da vila: ${b.blessings.map((id) => blessingName(id, theme)).join(', ')}.</p>` : ''}
+    <p class="muted">Recorde em ${mode.name} · ${rulesTheme.name}: ${best.toLocaleString('pt-BR')} pontos (semente ${bestSeed}).</p>
+    ${special ? '' : specialsLine()}
     <div class="row">
       <button class="primary" type="button" data-act="new">Jogar de novo</button>
+      ${mode.daily ? '' : `<button class="secondary" type="button" data-act="replay-seed">Repetir a semente</button>`}
       <button class="secondary" type="button" data-act="theme">Trocar tema</button>
-    </div>`);
+      ${special ? '' : `<button class="secondary" type="button" data-act="almanac">Almanaque</button>`}
+    </div>
+    ${moves.length ? `<div class="row"><button class="secondary" type="button" data-act="film">Gravar o filme da partida</button></div>` : ''}`);
   if (record) hud.modalBody.querySelector('h2')!.classList.add('record');
   sfx.gameOver(record);
   hud.countUp(hud.modalBody.querySelector<HTMLElement>('[data-count]')!, b.score);
 }
 
 hud.modal.addEventListener('click', (e) => {
-  const act = (e.target as HTMLElement).closest('button')?.dataset.act;
+  const btn = (e.target as HTMLElement).closest('button');
+  const act = btn?.dataset.act;
+  if (btn?.dataset.tab) {
+    // Abas da ajuda: troca a seção visível sem refazer o modal.
+    for (const el of hud.modalBody.querySelectorAll<HTMLElement>('[data-tab]')) {
+      const on = el.dataset.tab === btn.dataset.tab;
+      if (el.tagName === 'SECTION') el.hidden = !on;
+      else el.setAttribute('aria-selected', String(on));
+    }
+    return;
+  }
+  if (act === 'bless') {
+    chooseBlessing(Number(btn?.dataset.pick));
+    return;
+  }
+  if (act === 'film') {
+    // O diálogo de exportação toma o lugar do placar final.
+    capture.showExportDialog('film');
+    return;
+  }
+  if (act === 'almanac') {
+    showHelp('almanaque');
+    return;
+  }
+  if (act === 'tips') {
+    tutorial.reset();
+    hud.hideModal();
+    store.set('seenHelp', '1');
+    hud.toast('As dicas voltam a aparecer conforme você joga.');
+    return;
+  }
+  // A escolha de era não fecha clicando fora: fica para a próxima peça.
+  if (e.target === hud.modal && game.offers.length && hud.modalBody.querySelector('.blessings')) return;
   if (e.target === hud.modal || act === 'close') {
     hud.hideModal();
     store.set('seenHelp', '1');
   } else if (act === 'new') {
     hud.hideModal();
     startFresh();
+  } else if (act === 'replay-seed') {
+    // A mesma sequência de peças, para tentar de novo com o que se aprendeu.
+    hud.hideModal();
+    commitProgress();
+    const seed = game.seed;
+    rulesTheme = theme;
+    newGame(seed);
+    hud.toast(`Mesma semente (${seed}) · ${mode.name} · ${theme.name}`);
   } else if (act === 'mode') {
     hud.hideModal();
     startFresh(modeById((e.target as HTMLElement).closest('button')?.dataset.mode));
   } else if (act === 'theme') {
     hud.hideModal();
     hud.openThemeMenu(theme, pickTheme);
+  } else if (act === 'export') {
+    capture.submitExport();
   }
 });
 
+/** Troca a cor da casa ou o brasão: o tema é "vestido" de novo e o mundo refeito. */
+function setHouse(color: HouseColor | null, b: Banner) {
+  const recolor = color !== house;
+  house = color;
+  banner = b;
+  store.set('house', color);
+  store.set('banner', JSON.stringify(b));
+  if (recolor) {
+    theme = dress(themeById(theme.id), house);
+    hud.applyTheme(theme);
+    world.setTheme(theme, game.board);
+    hud.renderQuests(game.board.quests, theme);
+    refreshHud(true);
+  }
+  showCrest();
+}
+
+function showCrest() {
+  hud.setCrest(bannerSvg(theme.ui.accent, banner, 34));
+}
+
 function pickTheme(t: Theme) {
-  theme = t;
+  if (capture.take) capture.stopTake('A gravação terminou aqui: o vídeo fica no tema em que começou.');
+  theme = dress(t, house);
   store.set('theme', t.id);
-  hud.applyTheme(t);
-  world.setTheme(t, game.board);
-  hud.renderQuests(game.board.quests, t);
+  hud.applyTheme(theme);
+  showCrest();
+  world.setTheme(theme, game.board);
+  sfx.setStyle(t.music, game.board.era);
+  hud.renderQuests(game.board.quests, theme);
   refreshHud(true);
   if (game.over) {
     rulesTheme = t;
@@ -488,50 +823,79 @@ function pickTheme(t: Theme) {
 
 // ------------------------------------------------------------------ qualidade
 
-const qualityLabel: Record<QualityMode, string> = { auto: 'Auto', ultra: 'Ultra', high: 'Alta', medium: 'Média', low: 'Baixa' };
+const qualityLabel: Record<QualityMode, string> = { auto: 'Auto', cinema: 'Cinema', ultra: 'Ultra', high: 'Alta', medium: 'Média', low: 'Baixa' };
+const QUALITY_NOTE: Record<Quality, string> = {
+  cinema: 'Desenha 1,5× acima da tela, com grão de filme e lente. Para placas de topo (classe RTX 4080)',
+  ultra: 'Luz indireta, reflexos na água e raios de sol. Para placas acima da RX 580',
+  high: 'Oclusão, bloom e profundidade de campo',
+  medium: 'Leve, para notebooks e celulares',
+  low: 'Sem sombras nem pós-processamento',
+};
 const qualityBtn = document.getElementById('btn-quality')!;
 
-// Em telas de toque (celular/tablet) o modo Auto começa em Média; no computador, em Ultra.
+// O modo Auto começa pelo nome da placa de vídeo (gpuTier.ts). Sem um nome conhecido, começa em
+// Média nas telas de toque (celular, tablet) e em Ultra no computador.
+const gpu = readGpuInfo(world.renderer);
+const gpuLabel = gpuName(gpu);
 const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-const autoStart: Quality = coarsePointer ? 'medium' : 'ultra';
-const LOWER: Record<Quality, Quality> = { ultra: 'high', high: 'medium', medium: 'low', low: 'low' };
+const autoStart: Quality = tierForGpu(gpu) ?? (coarsePointer ? 'medium' : 'ultra');
+const LOWER: Record<Quality, Quality> = { cinema: 'ultra', ultra: 'high', high: 'medium', medium: 'low', low: 'low' };
 let autoLevel: Quality = autoStart;
+/** Resolução dinâmica do Auto: cede antes de o nível descer. */
+const dynres = new DynRes();
+
+function autoNote() {
+  return `${qualityLabel[autoLevel]}${dynres.step ? `, resolução ${Math.round(dynres.scale * 100)}%` : ''}`;
+}
+
+function updateQualityTitle() {
+  qualityBtn.title = `Qualidade gráfica: ${qualityLabel[qualityMode]}${qualityMode === 'auto' ? ` (${autoNote()})` : ''}${gpuLabel ? ` · ${gpuLabel}` : ''}`;
+}
 
 function applyQuality(mode: QualityMode) {
   qualityMode = mode;
   if (mode === 'auto') autoLevel = autoStart;
+  dynres.reset();
+  world.setResolutionScale(1);
   world.setQuality(mode === 'auto' ? autoLevel : mode);
   qualityBtn.textContent = qualityLabel[mode];
-  frameTimes.length = 0;
+  updateQualityTitle();
 }
 
-const frameTimes: number[] = [];
-function adaptQuality(dt: number) {
-  if (qualityMode !== 'auto' || document.hidden) return;
-  frameTimes.push(dt);
-  if (frameTimes.length < 150) return;
-  frameTimes.sort((a, b) => a - b);
-  const median = frameTimes[75];
-  frameTimes.length = 0;
-  if (median > 1 / 38 && autoLevel !== 'low') {
+/** Modo Auto: com o quadro lento, a resolução cede um degrau por vez; no menor degrau, o nível desce. */
+function adaptQuality(dt: number, now: number) {
+  if (qualityMode !== 'auto' || document.hidden || capture.stage !== 'play') return;
+  const ev = dynres.push(dt, now / 1000);
+  if (ev === 'up' || ev === 'down') world.setResolutionScale(dynres.scale);
+  else if (ev === 'floor' && autoLevel !== 'low') {
     autoLevel = LOWER[autoLevel];
+    dynres.reset();
+    world.setResolutionScale(1);
     world.setQuality(autoLevel);
     hud.toast(`Qualidade ajustada para ${qualityLabel[autoLevel]} para manter a fluidez.`);
   }
+  if (ev) updateQualityTitle();
 }
 
 // ------------------------------------------------------------------ entrada
 
-const pointers = new Map<number, { x: number; y: number }>();
-let drag: { button: number; x: number; y: number; moved: boolean; ground: THREE.Vector3 | null; touch: boolean } | null = null;
-let pinch: { d: number; mx: number; my: number } | null = null;
-
-function hoverAt(clientX: number, clientY: number) {
-  const p = world.groundPoint(clientX, clientY);
-  if (!p) return null;
-  const [q, r] = worldToHex(p.x, p.z);
-  return { q, r };
-}
+/** Foto, gravação e vídeo (src/ui/capture.ts): o estado da tela e a gravação em andamento. */
+const capture = new Capture({
+  canvas,
+  world,
+  hud,
+  store,
+  theme: () => theme,
+  game: () => game,
+  moves: () => moves,
+  liveQuality: () => (qualityMode === 'auto' ? autoLevel : qualityMode),
+  qualityLabel: (q) => qualityLabel[q],
+  cycleTime,
+  clearHover: () => (hover = null),
+  updateGhost,
+  resetDynres: () => dynres.reset(),
+  refreshHud,
+});
 
 function setHover(h: { q: number; r: number } | null) {
   const same = h && hover && h.q === hover.q && h.r === hover.r;
@@ -539,139 +903,27 @@ function setHover(h: { q: number; r: number } | null) {
   if (!same) updateGhost();
 }
 
-canvas.addEventListener('pointerdown', (e) => {
-  sfx.unlock();
-  hud.closeThemeMenu();
-  if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 2) return;
-  canvas.setPointerCapture(e.pointerId);
-  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pointers.size === 2) {
-    const [a, b] = [...pointers.values()];
-    pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
-    drag = null;
-    return;
-  }
-  drag = { button: e.button, x: e.clientX, y: e.clientY, moved: false, ground: world.groundPoint(e.clientX, e.clientY), touch: e.pointerType !== 'mouse' };
+const input = bindInput({
+  canvas,
+  world,
+  hud,
+  sfx,
+  store,
+  capture,
+  hover: () => hover,
+  setHover,
+  open: (q, r) => game.board.frontier.has(hkey(q, r)),
+  hasPiece: () => !!game.current,
+  gameOver: () => game.over,
+  place,
+  rotate,
+  cycleTime,
+  showHelp: () => showHelp(),
+  requestNewGame,
+  undo,
+  toggleMusic,
+  choose: (pick) => !!hud.modalBody.querySelector('.blessings') && chooseBlessing(pick),
 });
-
-canvas.addEventListener('pointermove', (e) => {
-  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pinch && pointers.size === 2) {
-    const [a, b] = [...pointers.values()];
-    const d = Math.hypot(a.x - b.x, a.y - b.y);
-    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    world.rig.zoom(pinch.d / Math.max(d, 1));
-    const before = world.groundPoint(pinch.mx, pinch.my);
-    const after = world.groundPoint(mx, my);
-    if (before && after) world.rig.panWorld(before.x - after.x, before.z - after.z, true);
-    pinch = { d, mx, my };
-    return;
-  }
-  if (drag) {
-    if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > (drag.touch ? 10 : 5)) drag.moved = true;
-    if (drag.moved) {
-      if (drag.button === 2 || (drag.button === 0 && e.shiftKey)) {
-        world.rig.rotate(-(e.movementX || 0) * 0.006);
-      } else if (drag.ground) {
-        const now = world.groundPoint(e.clientX, e.clientY);
-        if (now) {
-          world.rig.panWorld(drag.ground.x - now.x, drag.ground.z - now.z, true);
-          world.rig.apply(world.camera);
-          world.camera.updateMatrixWorld();
-        }
-      }
-      canvas.style.cursor = 'grabbing';
-      return;
-    }
-  }
-  if (e.pointerType === 'mouse') setHover(hoverAt(e.clientX, e.clientY));
-});
-
-function endPointer(e: PointerEvent) {
-  sfx.unlock(); // iOS libera áudio no fim do toque
-  pointers.delete(e.pointerId);
-  if (pointers.size < 2) pinch = null;
-  canvas.style.cursor = '';
-  const d = drag;
-  drag = null;
-  if (!d || d.moved || e.type === 'pointercancel') return;
-  if (d.button === 2) {
-    rotate(1);
-    return;
-  }
-  const h = hoverAt(e.clientX, e.clientY);
-  if (!h) return;
-  if (d.touch) {
-    // Toque: primeiro mostra a peça no espaço, o segundo toque confirma.
-    if (hover && hover.q === h.q && hover.r === h.r && game.board.frontier.has(hkey(h.q, h.r))) place(h.q, h.r);
-    else {
-      setHover(h);
-      hud.confirm.hidden = !(game.current && game.board.frontier.has(hkey(h.q, h.r)));
-    }
-    return;
-  }
-  setHover(h);
-  place(h.q, h.r);
-}
-canvas.addEventListener('pointerup', endPointer);
-canvas.addEventListener('pointercancel', endPointer);
-canvas.addEventListener('pointerleave', (e) => {
-  if (e.pointerType === 'mouse' && !drag) setHover(null);
-});
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-canvas.addEventListener(
-  'wheel',
-  (e) => {
-    e.preventDefault();
-    world.rig.zoom(Math.exp(e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)));
-  },
-  { passive: false },
-);
-
-const held = new Set<string>();
-window.addEventListener('keydown', (e) => {
-  // Atalhos do navegador (Ctrl/Cmd+R, Cmd+D...) ficam com o navegador.
-  if (e.target instanceof HTMLInputElement || e.ctrlKey || e.metaKey || e.altKey) return;
-  const k = e.key.toLowerCase();
-  if (k === 'escape') {
-    if (hud.modalOpen && !game.over) store.set('seenHelp', '1');
-    hud.hideModal();
-    hud.closeThemeMenu();
-    return;
-  }
-  if (hud.modalOpen) return;
-  sfx.unlock();
-  if (k === 'r' || k === ' ') {
-    e.preventDefault();
-    rotate(e.shiftKey ? -1 : 1);
-  } else if (k === 't') rotate(-1);
-  else if (k === 'f') hud.stats.hidden = !hud.stats.hidden;
-  else if (k === 'l') cycleTime();
-  else if (k === 'h' || k === '?') showHelp();
-  else if (k === 'n') requestNewGame();
-  else if (k === 'u') undo();
-  else if (k === 'm') toggleMusic();
-  else if (k === '+' || k === '=') world.rig.zoom(0.85);
-  else if (k === '-') world.rig.zoom(1.18);
-  else held.add(k);
-});
-window.addEventListener('keyup', (e) => {
-  // Com Cmd pressionado o macOS não envia keyup das outras teclas: evita câmera "presa".
-  if (e.key === 'Meta' || e.key === 'Control' || e.key === 'Alt') held.clear();
-  else held.delete(e.key.toLowerCase());
-});
-window.addEventListener('blur', () => held.clear());
-
-function keyboardCamera(dt: number) {
-  let dx = 0, dy = 0;
-  if (held.has('a') || held.has('arrowleft')) dx -= 1;
-  if (held.has('d') || held.has('arrowright')) dx += 1;
-  if (held.has('w') || held.has('arrowup')) dy += 1;
-  if (held.has('s') || held.has('arrowdown')) dy -= 1;
-  if (dx || dy) world.rig.panScreen(dx * dt * 12, dy * dt * 12);
-  if (held.has('q')) world.rig.rotate(dt * 1.6);
-  if (held.has('e')) world.rig.rotate(-dt * 1.6);
-}
 
 document.getElementById('rot-left')!.addEventListener('click', () => {
   sfx.unlock();
@@ -684,33 +936,44 @@ document.getElementById('rot-right')!.addEventListener('click', () => {
 hud.confirm.addEventListener('click', () => {
   if (hover) place(hover.q, hover.r);
 });
-document.getElementById('btn-help')!.addEventListener('click', showHelp);
+document.getElementById('btn-help')!.addEventListener('click', () => showHelp());
+// No celular as missões ficam em linhas finas; um toque abre ou fecha os detalhes.
+hud.quests.addEventListener('click', () => hud.quests.classList.toggle('open'));
 document.getElementById('btn-new')!.addEventListener('click', requestNewGame);
 document.getElementById('btn-undo')!.addEventListener('click', undo);
 hud.themeBtn.addEventListener('click', () => {
-  if (hud.themeMenu.hidden) hud.openThemeMenu(theme, pickTheme);
+  if (hud.themeMenu.hidden) hud.openThemeMenu(theme, pickTheme, { color: house, banner, themeAccent: themeById(theme.id).ui.accent, onChange: setHouse });
   else hud.closeThemeMenu();
 });
 qualityBtn.addEventListener('click', () => {
-  const next = QUALITIES[(QUALITIES.indexOf(qualityMode) + 1) % QUALITIES.length];
-  applyQuality(next);
-  store.set('quality', next);
-  hud.toast(`Qualidade: ${qualityLabel[next]}`);
+  if (capture.stage !== 'play') return;
+  const items = QUALITIES.map((q) => ({
+    id: q,
+    label: q === 'auto' ? `Auto · ${autoNote()}` : qualityLabel[q],
+    note: q === 'auto' ? `Escolhe pela placa de vídeo${gpuLabel ? ` (${gpuLabel})` : ''} e baixa a resolução antes de tirar efeitos` : QUALITY_NOTE[q],
+    current: q === qualityMode,
+  }));
+  hud.toggleMenu(qualityBtn, items, (id) => {
+    const next = pickQ(id);
+    if (!next) return;
+    applyQuality(next);
+    store.set('quality', next);
+    hud.toast(`Qualidade: ${qualityLabel[next]}${next === 'cinema' ? ' · pede uma placa de vídeo de topo' : ''}`);
+  });
 });
-const TIME_LABEL: Record<TimeOfDay, string> = { day: 'Dia', dusk: 'Tarde', night: 'Noite' };
-const TIME_ICON: Record<TimeOfDay, string> = { day: '☀', dusk: '◐', night: '☾' };
 const setTimeLabel = (t: TimeOfDay) => {
   timeBtn.querySelector('.long')!.textContent = TIME_LABEL[t];
   timeBtn.querySelector('.short')!.textContent = TIME_ICON[t];
 };
 const timeBtn = document.getElementById('btn-time')!;
 function cycleTime() {
-  const order: TimeOfDay[] = ['day', 'dusk', 'night'];
-  const next = order[(order.indexOf(world.timeOfDay) + 1) % 3];
+  const next = TIME_ORDER[(TIME_ORDER.indexOf(world.timeOfDay) + 1) % TIME_ORDER.length];
   world.setTimeOfDay(next);
   setTimeLabel(next);
   sfx.setMood(next);
   store.set('time', next);
+  capture.take?.event({ kind: 'time', tod: next });
+  capture.timeChanged();
 }
 timeBtn.addEventListener('click', cycleTime);
 {
@@ -772,6 +1035,8 @@ function autoPlace(n: number, infinite: boolean) {
     const res = game.place(m.q, m.r);
     if (!res) break;
     placed.push(res.placed);
+    // As jogadas entram na lista: o filme e a gravação refazem o mapa por elas.
+    moves.push([m.q, m.r, m.rot]);
     while (game.discardIfStuck());
   }
   const logic = performance.now() - t0;
@@ -804,10 +1069,48 @@ let statsClock = 0;
 let frames = 0;
 let cpuAcc = 0;
 let last = performance.now();
+let ambienceAt = 0;
+
+/**
+ * Som de ambiente: a paisagem num raio de 3 casas em volta do foco da câmera. Cada terreno
+ * pesa pela fração das bordas, vezes o quanto do raio já tem peça (o vazio é só vento).
+ */
+function updateAmbience(now: number) {
+  if (now - ambienceAt < 500) return;
+  ambienceAt = now;
+  const [fq, fr] = worldToHex(world.rig.target.x, world.rig.target.z);
+  const n = [0, 0, 0, 0, 0, 0];
+  let tiles = 0;
+  for (const p of game.board.list) {
+    if (hexDistance(p.q, p.r, fq, fr) > 3) continue;
+    tiles++;
+    for (const t of p.edges) n[t]++;
+  }
+  const area = 37 * 6;
+  const share = (t: T, k: number) => Math.min(1, (n[t] / area) * k);
+  sfx.setAmbience({
+    open: Math.min(1, share(T.Grass, 1.2) + share(T.Field, 1.2)),
+    forest: share(T.Forest, 2),
+    water: share(T.Water, 4),
+    village: share(T.Village, 2.5),
+    rail: share(T.Rail, 4),
+    near: tiles ? THREE.MathUtils.clamp(1 - (world.rig.dist - world.rig.minDist) / 20, 0, 1) : 0,
+  });
+}
+
+// Bateria: em tela de toque, com o jogo parado (sem toque, tecla ou peça caindo), desenha a 30
+// quadros e, depois de 15 s, a 20. O mundo continua animado; no computador nada muda.
+const saveBattery = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+let lastInput = 0;
+let frameNo = 0;
+for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart'])
+  window.addEventListener(ev, () => (lastInput = performance.now()), { capture: true, passive: true });
 
 function frame(now: number) {
   try {
-    step(now);
+    const idle = now - lastInput;
+    const skip = saveBattery && !special && capture.stage === 'play' && !capture.take && !capture.shooting && idle > 4000 ? (idle > 15000 ? 3 : 2) : 1;
+    if (++frameNo % skip === 0) step(now);
   } finally {
     requestAnimationFrame(frame);
   }
@@ -820,21 +1123,45 @@ function step(now: number) {
   const realDt = (now - last) / 1000;
   const dt = Math.min(0.05, realDt) * timeScale;
   last = now;
+  // A foto e o vídeo desenham por conta própria.
+  if (capture.stage === 'export' || capture.shooting) return;
+  tutorial.tick(hud.modalOpen || capture.stage !== 'play' || capture.take !== null);
   const c0 = performance.now();
-  keyboardCamera(dt);
+  input.keyboardCamera(dt);
   if (params.has('demo')) demoStep(dt);
+  if (scoutPending && !hud.modalOpen) {
+    scoutPending = false;
+    world.scout(game.board);
+  }
   world.tick(dt);
+  updateAmbience(now);
+  if (capture.take && !capture.take.frame(realDt, { x: world.rig.target.x, z: world.rig.target.z, dist: world.rig.dist, yaw: world.rig.yaw, tilt: world.rig.tilt })) capture.stopTake('A gravação chegou a 2 minutos.');
   hud.tick(dt);
   const markers = [];
   for (const q of game.board.quests) {
     if (q.state !== 'active') continue;
     const s = screenOf(q.anchor.q, q.anchor.r, 0.55);
-    markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: q.exact ? `=${q.target}` : `${q.target}+`, color: theme.terrainColors[q.terrain] });
+    // O estandarte não tapa a jogada: apaga quando o fantasma passa na peça dele ou numa vizinha.
+    const dim = !!hover && hexDistance(hover.q, hover.r, q.anchor.q, q.anchor.r) <= 1;
+    markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: questMarker(q), color: q.kind === 'perfect' ? theme.ui.accent : theme.terrainColors[q.terrain], dim });
   }
-  for (const st of game.board.sites) {
-    if (st.found) continue;
+  // Maravilha em obra: etiqueta com a etapa sobre o canteiro.
+  const wd = game.board.wonder;
+  if (wd && wd.stage < game.rules.wonderStages) {
+    const s = screenOf(wd.tile.q, wd.tile.r, 0.9);
+    markers.push({ id: 900000, x: s.x, y: s.y, visible: s.visible, text: `⛫ ${wd.stage}/${game.rules.wonderStages}`, color: '#8a6a3a', kind: 'wonder' });
+  }
+  // Os sítios são carimbos no mapa (World); a etiqueta com a recompensa só aparece com o fantasma em cima.
+  const st = hover && game.current ? game.board.siteAt(hover.q, hover.r) : null;
+  if (st) {
     const s = screenOf(st.q, st.r, 0.05);
-    markers.push({ id: 100000 + st.q * 1000 + st.r, x: s.x, y: s.y + 30, visible: s.visible, text: SITE_LABEL[st.kind].icon, color: '#8a6a3a', kind: st.kind });
+    markers.push({ id: 100000 + st.q * 1000 + st.r, x: s.x, y: s.y + 30, visible: s.visible, text: `${SITE_LABEL[st.kind].icon} ${SITE_LABEL[st.kind].name}: ${siteReward(st.kind)}`, color: '#8a6a3a', kind: st.kind });
+  }
+  // Influência das construções: o ganho aparece com o fantasma numa casa contornada.
+  const inf = hover && game.current && !st ? game.board.influenceAt(hover.q, hover.r, game.current.edges) : null;
+  if (inf?.points) {
+    const s = screenOf(hover!.q, hover!.r, 0.05);
+    markers.push({ id: 200000, x: s.x, y: s.y + 30, visible: s.visible, text: `✦ +${inf.points} · ${inf.kinds.map((k) => theme.synergy[k.kind]).join(', ')}`, color: theme.ui.accent, kind: 'influence' });
   }
   hud.updateMarkers(markers);
   cpuAcc += performance.now() - c0;
@@ -856,19 +1183,21 @@ function step(now: number) {
         `triângulos ${(s.triangles / 1000).toFixed(0)} mil`,
         `peças ${game.board.list.length} · blocos ${s.chunks}`,
         `instâncias ${s.instances.toLocaleString('pt-BR')}`,
-        `qualidade ${qualityLabel[qualityMode]}${qualityMode === 'auto' ? ` (${qualityLabel[autoLevel]})` : ''}`,
+        `qualidade ${qualityLabel[qualityMode]}${qualityMode === 'auto' ? ` (${autoNote()})` : ''}`,
+        `placa ${gpuLabel || '?'}`,
       ].join('\n');
     }
-    (window as unknown as { __stats: unknown }).__stats = { ...statsText, ...world.stats(), tiles: game.board.list.length, quality: world.quality };
+    (window as unknown as { __stats: unknown }).__stats = { ...statsText, ...world.stats(), tiles: game.board.list.length, quality: world.quality, res: dynres.scale, gpu: gpuLabel };
+    if (capture.take) capture.updateCameraBtn();
   }
-  adaptQuality(realDt);
+  adaptQuality(realDt, now);
 }
 
 // ------------------------------------------------------------------ início
 
 function start(data: unknown) {
   const hotData = data as (Partial<Save> & { theme?: string }) | undefined;
-  if (hotData?.theme) theme = themeById(hotData.theme);
+  if (hotData?.theme) theme = dress(themeById(hotData.theme), house);
   applyQuality(qualityMode);
   let saved = special ? null : (validSave(hotData) ?? readSave());
   // Um link com ?seed= (desafio) vence a partida salva de outra semente.
@@ -878,7 +1207,7 @@ function start(data: unknown) {
   if (saved) {
     rulesTheme = themeById(saved.rulesId);
     mode = modeById(saved.mode);
-    resumed = newGame(saved.seed, saved.moves, saved.score, saved.undone);
+    resumed = newGame(saved.seed, saved.moves, saved.score, saved.undone, saved.specials);
     if (resumed && saved.moves.length) hud.toast(`Partida retomada · ${saved.moves.length} peças`);
     else if (!resumed) hud.toast('A partida salva é de uma versão anterior e não pôde ser retomada. Começando outra.');
   }
@@ -893,10 +1222,19 @@ function start(data: unknown) {
     (window as unknown as { __load: unknown }).__load = r;
   } else if (params.has('auto')) autoPlace(Number(params.get('auto')) || 40, false);
   if (params.has('debug')) hud.stats.hidden = false;
+  // Legibilidade: decorações pretas sobre chão branco (vilas, construções e marcos precisam ler de longe).
+  if (params.has('silhueta')) U.silhouette.value = 1;
   (window as unknown as { __pools: () => unknown }).__pools = () => world.poolReport();
   if (params.has('gallery')) (window as unknown as { __gallery: string[] }).__gallery = world.showGallery();
   if (params.has('yaw')) world.rig.yaw = world.rig.goalYaw = Number(params.get('yaw'));
   if (params.has('zoom')) world.rig.dist = world.rig.goalDist = Number(params.get('zoom'));
+  // Inclinação guardada (ajuste em radianos) ou pedida pela URL (graus acima do chão, para capturas).
+  const savedTilt = Number(store.get('tilt'));
+  if (store.get('tilt') !== null && Number.isFinite(savedTilt) && Math.abs(savedTilt) <= 1) world.rig.tilt = world.rig.goalTilt = world.rig.clampTilt(savedTilt);
+  const pitchDeg = Number(params.get('pitch'));
+  if (params.has('pitch') && Number.isFinite(pitchDeg) && pitchDeg >= PITCH_MIN * THREE.MathUtils.RAD2DEG - 1e-6 && pitchDeg <= PITCH_MAX * THREE.MathUtils.RAD2DEG + 1e-6) {
+    world.rig.tilt = world.rig.goalTilt = pitchDeg * THREE.MathUtils.DEG2RAD - world.rig.basePitch(world.rig.goalDist);
+  }
   if (params.has('focus')) (window as unknown as { __focus: (t: number) => boolean }).__focus(Number(params.get('focus')));
   if (!special && !store.get('seenHelp') && !(resumed && moves.length)) showHelp();
   requestAnimationFrame((t) => {
@@ -938,7 +1276,101 @@ function start(data: unknown) {
 };
 (window as unknown as { __ripple: (age: number) => void }).__ripple = (age) => world.ripple(world.rig.target.x, world.rig.target.z, 1, age);
 
+// Centraliza a câmera no Centro e o mostra numa era (0 a 3); com `age`, a onda dourada já com essa idade em segundos.
+(window as unknown as { __era: (era: number, age?: number, zoom?: number) => void }).__era = (era, age, zoom) => {
+  world.showEra(era, age ?? -1);
+  world.rig.goal.set(0, 0, 0);
+  world.rig.target.set(0, 0, 0);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+};
+
+// Centraliza a câmera no último marco de era erguido (capturas do marco).
+(window as unknown as { __mark: (zoom?: number) => boolean }).__mark = (zoom) => {
+  const p = game.board.list.filter((t) => t.eraMark !== undefined).pop();
+  if (!p) return false;
+  const { x, z } = hexToWorld(p.q, p.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
+
 // Centraliza a câmera num barco andando (capturas das esteiras na água).
+(window as unknown as { __site: (zoom?: number) => string | null }).__site = (zoom) => {
+  const found = [...game.board.list].reverse().find((p) => p.site);
+  const st = found ?? game.board.sites.find((x) => !x.found);
+  if (!st) return null;
+  const { x, z } = hexToWorld(st.q, st.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return found ? `achado:${found.site}` : `escondido:${(st as { kind: string }).kind}`;
+};
+// Peça especial: centraliza na i-ésima colocada (estação, moinho d'água ou farol) e devolve qual.
+(window as unknown as { __special: (i?: number, zoom?: number) => string | null }).__special = (i = 0, zoom) => {
+  const p = game.board.list.filter((t) => t.def.special)[i];
+  if (!p) return null;
+  const { x, z } = hexToWorld(p.q, p.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return p.def.special!;
+};
+// Maravilha: centraliza no canteiro; com `stage`, mostra a obra nessa etapa (0 a 6, só a imagem).
+(window as unknown as { __wonder: (stage?: number, zoom?: number) => boolean }).__wonder = (stage, zoom) => {
+  const w = game.board.wonder;
+  if (!w) return false;
+  const { x, z } = hexToWorld(w.tile.q, w.tile.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  if (stage !== undefined) world.syncWonder({ wonder: { tile: w.tile, stage }, rules: game.rules } as typeof game.board, false);
+  return true;
+};
+(window as unknown as { __folk: (i?: number, zoom?: number) => boolean }).__folk = (i = 0, zoom) => {
+  const f = world.life.workerPos(i);
+  if (!f) return false;
+  world.rig.goal.set(f.x, 0, f.z);
+  world.rig.target.set(f.x, 0, f.z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
+// Centraliza no i-ésimo cardume, ou no i-ésimo cais de pescador com `pier` (capturas da pesca).
+(window as unknown as { __fishing: (i?: number, pier?: boolean, zoom?: number) => boolean }).__fishing = (i = 0, pier = false, zoom) => {
+  const f = world.life.fishingPos(i, pier);
+  if (!f) return false;
+  world.rig.goal.set(f.x, 0, f.z);
+  world.rig.target.set(f.x, 0, f.z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
+// Linha reta de ferrovia, fora do mapa, para a captura da carga e da moeda.
+(window as unknown as { __spur: () => boolean }).__spur = () => {
+  const edges = [T.Rail, T.Village, T.Grass, T.Rail, T.Grass, T.Grass];
+  for (let i = 0; i < 4; i++) if (game.board.tiles.has(hkey(12 + i, 0))) return false;
+  const placed = [0, 1, 2, 3].map((i) => game.board.placeRaw(12 + i, 0, { edges: [...edges], seed: 9000 + i, quest: null }, 0));
+  world.placeInstant(placed, game.board);
+  return true;
+};
+// Segura o trem na parada e centraliza (captura da carga e da moeda).
+(window as unknown as { __holdTrade: (zoom?: number) => boolean }).__holdTrade = (zoom) => {
+  if (!world.life.holdTrade()) return false;
+  const p = world.life.tradePos(true);
+  if (!p) return false;
+  world.rig.goal.set(p.x, 0, p.z);
+  world.rig.target.set(p.x, 0, p.z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
+// Centraliza no veículo da rota. Com `coin`, só quando a moeda está no ar (captura da parada).
+(window as unknown as { __trade: (coin?: boolean, zoom?: number) => boolean }).__trade = (coin = false, zoom) => {
+  const p = world.life.tradePos(coin);
+  if (!p) return false;
+  world.rig.goal.set(p.x, 0, p.z);
+  world.rig.target.set(p.x, 0, p.z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
 (window as unknown as { __boat: (zoom?: number) => boolean }).__boat = (zoom) => {
   const b = world.life.boatPos();
   if (!b) return false;
@@ -961,7 +1393,8 @@ function start(data: unknown) {
 };
 
 // Idem, escolhendo a jogada com mais interações (para ver as construções).
-(window as unknown as { __ghostSynergy: () => number }).__ghostSynergy = () => {
+// Com `commit`, coloca a peça ali (capturas da obra subindo com andaime).
+(window as unknown as { __ghostSynergy: (commit?: boolean) => number }).__ghostSynergy = (commit) => {
   if (!game.current) return 0;
   let best: { q: number; r: number; rot: number; n: number } | null = null;
   for (const k of game.board.frontier) {
@@ -980,7 +1413,31 @@ function start(data: unknown) {
   updateGhost();
   const { x, z } = hexToWorld(best.q, best.r);
   world.rig.goal.set(x, 0, z);
+  if (commit) {
+    world.rig.target.set(x, 0, z);
+    place(best.q, best.r);
+  }
   return best.n;
+};
+
+// Exporta um vídeo sem o diálogo (teste no contêiner): o filme da partida ou a gravação em andamento
+// (tecla V), em `height` linhas, e devolve o MP4 em base64 para conferir com o ffprobe.
+(window as unknown as { __video: (o?: { kind?: string; height?: number; quality?: string }) => Promise<unknown> }).__video = async (o = {}) => {
+  const kind = o.kind === 'take' ? 'take' : 'film';
+  if (kind === 'take') {
+    if (!capture.take) return null;
+    capture.stopTake();
+    hud.hideModal();
+  }
+  const height = Math.round(THREE.MathUtils.clamp(Number(o.height) || 360, 144, 2160) / 2) * 2;
+  const q = (VIDEO_QUALITIES as readonly string[]).includes(o.quality ?? '') ? (o.quality as Quality) : 'high';
+  const t0 = performance.now();
+  const blob = await capture.exportVideo(kind, height, q, 'cinematic', world.timeOfDay);
+  if (!blob) return null;
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  return { bytes: blob.size, ms: performance.now() - t0, b64: btoa(bin) };
 };
 
 const hot = (window as unknown as { claude?: { hot?: Hot } }).claude?.hot;

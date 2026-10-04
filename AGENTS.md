@@ -38,12 +38,13 @@ npm install          # Node >= 22.12 (ver .nvmrc)
 npm run dev          # servidor de desenvolvimento (Vite)
 npm run check        # typecheck + testes + build: rode antes de todo commit
 npm run typecheck    # tsc --noEmit
-npm test             # 600 partidas simuladas com oráculos independentes + cenários sintéticos
+npm test             # 600 partidas simuladas com oráculos independentes, cenários sintéticos e legibilidade das cores (tests/legibility.ts)
 npm run build        # dist/index.html (arquivo único)
+npm run smoke        # depois do build: abre o jogo em WebGPU e WebGL2 e falha com erro no console
 node scripts/artifact.mjs   # depois do build: dist/artifact/retalhos.html (formato de página publicável)
 ```
 
-A CI (`.github/workflows/ci.yml`) roda typecheck, testes e build em todo pull request e em todo push na `main`. No Claude Code na web, o hook `.claude/hooks/session-start.sh` roda `npm install` no início da sessão.
+A CI (`.github/workflows/ci.yml`) roda typecheck, testes e build em todo pull request e em todo push na `main`, e depois `npm run smoke` (`scripts/smoke.mjs`): abre o build no Chromium em WebGPU e em WebGL2, deixa a IA pôr 12 peças e falha com qualquer erro no console. Rode o mesmo localmente depois do build quando mexer em `src/render/` ou no `main.ts`. No Claude Code na web, o hook `.claude/hooks/session-start.sh` roda `npm install` no início da sessão.
 
 ### Verificação visual (Playwright, sem GPU)
 
@@ -76,17 +77,26 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?stress=1000` | teste de carga; o resultado fica em `window.__load` |
 | `?focus=4` | centraliza a câmera na peça com mais bordas do terreno (4 = rio); `window.__focus(t, zoom)` |
 | `?webgl` | força o backend WebGL2 (o padrão é WebGPU quando o navegador oferece) |
-| `?fx=ao.gi.ssr.rays.traa.bloom.dof` | liga os efeitos de pós um a um (medir custo); `?fx=` desliga todos |
+| `?fx=ao.gi.ssr.rays.traa.bloom.dof.ink.film` | liga os efeitos de pós um a um (medir custo; `film` é o acabamento do Cinema: mais amostras, grão e aberração); `?fx=` desliga todos |
 | `?timescale=0.05` | desacelera o mundo (animações nas capturas por software) |
+| `?silhueta` | decorações pretas sobre chão branco: confere se vilas, construções e marcos leem de longe |
 | `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
 | `window.__ripple(idade)` | dispara a onda do chão no foco da câmera, já com essa idade em segundos |
 | `window.__celebrate()` | anel dourado e bando de pássaros no foco da câmera (efeitos de nova era) |
+| `window.__era(era, idade?, zoom?)` | centraliza no Centro da vila e o mostra na era (0 a 3); com `idade`, a onda dourada já com essa idade em segundos |
+| `window.__mark(zoom?)` | centraliza a câmera no último marco de era erguido |
 | `window.__boat(zoom?)` | centraliza a câmera num barco andando (esteiras na água) |
-| `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` | ver o `README.md` |
+| `window.__fishing(i?, cais?, zoom?)` | centraliza no i-ésimo cardume de peixes; com `cais = true`, no i-ésimo cais de pescador |
+| `window.__folk(i?, zoom?)` | centraliza a câmera no i-ésimo aldeão de construção |
+| `window.__site(zoom?)` | centraliza no último sítio achado (ou no primeiro escondido) e devolve qual |
+| `?specials=all` / `window.__special(i?, zoom?)` | põe as peças especiais na partida sem liberá-las; centraliza na i-ésima colocada e devolve qual |
+| `window.__wonder(etapa?, zoom?)` | centraliza no canteiro da maravilha; com `etapa` (0 a 6), mostra a obra nessa etapa |
+| `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` `?pitch=` | ver o `README.md` |
 | `window.__stats` | estatísticas do último quadro |
 | `window.__pools()` | relatório dos InstancedMesh |
 | `window.__ghostBest()` | põe o fantasma na melhor jogada |
-| `window.__ghostSynergy()` | põe o fantasma numa jogada com interação e devolve quantas |
+| `window.__ghostSynergy(colocar?)` | põe o fantasma numa jogada com interação e devolve quantas; com `true`, coloca a peça (obra com andaime) |
+| `window.__video({ kind, height, quality })` | exporta sem o diálogo o filme da partida (`film`) ou a gravação em andamento (`take`, tecla `V`) e devolve `{ bytes, ms, b64 }`: o MP4 em base64, para conferir com o `ffprobe` |
 
 ## Mapa do código
 
@@ -95,19 +105,25 @@ src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em
   hex.ts         grade hexagonal flat-top, coordenadas axiais (q, r), DIRS, hkey/unkey
   tiles.ts       enum T (Prado, Floresta, Plantação, Vila, Rio, Estrada), rotateEdges, geração de peças
   board.ts       Rules/DEFAULT_RULES, Board: validação, pontuação, grupos, missões, interações
-  synergy.ts     tabela das interações (vila×floresta, vila×plantação, vila×prado, plantação×prado)
+  synergy.ts     tabela das interações (vila×floresta, vila×plantação, vila×prado, plantação×prado) e a influência delas nas casas vizinhas
   game.ts        Game: semente, pilha, sorteio por peça, descarte, bestMove (IA gulosa), upcoming (mirante)
+  blessings.ts   cartas da virada de era: 1 de 2 por era, oferecidas pela semente; a escolha vai no save junto da jogada
   sites.ts       sítios escondidos (ruína, tesouro, relíquia, mirante), da semente por um gerador à parte
   modes.ts       modos: Clássico, Zen, Desafio do dia, Exploradores (regras + desfazer)
+  specials.ts    peças especiais (estação, moinho d'água, farol): bordas, pontos e posições na pilha
   rng.ts         mulberry32 e utilitários de sorteio
 src/themes/      temas como DADOS
   types.ts       esquema Theme, com cada kit comentado: é a referência de tudo que um tema pode escolher
   themes.ts      6 temas base, THEMES, PERIOD_LABEL/ORDER, themeById
   eras.ts        8 temas históricos (Egito, Song, Vikings, Toscana, Edo, Colonial, Oeste, Andes)
+  progress.ts    housesAtEra: as casas do tema em cada era da vila (taipa e palha, o tema, enxaimel e sobrado, flâmulas)
 src/render/
   gpu.ts         cria o WebGPURenderer (WebGPU ou WebGL2)
-  materials.ts   materiais em TSL: chão, água, kits instanciados (vento, plantações, janelas), grade do vazio; uniformes U
+  materials.ts   materiais em TSL: chão, água, kits instanciados (vento, plantações, janelas), pergaminho do vazio (terra incógnita); uniformes U
   noise.ts       texturas de ruído periódicas geradas em código (nuvens, chão, ondulação da água)
+  atmosphere.ts  névoa da cena (scene.fogNode): bruma e névoa rasteira por altura, e a névoa de alcance
+  groundMap.ts   mapa do chão visto de cima: cor do terreno (luz rebatida) e poças dos lampiões
+  clouds.ts      nuvens volumétricas do zoom aberto, marchadas numa laje acima do tabuleiro
   post.ts        pós-processamento por perfil: SSGI ou GTAO, reflexos (SSR), raios de luz, TRAA, bloom,
                  profundidade de campo, vinheta, ombro de tons
   lib.ts         geometria dos kits (casas, árvores, plantações, animais, barcos, veículos, marcos), classe Lib,
@@ -120,13 +136,25 @@ src/render/
   fx.ts          partículas em sprites: poeira, fumaça e brilhos (CPU); clima do tema e vaga-lumes (no shader)
   sky.ts         céu procedural para a luz de ambiente (IBL)
   preview.ts     a peça da vez sobre a pilha, com canvas e renderizador próprios
-  life.ts        Life: barcos, veículos, animais, moinhos e pássaros que se movem
-  cameraRig.ts   câmera orbital
-src/ui/          HUD em HTML/CSS (hud.ts, style.css); a página é o index.html
-src/audio.ts     sons sintetizados com WebAudio
-src/main.ts      entrada: fluxo da partida, entrada de mouse/toque/teclado, salvamento, parâmetros de URL, ganchos de depuração
+  life.ts        Life: barcos, veículos, animais, aldeões, moinhos, peixes e pássaros que se movem
+  cameraRig.ts   câmera orbital: inclinação baixa pela curva do zoom mais o ajuste de quem joga (`tilt`);
+                 lente de 40° com `rig.eye` = distância real (`rig.dist` é o enquadramento)
+  gpuTier.ts     nível inicial do Auto pelo nome da placa de vídeo (puro)
+  dynres.ts      resolução dinâmica do Auto: degraus de resolução antes de descer o nível (puro)
+src/video/       foto e vídeo (o modo foto e a exportação ficam em src/ui/capture.ts)
+  take.ts        gravação: a pose da câmera a cada quadro e os eventos (jogadas, hora, fantasma), até 2 min
+  path.ts        poses reamostradas a 60 quadros por segundo e suavizadas por um filtro gaussiano sem atraso
+  film.ts        plano do filme da partida: quando cada peça cai e por onde a câmera passa
+  render.ts      desenha o vídeo quadro a quadro, com world.tick(1/60), e entrega ao codificador
+  encoder.ts     WebCodecs: escolhe H.264 ou VP9 e guarda os quadros codificados em Blobs
+  mp4.ts         cabeçalho MP4 (ftyp, moov, mdat) escrito à mão, sem biblioteca
+src/ui/          HUD em HTML/CSS (hud.ts, style.css); eraChoice.ts: nomes e diálogo das cartas da era; banner.ts: cor da casa e brasão (troca o `ui.accent` do tema); tutorial.ts: dicas das primeiras partidas; progress.ts: progresso entre partidas e liberação das peças especiais; capture.ts: modo foto, gravação, filme da partida e exportação (`Capture`, com o estado da tela em `stage`); input.ts: mouse, toque e teclado no tabuleiro (`bindInput`); a página é o index.html
+src/audio.ts     sons sintetizados com WebAudio: música, efeitos e ambiente (paisagem perto do foco da câmera, `setAmbience`)
+src/main.ts      entrada: fluxo da partida, telas e botões, qualidade, salvamento, parâmetros de URL, ganchos de depuração
 tests/logic.ts      simulação de partidas contra oráculos independentes (grupos por BFS, pontuação recalculada, replay)
 tests/synthetic.ts  cenários montados à mão (peça travada, descarte, fim de jogo, semente → sequência)
+tests/legibility.ts telhados e paredes contra o chão da vila (ΔE em CIELAB, ponderado pelo peso das casas)
+tests/video.ts      MP4 conferido por um leitor de caixas próprio, resolução dinâmica, nível por placa, câmera e filme
 scripts/         capturas, teste de carga, conversão para página publicável
 ```
 
@@ -135,11 +163,12 @@ scripts/         capturas, teste de carga, conversão para página publicável
 2. Em seguida chama `World.placeAnimated(...)`.
 3. O `World` chama `buildTile(edges, seed, theme, { detail, synergies, houses })`, que devolve a geometria do chão e uma lista de decorações.
 4. Quando a peça pousa, o chão vai para o **bloco estático** da região (8×8 peças), as decorações para os **pools** de `InstancedMesh` (um por chave de kit), e o que se move vai para o `Life`.
+5. Na virada de era, `Lib.setEra` troca a geometria das casas (`wall:i`, `roof:i`) e o `World` troca a dos pools delas (`Pool.retarget`): mesmas posições e cores, nada é reconstruído. A decoração sai sempre das casas do tema como ele é (`Lib.houseMeta`), e a fumaça acompanha a altura da chaminé da era (`Lib.chimScale`).
 
 ## Invariantes: não quebre
 
 1. **`src/core` é puro e determinístico.** Nada de three.js, DOM ou `Math.random`. A única exceção é `Game.bestMove`, que usa `Math.random` de propósito para não mexer na sequência de peças.
-2. **A sequência de peças depende só da semente e do índice** (`Game.draw`). A mesma semente dá as mesmas peças para qualquer jogador. Só a presença da missão depende do estado da partida.
+2. **A sequência de peças depende só da semente, do índice e das peças especiais liberadas** (`Game.draw`, `specialSlots`). A mesma semente com as mesmas peças liberadas dá as mesmas peças para qualquer jogador; a peça especial só toma o lugar da peça do seu índice. Só a presença da missão depende do estado da partida.
 3. **A aparência de uma peça depende só de `(edges, def.seed, theme, opts)`.** `buildTile` usa `mulberry32(seed)`, então fantasma, queda e mapa mostram a mesma peça. `Math.random` no render é aceitável só em efeitos passageiros, como partículas.
 4. **Rotação:**
    - lógica: `rotateEdges` faz `out[(i + rot) % 6] = base[i]`;
@@ -149,7 +178,8 @@ scripts/         capturas, teste de carga, conversão para página publicável
    Mude os três juntos ou nenhum.
 5. **Rio e estrada são estritos** (`isStrict`): só encostam neles mesmos. Os 4 terrenos comuns aceitam qualquer vizinho, mas só pontuam quando iguais. As interações pontuam pares diferentes.
 6. **Saves:**
-   - o formato é `{ v, seed, rulesId, mode, moves, undone, score }` (v4), guardado em `localStorage` com o prefixo `retalhos.`;
+   - o formato é `{ v, seed, rulesId, mode, moves, undone, score, specials }` (v9), guardado em `localStorage` com o prefixo `retalhos.`; cada jogada é `[q, r, giro, ...escolhas]`, com as cartas da era (0 ou 1) escolhidas logo depois dela;
+   - o progresso entre partidas (totais, registro por tema e peças especiais liberadas) fica em `retalhos.progress` (`src/ui/progress.ts`), validado campo a campo ao ler;
    - ao carregar, a partida é **reconstruída pelo replay** das jogadas e conferida contra a pontuação.
    - Se você mudar regras, pontuação ou geração de peças de um jeito que altere o replay, **aumente `SAVE_VERSION` em `main.ts`**. Saves antigos mostram um aviso e são descartados.
 7. **Os testes têm oráculos independentes.** Ao mudar a pontuação, atualize o oráculo em `tests/logic.ts` reimplementando a regra. Nunca faça o oráculo chamar o código que ele testa.
@@ -157,25 +187,38 @@ scripts/         capturas, teste de carga, conversão para página publicável
 9. **Materiais em TSL (three r186, `three/webgpu` e `three/tsl`):** nada de `onBeforeCompile` nem GLSL; o mesmo nó compila para WebGPU e WebGL2.
    - Importe sempre de `three/webgpu` (não de `three`), para o bundle não levar o WebGLRenderer.
    - Atributos por vértice dos kits: `color`, `tint` (quanto a cor da instância tinge) e `glow` (janelas que acendem com `U.night`). A cor da instância é o atributo `iColor` da geometria criada por `instGeometry()`; não use `mesh.instanceColor`, que o three multiplicaria de novo.
-   - Uniformes globais em `U` (`materials.ts`): `time`, `dt`, `wind`, `night`, `clouds`, `sparkle`, `glow`, `water`, `sun`, `sunDir`.
+   - Uniformes globais em `U` (`materials.ts`): `time`, `dt`, `wind`, `night`, `clouds`, `sparkle`, `glow`, `water`, `sun`, `sunDir`, `fine`, `bounce`, `lamps`, `eraWave`, `silhouette`.
    - No r186 a instância é aplicada **antes** do `positionNode`: ali `positionLocal` já está no espaço do mundo (pools) e `positionGeometry` é o vértice original. Quem desloca vértices (vento) também ajusta `positionPrevious`, senão o antisserrilhado temporal deixa rastro.
-   - A água usa os atributos `wflow` (correnteza) e `wbed` (cor do leito e profundidade da coluna): a malha da água repete os triângulos do leito abaixo da linha d'água, então a beira fica exatamente onde a profundidade zera. A correnteza de cada peça herda das vizinhas (`World.flowAt` + `resolveFlow`) e gira junto com a peça no bloco.
+   - A água usa os atributos `wflow` (correnteza) e `wbed` (cor do leito e profundidade da coluna): a malha da água repete os triângulos do leito abaixo da linha d'água, então a beira fica exatamente onde a profundidade zera. A correnteza de cada peça herda das vizinhas (`World.flowAt` + `resolveFlow`) e gira junto com a peça no bloco. A largura do rio em cada borda segue a mesma regra (`World.widthsAt`, `BuildOpts.widths`): a peça nova adota a da vizinha já colocada, e perto da borda o campo da água vira o perfil da própria borda, então a emenda casa. Lago ou rio sai de `waterShape` (semente, gerador à parte).
+   - Os materiais iluminados do jogo (kits, chão, água) são `LitMaterial`: gravam a parte da cor que veio do céu, e a oclusão de ambiente do pós só escurece essa parte (o sol direto e as janelas acesas ficam de fora). Um material iluminado novo que não seja `LitMaterial` recebe a oclusão inteira, como o vazio.
+   - O `LitMaterial` também soma na luz indireta o que vem do mapa do chão (`groundMap.ts`): a cor do terreno rebatida nas faces viradas para os lados e para baixo (`U.bounce`) e as poças dos lampiões à noite (`U.lamps`). A pilha (`preview.ts`) zera os dois, porque o mapa é do tabuleiro.
+   - A névoa é um nó (`scene.fogNode`, `atmosphere.ts`), não `THREE.Fog`: bruma e névoa rasteira com densidade que cai com a altura (integral exata ao longo do raio), mais a névoa de alcance para a cor do fundo. Densidades e cores vêm da hora do dia (`skyFor` em `world.ts`).
+   - As nuvens do céu (`clouds.ts`) e a sombra delas no chão (`cloudLight`) leem o mesmo ruído (`cloudField`, `cloudPuff`); a sombra é lida no ponto em que o raio até o sol cruza a camada das nuvens. As nuvens ficam numa cena própria, que o pós compõe antes do TRAA (`buildPost(..., clouds)`): no passe da cena, um transparente não grava profundidade nem normal, e a oclusão e a luz rebatida do chão de baixo vazariam nele.
    - Sem tone mapping do renderizador: o pós-processamento aplica um ombro suave que preserva as paletas dos temas.
    - Se um nó falhar ao compilar, o erro aparece no console das capturas.
-10. **Blocos estáticos só crescem** (append-only). Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim, escondida quando `rig.dist >= 13` (nível de detalhe). Quem consulta geometria pela chave precisa tirar o `~`.
+10. **Blocos estáticos só crescem** (append-only), e o mapa do chão (`groundMap.ts`) também: cada peça pinta a sua parte quando assenta. Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim (nível de detalhe): entre `rig.dist` 11,5 e 14,5 cada planta dessa metade afunda no chão na sua vez (`U.fine`, material `cropFine`), e mais longe o pool fica escondido. No Ultra e no Cinema a faixa vai 1,35× e 1,6× mais longe. Quem consulta geometria pela chave precisa tirar o `~`.
 11. **Construções internas não pontuam.** A roda d'água (vila na beira do rio), a irrigação, a estação e o silo (junto à ferrovia) são só visuais. Pontos de interação vêm apenas de `synergy.ts` × `Rules.synergyPoints`.
 12. **Parâmetros de URL e valores salvos são validados** contra listas fixas (ver `pickQ` e o uso de `Object.hasOwn` para `time`). Mantenha esse padrão ao criar um parâmetro novo.
+13. **O mundo anda pelo `dt` do `World.tick`.** O vídeo é desenhado depois da gravação, quadro a quadro, cada um com `world.tick(1/60)`, e o modo foto congela o mundo com `world.timeScale = 0`.
+    - Animação nova usa o `dt` que o `tick` calcula (já multiplicado por `timeScale`) ou `U.time`. Nunca `performance.now()` nem o `time` embutido do TSL: no vídeo ela saltaria e na foto não pararia.
+    - A câmera, o fantasma e a troca de hora seguem o tempo real (`realDt`), para responderem no modo foto com o mundo parado.
+    - Efeito de jogada que o vídeo também deve mostrar vai em `World.placeFx`, que o jogo e o vídeo chamam do mesmo jeito.
+    - Foto e vídeo copiam o canvas logo depois do `tick`, no mesmo passo do desenho.
 
 ## Orçamento de desempenho
 
 Medido com `RUNS=300:high node scripts/stress.mjs`, renderização por software:
 
-| Peças | Qualidade | Draw calls | Triângulos | CPU JS/quadro |
+| Peças | Qualidade | Draw calls | Triângulos | Instâncias |
 |---|---|---|---|---|
-| 300 | alta | ~94 | ~1,37 milhão | ~4,3 ms |
+| 300 | alta | ~136 | ~1,46 milhão | ~53 mil |
+| 300 | ultra | ~248 | ~2,82 milhões | ~69 mil |
+
+Números de 2026-10-02, depois do traço, do pincel, dos aldeões, dos estandartes e da maravilha (a Alta tinha ~94 draw calls na v4 e ~111 no PR #5). No WebGPU por software, a CPU por quadro inclui a espera pelo SwiftShader e não serve de medida.
 
 - **Regra prática:** uma mudança visual não deve subir triângulos ou draw calls em mais de ~10% sem justificativa escrita no commit.
-- **Qualidade:** Ultra (pensado para GPUs acima da RX 580: sombras em 3 cascatas de 4096, luz indireta SSGI, reflexos na água, raios de luz no entardecer, TRAA, bloom, profundidade de campo, DPR até 2 e 35% mais vegetação), Alta (GTAO em meia resolução, sombra única de 2048), Média (MSAA, sem pós pesado) e Baixa (sem pós e sem sombras). Cada nível tem um teto de pixels desenhados (Ultra 4K, Alta 1440p, Média e Baixa 1080p; `PIXELS` em `world.ts`): numa tela 4K, descer de nível também reduz a resolução interna. A densidade de decoração é multiplicada por 1,35 (ultra), 1 (alta), 0,65 (média) ou 0,4 (baixa). O modo automático começa em Ultra no computador e em Média em telas de toque, e desce sozinho se o quadro passar de ~26 ms.
+- **Qualidade:** Cinema (placas de topo, fotos e vídeos: desenha 1,5× acima da tela e reduz, SSGI e reflexos com mais amostras, 4 cascatas de sombra, 60% mais vegetação, grão de filme e aberração de lente), Ultra (pensado para GPUs acima da RX 580: sombras em 3 cascatas de 4096, luz indireta SSGI, reflexos na água, raios de luz no entardecer, TRAA, bloom, profundidade de campo, DPR até 2 e 35% mais vegetação), Alta (GTAO em meia resolução, sombra única de 2048), Média (MSAA, sem pós pesado) e Baixa (sem pós e sem sombras). Cada nível tem um teto de pixels desenhados (Cinema 4K × 2,25, Ultra 4K, Alta 1440p, Média e Baixa 1080p; `PIXELS` em `world.ts`): numa tela 4K, descer de nível também reduz a resolução interna. A densidade de decoração é multiplicada por 1,6 (cinema), 1,35 (ultra), 1 (alta), 0,65 (média) ou 0,4 (baixa).
+- **Modo automático:** começa pelo nome da placa de vídeo (`gpuTier.ts`: Alta na RX 580, Ultra da RTX 3060 e da RX 6600 para cima, Média no Iris Xe e nos celulares); sem um nome conhecido, começa em Ultra no computador e em Média nas telas de toque. Nunca escolhe o Cinema. Se o quadro passar de ~26 ms, primeiro baixa a resolução interna em degraus de 10% até 60% (`dynres.ts`) e só no último degrau desce de nível.
 - **Ainda não foi medido:** o FPS numa GPU de verdade.
 
 ## Tarefas comuns
@@ -183,7 +226,7 @@ Medido com `RUNS=300:high node scripts/stress.mjs`, renderização por software:
 ### Novo tema
 
 1. Copie um tema de `src/themes/eras.ts`.
-2. Troque `id`, nomes, cores e kits. Os campos estão comentados em `types.ts`.
+2. Troque `id`, nomes, cores e kits, e a gradação (`grade`: tom das sombras, dos realces e saturação). Os campos estão comentados em `types.ts`.
 3. Confira as formas com `?gallery&theme=<id>`.
 4. Adicione o tema em `scripts/screenshots.mjs` e gere a captura.
 
@@ -220,11 +263,12 @@ São opcionais no tema (`gate`, `bridge`) e não pontuam. O `buildTile` decide o
 
 ## Estado atual e próximos passos
 
-- **Feito (v4, outubro de 2026):** renderização WebGPU/TSL com GTAO, TRAA, bloom e profundidade de campo; rios escavados com correnteza; céu procedural (IBL); chão com detalhe por terreno; clima por tema; vilas com trilhas; eras da vila, sítios, bônus por tema, desfazer e 4 modos. Ideias de Age of Empires ainda não feitas estão em `docs/IDEIAS_AOE.md` (Centro que evolui, arquitetura por era, aldeões, maravilha, terra incógnita).
+- **Feito (outubro de 2026, depois da v4):** água física (leito visível, cáusticas, esteiras); acabamento (oclusão só na luz indireta, nitidez, cor por hora, sombra firme); luz e céu (amanhecer e hora dourada, névoa por altura, lampiões, luz rebatida do chão, nuvens volumétricas); cinema e vídeo (nível Cinema, Auto pela placa com resolução dinâmica, modo foto, gravação e filme da partida em MP4). Detalhes em `docs/VIABILIDADE.md`.
+- **Feito (v4, outubro de 2026):** renderização WebGPU/TSL com GTAO, TRAA, bloom e profundidade de campo; rios escavados com correnteza; céu procedural (IBL); chão com detalhe por terreno; clima por tema; vilas com trilhas; eras da vila, sítios, bônus por tema, desfazer e 4 modos. O andamento do plano de Age of Empires está no topo de `docs/IDEIAS_AOE.md`; faltam a regra das rotas num modo próprio, minimapa, interface por tema, atmosferas e estações, e monumentos por conquista.
 - **Feito (v3):** 14 temas, kits detalhados, 4 interações com prévia em dourado, mundo animado, dia/entardecer/noite, qualidade adaptativa, save v3 com replay, duas rodadas de revisão de código com correções. O histórico está em `docs/VIABILIDADE.md`, Apêndice A.
 - **Pendente:**
   - medir o FPS numa GPU real (`?stress=1000&debug`) no PC e no celular;
   - kits de fidelidade histórica que ainda faltam (`docs/TEMAS.md`, fim): roda-d'água como `MillStyle`, cipreste em alameda, estação de fim de linha por tema;
-  - funções de jogo: bandeiras, desfazer, mostrar as 3 próximas peças, peças especiais (`docs/VIABILIDADE.md` §12);
+  - funções de jogo: bandeiras (`docs/VIABILIDADE.md` §12); as peças especiais já existem (`specials.ts`). Desfazer e as 3 próximas peças já existem na v4: as próximas peças aparecem como recompensa do mirante;
   - otimizações com folga conhecida: culling por super-bloco, sombra em cache, renderizar sob demanda (`docs/VIABILIDADE.md` §5).
 - **Publicação:** o build de página única (`scripts/artifact.mjs`) é o que vai para o link público do protótipo.

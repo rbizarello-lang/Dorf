@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Retalhos</title>
+    <!-- Ícone da aba embutido (sem arquivo): um hexágono em retalhos, nas cores dos terrenos. -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 16V2L28 9z' fill='%2389b84a'/%3E%3Cpath d='M16 16L28 9v14z' fill='%23e8b83a'/%3E%3Cpath d='M16 16l12 7-12 7z' fill='%23d9643f'/%3E%3Cpath d='M16 16v14L4 23z' fill='%233f8f5a'/%3E%3Cpath d='M16 16L4 23V9z' fill='%233f8fb8'/%3E%3Cpath d='M16 16L4 9l12-7z' fill='%23b9a37a'/%3E%3Cpath d='M16 2l12 7v14l-12 7-12-7V9z' fill='none' stroke='%234a2c1d' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   </head>
@@ -15,6 +17,7 @@
 
     <header class="hud-top">
       <div class="score-block">
+        <span id="crest" class="crest" title="Brasão da sua casa (troque no menu de temas)"></span>
         <span class="brand">Retalhos</span>
         <output id="score" class="score">0</output>
         <span id="best" class="best">recorde 0</span>
@@ -25,7 +28,8 @@
           <span id="theme-swatch" class="swatch" aria-hidden="true"></span><span id="theme-name">Tema</span>
         </button>
         <button id="btn-time" class="icon-btn" type="button" title="Hora do dia (L)"><span class="long">Dia</span><span class="short" aria-hidden="true">☀</span></button>
-        <button id="btn-quality" class="icon-btn" type="button" title="Qualidade gráfica">Auto</button>
+        <button id="btn-quality" class="icon-btn" type="button" title="Qualidade gráfica" aria-haspopup="true" aria-expanded="false">Auto</button>
+        <button id="btn-camera" class="icon-btn" type="button" title="Foto e vídeo" aria-haspopup="true" aria-expanded="false"><span class="long">Câmera</span><span class="short" aria-hidden="true">◉</span></button>
         <button id="btn-sound" class="icon-btn" type="button" title="Som" aria-pressed="true"><span class="long">Som</span><span class="short" aria-hidden="true">♪</span></button>
         <button id="btn-undo" class="icon-btn" type="button" title="Desfazer a última jogada (U)"><span class="long">Desfazer</span><span class="short" aria-hidden="true">↶</span> <small id="undo-n"></small></button>
         <button id="btn-help" class="icon-btn" type="button" title="Como jogar (H)">?</button>
@@ -34,6 +38,7 @@
     </header>
 
     <div id="theme-menu" class="popover" hidden></div>
+    <div id="menu" class="popover menu" hidden></div>
 
     <aside id="quests" class="quests" aria-label="Missões"></aside>
 
@@ -51,6 +56,7 @@
     <p id="hint" class="hint">Clique para colocar · <kbd>R</kbd> ou botão direito gira · arraste para mover · roda para zoom · <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera</p>
 
     <div id="toasts" class="toasts" aria-live="polite"></div>
+    <aside id="tip" class="tip" role="status" aria-live="polite" hidden><b></b><p></p><button type="button" class="secondary">Entendi</button></aside>
     <div id="sr" class="sr-only" aria-live="polite"></div>
 
     <pre id="stats" class="stats" hidden></pre>

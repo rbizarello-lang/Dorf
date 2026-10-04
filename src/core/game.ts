@@ -1,7 +1,9 @@
+import { type BlessingId, blessingOffer } from './blessings';
 import { Board, type PlaceResult, type Rules } from './board';
 import { unkey } from './hex';
 import { mulberry32, type Rng } from './rng';
 import { generateSites } from './sites';
+import { type SpecialKind, specialSlots, specialTile } from './specials';
 import { T, generateTile, rotateEdges, type TileDef } from './tiles';
 
 export interface Move {
@@ -21,12 +23,23 @@ export class Game {
   placedCount = 0;
   discarded = 0;
   private drawn = 0;
+  /**
+   * Escolhas de era ainda por fazer, a mais antiga primeiro. Não travam a partida: a carta
+   * vale da jogada seguinte à escolha em diante, e o save guarda a escolha junto da jogada
+   * depois da qual ela foi feita.
+   */
+  offers: [BlessingId, BlessingId][] = [];
+  /** Índice da pilha → peça especial liberada que sai nele. */
+  private slots: Map<number, SpecialKind>;
 
   constructor(
     readonly seed: number,
     readonly rules: Rules,
+    /** Peças especiais liberadas que entram nesta partida (vazio no Desafio do dia). */
+    readonly specials: readonly SpecialKind[] = [],
   ) {
     this.rng = mulberry32(seed);
+    this.slots = specialSlots(seed, specials);
     this.board = new Board(rules);
     const starter: TileDef = {
       edges: [T.Grass, T.Grass, T.Forest, T.Forest, T.Field, T.Village],
@@ -48,10 +61,13 @@ export class Game {
   /**
    * Cada peça tem um gerador próprio (semente + índice) e sempre consome os mesmos
    * sorteios. Assim, a mesma semente dá a mesma sequência de peças para qualquer
-   * jogador; só a presença da missão depende do estado da partida.
+   * jogador; só a presença da missão depende do estado da partida. Uma peça especial
+   * liberada toma o lugar da peça do seu índice, sem mexer nas outras.
    */
   private draw(): TileDef {
     const rng = mulberry32((this.seed + Math.imul(++this.drawn, 0x9e3779b1)) >>> 0);
+    const kind = this.slots.get(this.drawn);
+    if (kind) return specialTile(rng, kind);
     const roll = rng();
     const def = generateTile(rng, true);
     // Missões ainda na mão (atual e próxima) contam para o limite.
@@ -70,6 +86,11 @@ export class Game {
     const out: TileDef[] = [];
     for (let k = 1; k <= n; k++) {
       const rng = mulberry32((this.seed + Math.imul(this.drawn + k, 0x9e3779b1)) >>> 0);
+      const kind = this.slots.get(this.drawn + k);
+      if (kind) {
+        out.push(specialTile(rng, kind));
+        continue;
+      }
       rng();
       out.push({ ...generateTile(rng, true), quest: null });
     }
@@ -94,8 +115,12 @@ export class Game {
     if (!def) return null;
     const c = this.check(q, r);
     if (!c?.valid) return null;
+    const era = this.board.era;
     const res = this.board.place(q, r, def, this.rot);
     this.placedCount++;
+    // Uma jogada pode abrir mais de uma era; cada uma traz a sua escolha. Cartas já escolhidas
+    // ou ainda na mesa não voltam.
+    if (this.rules.blessings) for (let e = era + 1; e <= this.board.era; e++) this.offers.push(blessingOffer(this.seed, e, [...this.board.blessings, ...this.offers.flat()]));
     if (!this.rules.infinite) this.stack += res.tilesGained - 1;
     // Exploradores: achou o último sítio, a partida acaba e cada peça que sobrou vale pontos.
     if (this.rules.endOnSites && this.board.sites.length && this.board.sitesLeft() === 0) {
@@ -107,6 +132,15 @@ export class Game {
     }
     this.advance();
     return res;
+  }
+
+  /** Escolhe a carta 0 ou 1 da escolha de era mais antiga; devolve a carta, ou null se não havia escolha. */
+  choose(pick: number): BlessingId | null {
+    const offer = this.offers.shift();
+    if (!offer) return null;
+    const id = offer[pick === 1 ? 1 : 0];
+    this.board.bless(id);
+    return id;
   }
 
   /** Avança para a próxima peça. */

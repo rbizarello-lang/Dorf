@@ -108,6 +108,19 @@ kbd {
   backdrop-filter: blur(6px);
 }
 
+/* Brasão da casa, à direita do placar. */
+.score-block > :not(.crest) {
+  grid-column: 1;
+}
+.crest {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: center;
+  margin-left: 14px;
+  line-height: 0;
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.18));
+}
+
 .brand {
   font-family: var(--font-display);
   font-size: 15px;
@@ -251,6 +264,77 @@ kbd {
   color: var(--accent);
 }
 
+/* ---------- cor da casa e brasão, no topo do menu de temas */
+.house {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 14px;
+  align-items: center;
+  padding: 6px 12px 10px;
+}
+.house .crest-big {
+  grid-row: span 4;
+  line-height: 0;
+}
+.house .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.house button {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 13px;
+  border: 2px solid transparent;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  font-size: 12px;
+  font-weight: 700;
+}
+.house button.dot {
+  width: 26px;
+  padding: 0;
+  background: var(--c);
+}
+.house button[aria-pressed='true'] {
+  border-color: var(--ink);
+}
+
+/* ---------- menus de qualidade e câmera */
+.menu {
+  width: min(330px, calc(100vw - 2 * var(--gutter)));
+}
+
+.menu-opt {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  align-items: center;
+  text-align: left;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+}
+
+.menu-opt:hover,
+.menu-opt[aria-current='true'] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.menu-opt strong {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 16px;
+}
+
+.menu-opt span {
+  grid-column: 1 / -1;
+  font-size: 12.5px;
+  color: var(--soft);
+  line-height: 1.35;
+}
+
 /* ---------- missões */
 .quests {
   position: fixed;
@@ -276,9 +360,17 @@ kbd {
 
 .quest .ico {
   grid-row: span 2;
+  display: grid;
+  place-items: center;
   width: 30px;
   height: 30px;
   clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0 50%);
+}
+
+.quest .ico svg,
+.legend i svg {
+  width: 72%;
+  height: 72%;
 }
 
 .quest b {
@@ -490,6 +582,62 @@ kbd {
   width: min(420px, calc(100vw - 2 * var(--gutter)));
 }
 
+/* Dica das primeiras partidas: um cartão por vez, acima da linha de controles. */
+.tip {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 58px);
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 14px;
+  align-items: end;
+  width: min(440px, calc(100vw - 2 * var(--gutter)));
+  padding: 14px 16px 14px 18px;
+  border-radius: 18px;
+  border-left: 5px solid var(--accent);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  z-index: 6;
+  animation: tip-in 0.35s ease;
+}
+
+.tip[hidden] {
+  display: none;
+}
+
+.tip b {
+  grid-column: 1 / -1;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 19px;
+}
+
+.tip p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.tip button {
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+@keyframes tip-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+}
+
 .toast {
   padding: 8px 16px;
   border-radius: 999px;
@@ -570,32 +718,64 @@ kbd {
   }
 }
 
+/* Estandarte de missão: flâmula de rabo de andorinha no terreno da missão, com a faixa da
+   cor da casa no alto, presa a um mastro que desce até a peça. */
 .marker {
   position: absolute;
   left: 0;
   top: 0;
-  display: grid;
-  place-items: center;
-  min-width: 40px;
-  height: 32px;
-  padding: 0 8px;
-  border-radius: 10px 10px 10px 2px;
-  background: var(--panel);
-  box-shadow: var(--shadow);
-  font-weight: 800;
-  font-size: 13px;
-  border-bottom: 4px solid var(--c, var(--accent));
+  width: 36px;
+  height: 64px;
   will-change: transform;
+  filter: drop-shadow(0 2px 2px rgb(0 0 0 / 0.25));
 }
 
-.marker::after {
+/* Estandarte apagado enquanto a peça da vez passa por baixo dele. */
+.marker.dim {
+  opacity: 0.22;
+}
+
+.marker {
+  transition: opacity 0.2s ease;
+  transform-origin: 1px 64px;
+}
+
+.marker::before {
   content: '';
   position: absolute;
+  left: 0;
+  top: 0;
+  width: 2px;
+  height: 64px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--ink) 75%, transparent);
+}
+
+.marker span {
+  position: absolute;
   left: 2px;
-  bottom: -9px;
-  border: 5px solid transparent;
-  border-top-color: var(--c, var(--accent));
-  border-left-color: var(--c, var(--accent));
+  top: 2px;
+  width: 34px;
+  height: 44px;
+  display: grid;
+  place-items: start center;
+  padding-top: 13px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
+  background: linear-gradient(var(--accent) 0 8px, var(--c, var(--accent)) 8px);
+  color: #fff;
+  font-weight: 800;
+  font-size: 12px;
+  text-shadow: 0 1px 1px rgb(0 0 0 / 0.35);
+}
+
+.marker i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  margin: 0 auto 2px;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.9;
 }
 
 .stats {
@@ -682,6 +862,96 @@ kbd {
   background: color-mix(in srgb, var(--ink) 9%, transparent);
 }
 
+/* Escolha da era: duas cartas lado a lado (uma sobre a outra no celular). */
+.blessings {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.blessing {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 14px 16px;
+  border: 2px solid color-mix(in srgb, var(--ink) 12%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+  color: var(--ink);
+  text-align: center;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s;
+}
+
+.blessing:hover,
+.blessing:focus-visible {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.blessing-icon {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.blessing strong {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 18px;
+  text-wrap: balance;
+}
+
+.blessing span:not(.blessing-icon) {
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--soft);
+}
+
+.blessing kbd {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+@media (max-width: 520px) {
+  .blessings {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+
+.tabs button {
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tabs button[aria-selected='true'] {
+  background: var(--accent);
+  color: var(--panel);
+}
+
+.sheet .tab[hidden] {
+  display: none;
+}
+
 .final {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -711,6 +981,78 @@ kbd {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--soft);
+}
+
+/* Almanaque */
+.almanac tr td.none {
+  text-align: left;
+}
+
+.final.small {
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 10px;
+}
+
+.final.small b {
+  font-size: 20px;
+}
+
+.sheet h3 {
+  margin: 16px 0 6px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--soft);
+}
+
+.legend.sites {
+  grid-template-columns: repeat(2, 1fr);
+  margin: 0;
+}
+
+.legend.sites i {
+  font-style: normal;
+  width: 1.2em;
+  text-align: center;
+}
+
+.almanac-specials {
+  margin: 0;
+  font-size: 14px;
+}
+
+.almanac-specials .locked,
+.almanac .locked {
+  color: var(--soft);
+}
+
+.almanac {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.almanac th {
+  text-align: left;
+  font-size: 11px;
+  color: var(--soft);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.almanac td,
+.almanac th {
+  padding: 4px 6px 4px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+.almanac td:nth-child(2),
+.almanac td:nth-child(4),
+.almanac th:nth-child(2),
+.almanac th:nth-child(4) {
+  text-align: right;
 }
 
 .legend {
@@ -750,15 +1092,173 @@ kbd {
 }
 
 .legend i {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
   flex: none;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 25%, transparent);
 }
 
+/* ---------- foto e vídeo */
+/* Modo foto e vídeo: só o mapa (os avisos continuam). */
+body.capture .hud-top,
+body.capture .quests,
+body.capture .stack,
+body.capture .hint,
+body.capture .tip,
+body.capture .stats,
+body.capture #markers,
+body.capture #floaters {
+  display: none;
+}
+
+/* O vídeo é 16:9: durante a exportação o canvas mostra o quadro inteiro, sem esticar. */
+#scene.letterbox {
+  object-fit: contain;
+  background: #000;
+}
+
+.icon-btn.rec {
+  color: var(--bad);
+}
+
+.icon-btn.rec .long,
+.icon-btn.rec .short {
+  animation: rec 1.2s ease-in-out infinite;
+}
+
+@keyframes rec {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.capture-bar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 2 * var(--gutter));
+  padding: 8px;
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(6px);
+  z-index: 6;
+}
+
+.capture-bar button {
+  height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 19px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  font-weight: 800;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.capture-bar button.primary {
+  background: var(--accent);
+  color: var(--panel);
+}
+
+.capture-bar.busy button {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.capture-bar.export {
+  width: min(520px, calc(100vw - 2 * var(--gutter)));
+  flex-wrap: nowrap;
+  padding: 8px 8px 8px 18px;
+}
+
+.capture-bar .label {
+  flex: 1;
+  font-weight: 800;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.capture-bar .bar {
+  flex: 0 0 30%;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+.capture-bar .bar i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* Escolhas do vídeo: grupos de botões segmentados. */
+.segs {
+  border: 0;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.segs legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--soft);
+}
+
+.segs > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.seg input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.seg span {
+  display: inline-block;
+  padding: 7px 13px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  font-weight: 800;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.seg input:checked + span {
+  background: var(--accent);
+  color: var(--panel);
+}
+
+.seg input:focus-visible + span {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* ---------- telas pequenas */
 @media (max-width: 720px) {
+  .tip {
+    top: calc(env(safe-area-inset-top, 0px) + 150px);
+    bottom: auto;
+  }
+
   .hint {
     display: none;
   }
@@ -851,6 +1351,85 @@ kbd {
   }
 }
 
+/* Celular em retrato: a interface fica nas bordas e cobre pouco do mapa. As missões viram
+   linhas finas (ícone, nome e barra); um toque abre os detalhes (Hud: .quests.open). */
+@media (max-width: 520px) {
+  .score-block {
+    padding: 6px 10px 7px;
+    border-radius: 14px;
+    max-width: 44vw;
+  }
+  .brand,
+  .best {
+    display: none;
+  }
+  .score {
+    font-size: 24px;
+  }
+  .crest svg {
+    width: 26px;
+    height: 26px;
+  }
+  .crest {
+    margin-left: 8px;
+  }
+  .era {
+    margin-top: 3px;
+    font-size: 10px;
+  }
+  .era-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .quests {
+    width: min(200px, calc(100vw - 2 * var(--gutter) - 120px));
+    gap: 4px;
+    pointer-events: auto;
+    cursor: pointer;
+  }
+  .quest {
+    grid-template-columns: 18px 1fr;
+    gap: 2px 7px;
+    padding: 5px 8px;
+    border-radius: 10px;
+  }
+  .quest .ico {
+    width: 18px;
+    height: 18px;
+  }
+  .quest b {
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .quests:not(.open) .quest b small {
+    display: none;
+  }
+  .quest .bar {
+    height: 3px;
+  }
+  .quests.open .quest .reward {
+    display: block;
+    grid-column: 2;
+    font-size: 10.5px;
+  }
+  .stack {
+    width: 108px;
+  }
+  .preview {
+    width: 108px;
+    height: 108px;
+  }
+  .stack-count {
+    top: 56px;
+  }
+  .tip {
+    top: calc(env(safe-area-inset-top, 0px) + 112px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -940,12 +1519,13 @@ kbd {
   opacity: 0.9;
 }
 
-/* ---------- sítios escondidos: carimbo de mapa antigo */
+/* ---------- sítios escondidos: etiqueta da recompensa sob o fantasma (o carimbo fica no mapa) */
 .marker.site {
-  border-radius: 50%;
+  border-radius: 13px;
   min-width: 26px;
   height: 26px;
-  padding: 0;
+  padding: 0 10px;
+  white-space: nowrap;
   display: grid;
   place-items: center;
   font-size: 14px;
@@ -954,8 +1534,12 @@ kbd {
   border: 2px dashed #8a6a3a;
   box-shadow: none;
 }
-.marker.site::after {
+.marker.site::before {
   display: none;
+}
+.marker.site {
+  width: auto;
+  filter: none;
 }
 #btn-undo small {
   font-size: 10px;

@@ -60,12 +60,12 @@ Valores do original segundo guias da comunidade (ver [PESQUISA.md §1](PESQUISA.
 
 | Regra | Dorfromantik (Classic) | Retalhos (protótipo) |
 |---|---|---|
-| Pilha inicial | 40 peças | 40 (varia por tema: Inverno 45, Marte 36) |
+| Pilha inicial | 40 peças | 50 (varia por tema: Inverno 55, Marte 46) |
 | Encaixe obrigatório | rio e trilho | rio e trilho (os nomes mudam por tema: canal, ferrovia, maglev) |
 | Ponto por borda | +10 | +10 |
 | Encaixe perfeito | 6/6 bordas: +60 e +1 peça | todas as bordas **vizinhas** combinam (mínimo 2): +20 (Cerrado: +25) |
 | Peça cercada | parte do "perfeito" | peça com 6 vizinhos encaixados: +30 e +1 peça, inclusive peças antigas que você "fecha" |
-| Missões | N+ / exatamente N: +100 e +5 peças | N+ / exatamente N: +10×N pontos e +4 a +6 peças |
+| Missões | N+ / exatamente N: +100 e +5 peças | grupo N+ ou exatamente N, fechar um grupo, N encaixes perfeitos, N interações de um tipo: +5 a +7 peças |
 | Bandeiras, peças especiais, desfazer | sim | ainda não (próximos passos) |
 
 Essas mudanças mostram o que o usuário pediu com "pequenas adaptações": os números são configuração, não código. Ideias de twists por tema estão na seção 6.
@@ -385,7 +385,79 @@ A água deixou de ser uma faixa pintada sobre o leito e virou uma coluna d'água
 
 **Custo.** Com 300 peças em renderização por software, os draw calls não mudam (193 no Ultra, 111 na Alta) e os triângulos sobem 0,3% no Ultra (3,06 M) e 0,7% na Alta (1,54 M), porque a água agora segue a grade do leito. A montagem das peças fica ~15% mais lenta, já que a correnteza é calculada em mais vértices. A CPU por quadro ficou dentro do ruído do SwiftShader, que dá picos de ~1 s nos dois builds. O shader da água ficou mais pesado (12 leituras de textura por pixel de água, contra 3); esse custo só uma GPU de verdade mede.
 
+### Acabamento (outubro de 2026)
+
+Cinco ajustes de imagem do estudo da Lagoa e do Threetopia, quase sem custo na placa.
+
+| Recurso | Como entrou |
+|---|---|
+| Oclusão só na luz indireta | os materiais do jogo (`LitMaterial`: kits, chão e água) gravam no passe da cena a parte da cor que veio do céu (`indirectShare`), e o pós escurece só essa parte. O sol direto, as janelas acesas, o contorno das copas e a névoa não ganham mais halo escuro. Na Alta, o GTAO ganha o rebatimento colorido de Jimenez (2016): o pé da grama fica verde-escuro, não cinza. No Ultra, o próprio SSGI já traz a luz rebatida |
+| Nitidez e faixas | o RCAS (`SharpenNode`) depois do TRAA devolve o detalhe que a média temporal amolece, sem realçar o ruído do SSGI; um dither triangular de ±1 nível, depois da conversão para sRGB, tira as faixas do céu e da névoa |
+| Cor por hora | a gradação puxa os realces para a cor do sol e as sombras para o tom oposto: quase nada ao meio-dia, realce dourado e sombra azulada no entardecer, nada à noite. O tom sai da cor do sol de cada tema, sem regra por tema |
+| Sombra firme | sem cascatas (Alta e abaixo), o centro da sombra anda de texel em texel no plano da luz, e as bordas não tremem quando a câmera desliza; as cascatas do Ultra já faziam isso |
+| Capim sem pipocar | a metade fina das plantas (chaves `~`) não some mais de uma vez em `rig.dist` 13: entre 11,5 e 14,5, cada planta afunda no chão na sua vez (material `cropFine`, sem `discard`) |
+
+**Armadilhas:**
+- O `builtinAOContext` do three aplica a oclusão dentro do material, mas pede um pré-passe de profundidade e normal, o que dobra os draw calls. Gravar a parte indireta numa saída do passe da cena dá o mesmo resultado sem passe extra. Ela vai no alfa da saída `diffuse` (Ultra) ou da `normal` (Alta, que não grava a máscara do reflexo).
+- Com SSGI, o vazio grava a cor difusa zerada, para não tingir a luz rebatida. O alfa dessa saída precisa ser 1; com 0, o vazio perde a oclusão e o fundo entre as peças clareia.
+- O dither precisa vir depois da conversão para sRGB, então o pipeline faz a conversão no próprio grafo (`outputColorTransform = false` e `renderOutput`).
+
+**Custo.** Com 300 peças em renderização por software, os níveis com TRAA ganham 2 draw calls (o RCAS e uma cópia da saída do TRAA): 195 no Ultra e 113 na Alta. Os triângulos não mudam. A CPU por quadro fica dentro do ruído; os picos de ~0,7 s aparecem nos dois builds e vêm de shaders compilados tarde, dentro da janela da medida. Na GPU, entra uma passada de tela cheia (5 leituras por pixel) e algumas contas no pós.
+
+### Luz e céu (outubro de 2026)
+
+O terceiro pacote do estudo da Lagoa e do Threetopia: luz que não vem do sol, horas novas e céu.
+
+| Recurso | Como entrou |
+|---|---|
+| Amanhecer e hora dourada | duas horas a mais no ciclo (`L` e o botão: amanhecer, dia, hora dourada, entardecer, noite; `?time=dawn` e `golden`). No amanhecer o sol nasce rasante pelo lado, a luz é rosada e algumas janelas ainda estão acesas; na hora dourada o sol baixa a 26° e as sombras se alongam. As cores saem do tema, misturadas com a da hora, sem regra por tema. A música também ganhou as duas horas |
+| Névoa por altura | `scene.fogNode` (`atmosphere.ts`) no lugar do `THREE.Fog`. A bruma tem densidade que cai com a altura (integral exata ao longo do raio) e azula a distância, mais quente olhando para o sol; a névoa rasteira é uma camada fina colada no chão, em manchas que andam com o vento: forte no amanhecer, leve no entardecer e à noite, nenhuma de dia. Telhados e copas saem por cima dela. A névoa de alcance para a cor do fundo continua igual |
+| Lampiões | cada casa com janela acende uma poça de luz na cor das janelas do tema, no chão e no pé das paredes, tremulando devagar. As poças são pintadas num mapa visto de cima (`groundMap.ts`, canal alfa) quando a peça assenta e acendem com a noite (`U.lamps`) |
+| Luz rebatida do chão | o mesmo mapa guarda a cor do terreno e da água vista de cima (rasterizada na CPU a partir da geometria da peça). Paredes, beirais e o miolo das copas recebem a luz que o chão devolve, na cor dele: a vila de terra esquenta as paredes, a grama esverdeia as copas. Pontos mais altos leem uma mipmap mais borrada (veem mais chão) |
+| Nuvens volumétricas | com a câmera afastada além do enquadramento de jogo (`rig.dist` de 20 a 28), cúmulos brancos de base plana aparecem numa laje acima do tabuleiro, marchados por pixel (`clouds.ts`). O ruído é o mesmo da sombra das nuvens, que agora é lida onde o raio até o sol cruza a laje: cada nuvem paira sobre a própria sombra, e a sombra sob os cúmulos ficou mais funda. As nuvens nunca cobrem o tabuleiro na tela: onde o olhar do pixel chega a uma peça (uma mipmap larga do mapa do chão), elas se abrem, com folga para as vagas da fronteira. Flutuam em volta, sobre o vazio, e se abrem também em volta do foco da câmera |
+
+| Amanhecer no Vale | Hora dourada na Toscana |
+|---|---|
+| ![](screens/amanhecer.png) | ![](screens/dourada.png) |
+| **Lampiões na Holanda** | **Nuvens no zoom aberto** |
+| ![](screens/noite.png) | ![](screens/nuvens.png) |
+
+**Armadilhas:**
+- Com `scene.fogNode`, o three passa a cor do material em `output` e usa o que o nó devolver; o `scene.fog` fica nulo.
+- A luz extra entra em `builder.context.irradiance` antes da luz indireta do modelo (`SplitLighting.indirect`): assim ela conta como luz indireta para a oclusão, e a água a recebe pelo mesmo caminho.
+- Sem a máscara de altura, as laterais das peças (que olham para o vazio) pegariam a cor do topo da própria peça.
+- A pilha tem renderizador próprio e usa os mesmos materiais; ela zera `U.bounce` e `U.lamps`, como já zerava a noite.
+- As nuvens são vistas sempre de cima, então um campo de altura basta. Um ruído fino demais no topo vira paredes verticais listradas quando a câmera olha de lado; os calombos precisam ser largos.
+- O fundo do tema é claro e emissivo: nuvens iluminadas como uma superfície comum saem mais escuras que ele e parecem fumaça. O topo ao sol precisa ser um pouco mais claro que o fundo.
+- No passe da cena, a nuvem (transparente, sem profundidade nem normal) herdava a oclusão e a luz rebatida do chão de baixo: no Ultra, as casas apareciam através dela como manchas. Ela foi para uma cena própria, desenhada num passe limpo com alfa 0 e composta pelo pós antes do TRAA. Sem TRAA (Média), o passe tem meia resolução e o ruído do começo do raio fica parado.
+
+**Custo.** Com 300 peças em renderização por software, os draw calls e os triângulos não mudam com a câmera perto; com ela no alto, as nuvens somam 1 draw call e 2 triângulos. O passe das nuvens limpa um alvo a mais por quadro (cor em meia precisão, na resolução da tela; metade na Média). A montagem das peças e a CPU por quadro ficam dentro do ruído (o mapa do chão rasteriza ~600 triângulos por peça). Na GPU: a névoa custa uma leitura de textura por pixel; a luz extra, três leituras por pixel dos materiais iluminados; as nuvens, quatro leituras por pixel sem nuvem (o mapa do chão e três da cobertura) e até 22 passos de quatro leituras dentro delas, só com a câmera no alto. O mapa do chão ocupa 4 MB (1024², 0,1 unidade por texel) e é reenviado quando uma peça assenta.
+
 **Ainda não feito, do documento do AoE:** Centro que evolui com a era, arquitetura que muda por era, aldeões trabalhando, maravilha, vazio como mapa antigo, minimapa, trilha sonora por era.
+
+### Cinema e vídeo (outubro de 2026)
+
+O quarto pacote do estudo da Lagoa e do Threetopia: um nível acima do Ultra, um Auto que conhece a placa de vídeo, e foto e vídeo para mostrar o jogo.
+
+| Recurso | Como entrou |
+|---|---|
+| Nível Cinema | desenha 1,5× acima da densidade da tela em cada eixo e reduz (no máximo 4K × 2,25 pixels e 8.192 no lado maior). O SSGI usa 3 fatias e 16 passos (o Ultra, 2 e 12), os reflexos têm resolução cheia (o Ultra, metade), os raios de luz têm 64 passos (o Ultra, 48), a sombra do sol tem 4 cascatas de 4096², com mais faixas perto do alvo, e a vegetação é 1,6× (o Ultra, 1,35). No fim entram um grão de filme por luminância (some no preto e no branco, do tamanho de um pixel da tela ou do vídeo) e uma aberração cromática lateral, que cresce com o quadrado da distância ao centro. Os dois vêm depois do TRAA, para a média temporal não apagá-los |
+| Auto pela placa | o nome da placa vem do WebGL (`WEBGL_debug_renderer_info`, por um contexto descartável quando o jogo roda em WebGPU) e a arquitetura vem do WebGPU (`adapterInfo`). Regras por fabricante e série (`gpuTier.ts`) dão o nível de partida: Alta na RX 580, Ultra da RTX 3060 e da RX 6600 para cima, Média no Iris Xe e nos celulares, Baixa no SwiftShader. O título do botão mostra o nível escolhido e a placa |
+| Resolução dinâmica | antes de descer de nível, o Auto baixa a resolução interna em degraus de 10% até 60% (`dynres.ts`), pela mediana de janelas de 40 quadros: acima de 26 ms desce, abaixo de 20 ms sobe. Numa tela de 60 Hz o tempo do quadro só mostra múltiplos de 16,7 ms, e subir um degrau pode dar quadros de 33 ms logo em seguida. O degrau que falha assim fica proibido por 60 s, o dobro a cada nova falha, até 10 min, e a resolução não fica oscilando |
+| Modo foto | `P` esconde a interface, Espaço pausa o mundo (a câmera, a luz e a troca de hora continuam respondendo) e `L` muda a hora. A foto sai em PNG no tamanho da tela, em 4K ou em 8K: o canvas vai para o tamanho da foto, 24 quadros parados deixam o TRAA assentar, e a cópia sai logo depois do último desenho |
+| Gravação | `V` grava até 2 min. O jogo anota só a pose da câmera a cada quadro e os eventos (jogadas, hora, peça flutuando); nada é desenhado a mais durante o jogo |
+| Exportação | o mapa do começo da gravação é refeito numa partida à parte. As poses são reamostradas a 60 quadros por segundo e suavizadas por um filtro gaussiano simétrico (sem atraso; o zoom em escala logarítmica), e cada quadro é desenhado com `world.tick(1/60)`. Como nada depende do relógio real, o vídeo sai liso mesmo que cada quadro leve um segundo. No fim, o jogo volta como estava: mapa, câmera, hora e nível |
+| Filme da partida | o mesmo caminho, sem gravação: as jogadas caem uma a uma, de 0,1 a 0,6 s entre elas (a parte das jogadas mira 100 s), e a câmera se afasta conforme o mapa cresce, girando devagar em volta dele, com 6 s no mapa pronto no fim |
+| MP4 sem biblioteca | o WebCodecs codifica em H.264 High (nível 4.2, 5.1 ou 5.2, pelo tamanho) ou, sem ele, em VP9, a ~0,13 bit por pixel (≈16 Mbit/s em 1080p60, ≈65 Mbit/s em 4K60). Os quadros codificados vão para Blobs, que o navegador pode guardar em disco, e `mp4.ts` escreve o cabeçalho: ftyp, moov (com `ctts` e lista de edição quando há quadros B) e mdat, com tamanho de 64 bits acima de 4 GB |
+
+**Armadilhas:**
+- Os nós de efeito do three r186 (SSGI, GTAO, SSR, raios, TRAA, bloom, nitidez) tomam o tamanho do buffer de desenho do renderizador, não o do passe da cena. Por isso a resolução dinâmica muda a densidade de pixels do canvas, e não a escala do passe: um TAAU com o passe menor não aliviaria o SSGI, que não tem escala própria.
+- O `ChromaticAberrationNode` do three também escala a imagem inteira e borra o centro. A aberração do Cinema é uma conta própria, que só afasta o vermelho e o azul do centro.
+- O `hash` do TSL converte a semente para inteiro: a semente do grão fica abaixo de 2²⁴, senão o float arredonda e o grão para.
+- No Chromium com WebGPU, a primeira cópia do canvas (`drawImage`) depois da troca de tamanho saiu de uma cor só, e os 4 primeiros quadros do filme saíam verdes. O aquecimento (30 quadros com o mundo parado, para os shaders compilarem e o TRAA assentar) agora também copia o canvas, e a exportação espera um quadro da tela antes de começar.
+- O Chromium sem GPU destes contêineres não tem codificador H.264, só VP9 e AV1: o teste de ponta a ponta sai em VP9. O caminho do H.264, com quadros B, é conferido pelo leitor de caixas de `tests/video.ts`.
+
+**Custo.** O Cinema é um nível novo; os outros quatro não mudam. Com 300 peças em renderização por software, o Cinema tem 221 draw calls e 3,62 M de triângulos, contra 196 e 3,06 M no Ultra: são a quarta cascata de sombra e a vegetação 1,6×. Na GPU, o Cinema desenha 2,25× os pixels do Ultra na mesma tela, e o SSGI e os reflexos custam mais por pixel; numa tela 4K, são 18,7 milhões de pixels por quadro. É um nível para placas de topo e para exportar vídeo, que não precisa de tempo real. A gravação não pesa no jogo; a exportação leva o tempo que a placa levar (no SwiftShader, o filme de 11 s em 256×144 na Alta levou 2 min).
 
 ## Apêndice A: revisão de código e QA pelo Sonnet
 
@@ -436,3 +508,5 @@ Nota de balanceamento: como o encaixe perfeito exige todas as bordas iguais, uma
 ## Apêndice B: o que as simulações dizem sobre o balanceamento
 
 Nas 3.000 partidas simuladas, jogadores automáticos que **não** perseguem missões (guloso, aleatório e "pior jogada") duraram em média **40 a 50 peças** e cumpriram **cerca de 0,5 missão por partida**. Um humano que mira as missões vai mais longe. Mesmo assim, é um sinal de que as recompensas atuais (+4 a +6 peças por missão, +1 por peça cercada) talvez sejam avaras para partidas longas e relaxantes como as do gênero. Esse é o primeiro ajuste a testar com jogadores reais, e hoje basta mudar números em `Rules`.
+
+**Ajuste de 2026-10-03.** A simulação ganhou um jogador que persegue as missões ativas (`quest` em `tests/logic.ts`) e uma tabela da duração da partida no Clássico por jogador. Com missões de quatro tipos (grupo, fechar, perfeitos, interações), chance de missão de 0,24 para 0,32, recompensas de +5 a +7 peças e pilha de 40 para 50, a mediana passou de 61 para 92 peças com a IA gulosa e de 67 para 100 com o jogador de missões, sem partidas sem fim (máximo de ~200). Jogadores ruins (aleatório, pior jogada) ficam em ~55 peças: a habilidade continua fazendo diferença.

@@ -1,9 +1,16 @@
 import type { Quest } from '../core/board';
+import type { TimeOfDay } from '../render/world';
 import { corner } from '../core/hex';
 import type { TileDef } from '../core/tiles';
 import { PERIOD_LABEL, PERIOD_ORDER, THEMES, type Theme } from '../themes/themes';
+import { CHARGES, HOUSE_COLORS, METALS, ORDINARIES, bannerSvg, type Banner, type HouseColor } from './banner';
 
 const $ = <E extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as E;
+
+export const TIME_LABEL: Record<TimeOfDay, string> = { dawn: 'Amanhecer', day: 'Dia', golden: 'Hora dourada', dusk: 'Entardecer', night: 'Noite' };
+export const TIME_ICON: Record<TimeOfDay, string> = { dawn: '◒', day: '☀', golden: '☼', dusk: '◐', night: '☾' };
+/** Ordem do botão e da tecla L: o dia passa uma hora por vez. */
+export const TIME_ORDER: TimeOfDay[] = ['dawn', 'day', 'golden', 'dusk', 'night'];
 
 export interface MarkerView {
   id: number;
@@ -14,15 +21,102 @@ export interface MarkerView {
   color: string;
   /** Sítio escondido (estilo de carimbo), em vez de missão. */
   kind?: string;
+  /** Estandarte apagado: a peça da vez está passando por baixo dele. */
+  dim?: boolean;
 }
 
 function esc(s: string) {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 }
 
+// Desenho de cada terreno (e das missões de contagem), em traço claro sobre a cor: a cor
+// sozinha não basta (daltonismo; no Cerrado a Mata é amarela e a Roça é verde).
+const GLYPH: Record<string, string> = {
+  t0: '<path d="M7 19c0-4 1-7 2-10M12 19c0-5 0-9 1-12M17 19c0-4-1-6-2-9"/>',
+  t1: '<path d="M12 4l6 9h-3.5l3.5 5H6l3.5-5H6z" fill="#fff"/><path d="M12 18v3"/>',
+  t2: '<path d="M12 21V8M12 9l-3-3M12 9l3-3M12 13l-3-3M12 13l3-3M12 17l-3-3M12 17l3-3"/>',
+  t3: '<path d="M5 12l7-6 7 6v8H5z" fill="#fff"/>',
+  t4: '<path d="M4 10c3-3 5 3 8 0s5 3 8 0M4 16c3-3 5 3 8 0s5 3 8 0"/>',
+  t5: '<path d="M8 3v18M16 3v18M6 7h12M6 12h12M6 17h12"/>',
+  perfect: '<path d="M12 4l2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z" fill="#fff"/>',
+  synergy: '<path d="M9 7l-4 5 4 5M15 7l4 5-4 5"/>',
+};
+
+/** Ícone do terreno (ou da missão) em SVG, claro ou escuro conforme a cor de fundo `bg` (#rrggbb). */
+export function glyph(key: string, bg: string) {
+  const n = parseInt(bg.slice(1, 7), 16) || 0;
+  const lum = 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  const ink = lum > 165 ? '#3b2a24' : '#fff';
+  return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="${ink}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${(GLYPH[key] ?? '').replaceAll('#fff', ink)}</svg>`;
+}
+
+const questGlyph = (q: Quest) => (q.kind === 'perfect' || q.kind === 'synergy' ? q.kind : `t${q.terrain}`);
+
 export function questLabel(q: Quest, theme: Theme) {
   const name = theme.terrainNames[q.terrain];
+  if (q.kind === 'close') return `Fechar ${name}`;
+  if (q.kind === 'perfect') return `${q.target} encaixes perfeitos`;
+  if (q.kind === 'synergy') return `${q.target}× ${theme.synergy[q.syn!]}`;
   return q.exact ? `${name}: exatamente ${q.target}` : `${name}: ${q.target} ou mais`;
+}
+
+/** Título, linha de baixo e cor do cartão de uma missão. */
+function questCard(q: Quest, theme: Theme) {
+  const count = `${Math.min(q.progress, q.target)}/${q.target}`;
+  const color = theme.terrainColors[q.terrain];
+  if (q.kind === 'close') {
+    const open = q.open ?? 0;
+    return { title: `Fechar ${theme.terrainNames[q.terrain]}`, sub: open === 1 ? 'falta 1 borda aberta' : `faltam ${open} bordas abertas`, color };
+  }
+  if (q.kind === 'perfect') return { title: 'Encaixes perfeitos', sub: count, color: theme.ui.accent };
+  if (q.kind === 'synergy') return { title: theme.synergy[q.syn!], sub: `interações · ${count}`, color };
+  return { title: theme.terrainNames[q.terrain], sub: `${q.exact ? `exatamente ${q.target}` : `${q.target} ou mais`} · ${count}`, color };
+}
+
+/** Texto curto do estandarte da missão no mapa. */
+export function questMarker(q: Quest) {
+  if (q.kind === 'close') return `◯${q.open ?? 0}`;
+  if (q.kind === 'perfect') return `★${q.target - q.progress}`;
+  if (q.kind === 'synergy') return `✦${q.target - q.progress}`;
+  return q.exact ? `=${q.target}` : `${q.target}+`;
+}
+
+/** Seção "Sua casa" no topo do menu de temas: cor da casa e brasão. */
+export interface HouseMenu {
+  color: HouseColor | null;
+  banner: Banner;
+  /** Destaque do próprio tema (a opção "Tema"). */
+  themeAccent: string;
+  onChange: (color: HouseColor | null, banner: Banner) => void;
+}
+
+function houseSection(h: HouseMenu) {
+  const field = h.color ? HOUSE_COLORS[h.color].hex : h.themeAccent;
+  const pressed = (on: boolean) => `aria-pressed="${on}"`;
+  const dots = [`<button class="dot" type="button" data-k="color" data-v="tema" style="--c:${h.themeAccent}" title="Cor do tema" ${pressed(!h.color)}></button>`]
+    .concat(Object.entries(HOUSE_COLORS).map(([id, c]) => `<button class="dot" type="button" data-k="color" data-v="${id}" style="--c:${c.hex}" title="${c.name}" ${pressed(h.color === id)}></button>`))
+    .join('');
+  const row = (k: keyof Banner, list: Record<string, string>) =>
+    Object.entries(list)
+      .map(([id, label]) => `<button type="button" data-k="${k}" data-v="${id}" ${pressed(h.banner[k] === id)}>${k === 'metal' ? id[0].toUpperCase() + id.slice(1) : esc(label)}</button>`)
+      .join('');
+  return `<h3>Sua casa</h3><div class="house">
+    <span class="crest-big">${bannerSvg(field, h.banner, 56)}</span>
+    <div class="row">${dots}</div>
+    <div class="row">${row('metal', METALS)}</div>
+    <div class="row">${row('ordinary', ORDINARIES)}</div>
+    <div class="row">${row('charge', CHARGES)}</div>
+  </div>`;
+}
+
+/** Opção de um menu do topo (qualidade, câmera). */
+export interface MenuItem {
+  id: string;
+  label: string;
+  note?: string;
+  /** Atalho de teclado mostrado à direita. */
+  key?: string;
+  current?: boolean;
 }
 
 export class Hud {
@@ -38,6 +132,8 @@ export class Hud {
   readonly modalBody = $('modal-body');
   readonly themeMenu = $('theme-menu');
   readonly themeBtn = $('btn-theme');
+  readonly menu = $('menu');
+  private menuBtn: HTMLElement | null = null;
   readonly stats = $<HTMLPreElement>('stats');
   readonly hint = $('hint');
   readonly confirm = $<HTMLButtonElement>('confirm');
@@ -155,15 +251,16 @@ export class Hud {
       if (q.state === 'active' && !el) {
         el = document.createElement('div');
         el.className = 'quest';
-        el.innerHTML = `<i class="ico" style="background:${theme.terrainColors[q.terrain]}"></i><b></b><span class="reward">+${q.reward} peças</span><span class="bar"><i></i></span>`;
+        el.innerHTML = `<i class="ico" style="background:${questCard(q, theme).color}">${glyph(questGlyph(q), questCard(q, theme).color)}</i><b></b><span class="reward">+${q.reward} peças</span><span class="bar"><i></i></span>`;
         this.quests.appendChild(el);
         this.questEls.set(q.id, el);
       }
       if (!el) continue;
       const b = el.querySelector('b')!;
-      b.textContent = theme.terrainNames[q.terrain];
+      const card = questCard(q, theme);
+      b.textContent = card.title;
       const sub = document.createElement('small');
-      sub.textContent = `${q.exact ? `exatamente ${q.target}` : `${q.target} ou mais`} · ${Math.min(q.progress, q.target)}/${q.target}`;
+      sub.textContent = card.sub;
       b.appendChild(sub);
       (el.querySelector('.bar i') as HTMLElement).style.width = `${Math.min(100, (q.progress / q.target) * 100)}%`;
       if (q.state !== 'active' && !el.classList.contains('done') && !el.classList.contains('failed')) {
@@ -177,6 +274,7 @@ export class Hud {
 
   updateMarkers(list: MarkerView[]) {
     const alive = new Set<number>();
+    const narrow = window.innerWidth <= 520;
     for (const m of list) {
       alive.add(m.id);
       let el = this.markerEls.get(m.id);
@@ -186,10 +284,22 @@ export class Hud {
         this.markers.appendChild(el);
         this.markerEls.set(m.id, el);
       }
-      if (el.textContent !== m.text) el.textContent = m.text;
+      if (el.dataset.text !== m.text) {
+        el.dataset.text = m.text;
+        if (m.kind) el.textContent = m.text;
+        else {
+          // Estandarte: o pano (com a bolinha do terreno) leva o número.
+          const span = document.createElement('span');
+          span.append(document.createElement('i'), m.text);
+          el.replaceChildren(span);
+        }
+      }
       el.style.setProperty('--c', m.color);
       el.style.display = m.visible ? '' : 'none';
-      el.style.transform = `translate(${(m.x - 4).toFixed(1)}px, ${(m.y - 44).toFixed(1)}px)`;
+      el.classList.toggle('dim', !!m.dim);
+      // O pé do mastro (ou a ponta da etiqueta do sítio) fica no ponto da peça.
+      // No celular o estandarte encolhe em volta do pé do mastro, para tapar menos peças.
+      el.style.transform = m.kind ? `translate(${(m.x - 4).toFixed(1)}px, ${(m.y - 44).toFixed(1)}px)` : `translate(${(m.x - 1).toFixed(1)}px, ${(m.y - 64).toFixed(1)}px)${narrow ? ' scale(0.7)' : ''}`;
     }
     for (const [id, el] of this.markerEls) {
       if (!alive.has(id)) {
@@ -232,17 +342,40 @@ export class Hud {
     return !this.modal.hidden;
   }
 
-  openThemeMenu(current: Theme, onPick: (t: Theme) => void) {
+  /** Brasão no placar. */
+  setCrest(svg: string) {
+    $('crest').innerHTML = svg;
+  }
+
+  openThemeMenu(current: Theme, onPick: (t: Theme) => void, house?: HouseMenu) {
+    this.closeMenu();
     const opt = (t: Theme) => `<button class="theme-opt" type="button" data-id="${t.id}" aria-current="${t.id === current.id}" title="${esc(t.tagline)}">
         <span class="swatch">${t.terrainColors.slice(0, 5).map((c) => `<i style="background:${c}"></i>`).join('')}</span>
         <strong>${esc(t.name)}</strong>
         <span>${esc(t.era)}</span>
         ${t.ruleNote ? `<em>${esc(t.ruleNote)}</em>` : ''}
       </button>`;
-    this.themeMenu.innerHTML = PERIOD_ORDER.map((p) => {
-      const list = THEMES.filter((t) => t.period === p);
-      return list.length ? `<h3>${PERIOD_LABEL[p]}</h3>${list.map(opt).join('')}` : '';
-    }).join('');
+    this.themeMenu.innerHTML =
+      (house ? houseSection(house) : '') +
+      PERIOD_ORDER.map((p) => {
+        const list = THEMES.filter((t) => t.period === p);
+        return list.length ? `<h3>${PERIOD_LABEL[p]}</h3>${list.map(opt).join('')}` : '';
+      }).join('');
+    if (house) {
+      this.themeMenu.querySelectorAll<HTMLButtonElement>('.house button').forEach((b) =>
+        b.addEventListener('click', () => {
+          const { k, v } = b.dataset as { k: string; v: string };
+          const banner = { ...house.banner };
+          let color = house.color;
+          if (k === 'color') color = v === 'tema' ? null : (v as HouseColor);
+          else (banner as Record<string, string>)[k] = v;
+          house.onChange(color, banner);
+          const top = this.themeMenu.scrollTop;
+          this.openThemeMenu(current, onPick, { ...house, color, banner });
+          this.themeMenu.scrollTop = top;
+        }),
+      );
+    }
     this.themeMenu.hidden = false;
     this.themeBtn.setAttribute('aria-expanded', 'true');
     this.themeMenu.querySelector<HTMLElement>('[aria-current="true"]')?.scrollIntoView({ block: 'nearest' });
@@ -257,5 +390,36 @@ export class Hud {
   closeThemeMenu() {
     this.themeMenu.hidden = true;
     this.themeBtn.setAttribute('aria-expanded', 'false');
+    this.closeMenu();
+  }
+
+  /** Menu preso a um botão do topo; clicar de novo no mesmo botão fecha. */
+  toggleMenu(btn: HTMLElement, items: MenuItem[], onPick: (id: string) => void) {
+    const same = this.menuBtn === btn && !this.menu.hidden;
+    this.closeThemeMenu();
+    if (same) return;
+    this.menu.innerHTML = items
+      .map(
+        (it) => `<button class="menu-opt" type="button" data-id="${esc(it.id)}" aria-current="${!!it.current}">
+        <strong>${esc(it.label)}</strong>${it.key ? `<kbd>${esc(it.key)}</kbd>` : ''}
+        ${it.note ? `<span>${esc(it.note)}</span>` : ''}
+      </button>`,
+      )
+      .join('');
+    this.menu.hidden = false;
+    this.menuBtn = btn;
+    btn.setAttribute('aria-expanded', 'true');
+    this.menu.querySelectorAll<HTMLButtonElement>('.menu-opt').forEach((b) =>
+      b.addEventListener('click', () => {
+        this.closeMenu();
+        onPick(b.dataset.id!);
+      }),
+    );
+  }
+
+  closeMenu() {
+    this.menu.hidden = true;
+    this.menuBtn?.setAttribute('aria-expanded', 'false');
+    this.menuBtn = null;
   }
 }

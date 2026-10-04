@@ -8,6 +8,7 @@ import { T, isStrict, rotateEdges, type TileDef } from '../src/core/tiles';
 import { mulberry32 } from '../src/core/rng';
 import { MODES, type Mode } from '../src/core/modes';
 import { generateSites } from '../src/core/sites';
+import { SPECIAL_KINDS, type SpecialKind } from '../src/core/specials';
 import { THEMES } from '../src/themes/themes';
 
 const rulesFor = (t: { rules?: Partial<Rules> }, mode?: Mode): Rules => ({ ...DEFAULT_RULES, ...(mode?.daily ? {} : t.rules), ...mode?.rules });
@@ -19,6 +20,28 @@ const ORACLE_SITE: Record<string, { points: number; tiles: number }> = {
   relic: { points: 100, tiles: 1 },
   lookout: { points: 20, tiles: 0 },
 };
+
+// Peças especiais (cópia independente de src/core/specials.ts): bordas, terreno contado, raio,
+// pontos por peça contada, peças ganhas e jogadas de mirante.
+const ORACLE_SPECIAL: Record<SpecialKind, { edges: T[]; terrain: T; radius: number; per: number; tiles: number; lookout: number }> = {
+  station: { edges: [T.Rail, T.Village, T.Village, T.Rail, T.Field, T.Grass], terrain: T.Rail, radius: 2, per: 12, tiles: 2, lookout: 0 },
+  watermill: { edges: [T.Water, T.Village, T.Field, T.Water, T.Field, T.Field], terrain: T.Field, radius: 1, per: 20, tiles: 1, lookout: 0 },
+  lighthouse: { edges: [T.Water, T.Grass, T.Grass, T.Forest, T.Grass, T.Grass], terrain: T.Water, radius: 2, per: 10, tiles: 0, lookout: 5 },
+};
+
+// Cartas da virada de era (cópia independente dos números de src/core/blessings.ts).
+const ORACLE_BLESS = { synergy: 5, perfect: 10, closed: 1, quest: 2, site: 1, lookout: 10 };
+const BLESS_IDS = ['lumber', 'mill', 'pasture', 'apiary', 'surveyors', 'builders', 'pilgrims', 'cartographers'];
+
+// Influência das construções (cópia independente de src/core/synergy.ts): terrenos que contam
+// e pontos por setor em cada era; teto por peça.
+const ORACLE_INF: Record<string, { terrains: T[]; per: number[] }> = {
+  lumber: { terrains: [T.Forest], per: [1, 2, 2, 3] },
+  mill: { terrains: [T.Field], per: [1, 2, 2, 3] },
+  pasture: { terrains: [T.Grass], per: [1, 2, 2, 3] },
+  apiary: { terrains: [T.Grass, T.Field], per: [1, 1, 1, 2] },
+};
+const ORACLE_INF_CAP = 8;
 
 // Math.random determinístico para tornar bestMove reprodutível nos testes.
 function seedMathRandom(seed: number) {
@@ -70,17 +93,29 @@ function oracleAnyMove(b: Board, def: TileDef) {
   return false;
 }
 
+/** Bordas do grupo de (peça, setor) viradas para uma casa vazia (missão de fechar). */
+function oracleOpenEdges(b: Board, anchor: Placed, sector: number) {
+  let open = 0;
+  for (const [p, s] of oracleGroupMembers(b, anchor, sector)) if (!b.get(p.q + DIRS[s][0], p.r + DIRS[s][1])) open++;
+  return open;
+}
+
 /** BFS sobre (peça, setor): tamanho do grupo em nº de peças distintas. */
 function oracleGroupSize(b: Board, anchor: Placed, sector: number) {
+  return new Set(oracleGroupMembers(b, anchor, sector).map(([p]) => p)).size;
+}
+
+/** BFS sobre (peça, setor): todos os setores do grupo. */
+function oracleGroupMembers(b: Board, anchor: Placed, sector: number): Array<[Placed, number]> {
   const idx = new Map<Placed, number>();
   b.list.forEach((p, i) => idx.set(p, i));
   const seen = new Set<number>();
   const stack: Array<[Placed, number]> = [[anchor, sector]];
   seen.add(idx.get(anchor)! * 6 + sector);
-  const tiles = new Set<Placed>();
+  const members: Array<[Placed, number]> = [];
   while (stack.length) {
     const [p, s] = stack.pop()!;
-    tiles.add(p);
+    members.push([p, s]);
     const terr = p.edges[s];
     const push = (pp: Placed, ss: number) => {
       const k = idx.get(pp)! * 6 + ss;
@@ -99,7 +134,7 @@ function oracleGroupSize(b: Board, anchor: Placed, sector: number) {
     const nb = b.get(p.q + DIRS[s][0], p.r + DIRS[s][1]);
     if (nb && nb.edges[opposite(s)] === terr) push(nb, opposite(s));
   }
-  return tiles.size;
+  return members;
 }
 
 function oracleClosed(b: Board, t: Placed) {
@@ -122,21 +157,28 @@ interface GameLog {
   seed: number;
   themeId: string;
   rules: Rules;
-  moves: [number, number, number][];
+  specials: SpecialKind[];
+  /** q, r, rot e, depois, as cartas escolhidas logo após a jogada (0 ou 1). */
+  moves: number[][];
   snapshots: { score: number; stack: number; cur: number | null; next: number; tiles: number; active: number; discarded: number; perfects: number; qc: number }[];
   finalScore: number;
   finalStack: number;
   placed: number;
   discarded: number;
+  quests: number;
+  mode: string;
 }
 
 const themeStats: Record<string, { games: number; moves: number; score: number; discards: number; questsDone: number; questsFailed: number; exactDone: number; exactFailed: number; closed: number; perfects: number; maxActive: number; overshootGames: number }> = {};
 
-type Policy = 'greedy' | 'random' | 'worst';
+// greedy: a IA do jogo; quest: a mesma IA, mas que também persegue as missões ativas (como uma
+// pessoa faria); random e worst: jogadores ruins, para achar travas e casos extremos.
+type Policy = 'greedy' | 'quest' | 'random' | 'worst';
 function chooseMove(game: Game, policy: Policy, rnd: () => number): { q: number; r: number; rot: number } | null {
   if (policy === 'greedy') return game.bestMove();
   const def = game.current;
   if (!def) return null;
+  if (policy === 'quest') return questMove(game, def, rnd);
   const all: { q: number; r: number; rot: number; score: number }[] = [];
   for (const k of game.board.frontier) {
     const [q, r] = unkey(k);
@@ -154,20 +196,75 @@ function chooseMove(game: Game, policy: Policy, rnd: () => number): { q: number;
   return best;
 }
 
-function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: Policy = 'greedy', mode: Mode = MODES[0]): GameLog {
+/** Jogada gulosa com um empurrão para as missões ativas (não usa o código das missões do Board). */
+function questMove(game: Game, def: TileDef, rnd: () => number) {
+  const b = game.board;
+  // Casas vizinhas de cada grupo de missão, com o terreno que o grupo pede.
+  const want = new Map<number, number>();
+  const counts = { perfect: 0, syn: new Set<string>() };
+  for (const q of b.activeQuests()) {
+    if (q.kind === 'perfect') counts.perfect++;
+    else if (q.kind === 'synergy') counts.syn.add(q.syn!);
+    else if (!(q.exact && q.target - q.progress <= 1)) {
+      for (const [p, s] of oracleGroupMembers(b, q.anchor, q.sector)) {
+        const k = hkey(p.q + DIRS[s][0], p.r + DIRS[s][1]);
+        if (!b.tiles.has(k)) want.set(k * 8 + opposite(s), q.terrain);
+      }
+    }
+  }
+  const PAIR_KIND = ['lumber', 'mill', 'pasture', 'apiary'];
+  const PAIRS = [[T.Village, T.Forest], [T.Village, T.Field], [T.Village, T.Grass], [T.Field, T.Grass]];
+  let best: { q: number; r: number; rot: number; score: number } | null = null;
+  for (const k of b.frontier) {
+    const [q, r] = unkey(k);
+    for (let rot = 0; rot < 6; rot++) {
+      const edges = rotateEdges(def.edges, rot);
+      const c = b.check(q, r, edges);
+      if (!c.valid) continue;
+      let score = c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) + rnd() * 0.5;
+      for (let i = 0; i < 6; i++) {
+        const t = want.get(k * 8 + i);
+        if (t !== undefined && edges[i] === t) score += 3;
+        const n = b.get(q + DIRS[i][0], r + DIRS[i][1]);
+        if (!n || !counts.syn.size) continue;
+        const pair = PAIRS.findIndex(([x, y]) => (edges[i] === x && n.edges[opposite(i)] === y) || (edges[i] === y && n.edges[opposite(i)] === x));
+        if (pair >= 0 && counts.syn.has(PAIR_KIND[pair])) score += 2;
+      }
+      if (counts.perfect && c.neighbors >= 2 && c.matches === c.neighbors) score += 2;
+      if (!best || score > best.score) best = { q, r, rot, score };
+    }
+  }
+  return best;
+}
+
+function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: Policy = 'greedy', mode: Mode = MODES[0], specials: SpecialKind[] = []): GameLog {
   const prnd = mulberry32(seed ^ 0x5bd1e995);
   const theme = THEMES[themeIdx];
   const rules = rulesFor(theme, mode);
   // Zen não acaba: a simulação para num teto de jogadas.
   const maxMoves = rules.infinite ? 70 : Infinity;
   let expectedEra = 0;
-  const game = new Game(seed, rules);
+  let pendingMark: number | null = null;
+  // Maravilha (oráculo): índice da peça do canteiro e etapa.
+  let wonderAt: number | null = null;
+  let wonderStage = 0;
+  // Cartas escolhidas e escolhas ainda na mesa (oráculo).
+  const oBless = new Set<string>();
+  let oOffers = 0;
+  // Influência (oráculo): casa → tipos de construção vizinha.
+  const oInf = new Map<string, Set<string>>();
+  const game = new Game(seed, rules, specials);
   const b = game.board;
-  const log: GameLog = { seed, themeId: theme.id, rules, moves: [], snapshots: [], finalScore: 0, finalStack: 0, placed: 0, discarded: 0 };
+  const specialsSeen = new Set<SpecialKind>();
+  const log: GameLog = { seed, themeId: theme.id, rules, specials, moves: [], snapshots: [], finalScore: 0, finalStack: 0, placed: 0, discarded: 0, quests: 0, mode: mode.id };
   const ts = (themeStats[theme.id] ??= { games: 0, moves: 0, score: 0, discards: 0, questsDone: 0, questsFailed: 0, exactDone: 0, exactFailed: 0, closed: 0, perfects: 0, maxActive: 0, overshootGames: 0 });
   ts.games++;
 
   const hist = new Map<number, QuestHist>();
+  // Contagens próprias do oráculo para as missões de contagem (perfeitos e interações por tipo).
+  let oraclePerfects = 0;
+  const oracleSyn: Record<string, number> = { lumber: 0, mill: 0, pasture: 0, apiary: 0 };
+  const questBase = new Map<number, number>();
   let expectedScore = 0;
   let expectedStack = rules.startTiles;
   let maxActive = 0;
@@ -191,11 +288,15 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       break;
     }
     const edges = rotateEdges(cur.edges, m.rot);
+    // Marco da era: a primeira peça com vila depois de um avanço.
+    // A peça especial tem a construção dela no meio: o marco espera a próxima peça com vila.
+    const expectedMark = pendingMark !== null && !cur.special && edges.some((e) => e === T.Village) ? pendingMark : null;
     assert(oracleValid(b, m.q, m.r, edges), `seed ${seed}: bestMove inválida pelo oráculo`);
     // Estado prévio para o oráyculo de pontuação
     const closedBefore = new Set(b.list.filter((t) => oracleClosed(b, t)).map((t) => t.index));
     // vizinhos/encaixes pelo oráculo
     let nbs = 0, mt = 0, syn = 0;
+    const synKinds: string[] = [];
     // Interações (oráculo próprio): bordas comuns diferentes que formam um dos 4 pares.
     const SYN_PAIRS = [
       [T.Village, T.Forest],
@@ -209,7 +310,13 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       nbs++;
       const a = edges[i], c = n.edges[(i + 3) % 6];
       if (c === a) mt++;
-      else if (SYN_PAIRS.some(([x, y]) => (a === x && c === y) || (a === y && c === x))) syn++;
+      else {
+        const pair = SYN_PAIRS.findIndex(([x, y]) => (a === x && c === y) || (a === y && c === x));
+        if (pair >= 0) {
+          syn++;
+          synKinds.push(['lumber', 'mill', 'pasture', 'apiary'][pair]);
+        }
+      }
     }
     const prevQuestStates = b.quests.map((q) => q.state);
     const listBefore = b.list.length;
@@ -239,20 +346,44 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       if (a === c) pts += rules.matchBonus[a] ?? 0;
       else {
         const pair = SYN_PAIRS.findIndex(([x, y]) => (a === x && c === y) || (a === y && c === x));
-        if (pair >= 0) pts += rules.synergyBonus[(['lumber', 'mill', 'pasture', 'apiary'] as const)[pair]] ?? 0;
+        if (pair >= 0) {
+          const kind = (['lumber', 'mill', 'pasture', 'apiary'] as const)[pair];
+          pts += rules.synergyBonus[kind] ?? 0;
+          if (oBless.has(kind)) pts += ORACLE_BLESS.synergy;
+        }
       }
     }
     assert(res.synergies.length === syn, `seed ${seed}: interações ${res.synergies.length} != oráculo ${syn}`);
+    // Influência: casa marcada por interações anteriores; cada tipo uma vez, com teto.
+    let inf = 0;
+    if (rules.influence) {
+      for (const kind of oInf.get(`${m.q},${m.r}`) ?? []) {
+        const O = ORACLE_INF[kind];
+        inf += edges.filter((e) => O.terrains.includes(e)).length * O.per[Math.min(expectedEra, 3)];
+      }
+      inf = Math.min(ORACLE_INF_CAP, inf);
+      oInf.delete(`${m.q},${m.r}`);
+      for (const kind of synKinds) for (const [dq, dr] of DIRS) if (!b.get(m.q + dq, m.r + dr)) {
+        const k = `${m.q + dq},${m.r + dr}`;
+        if (!oInf.has(k)) oInf.set(k, new Set());
+        oInf.get(k)!.add(kind);
+      }
+    }
+    pts += inf;
+    assert(res.influence.points === inf, `seed ${seed}: influência ${res.influence.points} != oráculo ${inf}`);
+    if (inf) inc('influencia');
     const perfect = nbs >= 2 && mt === nbs;
-    if (perfect) pts += rules.perfectBonus;
+    if (perfect) pts += rules.perfectBonus + (oBless.has('surveyors') ? ORACLE_BLESS.perfect : 0);
     assert(res.perfect === perfect, `seed ${seed}: perfect diverge`);
+    if (perfect) oraclePerfects++;
+    for (const k of synKinds) oracleSyn[k]++;
     assert(res.matches === mt && res.neighbors === nbs, `seed ${seed}: matches/neighbors divergem (${res.matches}/${res.neighbors} vs ${mt}/${nbs})`);
     const closedAfter = new Set(b.list.filter((t) => oracleClosed(b, t)).map((t) => t.index));
     const newlyClosed = [...closedAfter].filter((i) => !closedBefore.has(i));
     assert(newlyClosed.length === res.closed.length, `seed ${seed}: closed diverge (${newlyClosed.length} vs ${res.closed.length})`);
     for (const t of b.list) assert(t.closed === closedAfter.has(t.index), `seed ${seed}: flag closed inconsistente na peça ${t.index}`);
     pts += newlyClosed.length * rules.closedBonus;
-    let gained = newlyClosed.length * rules.closedTiles;
+    let gained = newlyClosed.length * (rules.closedTiles + (oBless.has('builders') ? ORACLE_BLESS.closed : 0));
     ts.closed += newlyClosed.length;
     if (perfect) ts.perfects++;
 
@@ -263,46 +394,118 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
         assert(q.state === prevQuestStates[qi], `seed ${seed}: missão ${q.id} mudou de estado depois de encerrada`);
         continue;
       }
-      const size = oracleGroupSize(b, q.anchor, q.sector);
-      hist.get(q.id)!.sizes.push(size);
       let expected: 'active' | 'done' | 'failed' = 'active';
-      if (q.exact) {
-        if (size === q.target) expected = 'done';
-        else if (size > q.target) expected = 'failed';
-      } else if (size >= q.target) expected = 'done';
-      assert(q.state === expected, `seed ${seed}: missão ${q.id} (${q.exact ? 'exata' : 'N+'}) alvo ${q.target} tam ${size} estado ${q.state} esperado ${expected}`);
+      let progress: number;
+      let gain: number;
+      if (q.kind === 'group') {
+        const size = oracleGroupSize(b, q.anchor, q.sector);
+        hist.get(q.id)!.sizes.push(size);
+        if (q.exact) {
+          if (size === q.target) expected = 'done';
+          else if (size > q.target) expected = 'failed';
+        } else if (size >= q.target) expected = 'done';
+        progress = size;
+        gain = q.target * 10;
+      } else if (q.kind === 'close') {
+        const open = oracleOpenEdges(b, q.anchor, q.sector);
+        if (open === 0) expected = 'done';
+        progress = Math.max(0, q.target - open);
+        gain = oracleGroupSize(b, q.anchor, q.sector) * 10;
+        inc('missao_fechar_' + expected);
+      } else {
+        const count = q.kind === 'perfect' ? oraclePerfects : oracleSyn[q.syn!];
+        progress = count - questBase.get(q.id)!;
+        if (progress >= q.target) expected = 'done';
+        gain = q.target * (q.kind === 'perfect' ? 20 : 15);
+      }
+      assert(q.state === expected, `seed ${seed}: missão ${q.id} (${q.kind}${q.exact ? ' exata' : ''}) alvo ${q.target} progresso ${progress} estado ${q.state} esperado ${expected}`);
       if (expected === 'done') {
-        pts += q.target * 10;
-        gained += q.reward;
+        pts += gain;
+        gained += q.reward + (oBless.has('pilgrims') ? ORACLE_BLESS.quest : 0);
         ts.questsDone++;
         if (q.exact) ts.exactDone++;
+        inc('missao_ok_' + q.kind);
       } else if (expected === 'failed') {
         ts.questsFailed++;
         if (q.exact) ts.exactFailed++;
       }
-      if (q.state === 'active') assert(q.progress === size, `seed ${seed}: progresso da missão ${q.id} ${q.progress} != oráculo ${size}`);
+      if (q.state === 'active') assert(q.progress === progress, `seed ${seed}: progresso da missão ${q.id} ${q.progress} != oráculo ${progress}`);
     }
     if (res.newQuest) {
       const nq = res.newQuest;
-      const size = oracleGroupSize(b, nq.anchor, nq.sector);
-      assert(nq.progress === size && nq.target > size, `seed ${seed}: nova missão inconsistente`);
-      assert(nq.anchor === res.placed && nq.anchor.edges[nq.sector] === nq.terrain, `seed ${seed}: setor/terreno da missão incoerentes`);
-      // o setor escolhido deve ser o de maior grupo
-      let bestSize = -1;
-      for (let s = 0; s < 6; s++) if (nq.anchor.edges[s] === nq.terrain) bestSize = Math.max(bestSize, oracleGroupSize(b, nq.anchor, s));
-      assert(size === bestSize, `seed ${seed}: missão não usou o maior grupo`);
-      hist.set(nq.id, { quest: nq, sizes: [size], createdAtMove: log.moves.length });
-    }
+      assert(nq.kind === cur.quest?.kind && nq.anchor === res.placed && nq.state === 'active', `seed ${seed}: nova missão não veio da peça`);
+      if (nq.kind === 'group' || nq.kind === 'close') {
+        const size = oracleGroupSize(b, nq.anchor, nq.sector);
+        assert(nq.anchor.edges[nq.sector] === nq.terrain, `seed ${seed}: setor/terreno da missão incoerentes`);
+        // o setor escolhido deve ser o de maior grupo
+        let bestSize = -1;
+        for (let s = 0; s < 6; s++) if (nq.anchor.edges[s] === nq.terrain) bestSize = Math.max(bestSize, oracleGroupSize(b, nq.anchor, s));
+        assert(size === bestSize, `seed ${seed}: missão não usou o maior grupo`);
+        if (nq.kind === 'group') {
+          assert(nq.progress === size && nq.target > size, `seed ${seed}: nova missão inconsistente`);
+          assert(nq.reward === (nq.exact ? rules.exactQuestTiles : rules.groupQuestTiles + Math.floor(nq.target / 6)), `seed ${seed}: recompensa da missão de grupo`);
+        } else {
+          const open = oracleOpenEdges(b, nq.anchor, nq.sector);
+          assert(open > 0 && nq.target === open && nq.progress === 0 && nq.reward === rules.closeQuestTiles, `seed ${seed}: nova missão de fechar inconsistente`);
+        }
+        hist.set(nq.id, { quest: nq, sizes: [size], createdAtMove: log.moves.length });
+      } else {
+        assert(nq.target >= 3 && nq.progress === 0 && nq.reward === rules.countQuestTiles && (nq.kind === 'perfect' || !!nq.syn), `seed ${seed}: nova missão de contagem inconsistente`);
+        questBase.set(nq.id, nq.kind === 'perfect' ? oraclePerfects : oracleSyn[nq.syn!]);
+        hist.set(nq.id, { quest: nq, sizes: [], createdAtMove: log.moves.length });
+      }
+      inc('missao_nova_' + nq.kind);
+    } else if (cur.quest && (cur.quest.kind === 'perfect' || cur.quest.kind === 'synergy')) fail(`seed ${seed}: missão de contagem não nasceu`);
     for (const q of b.quests) if (!hist.has(q.id)) fail(`seed ${seed}: missão ${q.id} sem histórico`);
 
     // --- sítio
     if (siteKind) {
       pts += ORACLE_SITE[siteKind].points;
-      gained += ORACLE_SITE[siteKind].tiles;
+      gained += ORACLE_SITE[siteKind].tiles + (oBless.has('cartographers') ? ORACLE_BLESS.site : 0);
       inc('sitios_' + siteKind);
     }
+    // --- peça especial: pontos por peça a até `radius` hexágonos com ao menos uma borda do terreno dela
+    let specialExp: { kind: SpecialKind; count: number; points: number; tiles: number } | null = null;
+    if (cur.special) {
+      const O = ORACLE_SPECIAL[cur.special];
+      assert(cur.edges.every((e, i) => e === O.edges[i]) && !cur.quest, `seed ${seed}: peça especial ${cur.special} com bordas ou missão erradas`);
+      let count = 0;
+      for (const t of b.list) {
+        if (t === res.placed) continue;
+        const dq = t.q - res.placed.q, dr = t.r - res.placed.r;
+        if ((Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2 <= O.radius && t.edges.includes(O.terrain)) count++;
+      }
+      pts += count * O.per;
+      gained += O.tiles;
+      specialExp = { kind: cur.special, count, points: count * O.per, tiles: O.tiles };
+      if (O.lookout) assert(b.lookout >= O.lookout, `seed ${seed}: farol não abriu o mirante`);
+      specialsSeen.add(cur.special);
+      inc('especiais_' + cur.special);
+    }
+    assert(JSON.stringify(res.special) === JSON.stringify(specialExp), `seed ${seed}: especial ${JSON.stringify(res.special)} != oráculo ${JSON.stringify(specialExp)}`);
     assert((res.site?.kind ?? null) === siteKind, `seed ${seed}: sítio ${res.site?.kind} != oráculo ${siteKind}`);
     assert(b.sites.filter((st) => st.found).length === foundBefore + (siteKind ? 1 : 0), `seed ${seed}: contagem de sítios achados`);
+
+    // --- maravilha: na última era, a primeira peça com 2+ bordas de vila (que não seja a do
+    // marco) vira canteiro; cada peça seguinte avança uma etapa; a última etapa paga o bônus.
+    let wonderExp: { stage: number; started: boolean; done: boolean } | null = null;
+    if (wonderAt !== null && wonderStage < rules.wonderStages) {
+      wonderStage++;
+      const done = wonderStage === rules.wonderStages;
+      if (done) {
+        pts += rules.wonderPoints;
+        gained += rules.wonderTiles;
+        inc('maravilhas');
+      }
+      wonderExp = { stage: wonderStage, started: false, done };
+    } else if (wonderAt === null && !cur.special && rules.wonderStages > 0 && rules.eraScores.length > 1 && expectedEra === rules.eraScores.length - 1 && expectedMark === null && edges.filter((e) => e === T.Village).length >= 2) {
+      wonderAt = res.placed.index;
+      wonderStage = 0;
+      wonderExp = { stage: 0, started: true, done: false };
+      inc('canteiros');
+    }
+    assert(JSON.stringify(res.wonder) === JSON.stringify(wonderExp), `seed ${seed}: maravilha ${JSON.stringify(res.wonder)} != oráculo ${JSON.stringify(wonderExp)}`);
+    assert((b.wonder?.tile.index ?? null) === wonderAt && (b.wonder?.stage ?? 0) === wonderStage, `seed ${seed}: estado da maravilha diverge do oráculo`);
 
     // --- eras: limiares de pontuação, +eraTiles por era
     expectedScore += pts;
@@ -313,8 +516,34 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     }
     gained += eraUps * rules.eraTiles;
     if (eraUps) inc('eras');
+    if (expectedMark !== null) {
+      pendingMark = null;
+      inc('marcos_de_era');
+    }
+    if (eraUps) pendingMark = expectedEra;
+    assert((res.placed.eraMark ?? null) === expectedMark, `seed ${seed}: marco da era ${res.placed.eraMark} != oráculo ${expectedMark}`);
     assert(b.era === expectedEra, `seed ${seed}: era ${b.era} != oráculo ${expectedEra}`);
     assert((res.eraUp !== null) === eraUps > 0, `seed ${seed}: eraUp ${res.eraUp} sem avanço esperado`);
+
+    // --- escolha de era: uma por era nova; a política 'worst' nunca escolhe (partida sem cartas)
+    if (rules.blessings) oOffers += eraUps;
+    assert(game.offers.length === oOffers, `seed ${seed}: ${game.offers.length} escolhas de era na mesa, oráculo ${oOffers}`);
+    const onTable = game.offers.flat();
+    for (const o of game.offers) assert(o.length === 2 && o[0] !== o[1] && o.every((id) => BLESS_IDS.includes(id) && !oBless.has(id)), `seed ${seed}: escolha de era inválida ${JSON.stringify(o)}`);
+    assert(new Set(onTable).size === onTable.length, `seed ${seed}: carta repetida na mesa ${JSON.stringify(game.offers)}`);
+    while (policy !== 'worst' && game.offers.length) {
+      const pick = prnd() < 0.5 ? 0 : 1;
+      const want = game.offers[0][pick];
+      const lookBefore = b.lookout;
+      const got = game.choose(pick);
+      assert(got === want, `seed ${seed}: escolheu ${got}, esperado ${want}`);
+      oBless.add(want);
+      oOffers--;
+      log.moves[log.moves.length - 1].push(pick);
+      if (want === 'cartographers') assert(b.lookout === Math.max(lookBefore, ORACLE_BLESS.lookout), `seed ${seed}: cartógrafos não abriram o mirante`);
+      inc('cartas_' + want);
+    }
+    assert(b.blessings.length === oBless.size && b.blessings.every((id) => oBless.has(id)), `seed ${seed}: cartas ${b.blessings} != oráculo ${[...oBless]}`);
 
     // --- exploradores: último sítio encerra e as peças que sobram viram pontos
     const allFound = rules.endOnSites && b.sites.length > 0 && b.sites.every((st) => st.found);
@@ -373,6 +602,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
   // Missões: estado final coerente com o histórico
   for (const h of hist.values()) {
     const q = h.quest;
+    if (q.kind !== 'group') continue;
     let exp: 'active' | 'done' | 'failed' = 'active';
     for (const s of h.sizes.slice(1)) {
       if (exp !== 'active') break;
@@ -390,6 +620,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
   log.finalScore = b.score;
   log.finalStack = game.stack;
   log.placed = game.placedCount;
+  log.quests = b.questsCompleted;
   ts.score += b.score;
   ts.maxActive = Math.max(ts.maxActive, maxActive);
   if (maxActive > rules.maxQuests) ts.overshootGames++;
@@ -399,18 +630,22 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     assert(game.stack <= 0, `seed ${seed}: fim de jogo com pilha ${game.stack}`);
   } else assert(!game.over && game.stack === rules.startTiles, `seed ${seed}: zen terminou ou mexeu na pilha`);
   assert(game.placedCount === log.moves.length, `seed ${seed}: placedCount != moves`);
+  // Toda peça liberada sai até a 16ª peça depois do início: quem jogou mais que isso a viu.
+  for (const k of specials) if (log.moves.length + log.discarded >= 16 + 13 * SPECIAL_KINDS.indexOf(k)) assert(specialsSeen.has(k) || log.discarded > 0, `seed ${seed}: peça especial ${k} liberada não saiu`);
+  for (const k of specialsSeen) assert(specials.includes(k), `seed ${seed}: peça especial ${k} saiu sem estar liberada`);
   return log;
 }
 
 // ------------------------------------------------------------------ replay (mesmo fluxo de main.ts:newGame)
 
 function replay(log: GameLog, upTo = log.moves.length) {
-  const game = new Game(log.seed, log.rules);
-  const moves: [number, number, number][] = [];
-  for (const [q, r, rot] of log.moves.slice(0, upTo)) {
+  const game = new Game(log.seed, log.rules, log.specials);
+  const moves: number[][] = [];
+  for (const [q, r, rot, ...picks] of log.moves.slice(0, upTo)) {
     game.rot = rot;
     if (!game.place(q, r)) break;
-    moves.push([q, r, rot]);
+    for (const p of picks) game.choose(p);
+    moves.push([q, r, rot, ...picks]);
     while (game.discardIfStuck());
   }
   return { game, moves };
@@ -421,7 +656,7 @@ function replay(log: GameLog, upTo = log.moves.length) {
 const N_GAMES = Number(process.argv[2] ?? 300);
 const t0 = Date.now();
 const logs: GameLog[] = [];
-const POLICIES: Policy[] = ['greedy', 'random', 'worst'];
+const POLICIES: Policy[] = ['greedy', 'quest', 'random', 'worst'];
 for (let g = 0; g < N_GAMES; g++) {
   const themeIdx = g % THEMES.length;
   const policy = POLICIES[Math.floor(g / THEMES.length) % POLICIES.length];
@@ -429,7 +664,9 @@ for (let g = 0; g < N_GAMES; g++) {
   seedMathRandom(seed ^ 0xabcdef);
   // Um quinto das partidas em cada modo alternativo (o resto no clássico).
   const mode = g % 5 === 4 ? MODES[1 + Math.floor(g / 5) % (MODES.length - 1)] : MODES[0];
-  const lg = simulate(seed, themeIdx, g < 60, policy, mode);
+  // Um terço das partidas com todas as peças especiais liberadas e um terço só com a primeira.
+  const specials = g % 3 === 1 ? [...SPECIAL_KINDS] : g % 3 === 2 ? [SPECIAL_KINDS[0]] : [];
+  const lg = simulate(seed, themeIdx, g < 60, policy, mode, specials);
   (lg as GameLog & { policy?: string }).policy = policy;
   inc('partidas_' + policy);
   inc('modo_' + mode.id);
@@ -478,9 +715,10 @@ let contOk = 0, contBad = 0;
 for (const log of logs.slice(0, 120)) {
   const k = Math.max(1, Math.floor(log.moves.length / 3));
   const { game } = replay(log, k);
-  for (const [q, r, rot] of log.moves.slice(k)) {
+  for (const [q, r, rot, ...picks] of log.moves.slice(k)) {
     game.rot = rot;
     if (!game.place(q, r)) break;
+    for (const p of picks) game.choose(p);
     while (game.discardIfStuck());
   }
   if (game.board.score === log.finalScore && game.stack === log.finalStack) contOk++;
@@ -567,12 +805,33 @@ if (contBad) fail(`continuação pós-replay divergiu em ${contBad} partidas`);
     const g2 = new Game(seed, { ...DEFAULT_RULES, sites: 10 });
     if (g1.current?.seed !== g2.current?.seed || g1.next.seed !== g2.next.seed) bad++;
   }
+  // As peças especiais só trocam a peça dos seus índices: o resto da sequência é igual.
+  for (let seed = 1; seed <= 50; seed++) {
+    const g1 = new Game(seed, { ...DEFAULT_RULES, startTiles: 200 });
+    const g2 = new Game(seed, { ...DEFAULT_RULES, startTiles: 200 }, [...SPECIAL_KINDS]);
+    const a = g1.upcoming(80), c = g2.upcoming(80);
+    let specials = 0;
+    for (let i = 0; i < 80; i++) {
+      if (c[i].special) specials++;
+      else if (a[i].seed !== c[i].seed || a[i].edges.join() !== c[i].edges.join()) bad++;
+    }
+    if (specials !== 6) bad++;
+  }
   console.log(`Sítios: ${total} gerações conferidas, erros ${bad}`);
   if (bad) fail(`sítios: ${bad} erros de geração`);
 }
 
 // ------------------------------------------------------------------ resumo
 console.log('\nContadores:', JSON.stringify(counters));
+// Duração da partida no modo clássico, por jogador: é a medida do balanceamento (pilha, missões, recompensas).
+console.log('\nClássico, por jogador (mediana de peças colocadas · média de missões cumpridas):');
+for (const p of POLICIES) {
+  const ls = logs.filter((l) => (l as GameLog & { policy?: string }).policy === p && l.mode === 'classico');
+  if (!ls.length) continue;
+  const placed = ls.map((l) => l.placed).sort((a, b) => a - b);
+  const med = placed[Math.floor(placed.length / 2)];
+  console.log(`  ${p.padEnd(7)} partidas ${String(ls.length).padStart(3)}  peças ${String(med).padStart(4)} (de ${placed[0]} a ${placed[placed.length - 1]})  missões ${(ls.reduce((a, l) => a + l.quests, 0) / ls.length).toFixed(1)}  pontos ${(ls.reduce((a, l) => a + l.finalScore, 0) / ls.length).toFixed(0)}`);
+}
 console.log('\nPor tema:');
 for (const [id, s] of Object.entries(themeStats)) {
   console.log(

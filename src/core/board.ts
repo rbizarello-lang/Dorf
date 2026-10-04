@@ -1,7 +1,9 @@
-import { DIRS, hkey, opposite } from './hex';
-import { LOOKOUT_MOVES, SITE_REWARD, type Site } from './sites';
-import { type SynHit, type SynKind, synergyOf } from './synergy';
-import { T, isStrict, rotateEdges, type TileDef } from './tiles';
+import { BLESSING, SYN_BLESSING, type BlessingId } from './blessings';
+import { DIRS, hexDistance, hkey, opposite } from './hex';
+import { LOOKOUT_MOVES, SITE_REWARD, type Site, type SiteKind } from './sites';
+import { SPECIALS, type SpecialKind } from './specials';
+import { INFLUENCE, INFLUENCE_CAP, SYN_KINDS, type SynHit, type SynKind, synergyOf } from './synergy';
+import { T, isStrict, rotateEdges, type QuestKind, type TileDef } from './tiles';
 
 export interface Rules {
   startTiles: number;
@@ -29,15 +31,32 @@ export interface Rules {
   /** A partida acaba quando todos os sítios forem achados (cada peça que sobrou vale `leftoverPoints`). */
   endOnSites: boolean;
   leftoverPoints: number;
+  /**
+   * Maravilha na última era: a próxima peça com 2+ bordas de vila vira o canteiro, e cada
+   * peça colocada depois avança uma etapa. 0 = sem maravilha.
+   */
+  wonderStages: number;
+  /** Escolha de 1 entre 2 cartas a cada era nova (src/core/blessings.ts). */
+  blessings: boolean;
+  /** Influência das construções: peça nova perto de uma interação ganha pontos (src/core/synergy.ts). */
+  influence: boolean;
+  /** Pontos e peças ao completar a maravilha. */
+  wonderPoints: number;
+  wonderTiles: number;
+  /** Peças por missão: grupo (mais 1 a cada 6 peças pedidas), grupo exato, fechar, contagem (perfeitos, interações). */
+  groupQuestTiles: number;
+  exactQuestTiles: number;
+  closeQuestTiles: number;
+  countQuestTiles: number;
 }
 
 export const DEFAULT_RULES: Rules = {
-  startTiles: 40,
+  startTiles: 50,
   matchPoints: 10,
   perfectBonus: 20,
   closedBonus: 30,
   closedTiles: 1,
-  questChance: 0.24,
+  questChance: 0.32,
   maxQuests: 4,
   synergyPoints: 5,
   eraScores: [0, 500, 1500, 3000],
@@ -48,6 +67,15 @@ export const DEFAULT_RULES: Rules = {
   infinite: false,
   endOnSites: false,
   leftoverPoints: 20,
+  blessings: true,
+  influence: true,
+  wonderStages: 6,
+  wonderPoints: 300,
+  wonderTiles: 6,
+  groupQuestTiles: 5,
+  exactQuestTiles: 7,
+  closeQuestTiles: 6,
+  countQuestTiles: 5,
 };
 
 export interface Placed {
@@ -62,18 +90,39 @@ export interface Placed {
   closed: boolean;
   /** Interações criadas quando a peça foi colocada (construções nas bordas). */
   synergies: SynHit[];
+  /** Era cujo marco foi erguido nesta peça (a primeira peça com vila depois do avanço). */
+  eraMark?: number;
+  /** Sítio descoberto nesta peça (a peça mostra a ruína, o baú, o relicário ou a torre). */
+  site?: SiteKind;
+  /** Canteiro da maravilha (o meio da peça fica livre para ela). */
+  wonder?: boolean;
 }
 
 export interface Quest {
   id: number;
+  kind: QuestKind;
   terrain: T;
+  /**
+   * group: tamanho pedido; close: bordas abertas quando a missão nasceu;
+   * perfect e synergy: quantas vezes.
+   */
   target: number;
   exact: boolean;
   anchor: Placed;
+  /** Setor do grupo na peça âncora (group e close); -1 nas missões de contagem. */
   sector: number;
+  /** group: tamanho atual; close: bordas já fechadas (target − abertas); perfect e synergy: contagem. */
   progress: number;
   state: 'active' | 'done' | 'failed';
   reward: number;
+  /** close: bordas do grupo ainda viradas para o vazio. */
+  open?: number;
+  /** synergy: o tipo de interação pedido. */
+  syn?: SynKind;
+  /** perfect e synergy: a contagem do tabuleiro quando a missão nasceu. */
+  base?: number;
+  /** Pontos que a missão rendeu ao ser cumprida. */
+  points?: number;
 }
 
 export interface Check {
@@ -86,6 +135,12 @@ export interface Check {
   synergies: SynHit[];
   /** Sítio ainda escondido nesta posição (a prévia mostra a recompensa). */
   site: Site | null;
+  /** Era cujo marco esta peça ergueria (o fantasma já mostra), ou null. */
+  eraMark: number | null;
+  /** Esta peça viraria o canteiro da maravilha (o fantasma já mostra o meio livre). */
+  wonder: boolean;
+  /** Influência das construções vizinhas: pontos (já com o teto) e quanto cada tipo deu. */
+  influence: { points: number; kinds: { kind: SynKind; points: number }[] };
 }
 
 export interface PlaceResult {
@@ -104,8 +159,14 @@ export interface PlaceResult {
   site: Site | null;
   /** Era alcançada nesta jogada (índice a partir de 0), ou null. */
   eraUp: number | null;
+  /** Maravilha: começou nesta peça (etapa 0), avançou ou ficou pronta nesta jogada; null se nada mudou. */
+  wonder: { stage: number; started: boolean; done: boolean } | null;
   /** Exploradores: pontos pelas peças que sobraram quando o último sítio foi achado. */
   leftoverBonus?: number;
+  /** Peça especial colocada: quantas peças à volta contaram, pontos e peças ganhos. */
+  special: { kind: SpecialKind; count: number; points: number; tiles: number } | null;
+  /** Influência das construções vizinhas que esta peça aproveitou. */
+  influence: Check['influence'];
 }
 
 export class Board {
@@ -119,10 +180,18 @@ export class Board {
   readonly synergyCount: Record<SynKind, number> = { lumber: 0, mill: 0, pasture: 0, apiary: 0 };
   /** Era atual da vila (0 = primeira). */
   era = 0;
+  /** Era cujo marco espera a próxima peça com vila, ou null. */
+  markPending: number | null = null;
   /** Sítios do mapa (preenchidos pelo Game a partir da semente). */
   sites: Site[] = [];
   /** Jogadas restantes em que o mirante mostra as próximas peças. */
   lookout = 0;
+  /** Maravilha: peça do canteiro e etapa (pronta quando chega a `rules.wonderStages`). */
+  wonder: { tile: Placed; stage: number } | null = null;
+  /** Casas vazias sob influência de construções: chave da casa → tipos de interação. */
+  readonly influence = new Map<number, Set<SynKind>>();
+  /** Cartas escolhidas nas viradas de era (src/core/blessings.ts), na ordem. */
+  readonly blessings: BlessingId[] = [];
   private questSeq = 0;
   // Union-find sobre (peça, setor): refeito a cada jogada, O(n).
   private parent = new Int32Array(0);
@@ -163,7 +232,32 @@ export class Board {
         if (kind) synergies.push({ edge: i, kind });
       }
     }
-    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, synergies, site: this.siteAt(q, r) };
+    const eraMark = this.markPending !== null && edges.includes(T.Village) ? this.markPending : null;
+    const R = this.rules;
+    const lastEra = R.eraScores.length > 1 && this.era === R.eraScores.length - 1;
+    const wonder = !this.wonder && R.wonderStages > 0 && lastEra && eraMark === null && edges.filter((e) => e === T.Village).length >= 2;
+    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, synergies, site: this.siteAt(q, r), eraMark, wonder, influence: this.influenceAt(q, r, edges) };
+  }
+
+  /**
+   * Bônus de influência de uma peça com estas bordas em (q, r). Só conta quantos setores de
+   * cada terreno a peça tem, então não depende do giro (o mapa mostra as casas que rendem).
+   */
+  influenceAt(q: number, r: number, edges: readonly T[]) {
+    const kinds: { kind: SynKind; points: number }[] = [];
+    const here = this.rules.influence ? this.influence.get(hkey(q, r)) : undefined;
+    let points = 0;
+    if (here) {
+      for (const kind of SYN_KINDS) {
+        if (!here.has(kind)) continue;
+        const inf = INFLUENCE[kind];
+        const per = inf.per[Math.min(this.era, inf.per.length - 1)];
+        const n = edges.filter((e) => inf.terrains.includes(e)).length;
+        if (n) kinds.push({ kind, points: n * per });
+        points += n * per;
+      }
+    }
+    return { points: Math.min(INFLUENCE_CAP, points), kinds };
   }
 
   /** Sítio ainda não descoberto em (q, r). */
@@ -198,14 +292,34 @@ export class Board {
     let points = c.matches * R.matchPoints;
     const perfect = c.neighbors >= 2 && c.matches === c.neighbors;
     if (perfect) {
-      points += R.perfectBonus;
+      points += R.perfectBonus + (this.blessed('surveyors') ? BLESSING.perfect : 0);
       this.perfects++;
     }
     placed.synergies = c.synergies;
+    // A peça especial tem a sua construção no meio: o marco da era e a maravilha esperam a próxima.
+    if (c.eraMark !== null && !def.special) {
+      placed.eraMark = c.eraMark;
+      this.markPending = null;
+    }
     points += c.synergies.length * R.synergyPoints;
     for (const h of c.synergies) {
       this.synergyCount[h.kind]++;
       points += R.synergyBonus[h.kind] ?? 0;
+      if (this.blessed(SYN_BLESSING[h.kind])) points += BLESSING.synergy;
+    }
+    // Influência das construções em volta; depois, as interações desta peça marcam as vizinhas.
+    points += c.influence.points;
+    if (R.influence) {
+      for (const h of c.synergies) {
+        for (const [dq, dr] of DIRS) {
+          const k = hkey(q + dq, r + dr);
+          if (this.tiles.has(k)) continue;
+          let set = this.influence.get(k);
+          if (!set) this.influence.set(k, (set = new Set()));
+          set.add(h.kind);
+        }
+      }
+      this.influence.delete(placed.key);
     }
     // Bônus do tema por terreno encaixado.
     for (let i = 0; i < 6; i++) if (c.edgeState[i] === 1) points += R.matchBonus[edges[i]] ?? 0;
@@ -219,9 +333,22 @@ export class Board {
     const site = c.site;
     if (site) {
       site.found = true;
+      placed.site = site.kind;
       points += SITE_REWARD[site.kind].points;
       tilesGained += SITE_REWARD[site.kind].tiles;
-      if (site.kind === 'lookout') this.lookout = LOOKOUT_MOVES;
+      if (site.kind === 'lookout') this.lookout = Math.max(this.lookout, LOOKOUT_MOVES);
+      if (this.blessed('cartographers')) tilesGained += BLESSING.site;
+    }
+    // Peça especial: pontos por peça à volta com o terreno dela (contadas na hora de colocar).
+    let special: PlaceResult['special'] = null;
+    if (def.special) {
+      const sp = SPECIALS[def.special];
+      let count = 0;
+      for (const t of this.list) if (t !== placed && hexDistance(q, r, t.q, t.r) <= sp.radius && t.edges.includes(sp.terrain)) count++;
+      special = { kind: def.special, count, points: count * sp.per, tiles: sp.tiles };
+      points += special.points;
+      tilesGained += sp.tiles;
+      if (sp.lookout) this.lookout = Math.max(this.lookout, sp.lookout);
     }
     const candidates = [placed, ...DIRS.map(([dq, dr]) => this.get(q + dq, r + dr)).filter((x): x is Placed => !!x)];
     for (const t of candidates) {
@@ -229,7 +356,7 @@ export class Board {
       t.closed = true;
       closed.push(t);
       points += R.closedBonus;
-      tilesGained += R.closedTiles;
+      tilesGained += R.closedTiles + (this.blessed('builders') ? BLESSING.closed : 0);
     }
 
     this.computeGroups();
@@ -238,38 +365,69 @@ export class Board {
     const questsFailed: Quest[] = [];
     for (const quest of this.quests) {
       if (quest.state !== 'active') continue;
-      quest.progress = this.groupSize(quest.anchor, quest.sector);
-      if (quest.exact) {
-        if (quest.progress === quest.target) quest.state = 'done';
-        else if (quest.progress > quest.target) quest.state = 'failed';
-      } else if (quest.progress >= quest.target) quest.state = 'done';
+      let gain = 0;
+      if (quest.kind === 'group') {
+        quest.progress = this.groupSize(quest.anchor, quest.sector);
+        if (quest.exact) {
+          if (quest.progress === quest.target) quest.state = 'done';
+          else if (quest.progress > quest.target) quest.state = 'failed';
+        } else if (quest.progress >= quest.target) quest.state = 'done';
+        gain = quest.target * 10;
+      } else if (quest.kind === 'close') {
+        quest.open = this.openEdges(quest.anchor, quest.sector);
+        quest.progress = Math.max(0, quest.target - quest.open);
+        if (quest.open === 0) quest.state = 'done';
+        gain = this.groupSize(quest.anchor, quest.sector) * 10;
+      } else {
+        quest.progress = this.counter(quest) - quest.base!;
+        if (quest.progress >= quest.target) quest.state = 'done';
+        gain = quest.target * (quest.kind === 'perfect' ? 20 : 15);
+      }
       if (quest.state === 'done') {
         questsDone.push(quest);
-        tilesGained += quest.reward;
-        points += quest.target * 10;
+        tilesGained += quest.reward + (this.blessed('pilgrims') ? BLESSING.quest : 0);
+        quest.points = gain;
+        points += gain;
         this.questsCompleted++;
       } else if (quest.state === 'failed') questsFailed.push(quest);
     }
 
     let newQuest: Quest | null = null;
-    if (def.quest) {
-      const sector = this.bestSector(placed, def.quest.terrain);
+    const spec = def.quest;
+    if (spec && (spec.kind === 'group' || spec.kind === 'close')) {
+      const sector = this.bestSector(placed, spec.terrain);
       if (sector >= 0) {
         const size = this.groupSize(placed, sector);
-        const target = size + def.quest.delta;
-        newQuest = {
-          id: ++this.questSeq,
-          terrain: def.quest.terrain,
-          target,
-          exact: def.quest.exact,
-          anchor: placed,
-          sector,
-          progress: size,
-          state: 'active',
-          reward: def.quest.exact ? 6 : 4 + Math.floor(target / 8),
-        };
-        this.quests.push(newQuest);
+        if (spec.kind === 'group') {
+          const target = size + spec.delta;
+          newQuest = { id: ++this.questSeq, kind: 'group', terrain: spec.terrain, target, exact: spec.exact, anchor: placed, sector, progress: size, state: 'active', reward: spec.exact ? R.exactQuestTiles : R.groupQuestTiles + Math.floor(target / 6) };
+        } else {
+          // Peça num buraco cercado pode já nascer com o grupo fechado: aí não há o que pedir.
+          const open = this.openEdges(placed, sector);
+          if (open > 0) newQuest = { id: ++this.questSeq, kind: 'close', terrain: spec.terrain, target: open, exact: false, anchor: placed, sector, progress: 0, state: 'active', reward: R.closeQuestTiles, open };
+        }
       }
+    } else if (spec) {
+      newQuest = { id: ++this.questSeq, kind: spec.kind, terrain: spec.terrain, target: spec.delta, exact: false, anchor: placed, sector: -1, progress: 0, state: 'active', reward: R.countQuestTiles, syn: spec.syn };
+      newQuest.base = this.counter(newQuest);
+    }
+    if (newQuest) this.quests.push(newQuest);
+
+    // Maravilha (só na última era): começa na próxima peça com 2+ bordas de vila que não seja
+    // a do marco da era; depois, cada peça colocada avança uma etapa.
+    let wonder: PlaceResult['wonder'] = null;
+    if (this.wonder && this.wonder.stage < R.wonderStages) {
+      const stage = ++this.wonder.stage;
+      const done = stage === R.wonderStages;
+      if (done) {
+        points += R.wonderPoints;
+        tilesGained += R.wonderTiles;
+      }
+      wonder = { stage, started: false, done };
+    } else if (c.wonder && !def.special) {
+      this.wonder = { tile: placed, stage: 0 };
+      placed.wonder = true;
+      wonder = { stage: 0, started: true, done: false };
     }
 
     this.score += points;
@@ -279,8 +437,32 @@ export class Board {
       this.era++;
       tilesGained += R.eraTiles;
       eraUp = this.era;
+      this.markPending = this.era;
     }
-    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp };
+    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special, influence: c.influence };
+  }
+
+  blessed(id: BlessingId) {
+    return this.blessings.includes(id);
+  }
+
+  /** Aplica a carta escolhida na virada de era (vale da próxima jogada em diante). */
+  bless(id: BlessingId) {
+    this.blessings.push(id);
+    if (id === 'cartographers') this.lookout = Math.max(this.lookout, BLESSING.lookout);
+  }
+
+  /** Contagem do tabuleiro que uma missão de contagem acompanha. */
+  private counter(q: Quest) {
+    return q.kind === 'perfect' ? this.perfects : this.synergyCount[q.syn!];
+  }
+
+  /** Bordas do grupo de (p, setor) viradas para uma casa vazia. */
+  openEdges(p: Placed, sector: number) {
+    const root = this.find(p.index * 6 + sector);
+    let open = 0;
+    for (const t of this.list) for (let s = 0; s < 6; s++) if (this.find(t.index * 6 + s) === root && !this.get(t.q + DIRS[s][0], t.r + DIRS[s][1])) open++;
+    return open;
   }
 
   private isClosedPerfect(t: Placed) {

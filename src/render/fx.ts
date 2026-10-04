@@ -5,6 +5,7 @@ import { hexToWorld } from '../core/hex';
 import { T } from '../core/tiles';
 import type { Theme, WeatherKind } from '../themes/types';
 import { U, noiseTex } from './materials';
+import { P } from './post';
 
 // Efeitos de partículas, todos em "sprites" voltados para a câmera:
 //   Sprites: poeira, fumaça e brilhos, simulados na CPU (algumas centenas);
@@ -66,9 +67,14 @@ class SpriteLayer {
   private list: Particle[] = [];
   private geo: THREE.InstancedBufferGeometry;
 
+  /**
+   * `ball`: bolas de fumaça como no Dorfromantik, opacas, com borda nítida, sombreadas como uma
+   * esfera (luz de cima à esquerda) e contornadas de tinta; crescem e encolhem em vez de sumir.
+   */
   constructor(
     private cap: number,
     additive: boolean,
+    private ball = false,
   ) {
     this.geo = quad(cap, { sPos: 4, sCol: 4, sSeed: 1 });
     const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, fog: true });
@@ -77,11 +83,22 @@ class SpriteLayer {
     const seed = attribute('sSeed', 'float');
     m.positionNode = billboard(sp.xyz, positionGeometry.xy.mul(sp.w));
     const d = length(uv().sub(0.5));
-    // Bordas irregulares (fumaça "fofa"): o ruído come o contorno do disco.
-    const puff = texture(noiseTex, uv().mul(0.35).add(vec2(seed, seed.mul(1.7)))).a;
-    const soft = smoothstep(0.5, 0.12, d.add(puff.sub(0.5).mul(additive ? 0 : 0.35)));
-    m.colorNode = additive ? sc.rgb : sc.rgb.mul(FX.ambient);
-    m.opacityNode = sc.a.mul(soft);
+    if (ball) {
+      // Raio 1 na borda do disco; a normal da esfera sai da posição no disco.
+      const q = uv().sub(0.5).mul(2.05);
+      const r = length(q);
+      const n = vec3(q, float(1).sub(r.mul(r)).max(0).sqrt());
+      const lit = n.dot(vec3(-0.45, 0.6, 0.66)).max(0).mul(0.36).add(0.6);
+      const ring = smoothstep(0.82, 0.87, r);
+      m.colorNode = mix(sc.rgb.mul(lit).mul(FX.ambient), P.inkColor, ring.mul(0.9));
+      m.opacityNode = sc.a.mul(smoothstep(1, 0.95, r));
+    } else {
+      // Bordas irregulares (fumaça "fofa"): o ruído come o contorno do disco.
+      const puff = texture(noiseTex, uv().mul(0.35).add(vec2(seed, seed.mul(1.7)))).a;
+      const soft = smoothstep(0.5, 0.12, d.add(puff.sub(0.5).mul(additive ? 0 : 0.35)));
+      m.colorNode = additive ? sc.rgb : sc.rgb.mul(FX.ambient);
+      m.opacityNode = sc.a.mul(soft);
+    }
     this.mesh = new THREE.Mesh(this.geo, m);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 2;
@@ -104,6 +121,11 @@ class SpriteLayer {
     for (const p of this.list) {
       p.age += dt;
       if (p.age >= p.life) continue;
+      // Idade negativa: a bola ainda vai sair da chaminé (as de um mesmo rolo saem em fila).
+      if (p.age < 0) {
+        out.push(p);
+        continue;
+      }
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.z += p.vz * dt;
@@ -112,8 +134,10 @@ class SpriteLayer {
       p.vz *= k;
       p.vy = p.vy * k - p.gravity * dt;
       const t = p.age / p.life;
-      const fade = Math.min(1, t * 6) * (1 - t) * (1 - t);
-      pos.setXYZW(i, p.x, p.y, p.z, p.size * (1 + p.grow * t));
+      // A bola não fica transparente: no fim encolhe até sumir.
+      const fade = this.ball ? Math.min(1, t * 12) : Math.min(1, t * 6) * (1 - t) * (1 - t);
+      const shrink = this.ball ? 1 - Math.max(0, (t - 0.55) / 0.45) ** 1.5 : 1;
+      pos.setXYZW(i, p.x, p.y, p.z, p.size * (1 + p.grow * t) * shrink);
       col.setXYZW(i, p.color.r, p.color.g, p.color.b, p.alpha * fade);
       sd.setX(i, p.seed);
       out.push(p);
@@ -130,18 +154,22 @@ class SpriteLayer {
   }
 }
 
-/** Poeira, fumaça (normais) e brilhos (aditivos). */
+const WHITE = new THREE.Color(1, 1, 1);
+const SPLASH = new THREE.Color(0.95, 0.97, 1);
+
+/** Poeira (normal), brilhos (aditivos) e fumaça em bolas. */
 export class Sprites {
   readonly group = new THREE.Group();
   private soft = new SpriteLayer(420, false);
   private glow = new SpriteLayer(260, true);
+  private balls = new SpriteLayer(240, false, true);
 
   constructor() {
-    this.group.add(this.soft.mesh, this.glow.mesh);
+    this.group.add(this.soft.mesh, this.glow.mesh, this.balls.mesh);
   }
 
   get count() {
-    return this.soft.count + this.glow.count;
+    return this.soft.count + this.glow.count + this.balls.count;
   }
 
   /** Anel de poeira quando a peça assenta. */
@@ -164,19 +192,33 @@ export class Sprites {
     }
   }
 
-  /** Um rolo de fumaça de chaminé. */
+  /** Respingo de peixe: gotas brancas que sobem um palmo e caem de volta na água. */
+  splash(x: number, y: number, z: number, n: number) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 0.05 + Math.random() * 0.08;
+      this.glow.add({ x: x + Math.cos(a) * 0.01, y: y + 0.005, z: z + Math.sin(a) * 0.01, vx: Math.cos(a) * sp, vy: 0.35 + Math.random() * 0.25, vz: Math.sin(a) * sp, age: 0, life: 0.45 + Math.random() * 0.2, size: 0.012 + Math.random() * 0.01, grow: -0.4, color: SPLASH, alpha: 0.9, drag: 0.5, gravity: 2.2, seed: Math.random() });
+    }
+  }
+
+  /** Um rolo de fumaça de chaminé: três bolas claras (a cor do tema puxada para o branco) em fila, que sobem e derivam com o vento. */
   smoke(x: number, y: number, z: number, color: THREE.Color, wind: THREE.Vector2) {
-    this.soft.add({ x, y, z, vx: wind.x * 0.07, vy: 0.17 + Math.random() * 0.05, vz: wind.y * 0.07, age: 0, life: 2.8 + Math.random(), size: 0.05, grow: 4.5, color, alpha: 0.5, drag: 0.4, gravity: -0.01, seed: Math.random() });
+    const c = color.clone().lerp(WHITE, 0.6);
+    for (let k = 0; k < 3; k++) {
+      this.balls.add({ x, y, z, vx: wind.x * 0.06, vy: 0.14 + Math.random() * 0.04, vz: wind.y * 0.06, age: -k * 0.5, life: 2.6 + Math.random() * 0.8, size: 0.05 + Math.random() * 0.015, grow: 1.5, color: c, alpha: 1, drag: 0.4, gravity: -0.01, seed: Math.random() });
+    }
   }
 
   update(dt: number) {
     this.soft.update(dt);
     this.glow.update(dt);
+    this.balls.update(dt);
   }
 
   clear() {
     this.soft.clear();
     this.glow.clear();
+    this.balls.clear();
   }
 }
 

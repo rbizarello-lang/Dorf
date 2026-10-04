@@ -9,6 +9,7 @@ import { U } from './materials';
 import { TILE_T, tc, type TileBuild } from './tileBuilder';
 
 const tmpM = new THREE.Matrix4();
+const tmpBounce = new THREE.Color();
 
 /**
  * A peça da vez sobre a pilha, no canto do HUD. Tem canvas e renderizador próprios:
@@ -106,11 +107,17 @@ export class PreviewView {
     tile.group.position.y = this.drop * this.drop * 2.5 + Math.sin(this.time * 1.6) * 0.02;
     tile.inner.rotation.y += (-this.angle - tile.inner.rotation.y) * (1 - Math.exp(-dt * 16));
     // A pilha usa sempre luz de dia, para a peça da vez ficar legível.
-    const night = U.night.value, clouds = U.clouds.value;
+    // Sem o mapa do chão: ele é do tabuleiro, não da pilha.
+    const night = U.night.value, clouds = U.clouds.value, lamps = U.lamps.value;
+    const bounce = tmpBounce.copy(U.bounce.value);
     U.night.value = 0;
     U.clouds.value = 0;
+    U.lamps.value = 0;
+    U.bounce.value.setRGB(0, 0, 0);
     this.renderer.render(this.scene, this.cam);
     U.night.value = night;
     U.clouds.value = clouds;
+    U.lamps.value = lamps;
+    U.bounce.value.copy(bounce);
   }
 }

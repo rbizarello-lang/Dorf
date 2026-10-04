@@ -1,3 +1,4 @@
+import type { BlessingId } from '../core/blessings';
 import type { Rules } from '../core/board';
 
 // Esquema de tema. Um tema é só dado: paleta, nomes e a escolha de "kits"
@@ -55,7 +56,57 @@ export interface HouseKind {
   trim?: string;
   /** Chaminé com fumaça. */
   chimney?: boolean;
+  // Os campos abaixo vêm da era da vila (src/themes/progress.ts); o tema não precisa escrevê-los.
+  /** Escala da casa inteira (padrão 1). */
+  scale?: number;
+  /** Tom multiplicado na parede, por cima da cor sorteada (taipa na primeira era). */
+  tone?: string;
+  /** Flâmula na cumeeira, nesta cor. */
+  pennant?: string;
+  /** Brilho das janelas à noite (padrão 1). */
+  bright?: number;
 }
+
+/** Remate do palácio no Centro da vila, na última era. */
+/** Timbre da melodia do tema (sintetizado em src/audio.ts). */
+export type MusicTimbre =
+  | 'flute' // seno com sopro (padrão)
+  | 'reed' // palheta: dente-de-serra abafado
+  | 'pluck' // corda dedilhada (Karplus-Strong)
+  | 'bell' // sino ou carrilhão: parciais inarmônicas
+  | 'glass'; // vidro: seno com parcial aguda
+
+/** Forma da maravilha do tema (geometria paramétrica em lib.ts). */
+export type WonderCore =
+  | 'castle' // torre de menagem e 4 torres de conto
+  | 'civic' // paço municipal: bloco com frontão e lanterna
+  | 'church' // igreja colonial de duas torres
+  | 'ice' // palácio de blocos de gelo que brilham
+  | 'tree' // árvore milenar com torii
+  | 'elevator' // elevador espacial: cabo alto com anéis de luz
+  | 'pylon' // pilone, obeliscos e avenida de esfinges
+  | 'pagoda' // pagode octogonal de `stories` andares
+  | 'hall' // grande salão com cumeeiras de dragão
+  | 'dome' // cúpula de gomos com lanterna e campanário
+  | 'trestle' // ponte ferroviária de cavalete
+  | 'rings'; // terraços circulares em degraus
+
+/** Chapéu dos aldeões. */
+export type HatStyle =
+  | 'straw' // palha de aba larga
+  | 'cap' // barrete ou boné baixo
+  | 'scarf' // lenço amarrado na cabeça
+  | 'hood' // capuz pontudo
+  | 'helmet' // capacete de vidro
+  | 'none';
+
+export type CenterCrown =
+  | 'spire' // torre quadrada com flecha
+  | 'dome' // tambor e cúpula
+  | 'pagoda' // três beirais empilhados
+  | 'pyramid' // pirâmide com piramídio dourado
+  | 'stepped' // plataforma em degraus com disco do sol
+  | 'hall'; // salão de telhado íngreme com tábuas cruzadas
 
 export type Landmark =
   | 'church' // igreja com torre e agulha
@@ -214,6 +265,10 @@ export interface Theme {
   bush: string[];
   flowers: string[];
   rock: string;
+  /** Jazida no prado: cor do minério e chance por setor; com vila encostada na peça, vira mina. Omitir = sem jazidas. */
+  ore?: { color: string; chance: number };
+  /** Cor das frutas dos arbustos do prado (6% por setor). Omitir = sem frutas. */
+  berry?: string;
   animals: { kind: AnimalKind; colors: string[] };
 
   // --- água
@@ -228,10 +283,24 @@ export interface Theme {
   weather: { kind: WeatherKind; colors: [string, string]; density: number };
   sparkle: string;
   ui: { accent: string; panel: string; ink: string; soft: string };
+  /** Gradação de cor do tema na imagem final: matiz puxado nas sombras e nos realces (só o tom conta, não o brilho) e saturação (1 = neutra). */
+  grade: { shadow: string; light: string; saturation: number };
   /** Nomes das interações entre bordas neste tema. */
   synergy: { lumber: string; mill: string; pasture: string; apiary: string };
   rules?: Partial<Rules>;
   /** Nomes das 4 eras da vila (padrão: Aldeia, Vila, Burgo, Cidade). */
   eras?: [string, string, string, string];
+  /** Nomes próprios do tema para as cartas da virada de era (src/core/blessings.ts). */
+  blessingNames?: Partial<Record<BlessingId, string>>;
+  /** `false` = as casas não mudam com a era (módulos pré-fabricados não começam como taipa e palha). */
+  eraHouses?: false;
+  /** Remate do Centro da vila na última era (padrão: 'spire'). */
+  center?: CenterCrown;
+  /** Maravilha da última era: nome, forma, cores [principal, telhado, detalhe] e andares (pagode). */
+  wonder?: { name: string; core: WonderCore; colors: [string, string, string]; stories?: number };
+  /** Escala da música (semitons a partir da tônica, em ordem) e timbre da melodia; a fanfarra de era também usa. */
+  music?: { scale: number[]; timbre: MusicTimbre };
+  /** Aldeões: cor da pele, chapéu e cor do chapéu (padrão: sem chapéu). A camisa usa as cores dos telhados. */
+  folk?: { skin: string; hat: HatStyle; hatColor: string };
   ruleNote?: string;
 }
