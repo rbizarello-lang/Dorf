@@ -1185,6 +1185,24 @@ function boatBody(kind: BoatKind, [hullC, sailC]: [string, string]): THREE.Buffe
   }
 }
 
+/** Caixotes da rota. A origem fica na base, para sentar em cima do vagão. Madeira clara, para não sumir no vagão. */
+function cargoGeometry() {
+  return kit([
+    { geo: box(0.034, 0.02, 0.026, -0.01, 0, 0.004), color: '#a56b3c', grad: [0.88, 1.06, 0, 0.02] },
+    { geo: box(0.026, 0.016, 0.022, 0.014, 0, -0.006), color: '#6e4428' },
+    { geo: box(0.02, 0.014, 0.016, -0.004, 0.02, 0.002), color: '#e4c48a' },
+    { geo: box(0.036, 0.003, 0.003, -0.01, 0.018, 0.004), color: '#4a3428' },
+  ]);
+}
+
+/** Moeda da parada no mercado. O miolo acende à noite; de dia o brilho são as faíscas. */
+function coinGeometry() {
+  return kit([
+    { geo: cyl(0.034, 0.034, 0.006, 10), color: '#d9b44a' },
+    { geo: cyl(0.018, 0.018, 0.007, 6, 0, 0.002), color: '#fff6d0', glow: 1 },
+  ]);
+}
+
 function vehicleGeometry(kind: VehicleKind, [body, det]: [string, string], animal: AnimalKind): { head: THREE.BufferGeometry; car: THREE.BufferGeometry } {
   const wheels = (xs: number[], r: number, z: number): Part[] => xs.flatMap((x) => [z, -z].map((zz) => ({ geo: cyl(r, r, 0.004, 8).rotateX(Math.PI / 2).translate(x, r, zz), color: '#2a2622' })));
   switch (kind) {
@@ -1209,7 +1227,8 @@ function vehicleGeometry(kind: VehicleKind, [body, det]: [string, string], anima
     case 'cart':
       return {
         head: animalGeometry('horse'),
-        car: kit([{ geo: box(0.05, 0.016, 0.034, 0, 0.018), color: body }, { geo: jitter(ico(0.02, 0), 0.004, 30).scale(1.2, 0.7, 0.9).translate(0, 0.036, 0), color: det }, ...wheels([0], 0.016, 0.02), { geo: box(0.04, 0.003, 0.003, 0.04, 0.024, 0.01), color: '#5a4032' }, { geo: box(0.04, 0.003, 0.003, 0.04, 0.024, -0.01), color: '#5a4032' }]),
+        // Caçamba aberta: os caixotes (`cargo`) sentam na borda de cima (y = 0,034).
+        car: kit([{ geo: box(0.05, 0.016, 0.034, 0, 0.018), color: body }, ...wheels([0], 0.016, 0.02), { geo: box(0.04, 0.003, 0.003, 0.04, 0.024, 0.01), color: '#5a4032' }, { geo: box(0.04, 0.003, 0.003, 0.04, 0.024, -0.01), color: '#5a4032' }]),
       };
     case 'caravan': {
       const a = animal === 'camel' || animal === 'llama' || animal === 'horse' || animal === 'donkey' ? animal : 'horse';
@@ -2031,6 +2050,8 @@ export class Lib {
     const v = vehicleGeometry(theme.vehicle, theme.vehicleColors, theme.animals.kind);
     set('vehicle:head', v.head);
     set('vehicle:car', v.car);
+    set('cargo', cargoGeometry());
+    set('coin', coinGeometry());
     set('bird', birdGeometry());
     for (let e = 0; e < 4; e++) set(`center:${e}`, centerGeometry(e, theme));
     set('pennant', pennantGeometry(theme.trunk));

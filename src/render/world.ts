@@ -526,6 +526,7 @@ export class World {
     (this.scene as THREE.Scene & { fogNode?: THREE.Node }).fogNode = fogNode;
     this.life = new Life(this.lib, this.scene);
     this.life.onSplash = (x, z) => this.sprites.splash(x, WATER_Y, z, 7);
+    this.life.onTrade = (x, z) => this.burst(x, z, 'sparkle', 12, 0.12);
 
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);

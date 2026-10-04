@@ -28,7 +28,7 @@ Pesquisa de inspiração (visual e mecânica) na série Age of Empires · 01/10/
 | 10 Pesca e cardumes | feita (#42) |
 | 11 e 12 Sítios e terra incógnita | feitas (#21) |
 | 13 Maravilha | feita (#24) |
-| 14 Rotas de comércio | **a fazer**: no clássico, só a camada visual (carga, parada nos mercados, moeda); a regra completa, num modo próprio |
+| 14 Rotas de comércio | visual feita (carga, parada de 0,8 s e moeda no clássico); **a regra completa, num modo próprio, a fazer** |
 | 15 Cor da casa, estandartes, brasão | feita (#23); **monumentos por conquista a fazer** |
 | 16 Minimapa e linha do tempo | **a fazer** |
 | 17 Interface por tema | **a fazer** |
@@ -36,7 +36,7 @@ Pesquisa de inspiração (visual e mecânica) na série Age of Empires · 01/10/
 | 19 Atmosferas, fogo e estações | **a fazer** |
 | 20 Almanaque | feita (#33) |
 
-Próximo passo, na ordem do documento: 14, 16, 17, 19 e os monumentos. Um PR por proposta, saindo do `main`, com `npm run check` e `npm run smoke` antes do commit.
+Próximo passo, na ordem do documento: 16, 17, 19, os monumentos e a regra das rotas num modo próprio. Um PR por proposta, saindo do `main`, com `npm run check` e `npm run smoke` antes do commit.
 
 ## Resumo
 
@@ -686,8 +686,8 @@ R é o raio explorado: a maior distância das peças, mais 1,5.
 
 No modo clássico, a regra quase nunca dispararia. A recomendação:
 
-1. **No clássico:** só a camada visual. Carroças e trens com carga (kit `cargo`, caixotes), parada de 0,8 s em cada mercado e uma moeda brilhando.
-2. **A regra completa:** num modo próprio (seção 6), com mais trilho.
+1. **No clássico:** só a camada visual. Carroças e trens com carga (kit `cargo`, caixotes), parada de 0,8 s em cada mercado e uma moeda brilhando. **Feito:** a carga senta no vagão (a caravana já leva fardo); a parada é no meio da peça de passagem, ou na espera que o beco já tinha; a moeda sobe com faíscas. A pontuação não muda.
+2. **A regra completa:** num modo próprio (seção 6), com mais trilho. **Ainda por fazer.**
 
 **Como fazer.**
 

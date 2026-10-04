@@ -138,6 +138,8 @@ const JUMP_T = 0.7;
 
 /** Teto de aldeões (nas construções e nas estradas). */
 const FOLK_MAX = 120;
+/** Parada da carroça ou do trem em cada mercado, em segundos. */
+const MARKET_STOP = 0.8;
 
 interface Mover {
   boat: boolean;
@@ -155,6 +157,12 @@ interface Mover {
   cum: number[];
   speed: number;
   wait: number;
+  /** Já fez a parada de comércio nesta visita à peça. */
+  halted: boolean;
+  /** Segundos restantes da moeda sobre o veículo (0 = sem moeda). */
+  coin: number;
+  /** Solta as faíscas neste quadro, depois de a posição assentar. */
+  flash: boolean;
   trail: { x: number; z: number }[];
   x: number;
   z: number;
@@ -192,6 +200,8 @@ export class Life {
   private bobbers: Bobber[] = [];
   /** Respingo quando um peixe sai ou volta para a água (o World desenha as gotas). */
   onSplash: (x: number, z: number) => void = () => {};
+  /** Moeda na parada do mercado: o World solta as faíscas. */
+  onTrade: (x: number, z: number) => void = () => {};
   /** Batedor do começo da partida: vai do Centro até a beira, olha o sítio e volta. */
   private scoutRide: { x0: number; z0: number; x1: number; z1: number; t: number } | null = null;
   /** Os aldeões só aparecem de perto (`World` atualiza a cada quadro). */
@@ -345,7 +355,7 @@ export class Life {
     const { x, z } = hexToWorld(tile.q, tile.r);
     const roofs = th.houses.flatMap((h) => h.roofs);
     const shirt = folk ? new THREE.Color(Math.random() < 0.5 ? th.ui.accent : roofs[Math.floor(Math.random() * roofs.length)]) : undefined;
-    const m: Mover = { boat, folk, shirt, tile, a, b, t: Math.random() * 0.5, len: 1, route: [], cum: [], speed, wait: 0, trail: [], x, z, heading: 0, wake: 0 };
+    const m: Mover = { boat, folk, shirt, tile, a, b, t: Math.random() * 0.5, len: 1, route: [], cum: [], speed, wait: 0, halted: false, coin: 0, flash: false, trail: [], x, z, heading: 0, wake: 0 };
     this.setRoute(m);
     this.movers.push(m);
   }
@@ -567,6 +577,27 @@ export class Life {
     out.z = m.route[2 * k - 1] + (m.route[2 * k + 1] - m.route[2 * k - 1]) * f;
   }
 
+  /** Segura o primeiro veículo no meio da peça, com a moeda no ar (captura). */
+  holdTrade() {
+    const m = this.movers.find((v) => !v.boat && !v.folk);
+    if (!m) return false;
+    if (m.a >= 0 && m.b >= 0) m.t = 0.5;
+    m.wait = 8;
+    m.coin = 8;
+    m.halted = true;
+    m.flash = true;
+    return true;
+  }
+
+  /** Posição do i-ésimo veículo, ou do que está com a moeda se `coin` (capturas da rota). */
+  tradePos(coin: boolean): { x: number; z: number } | null {
+    const list = this.movers.filter((m) => !m.boat && !m.folk);
+    const hot = list.find((m) => m.coin > 0);
+    if (coin && !hot) return null;
+    const m = hot ?? list[0];
+    return m ? { x: m.x, z: m.z } : null;
+  }
+
   /** Posição de um barco andando, ou null (capturas das esteiras). */
   boatPos(): { x: number; z: number } | null {
     const m = this.movers.find((m) => m.boat && m.wait <= 0);
@@ -604,14 +635,24 @@ export class Life {
     WAKE_N.value = n;
   }
 
+  /** Começa a moeda desta visita. Uma vez por peça: o meio da passagem ou o beco. */
+  private markTrade(m: Mover) {
+    if (m.boat || m.folk || m.halted || m.coin > 0 || !isMarket(m.tile)) return;
+    m.halted = true;
+    m.coin = MARKET_STOP;
+    m.flash = true;
+  }
+
   private advance(m: Mover) {
     const board = this.board!;
     const terr = m.boat ? T.Water : T.Rail;
+    const left = m.tile;
     if (m.b < 0) {
       // Chegou ao centro de um beco (lago, estação): volta por onde veio.
       m.b = m.a;
       m.a = -1;
       m.wait = m.boat ? 0.5 : m.folk ? 3 : 1.8;
+      this.markTrade(m);
     } else {
       const [dq, dr] = DIRS[m.b];
       const n = board.tiles.get(hkey(m.tile.q + dq, m.tile.r + dr));
@@ -627,8 +668,10 @@ export class Life {
         m.a = m.b;
         m.b = a;
         m.wait = m.boat ? 0.4 : m.folk ? 2.5 : 1.2;
+        this.markTrade(m);
       }
     }
+    if (m.tile !== left) m.halted = false;
     m.t = 0;
     this.setRoute(m);
   }
@@ -641,27 +684,46 @@ export class Life {
       boats?.commit(0);
       head?.commit(0);
       car?.commit(0);
+      this.pools.get('cargo')?.commit(0);
+      this.pools.get('coin')?.commit(0);
       return;
     }
     const th = this.theme;
     const cars = th.vehicle === 'cart' ? 1 : 2;
     const spacing = th.vehicle === 'steam' ? 0.078 : th.vehicle === 'maglev' ? 0.074 : th.vehicle === 'cart' ? 0.058 : 0.068;
+    // Altura da carga sobre a origem do vagão: caçamba, teto do vagão, teto do maglev. A caravana já leva fardo.
+    const lift = th.vehicle === 'cart' ? 0.034 : th.vehicle === 'steam' ? 0.053 : th.vehicle === 'maglev' ? 0.036 : 0;
+    const cargo = lift ? this.pool('cargo') : null;
+    const coin = this.pool('coin', false);
     const roadY = ROAD_Y[th.road];
-    let bi = 0, hi = 0, ci = 0;
+    let bi = 0, hi = 0, ci = 0, gi = 0, ni = 0;
     const pos = { x: 0, z: 0 };
     const ahead = { x: 0, z: 0 };
     for (const m of this.movers) {
       if (m.wait > 0) m.wait -= dt;
       else {
-        m.t += (m.speed * dt) / m.len;
-        let guard = 0;
-        while (m.t >= 1 && guard++ < 4) this.advance(m);
+        const step = (m.speed * dt) / m.len;
+        // Mercado de passagem: para no meio da peça, uma vez por visita.
+        const halt = !m.boat && !m.folk && !m.halted && m.a >= 0 && m.b >= 0 && m.t < 0.5 && m.t + step >= 0.5 && isMarket(m.tile);
+        if (halt) {
+          m.t = 0.5;
+          m.wait = MARKET_STOP;
+          this.markTrade(m);
+        } else {
+          m.t += step;
+          let guard = 0;
+          while (m.t >= 1 && guard++ < 4) this.advance(m);
+        }
       }
       this.pathPos(m, Math.min(m.t, 1), pos);
       this.pathPos(m, Math.min(m.t + 0.02, 1), ahead);
       if (Math.hypot(ahead.x - pos.x, ahead.z - pos.z) > 1e-5) m.heading = Math.atan2(ahead.z - pos.z, ahead.x - pos.x);
       m.x = pos.x;
       m.z = pos.z;
+      if (m.flash) {
+        m.flash = false;
+        this.onTrade(m.x, m.z);
+      }
       if (m.folk) continue;
       if (m.boat) {
         m.wake += ((m.wait > 0 ? 0 : 1) - m.wake) * Math.min(1, dt * 1.5);
@@ -689,11 +751,31 @@ export class Life {
         const b2 = th.vehicle === 'caravan' ? Math.abs(Math.sin(this.time * 7 + k)) * 0.004 : 0;
         m4.compose(v3.set(p.x, roadY + b2, p.z), q4, s3.setScalar(1));
         car?.set(ci++, m4, this.beast);
+        if (cargo && lift) {
+          // Maior que o desenho do kit: de longe a carga precisa ler em cima do vagão.
+          m4.multiply(m4b.makeTranslation(0, lift, 0));
+          m4.multiply(m4b.makeScale(1.55, 1.55, 1.55));
+          cargo.set(gi++, m4);
+        }
+      }
+      if (m.coin > 0) {
+        if (coin) {
+          const u = 1 - m.coin / MARKET_STOP;
+          const k = Math.sin(Math.min(1, Math.max(0, u)) * Math.PI);
+          const ox = -Math.sin(m.heading) * 0.06;
+          const oz = Math.cos(m.heading) * 0.06;
+          q4.setFromAxisAngle(v3.set(1, 0, 0), this.time * 7);
+          m4.compose(v3.set(m.x + ox, roadY + 0.1 + k * 0.07, m.z + oz), q4, s3.setScalar(0.9 + k * 0.55));
+          coin.set(ni++, m4);
+        }
+        m.coin -= dt;
       }
     }
     boats?.commit(bi);
     head?.commit(hi);
     car?.commit(ci);
+    cargo?.commit(gi);
+    coin?.commit(ni);
   }
 
   /** Um bando sai do chão em espiral e vai embora; temas sem pássaros (futuro) ficam sem. */
@@ -768,6 +850,22 @@ function angleDiff(a: number, b: number) {
   while (d > Math.PI) d -= Math.PI * 2;
   while (d < -Math.PI) d += Math.PI * 2;
   return d;
+}
+
+/**
+ * Mercado da rota: estação especial, trilho de uma borda só, ou vila colada ao trilho.
+ * A mesma condição que ergue a estação em tileBuilder.
+ */
+function isMarket(p: Placed): boolean {
+  if (p.def.special === 'station') return true;
+  let rails = 0;
+  let village = false;
+  for (let i = 0; i < 6; i++) {
+    if (p.edges[i] !== T.Rail) continue;
+    rails++;
+    if (p.edges[(i + 1) % 6] === T.Village || p.edges[(i + 5) % 6] === T.Village) village = true;
+  }
+  return rails === 1 || village;
 }
 
 function strictEdges(p: Placed, terr: T) {

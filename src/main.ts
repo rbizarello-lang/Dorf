@@ -1344,6 +1344,33 @@ function start(data: unknown) {
   if (zoom) world.rig.dist = world.rig.goalDist = zoom;
   return true;
 };
+// Linha reta de ferrovia, fora do mapa, para a captura da carga e da moeda.
+(window as unknown as { __spur: () => boolean }).__spur = () => {
+  const edges = [T.Rail, T.Village, T.Grass, T.Rail, T.Grass, T.Grass];
+  for (let i = 0; i < 4; i++) if (game.board.tiles.has(hkey(12 + i, 0))) return false;
+  const placed = [0, 1, 2, 3].map((i) => game.board.placeRaw(12 + i, 0, { edges: [...edges], seed: 9000 + i, quest: null }, 0));
+  world.placeInstant(placed, game.board);
+  return true;
+};
+// Segura o trem na parada e centraliza (captura da carga e da moeda).
+(window as unknown as { __holdTrade: (zoom?: number) => boolean }).__holdTrade = (zoom) => {
+  if (!world.life.holdTrade()) return false;
+  const p = world.life.tradePos(true);
+  if (!p) return false;
+  world.rig.goal.set(p.x, 0, p.z);
+  world.rig.target.set(p.x, 0, p.z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
+// Centraliza no veículo da rota. Com `coin`, só quando a moeda está no ar (captura da parada).
+(window as unknown as { __trade: (coin?: boolean, zoom?: number) => boolean }).__trade = (coin = false, zoom) => {
+  const p = world.life.tradePos(coin);
+  if (!p) return false;
+  world.rig.goal.set(p.x, 0, p.z);
+  world.rig.target.set(p.x, 0, p.z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
 (window as unknown as { __boat: (zoom?: number) => boolean }).__boat = (zoom) => {
   const b = world.life.boatPos();
   if (!b) return false;

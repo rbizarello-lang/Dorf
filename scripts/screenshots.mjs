@@ -36,6 +36,7 @@ const all = [
   { name: 'ghost', q: 'theme=sakura&seed=21&auto=14&quality=high&zoom=7', wait: 9000, ghost: true },
   { name: 'interacoes', q: 'theme=vale&seed=33&auto=18&quality=high&zoom=5', wait: 9000, synergy: true },
   { name: 'vida', q: 'theme=holanda&seed=5&auto=90&quality=high&zoom=9', wait: 14000 },
+  { name: 'comercio', q: 'theme=oeste&seed=16&auto=8&quality=high', wait: 5000, trade: true },
   { name: 'mobile', q: 'theme=cerrado&seed=11&auto=22&quality=medium', wait: 12000, mobile: true },
 ];
 const list = shots.length ? all.filter((s) => shots.includes(s.name)) : all;
@@ -59,6 +60,16 @@ for (const s of list) {
     const n = await page.evaluate(() => window.__ghostSynergy());
     console.log('interações na prévia:', n);
     await page.waitForTimeout(8000);
+  }
+  if (s.trade) {
+    const spur = await page.evaluate(() => window.__spur());
+    console.log('linha:', spur);
+    await page.waitForTimeout(2500);
+    const ok = await page.evaluate(() => window.__holdTrade(3.2));
+    console.log('parada:', ok);
+    await page.waitForTimeout(2000);
+    await page.evaluate(() => window.__trade(true, 3.2));
+    await page.waitForTimeout(2500);
   }
   await page.screenshot({ path: `${out}/${s.name}.png`, timeout: s.timeout ?? 120000 });
   const stats = await page.evaluate(() => window.__stats);
