@@ -265,6 +265,10 @@ export interface Theme {
   bush: string[];
   flowers: string[];
   rock: string;
+  /** Jazida no prado: cor do minério e chance por setor; com vila encostada na peça, vira mina. Omitir = sem jazidas. */
+  ore?: { color: string; chance: number };
+  /** Cor das frutas dos arbustos do prado (6% por setor). Omitir = sem frutas. */
+  berry?: string;
   animals: { kind: AnimalKind; colors: string[] };
 
   // --- água
