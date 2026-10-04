@@ -1591,6 +1591,39 @@ function scaffoldGeometry(wood: Col) {
   return kit(parts);
 }
 
+/**
+ * Enfeite da praça do Centro, pequeno o bastante para caber entre as cabanas (raio ~0,08).
+ * A tora usa a madeira do tema; a estátua é dourada; o relicário tem a cruz acesa à noite.
+ */
+function monumentGeometry(kind: 'log' | 'statue' | 'reliquary', wood: string): THREE.BufferGeometry {
+  if (kind === 'log') {
+    return kit([
+      { geo: cyl(0.026, 0.03, 0.14, 7).rotateZ(Math.PI / 2).translate(0, 0.03, 0), color: wood, grad: [0.7, 1.08, 0.004, 0.056] },
+      { geo: cyl(0.032, 0.032, 0.012, 7).rotateZ(Math.PI / 2).translate(-0.07, 0.03, 0), color: wood },
+      { geo: cyl(0.028, 0.028, 0.012, 7).rotateZ(Math.PI / 2).translate(0.07, 0.03, 0), color: wood },
+      { geo: box(0.07, 0.006, 0.01, 0, 0.052, 0), color: '#4a301c' },
+      { geo: box(0.018, 0.008, 0.018, 0.015, 0.054, 0).rotateY(0.5), color: '#e6d2a4' },
+    ]);
+  }
+  if (kind === 'statue') {
+    return kit([
+      { geo: box(0.055, 0.012, 0.05), color: '#b7aa96' },
+      { geo: cyl(0.02, 0.024, 0.012, 6, 0, 0.012), color: '#d7c4a2' },
+      { geo: box(0.022, 0.055, 0.014, 0, 0.024), color: '#e2c15a', grad: [0.85, 1.2, 0.024, 0.08] },
+      { geo: new THREE.IcosahedronGeometry(0.014, 0).translate(0, 0.096, 0), color: '#f0d56a' },
+      { geo: box(0.01, 0.04, 0.008, -0.02, 0.04).rotateZ(0.6), color: '#e2c15a' },
+      { geo: box(0.01, 0.038, 0.008, 0.02, 0.038).rotateZ(-0.8), color: '#e2c15a' },
+    ]);
+  }
+  return kit([
+    { geo: box(0.05, 0.01, 0.04), color: '#8d8578' },
+    { geo: box(0.038, 0.04, 0.028, 0, 0.01), color: '#efe6d2', grad: [0.9, 1.05, 0.01, 0.05] },
+    { geo: box(0.044, 0.01, 0.034, 0, 0.05), color: '#c9a24a' },
+    { geo: box(0.006, 0.026, 0.004, 0, 0.06), color: '#f6e7a8', glow: 0.7 },
+    { geo: box(0.02, 0.006, 0.004, 0, 0.068), color: '#f6e7a8', glow: 0.7 },
+  ]);
+}
+
 /** Desloca a geometria para (x, z) virando o +z dela para o centro. */
 const facing = (g: THREE.BufferGeometry, x: number, z: number) => g.rotateY(Math.atan2(-x, -z)).translate(x, 0, z);
 
@@ -2054,6 +2087,9 @@ export class Lib {
     set('coin', coinGeometry());
     set('bird', birdGeometry());
     for (let e = 0; e < 4; e++) set(`center:${e}`, centerGeometry(e, theme));
+    set('monument:log', monumentGeometry('log', theme.trunk));
+    set('monument:statue', monumentGeometry('statue', theme.trunk));
+    set('monument:reliquary', monumentGeometry('reliquary', theme.trunk));
     set('pennant', pennantGeometry(theme.trunk));
     set('scaffold', scaffoldGeometry(theme.trunk));
     const wonder = wonderGeometry(theme);

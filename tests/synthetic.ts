@@ -6,6 +6,7 @@ import { DIRS, hkey } from '../src/core/hex';
 import { T, rotateEdges, type TileDef } from '../src/core/tiles';
 import { mulberry32 } from '../src/core/rng';
 import { timelineSvg, type TurnNote } from '../src/ui/minimap';
+import { monumentsDue } from '../src/ui/progress';
 
 const rules: Rules = { ...DEFAULT_RULES };
 let bad = 0;
@@ -148,6 +149,19 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
   ok(timelineSvg([], colors, '#c8553a') === '', 'sem jogadas não desenha');
   const dirty = timelineSvg([{ score: 1, groups: [1, 0, 0, 0, 0, 0], era: null, quests: 0, wonder: 'start' }], ['<script>'], '#c8553a');
   ok(dirty.includes('☆') && !dirty.includes('<script>'), 'cor fora do padrão não entra no svg');
+}
+
+// ---- 7) Monumentos da praça: a conta é pura e não depende do armazenamento.
+{
+  console.log('Cenário 7: monumentos por conquista');
+  const none = { relics: 0, wonders: 0 };
+  ok(monumentsDue({ lumber: 9, relics: 0, wonder: false }, none).join() === '', '9 serrarias ainda não erguem a tora');
+  ok(monumentsDue({ lumber: 10, relics: 0, wonder: false }, none).join() === 'log', '10 serrarias numa partida dão a tora');
+  ok(monumentsDue({ lumber: 0, relics: 0, wonder: true }, none).join() === 'statue', 'a primeira maravilha dá a estátua');
+  ok(monumentsDue({ lumber: 0, relics: 0, wonder: false }, { relics: 0, wonders: 1 }).join() === 'statue', 'maravilha de outra partida também dá a estátua');
+  ok(monumentsDue({ lumber: 0, relics: 3, wonder: false }, { relics: 16, wonders: 0 }).join() === '', '19 relíquias ainda não dão o relicário');
+  ok(monumentsDue({ lumber: 0, relics: 4, wonder: false }, { relics: 16, wonders: 0 }).join() === 'reliquary', '20 relíquias dão o relicário');
+  ok(monumentsDue({ lumber: 10, relics: 20, wonder: true }, none).join() === 'log,statue,reliquary', 'as três conquistas juntas, na ordem fixa');
 }
 
 console.log(bad ? `\n${bad} FALHA(S)` : '\nTodos os cenários sintéticos passaram');

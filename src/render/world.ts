@@ -903,6 +903,7 @@ export class World {
     this.fireflies.sync(board);
     this.centerAnim = -1;
     this.setCenter(board.era);
+    this.placeMonuments();
     this.disposeWonder();
     this.syncWonder(board, false);
   }
@@ -911,6 +912,9 @@ export class World {
 
   private center: THREE.InstancedMesh | null = null;
   private centerEra = -1;
+  /** Monumentos já conquistados, na praça do Centro (fora dos pools, como o próprio Centro). */
+  private monumentKinds: string[] = [];
+  private monumentMeshes: THREE.InstancedMesh[] = [];
   /** Tempo desde o avanço de era (-1 = parado) e a era que o Centro vai mostrar. */
   private centerAnim = -1;
   private centerNext = 0;
@@ -934,6 +938,37 @@ export class World {
     m.computeBoundingSphere();
     this.staticRoot.add(m);
     this.center = m;
+  }
+
+  /** Mostra na praça os monumentos conquistados. Chamar de novo troca a lista sem reconstruir o mapa. */
+  setMonuments(kinds: readonly string[]) {
+    this.monumentKinds = [...kinds];
+    this.placeMonuments();
+  }
+
+  private placeMonuments() {
+    for (const m of this.monumentMeshes) {
+      this.staticRoot.remove(m);
+      m.geometry.dispose();
+      m.dispose();
+    }
+    this.monumentMeshes = [];
+    // Entre as cabanas da primeira era (elas ficam a 90°, 210° e 330°).
+    const spots: Record<string, number> = { log: Math.PI / 6, statue: (5 * Math.PI) / 6, reliquary: (3 * Math.PI) / 2 };
+    for (const k of this.monumentKinds) {
+      const geo = this.lib.geo(`monument:${k}`);
+      const ang = spots[k];
+      if (!geo || ang === undefined) continue;
+      const x = Math.cos(ang) * 0.23, z = Math.sin(ang) * 0.23;
+      const mesh = new THREE.InstancedMesh(instGeometry(geo, 1), this.lib.material(`monument:${k}`), 1);
+      mesh.setMatrixAt(0, tmpM.makeTranslation(x, 0, z).multiply(tmpM2.makeRotationY(Math.atan2(x, z))));
+      setInstColor(mesh, 0, tmpColor.set('#ffffff'));
+      mesh.castShadow = this.quality !== 'low';
+      mesh.receiveShadow = true;
+      mesh.computeBoundingSphere();
+      this.staticRoot.add(mesh);
+      this.monumentMeshes.push(mesh);
+    }
   }
 
   /**

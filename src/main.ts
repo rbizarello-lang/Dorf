@@ -21,7 +21,7 @@ import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor
 import { Capture, VIDEO_QUALITIES } from './ui/capture';
 import { Hud, TIME_ICON, TIME_LABEL, TIME_ORDER, glyph, questLabel, questMarker } from './ui/hud';
 import { bindInput } from './ui/input';
-import { Progress, SPECIAL_NAME, UNLOCKS } from './ui/progress';
+import { MONUMENT_KINDS, MONUMENT_NAME, Progress, SPECIAL_NAME, UNLOCKS, type MonumentKind } from './ui/progress';
 import { Tutorial } from './ui/tutorial';
 import { blessingName, blessingRule, choiceHtml } from './ui/eraChoice';
 import { Minimap, timelineSvg, type TurnNote } from './ui/minimap';
@@ -216,6 +216,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   hud.hint.style.opacity = moves.length >= 6 ? '0' : '';
   world.dropGhost();
   world.setTheme(theme, game.board);
+  world.setMonuments(progress.monuments);
   sfx.setStyle(theme.music, game.board.era);
   hud.applyTheme(theme);
   showCrest();
@@ -407,7 +408,15 @@ function place(q: number, r: number) {
   rotSteps = 0;
   hud.confirm.hidden = true;
   announce(res);
-  if (!special) for (const k of progress.unlockLive(game.board)) unlockedToast(k);
+  if (!special) {
+    for (const k of progress.unlockLive(game.board)) unlockedToast(k);
+    const wonder = game.board.wonder;
+    const fresh = progress.unlockMonuments(game.board, !!wonder && wonder.stage >= game.rules.wonderStages);
+    if (fresh.length) {
+      world.setMonuments(progress.monuments);
+      for (const k of fresh) monumentToast(k);
+    }
+  }
   let discarded = 0;
   while (game.discardIfStuck()) discarded++;
   if (discarded) hud.toast(discarded === 1 ? 'Uma peça não cabia em lugar nenhum e foi descartada.' : `${discarded} peças sem encaixe foram descartadas.`, 'bad');
@@ -501,6 +510,11 @@ function specialRule(k: SpecialKind) {
 
 function unlockedToast(k: SpecialKind) {
   hud.toast(`Peça especial liberada: ${SPECIAL_NAME[k]}! Entra na pilha a partir da próxima partida.`, 'good');
+  sfx.quest();
+}
+
+function monumentToast(k: MonumentKind) {
+  hud.toast(`Monumento na praça do Centro: ${MONUMENT_NAME[k]}.`, 'good');
   sfx.quest();
 }
 
@@ -710,6 +724,12 @@ function almanac() {
     <div class="legend sites">${sites}</div>
     <h3>Peças especiais</h3>
     <ul class="almanac-specials">${specials}</ul>
+    <h3>Monumentos da praça</h3>
+    <ul class="almanac-specials">${MONUMENT_KINDS.map((k) => {
+      const on = d.monuments.includes(k);
+      const how = k === 'log' ? '10 serrarias numa partida' : k === 'statue' ? 'a primeira maravilha' : '20 relíquias no total';
+      return on ? `<li><b>${MONUMENT_NAME[k]}</b>: na praça do Centro.</li>` : `<li class="locked"><b>${MONUMENT_NAME[k]}</b>: preso, ${how}.</li>`;
+    }).join('')}</ul>
     <h3>Temas</h3>
     <table class="almanac"><thead><tr><th>Tema</th><th>Partidas</th><th>Maior era</th><th>Recorde</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
@@ -1323,6 +1343,17 @@ function start(data: unknown) {
 (window as unknown as { __ripple: (age: number) => void }).__ripple = (age) => world.ripple(world.rig.target.x, world.rig.target.z, 1, age);
 
 // Centraliza a câmera no Centro e o mostra numa era (0 a 3); com `age`, a onda dourada já com essa idade em segundos.
+// Mostra os três monumentos na praça do Centro (só a imagem; não grava o progresso).
+(window as unknown as { __plaza: (zoom?: number) => string[] }).__plaza = (zoom) => {
+  const kinds = [...MONUMENT_KINDS];
+  world.setMonuments(kinds);
+  world.showEra(Math.max(game.board.era, 0), -1);
+  world.rig.goal.set(0, 0, 0);
+  world.rig.target.set(0, 0, 0);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return kinds;
+};
+
 (window as unknown as { __era: (era: number, age?: number, zoom?: number) => void }).__era = (era, age, zoom) => {
   world.showEra(era, age ?? -1);
   world.rig.goal.set(0, 0, 0);
