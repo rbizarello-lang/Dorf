@@ -16,14 +16,11 @@ import { gpuName, tierForGpu } from './render/gpuTier';
 import { FX_FLAGS } from './render/post';
 import { U } from './render/materials';
 import { World } from './render/world';
-import { pickCodec, type VideoSize } from './video/encoder';
-import { planFilm } from './video/film';
-import { SMOOTHING, resample, smooth, type Smoothing } from './video/path';
-import { renderVideo, type Script } from './video/render';
-import { Take, type TakeEvent } from './video/take';
 import { THEMES, themeById, type Theme } from './themes/themes';
 import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor } from './ui/banner';
-import { Hud, glyph, questLabel, questMarker } from './ui/hud';
+import { Capture, VIDEO_QUALITIES } from './ui/capture';
+import { Hud, TIME_ICON, TIME_LABEL, TIME_ORDER, glyph, questLabel, questMarker } from './ui/hud';
+import { bindInput } from './ui/input';
 import { Progress, SPECIAL_NAME, UNLOCKS } from './ui/progress';
 import { Tutorial } from './ui/tutorial';
 import './ui/style.css';
@@ -151,12 +148,6 @@ const progress = new Progress(store, THEMES.map((t) => t.id));
 let committed = false;
 // ?specials=station.watermill.lighthouse (ou all) põe peças especiais na partida sem liberá-las (capturas).
 const forcedSpecials: SpecialKind[] | null = params.has('specials') ? (params.get('specials') === 'all' ? [...SPECIAL_KINDS] : SPECIAL_KINDS.filter((k) => params.get('specials')!.split('.').includes(k))) : null;
-/** O que a tela está fazendo: o jogo, o modo foto, ou um vídeo sendo desenhado (o laço não desenha). */
-let stage: 'play' | 'photo' | 'export' = 'play';
-/** Gravação em andamento (tecla V) e o estado do jogo quando ela começou. */
-let take: Take | null = null;
-type TakeStart = Pick<Script, 'theme' | 'seed' | 'rules' | 'specials' | 'prefix' | 'tod'>;
-let takeStart: TakeStart | null = null;
 
 // Regras: padrão ← tema ← modo. O desafio do dia ignora as regras do tema (é igual para todos).
 const rulesFor = (t: Theme, m: Mode = mode): Rules => ({ ...DEFAULT_RULES, ...(m.daily ? {} : t.rules), ...m.rules });
@@ -187,7 +178,7 @@ const synTimers: number[] = [];
 
 function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number, undos = 0, specials?: readonly SpecialKind[]): boolean {
   // A gravação vale para uma partida só (desfazer refaz a partida pelo replay).
-  if (take) stopTake('A gravação terminou aqui: o vídeo não acompanha o desfazer nem uma partida nova.');
+  if (capture.take) capture.stopTake('A gravação terminou aqui: o vídeo não acompanha o desfazer nem uma partida nova.');
   clearTimeout(overTimer);
   for (const t of synTimers.splice(0)) clearTimeout(t);
   // Peças especiais: as liberadas entram em toda partida nova, menos no Desafio do dia (igual para todos).
@@ -337,15 +328,15 @@ function refreshHud(instant = false) {
 }
 
 function updateGhost() {
-  if (!game.current || !hover || !game.board.frontier.has(hkey(hover.q, hover.r)) || hud.modalOpen || stage !== 'play') {
+  if (!game.current || !hover || !game.board.frontier.has(hkey(hover.q, hover.r)) || hud.modalOpen || capture.stage !== 'play') {
     world.clearGhost();
     hud.confirm.hidden = true;
-    take?.event({ kind: 'noghost' });
+    capture.take?.event({ kind: 'noghost' });
     return;
   }
   const check = game.check(hover.q, hover.r)!;
   world.setGhost(game.current, game.rot, rotSteps * (Math.PI / 3), hover.q, hover.r, check);
-  take?.event({ kind: 'ghost', q: hover.q, r: hover.r, rot: game.rot, angle: rotSteps * (Math.PI / 3) });
+  capture.take?.event({ kind: 'ghost', q: hover.q, r: hover.r, rot: game.rot, angle: rotSteps * (Math.PI / 3) });
 }
 
 function rotate(dir: 1 | -1) {
@@ -377,7 +368,7 @@ function place(q: number, r: number) {
   const rot = game.rot;
   const res = game.place(q, r)!;
   moves.push([q, r, rot]);
-  take?.event({ kind: 'place', q, r, rot });
+  capture.take?.event({ kind: 'place', q, r, rot });
   world.placeAnimated(res.placed);
   world.updateFrontier(game.board);
   rotSteps = 0;
@@ -691,7 +682,7 @@ hud.modal.addEventListener('click', (e) => {
   }
   if (act === 'film') {
     // O diálogo de exportação toma o lugar do placar final.
-    showExportDialog('film');
+    capture.showExportDialog('film');
     return;
   }
   if (act === 'almanac') {
@@ -726,9 +717,7 @@ hud.modal.addEventListener('click', (e) => {
     hud.hideModal();
     hud.openThemeMenu(theme, pickTheme);
   } else if (act === 'export') {
-    const o = readExportForm();
-    hud.hideModal();
-    if (o) void exportVideo(o.kind, o.height, o.quality, o.cam, o.tod);
+    capture.submitExport();
   }
 });
 
@@ -754,7 +743,7 @@ function showCrest() {
 }
 
 function pickTheme(t: Theme) {
-  if (take) stopTake('A gravação terminou aqui: o vídeo fica no tema em que começou.');
+  if (capture.take) capture.stopTake('A gravação terminou aqui: o vídeo fica no tema em que começou.');
   theme = dress(t, house);
   store.set('theme', t.id);
   hud.applyTheme(theme);
@@ -814,7 +803,7 @@ function applyQuality(mode: QualityMode) {
 
 /** Modo Auto: com o quadro lento, a resolução cede um degrau por vez; no menor degrau, o nível desce. */
 function adaptQuality(dt: number, now: number) {
-  if (qualityMode !== 'auto' || document.hidden || stage !== 'play') return;
+  if (qualityMode !== 'auto' || document.hidden || capture.stage !== 'play') return;
   const ev = dynres.push(dt, now / 1000);
   if (ev === 'up' || ev === 'down') world.setResolutionScale(dynres.scale);
   else if (ev === 'floor' && autoLevel !== 'low') {
@@ -829,25 +818,23 @@ function adaptQuality(dt: number, now: number) {
 
 // ------------------------------------------------------------------ entrada
 
-const pointers = new Map<number, { x: number; y: number }>();
-let drag: { button: number; x: number; y: number; moved: boolean; ground: THREE.Vector3 | null; touch: boolean } | null = null;
-// Dois dedos: decide no começo do gesto se é pinça (zoom e pan) ou arraste vertical (inclinação).
-let pinch: { d: number; mx: number; my: number; mode: 'pending' | 'zoom' | 'tilt'; ad: number; ax: number; ay: number } | null = null;
-
-/** Inclina a câmera e guarda o ajuste para a próxima partida (gravado quando o gesto para). */
-let tiltSave = 0;
-function tiltBy(d: number) {
-  world.rig.incline(d);
-  clearTimeout(tiltSave);
-  tiltSave = window.setTimeout(() => store.set('tilt', world.rig.goalTilt.toFixed(3)), 400);
-}
-
-function hoverAt(clientX: number, clientY: number) {
-  const p = world.groundPoint(clientX, clientY);
-  if (!p) return null;
-  const [q, r] = worldToHex(p.x, p.z);
-  return { q, r };
-}
+/** Foto, gravação e vídeo (src/ui/capture.ts): o estado da tela e a gravação em andamento. */
+const capture = new Capture({
+  canvas,
+  world,
+  hud,
+  store,
+  theme: () => theme,
+  game: () => game,
+  moves: () => moves,
+  liveQuality: () => (qualityMode === 'auto' ? autoLevel : qualityMode),
+  qualityLabel: (q) => qualityLabel[q],
+  cycleTime,
+  clearHover: () => (hover = null),
+  updateGhost,
+  resetDynres: () => dynres.reset(),
+  refreshHud,
+});
 
 function setHover(h: { q: number; r: number } | null) {
   const same = h && hover && h.q === hover.q && h.r === hover.r;
@@ -855,181 +842,26 @@ function setHover(h: { q: number; r: number } | null) {
   if (!same) updateGhost();
 }
 
-canvas.addEventListener('pointerdown', (e) => {
-  sfx.unlock();
-  hud.closeThemeMenu();
-  if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 2) return;
-  canvas.setPointerCapture(e.pointerId);
-  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pointers.size === 2) {
-    const [a, b] = [...pointers.values()];
-    pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, mode: 'pending', ad: 0, ax: 0, ay: 0 };
-    drag = null;
-    return;
-  }
-  drag = { button: e.button, x: e.clientX, y: e.clientY, moved: false, ground: world.groundPoint(e.clientX, e.clientY), touch: e.pointerType !== 'mouse' };
+const input = bindInput({
+  canvas,
+  world,
+  hud,
+  sfx,
+  store,
+  capture,
+  hover: () => hover,
+  setHover,
+  open: (q, r) => game.board.frontier.has(hkey(q, r)),
+  hasPiece: () => !!game.current,
+  gameOver: () => game.over,
+  place,
+  rotate,
+  cycleTime,
+  showHelp: () => showHelp(),
+  requestNewGame,
+  undo,
+  toggleMusic,
 });
-
-canvas.addEventListener('pointermove', (e) => {
-  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pinch && pointers.size === 2) {
-    const [a, b] = [...pointers.values()];
-    const d = Math.hypot(a.x - b.x, a.y - b.y);
-    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    if (pinch.mode === 'pending') {
-      // Os dois dedos subindo ou descendo juntos, sem abrir nem fechar: inclinação.
-      pinch.ad += d - pinch.d;
-      pinch.ax += mx - pinch.mx;
-      pinch.ay += my - pinch.my;
-      if (Math.hypot(pinch.ad, pinch.ax, pinch.ay) > 14) pinch.mode = Math.abs(pinch.ay) > 2 * Math.abs(pinch.ad) && Math.abs(pinch.ay) > Math.abs(pinch.ax) ? 'tilt' : 'zoom';
-    } else if (pinch.mode === 'tilt') tiltBy((my - pinch.my) * 0.006);
-    else {
-      world.rig.zoom(pinch.d / Math.max(d, 1));
-      const before = world.groundPoint(pinch.mx, pinch.my);
-      const after = world.groundPoint(mx, my);
-      if (before && after) world.rig.panWorld(before.x - after.x, before.z - after.z, true);
-    }
-    pinch.d = d;
-    pinch.mx = mx;
-    pinch.my = my;
-    return;
-  }
-  if (drag) {
-    if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > (drag.touch ? 10 : 5)) drag.moved = true;
-    if (drag.moved) {
-      if (drag.button === 2 || (drag.button === 0 && e.shiftKey)) {
-        // Na horizontal gira; na vertical inclina (arrastar para cima abaixa a câmera rumo ao horizonte, como nos mapas).
-        world.rig.rotate(-(e.movementX || 0) * 0.006);
-        if (e.movementY) tiltBy(e.movementY * 0.004);
-      } else if (drag.ground) {
-        const now = world.groundPoint(e.clientX, e.clientY);
-        if (now) {
-          world.rig.panWorld(drag.ground.x - now.x, drag.ground.z - now.z, true);
-          world.rig.apply(world.camera);
-          world.camera.updateMatrixWorld();
-        }
-      }
-      canvas.style.cursor = 'grabbing';
-      return;
-    }
-  }
-  if (e.pointerType === 'mouse' && stage === 'play') setHover(hoverAt(e.clientX, e.clientY));
-});
-
-function endPointer(e: PointerEvent) {
-  sfx.unlock(); // iOS libera áudio no fim do toque
-  pointers.delete(e.pointerId);
-  if (pointers.size < 2) pinch = null;
-  canvas.style.cursor = '';
-  const d = drag;
-  drag = null;
-  if (!d || d.moved || e.type === 'pointercancel' || stage !== 'play') return;
-  if (d.button === 2) {
-    rotate(1);
-    return;
-  }
-  const h = hoverAt(e.clientX, e.clientY);
-  if (!h) return;
-  if (d.touch) {
-    // Toque: primeiro mostra a peça no espaço, o segundo toque confirma.
-    if (hover && hover.q === h.q && hover.r === h.r && game.board.frontier.has(hkey(h.q, h.r))) place(h.q, h.r);
-    else {
-      setHover(h);
-      hud.confirm.hidden = !(game.current && game.board.frontier.has(hkey(h.q, h.r)));
-    }
-    return;
-  }
-  setHover(h);
-  place(h.q, h.r);
-}
-canvas.addEventListener('pointerup', endPointer);
-canvas.addEventListener('pointercancel', endPointer);
-canvas.addEventListener('pointerleave', (e) => {
-  if (e.pointerType === 'mouse' && !drag) setHover(null);
-});
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-canvas.addEventListener(
-  'wheel',
-  (e) => {
-    e.preventDefault();
-    if (stage === 'export') return;
-    world.rig.zoom(Math.exp(e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)));
-  },
-  { passive: false },
-);
-
-const held = new Set<string>();
-window.addEventListener('keydown', (e) => {
-  // Atalhos do navegador (Ctrl/Cmd+R, Cmd+D...) ficam com o navegador.
-  if (e.target instanceof HTMLInputElement || e.ctrlKey || e.metaKey || e.altKey) return;
-  const k = e.key.toLowerCase();
-  if (stage === 'export') {
-    if (k === 'escape') exportCancel = true;
-    return;
-  }
-  if (stage === 'photo') {
-    // No modo foto só a câmera, a hora, a pausa e a foto.
-    if (k === 'escape' || k === 'p') exitPhoto();
-    else if (k === ' ') {
-      e.preventDefault();
-      togglePhotoFreeze();
-    } else if (k === 'l') cycleTime();
-    else if (k === 'enter') void shootPhoto();
-    else if (k === '+' || k === '=') world.rig.zoom(0.85);
-    else if (k === '-') world.rig.zoom(1.18);
-    else if (k === 'home') tiltBy(-world.rig.goalTilt);
-    else held.add(k);
-    return;
-  }
-  if (k === 'escape') {
-    if (hud.modalOpen && !game.over) store.set('seenHelp', '1');
-    hud.hideModal();
-    hud.closeThemeMenu();
-    return;
-  }
-  if (hud.modalOpen) return;
-  sfx.unlock();
-  if (k === 'r' || k === ' ') {
-    e.preventDefault();
-    rotate(e.shiftKey ? -1 : 1);
-  } else if (k === 't') rotate(-1);
-  else if (k === 'f') hud.stats.hidden = !hud.stats.hidden;
-  else if (k === 'l') cycleTime();
-  else if (k === 'h' || k === '?') showHelp();
-  else if (k === 'n') requestNewGame();
-  else if (k === 'u') undo();
-  else if (k === 'm') toggleMusic();
-  else if (k === 'p') enterPhoto();
-  else if (k === 'v') {
-    if (take) stopTake();
-    else startTake();
-  } else if (k === '+' || k === '=') world.rig.zoom(0.85);
-  else if (k === '-') world.rig.zoom(1.18);
-  else if (k === 'home') tiltBy(-world.rig.goalTilt);
-  else {
-    if (k === 'pageup' || k === 'pagedown') e.preventDefault();
-    held.add(k);
-  }
-});
-window.addEventListener('keyup', (e) => {
-  // Com Cmd pressionado o macOS não envia keyup das outras teclas: evita câmera "presa".
-  if (e.key === 'Meta' || e.key === 'Control' || e.key === 'Alt') held.clear();
-  else held.delete(e.key.toLowerCase());
-});
-window.addEventListener('blur', () => held.clear());
-
-function keyboardCamera(dt: number) {
-  let dx = 0, dy = 0;
-  if (held.has('a') || held.has('arrowleft')) dx -= 1;
-  if (held.has('d') || held.has('arrowright')) dx += 1;
-  if (held.has('w') || held.has('arrowup')) dy += 1;
-  if (held.has('s') || held.has('arrowdown')) dy -= 1;
-  if (dx || dy) world.rig.panScreen(dx * dt * 12, dy * dt * 12);
-  if (held.has('q')) world.rig.rotate(dt * 1.6);
-  if (held.has('e')) world.rig.rotate(-dt * 1.6);
-  if (held.has('pageup')) tiltBy(dt * 0.9);
-  if (held.has('pagedown')) tiltBy(-dt * 0.9);
-}
 
 document.getElementById('rot-left')!.addEventListener('click', () => {
   sfx.unlock();
@@ -1052,7 +884,7 @@ hud.themeBtn.addEventListener('click', () => {
   else hud.closeThemeMenu();
 });
 qualityBtn.addEventListener('click', () => {
-  if (stage !== 'play') return;
+  if (capture.stage !== 'play') return;
   const items = QUALITIES.map((q) => ({
     id: q,
     label: q === 'auto' ? `Auto · ${autoNote()}` : qualityLabel[q],
@@ -1067,10 +899,6 @@ qualityBtn.addEventListener('click', () => {
     hud.toast(`Qualidade: ${qualityLabel[next]}${next === 'cinema' ? ' · pede uma placa de vídeo de topo' : ''}`);
   });
 });
-const TIME_LABEL: Record<TimeOfDay, string> = { dawn: 'Amanhecer', day: 'Dia', golden: 'Hora dourada', dusk: 'Entardecer', night: 'Noite' };
-const TIME_ICON: Record<TimeOfDay, string> = { dawn: '◒', day: '☀', golden: '☼', dusk: '◐', night: '☾' };
-/** Ordem do botão e da tecla L: o dia passa uma hora por vez. */
-const TIME_ORDER: TimeOfDay[] = ['dawn', 'day', 'golden', 'dusk', 'night'];
 const setTimeLabel = (t: TimeOfDay) => {
   timeBtn.querySelector('.long')!.textContent = TIME_LABEL[t];
   timeBtn.querySelector('.short')!.textContent = TIME_ICON[t];
@@ -1082,8 +910,8 @@ function cycleTime() {
   setTimeLabel(next);
   sfx.setMood(next);
   store.set('time', next);
-  take?.event({ kind: 'time', tod: next });
-  if (stage === 'photo') renderPhotoBar();
+  capture.take?.event({ kind: 'time', tod: next });
+  capture.timeChanged();
 }
 timeBtn.addEventListener('click', cycleTime);
 {
@@ -1128,347 +956,6 @@ soundBtn.addEventListener('click', () => {
 document.addEventListener('visibilitychange', () => sfx.pause(document.hidden));
 
 window.addEventListener('resize', () => world.resize());
-
-// ------------------------------------------------------------------ foto e vídeo
-
-/** "1:05" para durações. */
-const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
-/** Carimbo de data e hora para nomes de arquivo. */
-const stamp = () => {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-};
-
-function download(blob: Blob, name: string) {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 120_000);
-}
-
-/** Esconde a interface do jogo (foto e vídeo) ou volta com ela. */
-function setCaptureUi(on: boolean) {
-  document.body.classList.toggle('capture', on);
-  hud.closeThemeMenu();
-  world.showSlots = !on;
-  if (on) {
-    hover = null;
-    world.clearGhost();
-    hud.confirm.hidden = true;
-  }
-}
-
-const cameraBtn = document.getElementById('btn-camera')!;
-function updateCameraBtn() {
-  cameraBtn.classList.toggle('rec', !!take);
-  cameraBtn.querySelector('.long')!.textContent = take ? `● ${clock(take.t)}` : 'Câmera';
-  cameraBtn.querySelector('.short')!.textContent = take ? '●' : '◉';
-  cameraBtn.title = take ? 'Parar a gravação (V)' : 'Foto e vídeo';
-}
-cameraBtn.addEventListener('click', () => {
-  if (take) {
-    stopTake();
-    return;
-  }
-  if (stage !== 'play') return;
-  hud.toggleMenu(
-    cameraBtn,
-    [
-      { id: 'photo', label: 'Foto', key: 'P', note: 'Esconde a interface e salva a imagem em até 8K' },
-      { id: 'take', label: 'Gravar vídeo', key: 'V', note: 'Grava até 2 minutos do que você fizer; o vídeo sai liso, em até 4K' },
-      { id: 'film', label: 'Filme da partida', note: moves.length ? `A partida inteira, peça por peça (${moves.length} jogadas)` : 'Faça algumas jogadas primeiro' },
-      ...(pendingTake ? [{ id: 'last', label: 'Última gravação', note: `${clock(pendingTake.take.t)} · exportar de novo, em outro tamanho ou câmera` }] : []),
-    ],
-    (id) => {
-      if (id === 'photo') enterPhoto();
-      else if (id === 'take') startTake();
-      else if (id === 'last') showExportDialog('take');
-      else if (moves.length) showExportDialog('film');
-      else hud.toast('O filme precisa de pelo menos uma jogada.');
-    },
-  );
-});
-
-// ---- modo foto (P): sem interface, mundo parado ou animado, PNG em até 8K
-
-const PHOTO_SIZES = { screen: 'Tela', '4k': '4K', '8k': '8K' } as const;
-type PhotoSize = keyof typeof PHOTO_SIZES;
-let photoSize: PhotoSize = (() => {
-  const v = store.get('photoSize');
-  return v && Object.hasOwn(PHOTO_SIZES, v) ? (v as PhotoSize) : '4k';
-})();
-let photoFrozen = false;
-let shooting = false;
-const photoBar = document.createElement('div');
-photoBar.className = 'capture-bar';
-photoBar.hidden = true;
-document.body.appendChild(photoBar);
-
-/** Tamanho da foto: o lado maior da tela levado a 4K ou 8K (no máximo 8192, o limite das texturas). */
-function photoPixels(size: PhotoSize) {
-  const w = window.innerWidth, h = window.innerHeight;
-  const long = size === 'screen' ? Math.max(w, h) * (window.devicePixelRatio || 1) : size === '4k' ? 3840 : 7680;
-  const ratio = Math.min(long, 8192) / Math.max(w, h);
-  return { w, h, ratio, pw: Math.floor(w * ratio), ph: Math.floor(h * ratio) };
-}
-
-function renderPhotoBar() {
-  const p = photoPixels(photoSize);
-  photoBar.innerHTML = `
-    <button type="button" data-photo="freeze" title="Pausar ou animar o mundo (Espaço)">${photoFrozen ? '▶ Animar' : '❚❚ Pausar'}</button>
-    <button type="button" data-photo="time" title="Hora do dia (L)">${TIME_ICON[world.timeOfDay]} ${TIME_LABEL[world.timeOfDay]}</button>
-    <button type="button" data-photo="size" title="Tamanho da foto">${PHOTO_SIZES[photoSize]} · ${p.pw}×${p.ph}</button>
-    <button type="button" class="primary" data-photo="shoot" title="Salvar a foto (Enter)">Salvar foto</button>
-    <button type="button" data-photo="exit" title="Sair do modo foto (Esc)" aria-label="Sair do modo foto">✕</button>`;
-}
-
-photoBar.addEventListener('click', (e) => {
-  const act = (e.target as HTMLElement).closest('button')?.dataset.photo;
-  if (shooting || !act) return;
-  if (act === 'freeze') togglePhotoFreeze();
-  else if (act === 'time') cycleTime();
-  else if (act === 'size') {
-    const keys = Object.keys(PHOTO_SIZES) as PhotoSize[];
-    photoSize = keys[(keys.indexOf(photoSize) + 1) % keys.length];
-    store.set('photoSize', photoSize);
-    renderPhotoBar();
-  } else if (act === 'shoot') void shootPhoto();
-  else if (act === 'exit') exitPhoto();
-});
-
-function enterPhoto() {
-  if (stage !== 'play' || hud.modalOpen) return;
-  if (take) {
-    hud.toast('Pare a gravação antes (V).');
-    return;
-  }
-  stage = 'photo';
-  setCaptureUi(true);
-  world.timeScale = photoFrozen ? 0 : 1;
-  renderPhotoBar();
-  photoBar.hidden = false;
-  hud.toast('Modo foto · Espaço pausa · Enter salva · Esc sai');
-}
-
-function exitPhoto() {
-  if (stage !== 'photo' || shooting) return;
-  stage = 'play';
-  photoBar.hidden = true;
-  world.timeScale = 1;
-  setCaptureUi(false);
-  updateGhost();
-}
-
-function togglePhotoFreeze() {
-  photoFrozen = !photoFrozen;
-  world.timeScale = photoFrozen ? 0 : 1;
-  renderPhotoBar();
-}
-
-/** Desenha a cena parada no tamanho da foto, deixa o TRAA assentar e salva um PNG. */
-async function shootPhoto() {
-  if (stage !== 'photo' || shooting) return;
-  shooting = true;
-  photoBar.classList.add('busy');
-  const p = photoPixels(photoSize);
-  hud.toast(`Salvando a foto em ${p.pw}×${p.ph}…`);
-  world.timeScale = 0;
-  world.setFixedSize({ w: p.w, h: p.h, ratio: p.ratio });
-  try {
-    // Com o tamanho novo o antisserrilhado temporal recomeça: alguns quadros parados para ele assentar.
-    const out = document.createElement('canvas');
-    for (let i = 0; i < 24; i++) {
-      await new Promise((r) => requestAnimationFrame(r));
-      world.tick(1 / 60);
-    }
-    // A cópia sai no mesmo passo do último desenho, antes de o navegador trocar o quadro do canvas.
-    out.width = canvas.width;
-    out.height = canvas.height;
-    out.getContext('2d')!.drawImage(canvas, 0, 0);
-    const blob = await new Promise<Blob | null>((r) => out.toBlob(r, 'image/png'));
-    if (!blob) throw new Error('imagem vazia');
-    download(blob, `retalhos-${theme.id}-${stamp()}.png`);
-    hud.toast(`Foto salva · ${out.width}×${out.height}`, 'good');
-  } catch (err) {
-    console.error(err);
-    hud.toast('A foto não pôde ser salva (memória de vídeo?). Tente um tamanho menor.', 'bad');
-  } finally {
-    world.setFixedSize(null);
-    world.timeScale = photoFrozen ? 0 : 1;
-    shooting = false;
-    photoBar.classList.remove('busy');
-  }
-}
-
-// ---- gravação (V) e filme da partida
-
-function startTake() {
-  if (stage !== 'play' || take || hud.modalOpen) return;
-  take = new Take();
-  takeStart = { theme, seed: game.seed, rules: game.rules, specials: game.specials, prefix: moves.slice(), tod: world.timeOfDay };
-  // A peça que já está flutuando entra na gravação desde o começo.
-  updateGhost();
-  updateCameraBtn();
-  hud.toast('Gravando · V para parar (até 2 minutos)');
-}
-
-function stopTake(reason?: string) {
-  if (!take || !takeStart) return;
-  const t = take, start = takeStart;
-  take = null;
-  takeStart = null;
-  updateCameraBtn();
-  if (reason) hud.toast(reason);
-  if (t.t < 1) {
-    hud.toast('A gravação foi curta demais para virar vídeo.');
-    return;
-  }
-  pendingTake = { take: t, start };
-  showExportDialog('take');
-}
-
-/** A última gravação, para exportar (de novo, em outro tamanho ou câmera). */
-let pendingTake: { take: Take; start: TakeStart } | null = null;
-let exportCancel = false;
-
-const RESOLUTIONS = { 1080: '1080p', 1440: '1440p', 2160: '4K' } as const;
-const VIDEO_QUALITIES = ['cinema', 'ultra', 'high'] as const;
-const CAMERAS: Record<Smoothing, string> = { off: 'Como gravada', light: 'Suave', cinematic: 'Cinematográfica' };
-
-/** Escolhas do vídeo: tamanho, nível, câmera (gravação) ou hora (filme). */
-function showExportDialog(kind: 'take' | 'film') {
-  const dur = kind === 'take' ? pendingTake!.take.t : planFilm(moves, world.rig.yaw).duration;
-  const seg = (name: string, value: string, label: string, on: boolean) => `<label class="seg"><input type="radio" name="${name}" value="${value}"${on ? ' checked' : ''}><span>${label}</span></label>`;
-  const group = (legend: string, html: string) => `<fieldset class="segs"><legend>${legend}</legend><div>${html}</div></fieldset>`;
-  hud.showModal(`
-    <h2 id="modal-title">${kind === 'take' ? 'Gravação pronta' : 'Filme da partida'}</h2>
-    <p class="muted">${clock(dur)} de vídeo · ${Math.round(dur * 60).toLocaleString('pt-BR')} quadros a 60 por segundo${kind === 'film' ? ` · ${moves.length} jogadas` : ''}</p>
-    <form class="export" data-kind="${kind}">
-      ${group('Tamanho', Object.entries(RESOLUTIONS).map(([v, l]) => seg('res', v, l, v === '2160')).join(''))}
-      ${group('Qualidade', VIDEO_QUALITIES.map((q) => seg('q', q, qualityLabel[q], q === 'cinema')).join(''))}
-      ${
-        kind === 'take'
-          ? group('Câmera', (Object.keys(CAMERAS) as Smoothing[]).map((c) => seg('cam', c, CAMERAS[c], c === 'cinematic')).join(''))
-          : group('Hora', TIME_ORDER.map((t) => seg('tod', t, TIME_LABEL[t], t === world.timeOfDay)).join(''))
-      }
-    </form>
-    <p class="muted">Cada quadro é desenhado com calma, então o vídeo sai liso mesmo numa placa lenta. Em 4K no Cinema leva um bom tempo; dá para cancelar.</p>
-    <div class="row"><button class="primary" type="button" data-act="export">Exportar MP4</button><button class="secondary" type="button" data-act="close">${kind === 'take' ? 'Descartar' : 'Cancelar'}</button></div>`);
-}
-
-/** Lê as escolhas do diálogo (só valores das listas fixas). */
-function readExportForm() {
-  const form = hud.modalBody.querySelector<HTMLFormElement>('form.export');
-  if (!form) return null;
-  const val = (name: string) => (form.elements.namedItem(name) as RadioNodeList | null)?.value ?? '';
-  const res = Number(val('res'));
-  const q = val('q');
-  const cam = val('cam');
-  const tod = val('tod');
-  return {
-    kind: form.dataset.kind === 'film' ? ('film' as const) : ('take' as const),
-    height: Object.hasOwn(RESOLUTIONS, res) ? res : 1080,
-    quality: (VIDEO_QUALITIES as readonly string[]).includes(q) ? (q as Quality) : 'high',
-    cam: Object.hasOwn(CAMERAS, cam) ? (cam as Smoothing) : 'cinematic',
-    tod: Object.hasOwn(TIME_LABEL, tod) ? (tod as TimeOfDay) : world.timeOfDay,
-  };
-}
-
-/** Monta o roteiro do vídeo: a gravação suavizada, ou o filme da partida desde a peça inicial. */
-function buildScript(kind: 'take' | 'film', cam: Smoothing, tod: TimeOfDay, fps: number): Script | null {
-  if (kind === 'take') {
-    if (!pendingTake) return null;
-    const { take: t, start } = pendingTake;
-    const poses = smooth(resample(t.times, t.poses, fps, t.t), SMOOTHING[cam] * fps);
-    return { ...start, events: t.events, poses, gameUi: true };
-  }
-  if (!moves.length) return null;
-  const plan = planFilm(moves, world.rig.yaw);
-  const poses = smooth(resample(plan.times, plan.poses, fps, plan.duration), 0.8 * fps);
-  const events: TakeEvent[] = moves.map(([q, r, rot], i) => ({ t: plan.placeAt[i], kind: 'place', q, r, rot }));
-  return { theme, seed: game.seed, rules: game.rules, specials: game.specials, prefix: [], tod, events, poses, gameUi: false };
-}
-
-const exportBar = document.createElement('div');
-exportBar.className = 'capture-bar export';
-exportBar.hidden = true;
-document.body.appendChild(exportBar);
-exportBar.addEventListener('click', (e) => {
-  if ((e.target as HTMLElement).closest('button')) exportCancel = true;
-});
-
-/**
- * Desenha o vídeo quadro a quadro e baixa o MP4. O mapa do jogo é refeito no fim (o vídeo
- * reconstrói o mapa do começo da gravação), com a câmera, a hora e o nível de antes.
- */
-async function exportVideo(kind: 'take' | 'film', height: number, quality: Quality, cam: Smoothing, tod: TimeOfDay) {
-  if (stage !== 'play') return null;
-  const size: VideoSize = { width: Math.round((height * 16) / 9 / 2) * 2, height, fps: 60 };
-  const pick = await pickCodec(size);
-  if (!pick) {
-    hud.toast('Este navegador não grava vídeo (falta o WebCodecs com H.264 ou VP9). Use o Chrome ou o Edge.', 'bad');
-    return null;
-  }
-  const script = buildScript(kind, cam, tod, size.fps);
-  if (!script) return null;
-  const rig = world.rig;
-  const live = { tod: world.timeOfDay, goal: rig.goal.clone(), target: rig.target.clone(), dist: rig.goalDist, yaw: rig.goalYaw, tilt: rig.goalTilt };
-  stage = 'export';
-  exportCancel = false;
-  setCaptureUi(true);
-  // O vídeo é 16:9: na tela, o canvas mostra o quadro inteiro com faixas, sem esticar.
-  canvas.classList.add('letterbox');
-  exportBar.hidden = false;
-  exportBar.innerHTML = `<span class="label">Preparando…</span><span class="bar"><i></i></span><button type="button">Cancelar</button>`;
-  const label = exportBar.querySelector<HTMLElement>('.label')!;
-  const bar = exportBar.querySelector<HTMLElement>('.bar i')!;
-  const t0 = performance.now();
-  let blob: Blob | null = null;
-  try {
-    blob = await renderVideo(
-      world,
-      script,
-      { size, quality, supersample: quality === 'cinema' ? 1.5 : 1 },
-      pick,
-      (f, total) => {
-        if (f % 10 && f !== total) return;
-        const left = ((performance.now() - t0) / f) * (total - f) / 1000;
-        label.textContent = `Quadro ${f.toLocaleString('pt-BR')} de ${total.toLocaleString('pt-BR')} · ${f < 30 ? 'calculando o tempo' : `faltam ~${left > 90 ? `${Math.round(left / 60)} min` : `${Math.ceil(left)} s`}`}`;
-        bar.style.width = `${((f / total) * 100).toFixed(1)}%`;
-      },
-      () => exportCancel,
-    );
-    if (blob) {
-      download(blob, `retalhos-${script.theme.id}-${stamp()}.mp4`);
-      hud.toast(`Vídeo salvo · ${clock(script.poses.length / size.fps)} em ${RESOLUTIONS[height as keyof typeof RESOLUTIONS] ?? `${height}p`} · ${(blob.size / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: blob.size < 1e7 ? 1 : 0 })} MB`, 'good');
-    } else hud.toast('Exportação cancelada.');
-  } catch (err) {
-    console.error(err);
-    hud.toast(`O vídeo não pôde ser exportado: ${err instanceof Error ? err.message : String(err)}`, 'bad');
-  } finally {
-    exportBar.hidden = true;
-    canvas.classList.remove('letterbox');
-    world.setFixedSize(null);
-    world.setTimeOfDay(live.tod, true);
-    world.setQuality(qualityMode === 'auto' ? autoLevel : qualityMode);
-    world.setTheme(theme, game.board);
-    rig.goal.copy(live.goal);
-    rig.target.copy(live.target);
-    rig.dist = rig.goalDist = live.dist;
-    rig.yaw = rig.goalYaw = live.yaw;
-    rig.tilt = rig.goalTilt = live.tilt;
-    dynres.reset();
-    world.setResolutionScale(1);
-    stage = 'play';
-    setCaptureUi(false);
-    refreshHud(true);
-  }
-  return blob;
-}
 
 // ------------------------------------------------------------------ modos especiais
 
@@ -1560,7 +1047,7 @@ for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart'
 function frame(now: number) {
   try {
     const idle = now - lastInput;
-    const skip = saveBattery && !special && stage === 'play' && !take && !shooting && idle > 4000 ? (idle > 15000 ? 3 : 2) : 1;
+    const skip = saveBattery && !special && capture.stage === 'play' && !capture.take && !capture.shooting && idle > 4000 ? (idle > 15000 ? 3 : 2) : 1;
     if (++frameNo % skip === 0) step(now);
   } finally {
     requestAnimationFrame(frame);
@@ -1575,10 +1062,10 @@ function step(now: number) {
   const dt = Math.min(0.05, realDt) * timeScale;
   last = now;
   // A foto e o vídeo desenham por conta própria.
-  if (stage === 'export' || shooting) return;
-  tutorial.tick(hud.modalOpen || stage !== 'play' || take !== null);
+  if (capture.stage === 'export' || capture.shooting) return;
+  tutorial.tick(hud.modalOpen || capture.stage !== 'play' || capture.take !== null);
   const c0 = performance.now();
-  keyboardCamera(dt);
+  input.keyboardCamera(dt);
   if (params.has('demo')) demoStep(dt);
   if (scoutPending && !hud.modalOpen) {
     scoutPending = false;
@@ -1586,7 +1073,7 @@ function step(now: number) {
   }
   world.tick(dt);
   updateAmbience(now);
-  if (take && !take.frame(realDt, { x: world.rig.target.x, z: world.rig.target.z, dist: world.rig.dist, yaw: world.rig.yaw, tilt: world.rig.tilt })) stopTake('A gravação chegou a 2 minutos.');
+  if (capture.take && !capture.take.frame(realDt, { x: world.rig.target.x, z: world.rig.target.z, dist: world.rig.dist, yaw: world.rig.yaw, tilt: world.rig.tilt })) capture.stopTake('A gravação chegou a 2 minutos.');
   hud.tick(dt);
   const markers = [];
   for (const q of game.board.quests) {
@@ -1633,7 +1120,7 @@ function step(now: number) {
       ].join('\n');
     }
     (window as unknown as { __stats: unknown }).__stats = { ...statsText, ...world.stats(), tiles: game.board.list.length, quality: world.quality, res: dynres.scale, gpu: gpuLabel };
-    if (take) updateCameraBtn();
+    if (capture.take) capture.updateCameraBtn();
   }
   adaptQuality(realDt, now);
 }
@@ -1834,14 +1321,14 @@ function start(data: unknown) {
 (window as unknown as { __video: (o?: { kind?: string; height?: number; quality?: string }) => Promise<unknown> }).__video = async (o = {}) => {
   const kind = o.kind === 'take' ? 'take' : 'film';
   if (kind === 'take') {
-    if (!take) return null;
-    stopTake();
+    if (!capture.take) return null;
+    capture.stopTake();
     hud.hideModal();
   }
   const height = Math.round(THREE.MathUtils.clamp(Number(o.height) || 360, 144, 2160) / 2) * 2;
   const q = (VIDEO_QUALITIES as readonly string[]).includes(o.quality ?? '') ? (o.quality as Quality) : 'high';
   const t0 = performance.now();
-  const blob = await exportVideo(kind, height, q, 'cinematic', world.timeOfDay);
+  const blob = await capture.exportVideo(kind, height, q, 'cinematic', world.timeOfDay);
   if (!blob) return null;
   const buf = new Uint8Array(await blob.arrayBuffer());
   let bin = '';

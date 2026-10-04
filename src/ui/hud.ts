@@ -1,10 +1,16 @@
 import type { Quest } from '../core/board';
+import type { TimeOfDay } from '../render/world';
 import { corner } from '../core/hex';
 import type { TileDef } from '../core/tiles';
 import { PERIOD_LABEL, PERIOD_ORDER, THEMES, type Theme } from '../themes/themes';
 import { CHARGES, HOUSE_COLORS, METALS, ORDINARIES, bannerSvg, type Banner, type HouseColor } from './banner';
 
 const $ = <E extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as E;
+
+export const TIME_LABEL: Record<TimeOfDay, string> = { dawn: 'Amanhecer', day: 'Dia', golden: 'Hora dourada', dusk: 'Entardecer', night: 'Noite' };
+export const TIME_ICON: Record<TimeOfDay, string> = { dawn: '◒', day: '☀', golden: '☼', dusk: '◐', night: '☾' };
+/** Ordem do botão e da tecla L: o dia passa uma hora por vez. */
+export const TIME_ORDER: TimeOfDay[] = ['dawn', 'day', 'golden', 'dusk', 'night'];
 
 export interface MarkerView {
   id: number;
