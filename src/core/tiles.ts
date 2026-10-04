@@ -117,11 +117,14 @@ const RAIL_PATTERNS: ReadonlyArray<readonly [number[], number]> = [
   [[0, 2, 4], 0.5],
 ];
 
-export function generateEdges(rng: Rng): T[] {
+export function generateEdges(rng: Rng, waterChance = 0.17, railChance = 0.09): T[] {
   const e: (T | null)[] = Array<T | null>(6).fill(null);
   const roll = rng();
-  if (roll < 0.17) for (const i of weighted(rng, WATER_PATTERNS)) e[i] = T.Water;
-  else if (roll < 0.26) for (const i of weighted(rng, RAIL_PATTERNS)) e[i] = T.Rail;
+  // Os limiares de sempre (0,17 e 0,26) ficam literais: 0,17+0,09 não é o mesmo número e mudaria a sequência.
+  const waterCut = waterChance === 0.17 && railChance === 0.09 ? 0.17 : waterChance;
+  const railCut = waterChance === 0.17 && railChance === 0.09 ? 0.26 : waterChance + railChance;
+  if (roll < waterCut) for (const i of weighted(rng, WATER_PATTERNS)) e[i] = T.Water;
+  else if (roll < railCut) for (const i of weighted(rng, RAIL_PATTERNS)) e[i] = T.Rail;
   fillLand(e, rng);
   return rotateEdges(e as T[], randInt(rng, 0, 5));
 }
@@ -143,8 +146,8 @@ const SYN_BY_TERRAIN: Record<number, SynKind[]> = {
   [T.Rail]: [],
 };
 
-export function generateTile(rng: Rng, withQuest: boolean): TileDef {
-  const edges = generateEdges(rng);
+export function generateTile(rng: Rng, withQuest: boolean, waterChance = 0.17, railChance = 0.09): TileDef {
+  const edges = generateEdges(rng, waterChance, railChance);
   let quest: QuestSpec | null = null;
   if (withQuest) {
     const options = [...new Set(edges)].filter((t) => t !== T.Grass);

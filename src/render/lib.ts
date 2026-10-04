@@ -1365,6 +1365,18 @@ export function stampGeometry(kind: SiteKind): THREE.BufferGeometry {
   return out.rotateX(-Math.PI / 2);
 }
 
+/** Posto da Estrada Real no pergaminho: um quadrado com um ponto, deitado no plano. */
+export function postStampGeometry(): THREE.BufferGeometry {
+  const bar = (w: number, h: number, z: number) => new THREE.PlaneGeometry(w, h).translate(0, 0, z);
+  const parts = [bar(0.34, 0.34, 0), bar(0.12, 0.12, 0.004)];
+  const out = mergeGeometries(parts.map((g) => {
+    const n = g.index ? g.toNonIndexed() : g;
+    for (const k of Object.keys(n.attributes)) if (k !== 'position') n.deleteAttribute(k);
+    return n;
+  }))!;
+  return out.rotateX(-Math.PI / 2);
+}
+
 // ---------------------------------------------------------------- maravilha
 
 /** Altura do pódio da maravilha (a obra cresce a partir dele). */

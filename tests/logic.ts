@@ -237,6 +237,94 @@ function questMove(game: Game, def: TileDef, rnd: () => number) {
   return best;
 }
 
+// Rotas de comércio, reescritas aqui: não chamam src/core/routes.ts.
+// Um par novo por rede (trilho/mercado e água/porto), o mais distante com d ≥ 2.
+function oracleIsMarket(p: Placed): boolean {
+  if (p.def.special === 'station') return true;
+  let rails = 0;
+  let village = false;
+  for (let i = 0; i < 6; i++) {
+    if (p.edges[i] !== T.Rail) continue;
+    rails++;
+    if (p.edges[(i + 1) % 6] === T.Village || p.edges[(i + 5) % 6] === T.Village) village = true;
+  }
+  return rails === 1 || village;
+}
+
+function oracleIsPort(p: Placed): boolean {
+  for (let i = 0; i < 6; i++) {
+    if (p.edges[i] !== T.Water) continue;
+    if (p.edges[(i + 1) % 6] === T.Village || p.edges[(i + 5) % 6] === T.Village) return true;
+  }
+  return false;
+}
+
+function oracleRouteNet(b: Board, terr: T, placed: Placed): Placed[] | null {
+  const seen = new Set<number>();
+  for (const start of b.list) {
+    if (seen.has(start.key) || !start.edges.includes(terr)) continue;
+    const net: Placed[] = [];
+    const stack = [start];
+    seen.add(start.key);
+    let hasPlaced = false;
+    while (stack.length) {
+      const t = stack.pop()!;
+      net.push(t);
+      if (t === placed) hasPlaced = true;
+      for (let i = 0; i < 6; i++) {
+        if (t.edges[i] !== terr) continue;
+        const n = b.tiles.get(hkey(t.q + DIRS[i][0], t.r + DIRS[i][1]));
+        if (n && !seen.has(n.key) && n.edges[opposite(i)] === terr) {
+          seen.add(n.key);
+          stack.push(n);
+        }
+      }
+    }
+    if (hasPlaced) return net;
+  }
+  return null;
+}
+
+function oraclePayOne(b: Board, placed: Placed, terr: T, isNode: (p: Placed) => boolean, kind: 'market' | 'port', paid: Set<string>) {
+  if (!placed.edges.includes(terr)) return null;
+  const net = oracleRouteNet(b, terr, placed);
+  if (!net) return null;
+  const nodes = net.filter(isNode);
+  if (nodes.length < 2) return null;
+  const comp = new Map<number, number>();
+  let id = 0;
+  for (const start of net) {
+    if (start === placed || comp.has(start.key)) continue;
+    const stack = [start];
+    comp.set(start.key, id);
+    while (stack.length) {
+      const t = stack.pop()!;
+      for (let i = 0; i < 6; i++) {
+        if (t.edges[i] !== terr) continue;
+        const n = b.tiles.get(hkey(t.q + DIRS[i][0], t.r + DIRS[i][1]));
+        if (!n || n === placed || comp.has(n.key) || n.edges[opposite(i)] !== terr) continue;
+        comp.set(n.key, id);
+        stack.push(n);
+      }
+    }
+    id++;
+  }
+  const fresh = (a: Placed, c: Placed) => a === placed || c === placed || comp.get(a.key) !== comp.get(c.key);
+  let best: { a: Placed; c: Placed; d: number } | null = null;
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], c = nodes[j];
+      if (!fresh(a, c)) continue;
+      const d = hexDistance(a.q, a.r, c.q, c.r);
+      if (d < 2 || paid.has(`${kind}:${Math.min(a.key, c.key)}:${Math.max(a.key, c.key)}`)) continue;
+      if (!best || d > best.d) best = { a, c, d };
+    }
+  }
+  if (!best) return null;
+  paid.add(`${kind}:${Math.min(best.a.key, best.c.key)}:${Math.max(best.a.key, best.c.key)}`);
+  return { kind, d: best.d, points: Math.round(4 * best.d * (best.d / 6 + 1)), tiles: best.d >= 6 ? 1 : 0 };
+}
+
 function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: Policy = 'greedy', mode: Mode = MODES[0], specials: SpecialKind[] = []): GameLog {
   const prnd = mulberry32(seed ^ 0x5bd1e995);
   const theme = THEMES[themeIdx];
@@ -266,6 +354,8 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
   const oracleSyn: Record<string, number> = { lumber: 0, mill: 0, pasture: 0, apiary: 0 };
   const questBase = new Map<number, number>();
   let expectedScore = 0;
+  // Pares de rota já pagos nesta partida (o replay reconstrói o conjunto; o save não o guarda).
+  const oRoutesPaid = new Set<string>();
   let expectedStack = rules.startTiles;
   let maxActive = 0;
 
@@ -506,6 +596,17 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     }
     assert(JSON.stringify(res.wonder) === JSON.stringify(wonderExp), `seed ${seed}: maravilha ${JSON.stringify(res.wonder)} != oráculo ${JSON.stringify(wonderExp)}`);
     assert((b.wonder?.tile.index ?? null) === wonderAt && (b.wonder?.stage ?? 0) === wonderStage, `seed ${seed}: estado da maravilha diverge do oráculo`);
+
+    // --- rotas: só no modo que liga a regra; a distância entra no placar antes do limiar da era
+    const routeHits = rules.routes
+      ? [oraclePayOne(b, res.placed, T.Rail, oracleIsMarket, 'market', oRoutesPaid), oraclePayOne(b, res.placed, T.Water, oracleIsPort, 'port', oRoutesPaid)].filter((h) => h !== null)
+      : [];
+    for (const h of routeHits) {
+      pts += h.points;
+      gained += h.tiles;
+    }
+    if (routeHits.length) inc('rotas');
+    assert(JSON.stringify(res.routes) === JSON.stringify(routeHits), `seed ${seed}: rotas ${JSON.stringify(res.routes)} != oráculo ${JSON.stringify(routeHits)}`);
 
     // --- eras: limiares de pontuação, +eraTiles por era
     expectedScore += pts;

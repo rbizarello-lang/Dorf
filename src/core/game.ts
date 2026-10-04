@@ -4,6 +4,7 @@ import { unkey } from './hex';
 import { mulberry32, type Rng } from './rng';
 import { generateSites } from './sites';
 import { type SpecialKind, specialSlots, specialTile } from './specials';
+import { routePosts } from './routes';
 import { T, generateTile, rotateEdges, type TileDef } from './tiles';
 
 export interface Move {
@@ -41,6 +42,7 @@ export class Game {
     this.rng = mulberry32(seed);
     this.slots = specialSlots(seed, specials);
     this.board = new Board(rules);
+    if (rules.routes) this.board.posts = routePosts(seed);
     const starter: TileDef = {
       edges: [T.Grass, T.Grass, T.Forest, T.Forest, T.Field, T.Village],
       seed: Math.floor(this.rng() * 2 ** 31),
@@ -69,7 +71,7 @@ export class Game {
     const kind = this.slots.get(this.drawn);
     if (kind) return specialTile(rng, kind);
     const roll = rng();
-    const def = generateTile(rng, true);
+    const def = generateTile(rng, true, this.rules.waterChance, this.rules.railChance);
     // Missões ainda na mão (atual e próxima) contam para o limite.
     let pending = 0;
     for (const t of new Set([this.current, this.next])) if (t?.quest) pending++;
@@ -92,7 +94,7 @@ export class Game {
         continue;
       }
       rng();
-      out.push({ ...generateTile(rng, true), quest: null });
+      out.push({ ...generateTile(rng, true, this.rules.waterChance, this.rules.railChance), quest: null });
     }
     return out;
   }

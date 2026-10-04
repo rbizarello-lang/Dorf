@@ -522,6 +522,9 @@ function announce(res: PlaceResult) {
     sfx.perfect();
     hud.floater(s.x, s.y - 46, 'Perfeito!', 'big');
   }
+  for (const rt of res.routes) {
+    hud.toast(`${rt.kind === 'market' ? 'Rota de mercado' : 'Rota de porto'}: ${rt.d} casas, +${rt.points}${rt.tiles ? ' e +1 peça' : ''}.`, 'good');
+  }
   // Interações: um aviso por borda, perto dela.
   res.synergies.forEach((h, k) => {
     const [dq, dr] = DIRS[h.edge];
