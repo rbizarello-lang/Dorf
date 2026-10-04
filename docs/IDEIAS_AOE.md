@@ -28,7 +28,7 @@ Pesquisa de inspiração (visual e mecânica) na série Age of Empires · 01/10/
 | 10 Pesca e cardumes | feita (#42) |
 | 11 e 12 Sítios e terra incógnita | feitas (#21) |
 | 13 Maravilha | feita (#24) |
-| 14 Rotas de comércio | visual feita (carga, parada de 0,8 s e moeda no clássico); **a regra completa, num modo próprio, a fazer** |
+| 14 Rotas de comércio | feita (visual no clássico; regra completa no modo Estrada Real) |
 | 15 Cor da casa, estandartes, brasão e monumentos | feita (#23; monumentos) |
 | 16 Minimapa e linha do tempo | **a fazer** |
 | 17 Interface por tema | feita |
@@ -36,7 +36,7 @@ Pesquisa de inspiração (visual e mecânica) na série Age of Empires · 01/10/
 | 19 Atmosferas, fogo e estações | **a fazer** |
 | 20 Almanaque | feita (#33) |
 
-Próximo passo, na ordem do documento: 16, 19 e a regra das rotas num modo próprio. Um PR por proposta, saindo do `main`, com `npm run check` e `npm run smoke` antes do commit.
+Próximo passo, na ordem do documento: 16 e 19. Um PR por proposta, saindo do `main`, com `npm run check` e `npm run smoke` antes do commit.
 
 ## Resumo
 

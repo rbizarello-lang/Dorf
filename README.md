@@ -69,6 +69,7 @@ O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Re
 | Zen | peças sem fim; pontos e eras por gosto |
 | Desafio do dia | semente do dia e regras padrão, iguais para todo mundo; sem desfazer |
 | Exploradores | 10 sítios e 60 peças; achar o último encerra, e cada peça que sobrou vale 20 pontos |
+| Estrada Real | mais trilhos; mercados (estação, trilho de uma borda ou vila no trilho) e portos (vila no rio) da mesma rede rendem pela distância, uma vez por par. A 2 casas são 11 pontos, a 4 são 27, a 6 são 48 e uma peça, e assim por diante. Quatro postos aparecem no mapa |
 
 **Interações:** algumas bordas diferentes também "conversam". Quando se encostam, rendem +5 e erguem uma construção na borda. A prévia acende em dourado antes de você colocar a peça.
 
@@ -136,7 +137,7 @@ O botão de qualidade abre a lista: **Auto**, **Cinema**, **Ultra**, **Alta**, *
 | `?time=night` | `dawn`, `day`, `golden`, `dusk` ou `night` |
 | `?quality=high` | `auto`, `cinema`, `ultra`, `high`, `medium` ou `low` |
 | `?webgl` | força o WebGL2 em vez do WebGPU |
-| `?mode=zen` | modo inicial: `classico`, `zen`, `diario` ou `exploradores` |
+| `?mode=zen` | modo inicial: `classico`, `zen`, `diario`, `exploradores` ou `rotas` |
 | `?debug` | mostra FPS, draw calls, triângulos e instâncias |
 | `?auto=40` | a IA coloca 40 peças de uma vez (tabuleiro de exemplo) |
 | `?demo` | a IA joga sozinha, com animação |

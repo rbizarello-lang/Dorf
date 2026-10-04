@@ -10,7 +10,7 @@ import { T, rotateEdges, type TileDef } from '../core/tiles';
 import type { Theme } from '../themes/types';
 import { CameraRig, FOV } from './cameraRig';
 import { createRenderer, type Backend } from './gpu';
-import { Lib, WONDER_PODIUM, instGeometry, setInstColor, stampGeometry } from './lib';
+import { Lib, WONDER_PODIUM, instGeometry, postStampGeometry, setInstColor, stampGeometry } from './lib';
 import { Life } from './life';
 import { CLOUD_TOP, U, makeVoidMaterial, softShadowFilter } from './materials';
 import { A, fogNode } from './atmosphere';
@@ -1229,7 +1229,7 @@ export class World {
 
   private updateStamps(board: Board) {
     const left = board.sites.filter((s) => !s.found);
-    const sig = left.map((s) => `${s.q},${s.r},${s.kind}`).join('|');
+    const sig = left.map((s) => `${s.q},${s.r},${s.kind}`).join('|') + '#' + board.posts.map((p) => `${p.q},${p.r}`).join('|');
     if (sig === this.stampSig) return;
     this.stampSig = sig;
     const geos = left.map((s) => {
@@ -1237,6 +1237,10 @@ export class World {
       // Cada carimbo um pouco torto, como batido à mão (sem sorteio: vem da posição).
       return stampGeometry(s.kind).rotateY(Math.sin(s.q * 12.9898 + s.r * 78.233) * 0.25).translate(x, 0, z);
     });
+    for (const p of board.posts) {
+      const { x, z } = hexToWorld(p.q, p.r);
+      geos.push(postStampGeometry().rotateY(0.2).translate(x, 0, z));
+    }
     this.stamps.geometry.dispose();
     this.stamps.geometry = geos.length ? mergeGeometries(geos)! : new THREE.BufferGeometry();
   }

@@ -3,6 +3,7 @@ import { DIRS, hexDistance, hkey, opposite } from './hex';
 import { LOOKOUT_MOVES, SITE_REWARD, type Site, type SiteKind } from './sites';
 import { SPECIALS, type SpecialKind } from './specials';
 import { INFLUENCE, INFLUENCE_CAP, SYN_KINDS, type SynHit, type SynKind, synergyOf } from './synergy';
+import { payRoutes, type RouteHit, type RoutePost } from './routes';
 import { T, isStrict, rotateEdges, type QuestKind, type TileDef } from './tiles';
 
 export interface Rules {
@@ -43,6 +44,12 @@ export interface Rules {
   /** Pontos e peças ao completar a maravilha. */
   wonderPoints: number;
   wonderTiles: number;
+  /** Chance de a peça sair com rio (o resto do sorteio não muda se o valor for o de sempre, 0,17). */
+  waterChance: number;
+  /** Chance de a peça sair com trilho, somada à da água (0,09 de sempre; 0,20 no modo Estrada Real). */
+  railChance: number;
+  /** Rotas de comércio: mercados e portos da mesma rede rendem pela distância (src/core/routes.ts). */
+  routes: boolean;
   /** Peças por missão: grupo (mais 1 a cada 6 peças pedidas), grupo exato, fechar, contagem (perfeitos, interações). */
   groupQuestTiles: number;
   exactQuestTiles: number;
@@ -72,6 +79,9 @@ export const DEFAULT_RULES: Rules = {
   wonderStages: 6,
   wonderPoints: 300,
   wonderTiles: 6,
+  waterChance: 0.17,
+  railChance: 0.09,
+  routes: false,
   groupQuestTiles: 5,
   exactQuestTiles: 7,
   closeQuestTiles: 6,
@@ -167,6 +177,8 @@ export interface PlaceResult {
   special: { kind: SpecialKind; count: number; points: number; tiles: number } | null;
   /** Influência das construções vizinhas que esta peça aproveitou. */
   influence: Check['influence'];
+  /** Rotas pagas nesta jogada (modo Estrada Real). Vazio no clássico. */
+  routes: RouteHit[];
 }
 
 export class Board {
@@ -192,6 +204,10 @@ export class Board {
   readonly influence = new Map<number, Set<SynKind>>();
   /** Cartas escolhidas nas viradas de era (src/core/blessings.ts), na ordem. */
   readonly blessings: BlessingId[] = [];
+  /** Pares de rota já pagos (`market:chave:chave`), para não render duas vezes. */
+  readonly routesPaid = new Set<string>();
+  /** Postos desenhados no pergaminho quando o modo tem rotas. */
+  posts: RoutePost[] = [];
   private questSeq = 0;
   // Union-find sobre (peça, setor): refeito a cada jogada, O(n).
   private parent = new Int32Array(0);
@@ -430,6 +446,12 @@ export class Board {
       wonder = { stage: 0, started: true, done: false };
     }
 
+    const routes = R.routes ? payRoutes(this, placed) : [];
+    for (const h of routes) {
+      points += h.points;
+      tilesGained += h.tiles;
+    }
+
     this.score += points;
     // Eras: a pontuação acumulada abre a próxima, que traz peças.
     let eraUp: number | null = null;
@@ -439,7 +461,7 @@ export class Board {
       eraUp = this.era;
       this.markPending = this.era;
     }
-    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special, influence: c.influence };
+    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special, influence: c.influence, routes };
   }
 
   blessed(id: BlessingId) {
