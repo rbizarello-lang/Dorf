@@ -10,7 +10,8 @@ import { Mp4Writer, type CodecPick, type VideoSize } from './encoder';
 import type { Pose } from './path';
 import type { TakeEvent } from './take';
 
-export type MoveRec = readonly [number, number, number];
+/** q, r, giro e as escolhas de era feitas logo depois da jogada. */
+export type MoveRec = readonly number[];
 
 export interface Script {
   theme: Theme;
@@ -69,9 +70,10 @@ function breathe(): Promise<void> {
  */
 export async function renderVideo(world: World, s: Script, o: RenderOptions, pick: CodecPick, progress: (frame: number, total: number) => void, cancelled: () => boolean): Promise<Blob | null> {
   const game = new Game(s.seed, s.rules, s.specials);
-  for (const [q, r, rot] of s.prefix) {
+  for (const [q, r, rot, ...picks] of s.prefix) {
     game.rot = rot;
     if (!game.place(q, r)) break;
+    for (const p of picks) game.choose(p);
     while (game.discardIfStuck());
   }
   world.setQuality(o.quality);
@@ -100,7 +102,10 @@ export async function renderVideo(world: World, s: Script, o: RenderOptions, pic
       world.placeAnimated(res.placed);
       world.updateFrontier(game.board);
       world.placeFx(res);
+      for (const p of e.picks ?? []) game.choose(p);
       while (game.discardIfStuck());
+    } else if (e.kind === 'choose') {
+      game.choose(e.pick);
     } else if (e.kind === 'time') {
       if (TIMES.includes(e.tod)) world.setTimeOfDay(e.tod as TimeOfDay);
     } else if (e.kind === 'ghost') {

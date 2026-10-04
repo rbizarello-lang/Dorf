@@ -1,3 +1,4 @@
+import type { BlessingId } from '../core/blessings';
 import type { Rules } from '../core/board';
 
 // Esquema de tema. Um tema é só dado: paleta, nomes e a escolha de "kits"
@@ -285,6 +286,8 @@ export interface Theme {
   rules?: Partial<Rules>;
   /** Nomes das 4 eras da vila (padrão: Aldeia, Vila, Burgo, Cidade). */
   eras?: [string, string, string, string];
+  /** Nomes próprios do tema para as cartas da virada de era (src/core/blessings.ts). */
+  blessingNames?: Partial<Record<BlessingId, string>>;
   /** `false` = as casas não mudam com a era (módulos pré-fabricados não começam como taipa e palha). */
   eraHouses?: false;
   /** Remate do Centro da vila na última era (padrão: 'spire'). */

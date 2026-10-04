@@ -1,3 +1,4 @@
+import { BLESSING, SYN_BLESSING, type BlessingId } from './blessings';
 import { DIRS, hexDistance, hkey, opposite } from './hex';
 import { LOOKOUT_MOVES, SITE_REWARD, type Site, type SiteKind } from './sites';
 import { SPECIALS, type SpecialKind } from './specials';
@@ -35,6 +36,8 @@ export interface Rules {
    * peça colocada depois avança uma etapa. 0 = sem maravilha.
    */
   wonderStages: number;
+  /** Escolha de 1 entre 2 cartas a cada era nova (src/core/blessings.ts). */
+  blessings: boolean;
   /** Pontos e peças ao completar a maravilha. */
   wonderPoints: number;
   wonderTiles: number;
@@ -62,6 +65,7 @@ export const DEFAULT_RULES: Rules = {
   infinite: false,
   endOnSites: false,
   leftoverPoints: 20,
+  blessings: true,
   wonderStages: 6,
   wonderPoints: 300,
   wonderTiles: 6,
@@ -177,6 +181,8 @@ export class Board {
   lookout = 0;
   /** Maravilha: peça do canteiro e etapa (pronta quando chega a `rules.wonderStages`). */
   wonder: { tile: Placed; stage: number } | null = null;
+  /** Cartas escolhidas nas viradas de era (src/core/blessings.ts), na ordem. */
+  readonly blessings: BlessingId[] = [];
   private questSeq = 0;
   // Union-find sobre (peça, setor): refeito a cada jogada, O(n).
   private parent = new Int32Array(0);
@@ -256,7 +262,7 @@ export class Board {
     let points = c.matches * R.matchPoints;
     const perfect = c.neighbors >= 2 && c.matches === c.neighbors;
     if (perfect) {
-      points += R.perfectBonus;
+      points += R.perfectBonus + (this.blessed('surveyors') ? BLESSING.perfect : 0);
       this.perfects++;
     }
     placed.synergies = c.synergies;
@@ -269,6 +275,7 @@ export class Board {
     for (const h of c.synergies) {
       this.synergyCount[h.kind]++;
       points += R.synergyBonus[h.kind] ?? 0;
+      if (this.blessed(SYN_BLESSING[h.kind])) points += BLESSING.synergy;
     }
     // Bônus do tema por terreno encaixado.
     for (let i = 0; i < 6; i++) if (c.edgeState[i] === 1) points += R.matchBonus[edges[i]] ?? 0;
@@ -285,7 +292,8 @@ export class Board {
       placed.site = site.kind;
       points += SITE_REWARD[site.kind].points;
       tilesGained += SITE_REWARD[site.kind].tiles;
-      if (site.kind === 'lookout') this.lookout = LOOKOUT_MOVES;
+      if (site.kind === 'lookout') this.lookout = Math.max(this.lookout, LOOKOUT_MOVES);
+      if (this.blessed('cartographers')) tilesGained += BLESSING.site;
     }
     // Peça especial: pontos por peça à volta com o terreno dela (contadas na hora de colocar).
     let special: PlaceResult['special'] = null;
@@ -304,7 +312,7 @@ export class Board {
       t.closed = true;
       closed.push(t);
       points += R.closedBonus;
-      tilesGained += R.closedTiles;
+      tilesGained += R.closedTiles + (this.blessed('builders') ? BLESSING.closed : 0);
     }
 
     this.computeGroups();
@@ -333,7 +341,7 @@ export class Board {
       }
       if (quest.state === 'done') {
         questsDone.push(quest);
-        tilesGained += quest.reward;
+        tilesGained += quest.reward + (this.blessed('pilgrims') ? BLESSING.quest : 0);
         quest.points = gain;
         points += gain;
         this.questsCompleted++;
@@ -388,6 +396,16 @@ export class Board {
       this.markPending = this.era;
     }
     return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special };
+  }
+
+  blessed(id: BlessingId) {
+    return this.blessings.includes(id);
+  }
+
+  /** Aplica a carta escolhida na virada de era (vale da próxima jogada em diante). */
+  bless(id: BlessingId) {
+    this.blessings.push(id);
+    if (id === 'cartographers') this.lookout = Math.max(this.lookout, BLESSING.lookout);
   }
 
   /** Contagem do tabuleiro que uma missão de contagem acompanha. */

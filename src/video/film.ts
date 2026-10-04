@@ -27,7 +27,7 @@ const ORBIT = 0.045;
 export const fitDist = (r: number) => Math.min(46, Math.max(7, r * 2.1 + 5));
 
 /** Plano do filme para as jogadas `moves` ([q, r, giro]) a partir da peça inicial em (0, 0). */
-export function planFilm(moves: readonly (readonly [number, number, number])[], yaw0: number): FilmPlan {
+export function planFilm(moves: readonly (readonly number[])[], yaw0: number): FilmPlan {
   const n = moves.length;
   const gap = Math.min(MAX_GAP, Math.max(MIN_GAP, BODY / Math.max(1, n)));
   const placeAt = moves.map((_, i) => INTRO + i * gap);

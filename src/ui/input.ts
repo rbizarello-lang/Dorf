@@ -30,6 +30,8 @@ export interface InputHost {
   requestNewGame(): void;
   undo(): void;
   toggleMusic(): void;
+  /** Escolhe a carta 0 ou 1 quando a escolha de era está aberta; devolve se escolheu. */
+  choose(pick: number): boolean;
 }
 
 export interface Input {
@@ -193,7 +195,10 @@ export function bindInput(h: InputHost): Input {
       hud.closeThemeMenu();
       return;
     }
-    if (hud.modalOpen) return;
+    if (hud.modalOpen) {
+      if (k === '1' || k === '2') h.choose(Number(k) - 1);
+      return;
+    }
     sfx.unlock();
     if (k === 'r' || k === ' ') {
       e.preventDefault();

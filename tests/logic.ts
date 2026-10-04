@@ -29,6 +29,10 @@ const ORACLE_SPECIAL: Record<SpecialKind, { edges: T[]; terrain: T; radius: numb
   lighthouse: { edges: [T.Water, T.Grass, T.Grass, T.Forest, T.Grass, T.Grass], terrain: T.Water, radius: 2, per: 10, tiles: 0, lookout: 5 },
 };
 
+// Cartas da virada de era (cópia independente dos números de src/core/blessings.ts).
+const ORACLE_BLESS = { synergy: 5, perfect: 10, closed: 1, quest: 2, site: 1, lookout: 10 };
+const BLESS_IDS = ['lumber', 'mill', 'pasture', 'apiary', 'surveyors', 'builders', 'pilgrims', 'cartographers'];
+
 // Math.random determinístico para tornar bestMove reprodutível nos testes.
 function seedMathRandom(seed: number) {
   const r = mulberry32(seed);
@@ -144,7 +148,8 @@ interface GameLog {
   themeId: string;
   rules: Rules;
   specials: SpecialKind[];
-  moves: [number, number, number][];
+  /** q, r, rot e, depois, as cartas escolhidas logo após a jogada (0 ou 1). */
+  moves: number[][];
   snapshots: { score: number; stack: number; cur: number | null; next: number; tiles: number; active: number; discarded: number; perfects: number; qc: number }[];
   finalScore: number;
   finalStack: number;
@@ -233,6 +238,9 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
   // Maravilha (oráculo): índice da peça do canteiro e etapa.
   let wonderAt: number | null = null;
   let wonderStage = 0;
+  // Cartas escolhidas e escolhas ainda na mesa (oráculo).
+  const oBless = new Set<string>();
+  let oOffers = 0;
   const game = new Game(seed, rules, specials);
   const b = game.board;
   const specialsSeen = new Set<SpecialKind>();
@@ -326,12 +334,16 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       if (a === c) pts += rules.matchBonus[a] ?? 0;
       else {
         const pair = SYN_PAIRS.findIndex(([x, y]) => (a === x && c === y) || (a === y && c === x));
-        if (pair >= 0) pts += rules.synergyBonus[(['lumber', 'mill', 'pasture', 'apiary'] as const)[pair]] ?? 0;
+        if (pair >= 0) {
+          const kind = (['lumber', 'mill', 'pasture', 'apiary'] as const)[pair];
+          pts += rules.synergyBonus[kind] ?? 0;
+          if (oBless.has(kind)) pts += ORACLE_BLESS.synergy;
+        }
       }
     }
     assert(res.synergies.length === syn, `seed ${seed}: interações ${res.synergies.length} != oráculo ${syn}`);
     const perfect = nbs >= 2 && mt === nbs;
-    if (perfect) pts += rules.perfectBonus;
+    if (perfect) pts += rules.perfectBonus + (oBless.has('surveyors') ? ORACLE_BLESS.perfect : 0);
     assert(res.perfect === perfect, `seed ${seed}: perfect diverge`);
     if (perfect) oraclePerfects++;
     for (const k of synKinds) oracleSyn[k]++;
@@ -341,7 +353,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     assert(newlyClosed.length === res.closed.length, `seed ${seed}: closed diverge (${newlyClosed.length} vs ${res.closed.length})`);
     for (const t of b.list) assert(t.closed === closedAfter.has(t.index), `seed ${seed}: flag closed inconsistente na peça ${t.index}`);
     pts += newlyClosed.length * rules.closedBonus;
-    let gained = newlyClosed.length * rules.closedTiles;
+    let gained = newlyClosed.length * (rules.closedTiles + (oBless.has('builders') ? ORACLE_BLESS.closed : 0));
     ts.closed += newlyClosed.length;
     if (perfect) ts.perfects++;
 
@@ -379,7 +391,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       assert(q.state === expected, `seed ${seed}: missão ${q.id} (${q.kind}${q.exact ? ' exata' : ''}) alvo ${q.target} progresso ${progress} estado ${q.state} esperado ${expected}`);
       if (expected === 'done') {
         pts += gain;
-        gained += q.reward;
+        gained += q.reward + (oBless.has('pilgrims') ? ORACLE_BLESS.quest : 0);
         ts.questsDone++;
         if (q.exact) ts.exactDone++;
         inc('missao_ok_' + q.kind);
@@ -419,7 +431,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     // --- sítio
     if (siteKind) {
       pts += ORACLE_SITE[siteKind].points;
-      gained += ORACLE_SITE[siteKind].tiles;
+      gained += ORACLE_SITE[siteKind].tiles + (oBless.has('cartographers') ? ORACLE_BLESS.site : 0);
       inc('sitios_' + siteKind);
     }
     // --- peça especial: pontos por peça a até `radius` hexágonos com ao menos uma borda do terreno dela
@@ -482,6 +494,26 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     assert((res.placed.eraMark ?? null) === expectedMark, `seed ${seed}: marco da era ${res.placed.eraMark} != oráculo ${expectedMark}`);
     assert(b.era === expectedEra, `seed ${seed}: era ${b.era} != oráculo ${expectedEra}`);
     assert((res.eraUp !== null) === eraUps > 0, `seed ${seed}: eraUp ${res.eraUp} sem avanço esperado`);
+
+    // --- escolha de era: uma por era nova; a política 'worst' nunca escolhe (partida sem cartas)
+    if (rules.blessings) oOffers += eraUps;
+    assert(game.offers.length === oOffers, `seed ${seed}: ${game.offers.length} escolhas de era na mesa, oráculo ${oOffers}`);
+    const onTable = game.offers.flat();
+    for (const o of game.offers) assert(o.length === 2 && o[0] !== o[1] && o.every((id) => BLESS_IDS.includes(id) && !oBless.has(id)), `seed ${seed}: escolha de era inválida ${JSON.stringify(o)}`);
+    assert(new Set(onTable).size === onTable.length, `seed ${seed}: carta repetida na mesa ${JSON.stringify(game.offers)}`);
+    while (policy !== 'worst' && game.offers.length) {
+      const pick = prnd() < 0.5 ? 0 : 1;
+      const want = game.offers[0][pick];
+      const lookBefore = b.lookout;
+      const got = game.choose(pick);
+      assert(got === want, `seed ${seed}: escolheu ${got}, esperado ${want}`);
+      oBless.add(want);
+      oOffers--;
+      log.moves[log.moves.length - 1].push(pick);
+      if (want === 'cartographers') assert(b.lookout === Math.max(lookBefore, ORACLE_BLESS.lookout), `seed ${seed}: cartógrafos não abriram o mirante`);
+      inc('cartas_' + want);
+    }
+    assert(b.blessings.length === oBless.size && b.blessings.every((id) => oBless.has(id)), `seed ${seed}: cartas ${b.blessings} != oráculo ${[...oBless]}`);
 
     // --- exploradores: último sítio encerra e as peças que sobram viram pontos
     const allFound = rules.endOnSites && b.sites.length > 0 && b.sites.every((st) => st.found);
@@ -578,11 +610,12 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
 
 function replay(log: GameLog, upTo = log.moves.length) {
   const game = new Game(log.seed, log.rules, log.specials);
-  const moves: [number, number, number][] = [];
-  for (const [q, r, rot] of log.moves.slice(0, upTo)) {
+  const moves: number[][] = [];
+  for (const [q, r, rot, ...picks] of log.moves.slice(0, upTo)) {
     game.rot = rot;
     if (!game.place(q, r)) break;
-    moves.push([q, r, rot]);
+    for (const p of picks) game.choose(p);
+    moves.push([q, r, rot, ...picks]);
     while (game.discardIfStuck());
   }
   return { game, moves };
@@ -652,9 +685,10 @@ let contOk = 0, contBad = 0;
 for (const log of logs.slice(0, 120)) {
   const k = Math.max(1, Math.floor(log.moves.length / 3));
   const { game } = replay(log, k);
-  for (const [q, r, rot] of log.moves.slice(k)) {
+  for (const [q, r, rot, ...picks] of log.moves.slice(k)) {
     game.rot = rot;
     if (!game.place(q, r)) break;
+    for (const p of picks) game.choose(p);
     while (game.discardIfStuck());
   }
   if (game.board.score === log.finalScore && game.stack === log.finalStack) contOk++;

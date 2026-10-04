@@ -23,12 +23,14 @@ import { Hud, TIME_ICON, TIME_LABEL, TIME_ORDER, glyph, questLabel, questMarker 
 import { bindInput } from './ui/input';
 import { Progress, SPECIAL_NAME, UNLOCKS } from './ui/progress';
 import { Tutorial } from './ui/tutorial';
+import { blessingName, blessingRule, choiceHtml } from './ui/eraChoice';
 import './ui/style.css';
 
 // ------------------------------------------------------------------ estado
 
 type QualityMode = 'auto' | Quality;
-type MoveRec = [number, number, number];
+/** q, r, giro e as escolhas de era (0 ou 1) feitas logo depois da jogada. */
+type MoveRec = number[];
 /** v4: modos, eras, sítios e bônus por tema. Guarda a pontuação para conferir o replay. */
 interface Save {
   v: 8;
@@ -187,10 +189,11 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   if (!replay.length) committed = false;
   undone = undos;
   moves = [];
-  for (const [q, r, rot] of replay) {
+  for (const [q, r, rot, ...picks] of replay) {
     game.rot = rot;
     if (!game.place(q, r)) break;
-    moves.push([q, r, rot]);
+    for (const p of picks) game.choose(p);
+    moves.push([q, r, rot, ...picks]);
     while (game.discardIfStuck());
   }
   game.rot = 0;
@@ -235,7 +238,7 @@ function snapshot(): Save {
 /** Aceita só saves completos e da versão atual; qualquer outra coisa é descartada. */
 function validSave(raw: unknown): Save | null {
   const s = raw as Partial<Save> | null;
-  const okMove = (m: unknown) => Array.isArray(m) && m.length === 3 && m.every(Number.isInteger) && m[2] >= 0 && m[2] < 6;
+  const okMove = (m: unknown) => Array.isArray(m) && m.length >= 3 && m.length <= 6 && m.every(Number.isInteger) && m[2] >= 0 && m[2] < 6 && m.slice(3).every((p) => p === 0 || p === 1);
   if (s && s.v === SAVE_VERSION && Number.isInteger(s.seed) && s.seed! > 0 && typeof s.rulesId === 'string' && MODES.some((m) => m.id === s.mode) && Number.isInteger(s.undone) && s.undone! >= 0 && Array.isArray(s.moves) && s.moves.every(okMove) && Number.isFinite(s.score) && Array.isArray(s.specials) && s.specials.every((k) => SPECIAL_KINDS.includes(k))) return s as Save;
   return null;
 }
@@ -356,6 +359,11 @@ function screenOf(q: number, r: number, y = 0.4) {
 function place(q: number, r: number) {
   lastInput = performance.now();
   if (!game.current || hud.modalOpen) return;
+  // A escolha de era fica na mesa até a vila escolher: a próxima peça espera.
+  if (game.offers.length) {
+    showChoice();
+    return;
+  }
   const check = game.check(q, r);
   if (!check?.valid) {
     if (check && !check.occupied && check.neighbors > 0) {
@@ -401,6 +409,11 @@ function place(q: number, r: number) {
   refreshHud();
   hud.say(`${res.points > 0 ? `Mais ${res.points} pontos. ` : ''}Total ${game.board.score.toLocaleString('pt-BR')}. ${game.rules.infinite ? '' : `${game.stack} peças na pilha.`}`);
   persist();
+  if (res.eraUp !== null && game.offers.length && !game.over) {
+    clearTimeout(choiceTimer);
+    // Primeiro a onda dourada e a fanfarra, depois as cartas.
+    choiceTimer = window.setTimeout(() => !hud.modalOpen && showChoice(), 1500);
+  }
   if (game.over && !gameOverShown) {
     gameOverShown = true;
     commitProgress();
@@ -413,6 +426,32 @@ function place(q: number, r: number) {
       }, 900);
     }, 1100);
   }
+}
+
+let choiceTimer = 0;
+
+/** As duas cartas da escolha de era mais antiga ainda na mesa. */
+function showChoice() {
+  const offer = game.offers[0];
+  if (!offer || game.over) return;
+  clearTimeout(choiceTimer);
+  // A era da carta: a atual menos as escolhas que ainda vêm depois desta.
+  hud.showModal(choiceHtml(offer, `Era ${eraName(game.board.era - game.offers.length + 1)}`, theme));
+}
+
+/** Escolhe a carta 0 ou 1; a escolha fica gravada junto da última jogada (replay e desfazer). */
+function chooseBlessing(pick: number) {
+  if (!game.offers.length || !moves.length) return false;
+  const id = game.choose(pick)!;
+  moves[moves.length - 1].push(pick);
+  capture.take?.event({ kind: 'choose', pick });
+  hud.hideModal();
+  sfx.quest();
+  hud.toast(`${blessingName(id, theme)}: ${blessingRule(id, theme)}`, 'good');
+  refreshHud();
+  persist();
+  if (game.offers.length) showChoice();
+  return true;
 }
 
 /** Dicas das primeiras partidas, conforme o que a jogada fez acontecer. */
@@ -562,7 +601,8 @@ function showHelp(tab = 'basico') {
       'eras',
       'Eras',
       `<ul>
-        <li>Com ${R.eraScores.slice(1).map((v) => v.toLocaleString('pt-BR')).join(', ')} pontos a vila muda de era e ganha +${R.eraTiles} peças. O Centro, no meio da primeira peça, muda de forma, e a próxima peça com vila ergue o marco da era.</li>
+        <li>Com ${R.eraScores.slice(1).map((v) => v.toLocaleString('pt-BR')).join(', ')} pontos a vila muda de era e ganha +${R.eraTiles} peças. O Centro, no meio da primeira peça, muda de forma, as casas mudam de estilo, e a próxima peça com vila ergue o marco da era.</li>
+        ${R.blessings ? `<li><b>Escolha da era</b>: a cada era nova a vila escolhe 1 de 2 cartas (teclas <kbd>1</kbd> e <kbd>2</kbd>), como ${blessingName('mill', theme)} ou ${blessingName('surveyors', theme)}. A carta vale até o fim da partida.</li>` : ''}
         ${wonder ? `<li><b>Maravilha</b>: na última era, a próxima peça com 2 ou mais bordas de vila vira o canteiro da maravilha do tema. Cada peça colocada depois avança uma etapa, e as ${R.wonderStages} etapas rendem +${R.wonderPoints} pontos e +${R.wonderTiles} peças.</li>` : ''}
         <li><b>Peças especiais</b>: ${SPECIAL_KINDS.map((k) => `${SPECIAL_NAME[k]} (${specialRule(k).toLowerCase().replace(/\.$/, '')}; libera com ${UNLOCKS[k].need} ${UNLOCKS[k].label})`).join('; ')}. Liberadas, entram duas vezes em cada partida, menos no Desafio do dia.</li>
         <li><b>Sítios</b>: carimbos no mapa marcam ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.</li>
@@ -654,6 +694,7 @@ function showGameOver() {
       <div><b>${b.questsCompleted}</b><span>missões</span></div>
     </div>
     <p class="muted">Era ${eraName(b.era)}, ${b.sites.filter((x) => x.found).length} de ${b.sites.length} sítios, ${b.perfects} encaixes perfeitos, ${Object.values(b.synergyCount).reduce((a, c) => a + c, 0)} interações.</p>
+    ${b.blessings.length ? `<p class="muted">Cartas da vila: ${b.blessings.map((id) => blessingName(id, theme)).join(', ')}.</p>` : ''}
     <p class="muted">Recorde em ${mode.name} · ${rulesTheme.name}: ${best.toLocaleString('pt-BR')} pontos (semente ${bestSeed}).</p>
     ${special ? '' : specialsLine()}
     <div class="row">
@@ -680,6 +721,10 @@ hud.modal.addEventListener('click', (e) => {
     }
     return;
   }
+  if (act === 'bless') {
+    chooseBlessing(Number(btn?.dataset.pick));
+    return;
+  }
   if (act === 'film') {
     // O diálogo de exportação toma o lugar do placar final.
     capture.showExportDialog('film');
@@ -696,6 +741,8 @@ hud.modal.addEventListener('click', (e) => {
     hud.toast('As dicas voltam a aparecer conforme você joga.');
     return;
   }
+  // A escolha de era não fecha clicando fora: fica para a próxima peça.
+  if (e.target === hud.modal && game.offers.length && hud.modalBody.querySelector('.blessings')) return;
   if (e.target === hud.modal || act === 'close') {
     hud.hideModal();
     store.set('seenHelp', '1');
@@ -861,6 +908,7 @@ const input = bindInput({
   requestNewGame,
   undo,
   toggleMusic,
+  choose: (pick) => !!hud.modalBody.querySelector('.blessings') && chooseBlessing(pick),
 });
 
 document.getElementById('rot-left')!.addEventListener('click', () => {
