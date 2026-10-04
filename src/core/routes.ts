@@ -5,7 +5,9 @@ import { T } from './tiles';
 
 // Rotas de comércio (modo Estrada Real). Mercados na rede de trilho e portos na rede
 // de água rendem uma vez, pelo par mais distante que a jogada acabou de ligar.
-// A conta é a da carroça do Age of Empires II: pts = round(4 · d · (d / 6 + 1)).
+// A conta é a da carroça do Age of Empires II: pts = 2 · round(4 · d · (d / 6 + 1)).
+// O coeficiente 4 deixava a rota em cerca de 1% do placar na IA gulosa. Dobrar depois do
+// arredondamento mantém a curva e a tabela redonda (2 casas = 22, 4 = 54, 6 = 96).
 
 export interface RouteHit {
   kind: 'market' | 'port';
@@ -21,24 +23,51 @@ export interface RoutePost {
 
 /** Mercado: estação, trilho de uma borda só, ou vila colada ao trilho. A mesma condição da estação visual. */
 export function isMarket(p: Placed): boolean {
-  if (p.def.special === 'station') return true;
+  return marketAt(p.edges, p.def.special);
+}
+
+function marketAt(edges: readonly T[], special?: string): boolean {
+  if (special === 'station') return true;
   let rails = 0;
   let village = false;
   for (let i = 0; i < 6; i++) {
-    if (p.edges[i] !== T.Rail) continue;
+    if (edges[i] !== T.Rail) continue;
     rails++;
-    if (p.edges[(i + 1) % 6] === T.Village || p.edges[(i + 5) % 6] === T.Village) village = true;
+    if (edges[(i + 1) % 6] === T.Village || edges[(i + 5) % 6] === T.Village) village = true;
   }
   return rails === 1 || village;
 }
 
 /** Porto: vila colada a rio ou lago dentro da peça. */
 export function isPort(p: Placed): boolean {
+  return portAt(p.edges);
+}
+
+function portAt(edges: readonly T[]): boolean {
   for (let i = 0; i < 6; i++) {
-    if (p.edges[i] !== T.Water) continue;
-    if (p.edges[(i + 1) % 6] === T.Village || p.edges[(i + 5) % 6] === T.Village) return true;
+    if (edges[i] !== T.Water) continue;
+    if (edges[(i + 1) % 6] === T.Village || edges[(i + 5) % 6] === T.Village) return true;
   }
   return false;
+}
+
+export interface RouteMark {
+  q: number;
+  r: number;
+  kind: 'market' | 'port' | 'both';
+}
+
+/** Mercados e portos já no tabuleiro, para as etiquetas. Só no modo com a regra ligada. */
+export function routeMarks(board: Board): RouteMark[] {
+  if (!board.rules.routes) return [];
+  const out: RouteMark[] = [];
+  for (const p of board.list) {
+    const market = isMarket(p);
+    const port = isPort(p);
+    if (!market && !port) continue;
+    out.push({ q: p.q, r: p.r, kind: market && port ? 'both' : market ? 'market' : 'port' });
+  }
+  return out;
 }
 
 /** Componentes conexas de um terreno contínuo (rio ou trilho). */
@@ -71,7 +100,7 @@ const pairKey = (kind: string, a: number, b: number) => `${kind}:${Math.min(a, b
 
 /** Pontos da tabela do plano, para d ≥ 2. d ≥ 6 também devolve uma peça. */
 export function routePoints(d: number) {
-  return { points: Math.round(4 * d * (d / 6 + 1)), tiles: d >= 6 ? 1 : 0 };
+  return { points: Math.round(4 * d * (d / 6 + 1)) * 2, tiles: d >= 6 ? 1 : 0 };
 }
 
 /**
@@ -125,6 +154,75 @@ function payOne(board: Board, placed: Placed, terr: T, isNode: (p: Placed) => bo
   }
   if (!best) return null;
   board.routesPaid.add(pairKey(kind, best.a.key, best.b.key));
+  return { kind, d: best.d, ...routePoints(best.d) };
+}
+
+/**
+ * O que a peça renderia se entrasse em (q, r), sem colocá-la e sem marcar o par como pago.
+ * A mesma conta de `payRoutes`: um par novo por rede, o mais distante com d ≥ 2.
+ */
+export function previewRoutes(board: Board, q: number, r: number, edges: readonly T[], special?: string): RouteHit[] {
+  if (!board.rules.routes || board.tiles.has(hkey(q, r))) return [];
+  const hits: RouteHit[] = [];
+  const market = peekOne(board, q, r, edges, special, T.Rail, 'market');
+  const port = peekOne(board, q, r, edges, special, T.Water, 'port');
+  if (market) hits.push(market);
+  if (port) hits.push(port);
+  return hits;
+}
+
+interface PeekNode {
+  q: number;
+  r: number;
+  key: number;
+  /** null = a peça que ainda não está no tabuleiro. */
+  comp: number | null;
+}
+
+function peekOne(board: Board, q: number, r: number, edges: readonly T[], special: string | undefined, terr: T, kind: RouteHit['kind']): RouteHit | null {
+  if (!edges.includes(terr)) return null;
+  const here = hkey(q, r);
+  const isNode = terr === T.Rail ? (p: Placed) => isMarket(p) : (p: Placed) => isPort(p);
+  const compOf = new Map<number, number>();
+  const nodes: PeekNode[] = [];
+  let id = 0;
+  for (let i = 0; i < 6; i++) {
+    if (edges[i] !== terr) continue;
+    const start = board.tiles.get(hkey(q + DIRS[i][0], r + DIRS[i][1]));
+    if (!start || start.edges[opposite(i)] !== terr || compOf.has(start.key)) continue;
+    const stack = [start];
+    compOf.set(start.key, id);
+    if (isNode(start)) nodes.push({ q: start.q, r: start.r, key: start.key, comp: id });
+    while (stack.length) {
+      const t = stack.pop()!;
+      for (let e = 0; e < 6; e++) {
+        if (t.edges[e] !== terr) continue;
+        const nk = hkey(t.q + DIRS[e][0], t.r + DIRS[e][1]);
+        if (nk === here) continue;
+        const nb = board.tiles.get(nk);
+        if (!nb || compOf.has(nb.key) || nb.edges[opposite(e)] !== terr) continue;
+        compOf.set(nb.key, id);
+        if (isNode(nb)) nodes.push({ q: nb.q, r: nb.r, key: nb.key, comp: id });
+        stack.push(nb);
+      }
+    }
+    id++;
+  }
+  const virtual = terr === T.Rail ? marketAt(edges, special) : portAt(edges);
+  if (virtual) nodes.push({ q, r, key: here, comp: null });
+  if (nodes.length < 2) return null;
+  let best: { a: PeekNode; b: PeekNode; d: number } | null = null;
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i];
+      const b = nodes[j];
+      if (a.comp !== null && b.comp !== null && a.comp === b.comp) continue;
+      const d = hexDistance(a.q, a.r, b.q, b.r);
+      if (d < 2 || board.routesPaid.has(pairKey(kind, a.key, b.key))) continue;
+      if (!best || d > best.d) best = { a, b, d };
+    }
+  }
+  if (!best) return null;
   return { kind, d: best.d, ...routePoints(best.d) };
 }
 

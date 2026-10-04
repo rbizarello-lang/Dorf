@@ -9,6 +9,7 @@ import { SPECIALS, SPECIAL_KINDS, type SpecialKind } from './core/specials';
 import { mulberry32 } from './core/rng';
 import { T } from './core/tiles';
 import { DIRS, hexDistance, hexToWorld, hkey, unkey, worldToHex } from './core/hex';
+import { previewRoutes, routeMarks, type RouteHit, type RouteMark } from './core/routes';
 import type { Quality, TimeOfDay } from './render/world';
 import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
 import { DynRes } from './render/dynres';
@@ -33,9 +34,9 @@ import './ui/style.css';
 type QualityMode = 'auto' | Quality;
 /** q, r, giro e as escolhas de era (0 ou 1) feitas logo depois da jogada. */
 type MoveRec = number[];
-/** v10: estação na pontuação. Guarda a pontuação para conferir o replay. */
+/** v11: a rota da Estrada Real dobrou de peso. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 10;
+  v: 11;
   seed: number;
   rulesId: string;
   mode: ModeId;
@@ -46,7 +47,7 @@ interface Save {
   /** Peças especiais que entraram nesta partida (mudam a sequência da pilha). */
   specials: SpecialKind[];
 }
-const SAVE_VERSION = 10;
+const SAVE_VERSION = 11;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -122,6 +123,11 @@ let game: Game;
 let moves: MoveRec[] = [];
 /** Pontuação, grupos e marcas de cada jogada, para o gráfico do fim da partida. */
 let turns: TurnNote[] = [];
+/** Mercados e portos já colocados (Estrada Real). Recalcula na jogada, não a cada quadro. */
+let tradeMarks: RouteMark[] = [];
+/** Rota que a peça da vez renderia na casa do fantasma. */
+let routePeek: RouteHit[] = [];
+let routePeekAt = '';
 let rotSteps = 0;
 let hover: { q: number; r: number } | null = null;
 let scoutPending = false;
@@ -222,6 +228,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   hud.applyTheme(theme);
   showCrest();
   hud.renderQuests(game.board.quests, theme);
+  refreshTradeMarks();
   minimap.rebuild(game.board.list, theme.terrainColors);
   frameCamera(true);
   // Partida nova: o batedor mostra para onde fica o sítio mais perto (quando a ajuda fechar).
@@ -232,8 +239,15 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
       'Monte a paisagem',
       `Coloque a peça encostada no mapa: cada borda igual à vizinha vale ${game.rules.matchPoints} pontos. Gire com <kbd>R</kbd> ou o botão direito (no toque, os botões de girar). A partida acaba quando a pilha esvazia.`,
     );
+  if (!replay.length && game.rules.routes)
+    tutorial.offer(
+      'rotas',
+      'Estrada Real',
+      'As etiquetas marcam mercados e portos. Ligar dois da mesma rede rende pela distância, uma vez: 2 casas valem 22, 4 valem 54 e 6 valem 96 e devolvem uma peça. A prévia mostra o valor antes de colocar.',
+    );
   refreshHud(true);
   persist();
+  if (game.over) scheduleGameOver();
   return true;
 }
 
@@ -359,6 +373,8 @@ function showInfluence() {
 function updateGhost() {
   if (!game.current || !hover || !game.board.frontier.has(hkey(hover.q, hover.r)) || hud.modalOpen || capture.stage !== 'play') {
     world.clearGhost();
+    routePeek = [];
+    routePeekAt = '';
     hud.confirm.hidden = true;
     capture.take?.event({ kind: 'noghost' });
     return;
@@ -366,6 +382,7 @@ function updateGhost() {
   const check = game.check(hover.q, hover.r)!;
   world.setGhost(game.current, game.rot, rotSteps * (Math.PI / 3), hover.q, hover.r, check);
   capture.take?.event({ kind: 'ghost', q: hover.q, r: hover.r, rot: game.rot, angle: rotSteps * (Math.PI / 3) });
+  refreshRoutePeek();
 }
 
 function rotate(dir: 1 | -1) {
@@ -403,6 +420,7 @@ function place(q: number, r: number) {
   const res = game.place(q, r)!;
   moves.push([q, r, rot]);
   noteTurn(res);
+  refreshTradeMarks();
   minimap.add(res.placed);
   capture.take?.event({ kind: 'place', q, r, rot });
   world.placeAnimated(res.placed);
@@ -450,18 +468,7 @@ function place(q: number, r: number) {
     // Primeiro a onda dourada e a fanfarra, depois as cartas.
     choiceTimer = window.setTimeout(() => !hud.modalOpen && showChoice(), 1500);
   }
-  if (game.over && !gameOverShown) {
-    gameOverShown = true;
-    commitProgress();
-    overTimer = window.setTimeout(() => {
-      if (!game.over) return;
-      // A câmera recua devagar até mostrar o mapa inteiro antes do placar final.
-      frameCamera(false);
-      overTimer = window.setTimeout(() => {
-        if (game.over) showGameOver();
-      }, 900);
-    }, 1100);
-  }
+  scheduleGameOver();
 }
 
 let choiceTimer = 0;
@@ -536,15 +543,68 @@ function specialsLine() {
 }
 
 /** Anota a jogada para o gráfico do fim: pontos, maior grupo e o que aconteceu. */
-function noteTurn(res: PlaceResult) {
+function noteTurn(res: PlaceResult, score = game.board.score, groups = game.board.largestGroups()) {
   const w = res.wonder;
   turns.push({
-    score: game.board.score,
-    groups: game.board.largestGroups(),
+    score,
+    groups,
     era: res.eraUp,
     quests: res.questsDone.length,
     wonder: w?.done ? 'done' : w?.started ? 'start' : null,
   });
+}
+
+/** Se alguma jogada não foi anotada, refaz o gráfico pelo replay antes de abrir o placar. */
+function ensureTurns() {
+  if (turns.length || !moves.length) return;
+  const g = new Game(game.seed, game.rules, game.specials);
+  for (const [q, r, rot, ...picks] of moves) {
+    g.rot = rot;
+    const res = g.place(q, r);
+    if (!res) break;
+    for (const p of picks) g.choose(p);
+    noteTurn(res, g.board.score, g.board.largestGroups());
+    while (g.discardIfStuck());
+  }
+}
+
+/** Placar final em qualquer fim: peça à mão, descarte da última ou preenchimento automático. */
+function scheduleGameOver() {
+  if (!game.over || gameOverShown) return;
+  gameOverShown = true;
+  commitProgress();
+  overTimer = window.setTimeout(() => {
+    if (!game.over) return;
+    // A câmera recua devagar até mostrar o mapa inteiro antes do placar final.
+    frameCamera(false);
+    overTimer = window.setTimeout(() => {
+      if (game.over) showGameOver();
+    }, 900);
+  }, 1100);
+}
+
+function routeLabel(h: RouteHit) {
+  const name = h.kind === 'market' ? 'Mercado' : 'Porto';
+  return `${name}: ${h.d} casas, +${h.points}${h.tiles ? ' e +1 peça' : ''}`;
+}
+
+function refreshTradeMarks() {
+  tradeMarks = routeMarks(game.board);
+}
+
+/** Prévia da rota na casa do fantasma. Só recalcula quando a casa ou o giro mudam. */
+function refreshRoutePeek() {
+  if (!game.rules.routes || !hover || !game.current) {
+    routePeek = [];
+    routePeekAt = '';
+    return;
+  }
+  const key = `${hover.q}:${hover.r}:${game.rot}`;
+  if (key === routePeekAt) return;
+  routePeekAt = key;
+  const edges = game.currentEdges();
+  const check = edges ? game.check(hover.q, hover.r) : null;
+  routePeek = edges && check?.valid ? previewRoutes(game.board, hover.q, hover.r, edges, game.current.special) : [];
 }
 
 function announce(res: PlaceResult) {
@@ -562,9 +622,10 @@ function announce(res: PlaceResult) {
     sfx.perfect();
     hud.floater(s.x, s.y - 46, 'Perfeito!', 'big');
   }
-  for (const rt of res.routes) {
+  res.routes.forEach((rt, i) => {
     hud.toast(`${rt.kind === 'market' ? 'Rota de mercado' : 'Rota de porto'}: ${rt.d} casas, +${rt.points}${rt.tiles ? ' e +1 peça' : ''}.`, 'good');
-  }
+    hud.floater(s.x, s.y - (res.perfect ? 78 : 46) - i * 28, routeLabel(rt), 'route');
+  });
   // Interações: um aviso por borda, perto dela.
   res.synergies.forEach((h, k) => {
     const [dq, dr] = DIRS[h.edge];
@@ -642,6 +703,7 @@ function showHelp(tab = 'basico') {
         <li><b>Encaixe perfeito</b>: a peça encosta em 2 ou mais vizinhas e todas as bordas combinam (+${R.perfectBonus}).</li>
         <li>Cercar uma peça com 6 vizinhas encaixadas rende <b>+${R.closedTiles} peça</b>.</li>
         <li>A cada 20 jogadas a estação muda (primavera, verão, outono, inverno) e uma interação rende +3: colmeias, moinho, serraria e pasto, nessa ordem.</li>
+        ${R.routes ? `<li><b>Estrada Real</b>: mercados e portos da mesma rede rendem pela distância, uma vez. 2 casas valem 22, 4 valem 54 e 6 valem 96 e devolvem uma peça. A etiqueta marca cada um no mapa, e a prévia mostra o valor antes de colocar.</li>` : ''}
         <li>A partida acaba quando a pilha esvazia. <kbd>U</kbd> desfaz a última jogada (o número de vezes depende do modo).</li>
       </ul>`,
     ],
@@ -752,6 +814,7 @@ function synergyLegend() {
 }
 
 function showGameOver() {
+  ensureTurns();
   const b = game.board;
   const record = b.score > bestAtStart && b.score > 0;
   hud.showModal(`
@@ -1102,9 +1165,11 @@ function autoPlace(n: number, infinite: boolean) {
   world.placeInstant(placed, game.board);
   const bake = performance.now() - t1;
   hud.renderQuests(game.board.quests, theme);
+  refreshTradeMarks();
   minimap.rebuild(game.board.list, theme.terrainColors);
   frameCamera(true);
   refreshHud(true);
+  scheduleGameOver();
   return { logic, bake, tiles: game.board.list.length };
 }
 
@@ -1175,6 +1240,7 @@ function mapFrame() {
   minimap.frame({
     quests,
     sites: game.board.sites.filter((s) => s.found).map((s) => ({ q: s.q, r: s.r, kind: s.kind })),
+    nodes: tradeMarks,
     corners: world.viewOnGround(),
   });
 }
@@ -1231,11 +1297,24 @@ function step(now: number) {
     const s = screenOf(st.q, st.r, 0.05);
     markers.push({ id: 100000 + st.q * 1000 + st.r, x: s.x, y: s.y + 30, visible: s.visible, text: `${SITE_LABEL[st.kind].icon} ${SITE_LABEL[st.kind].name}: ${siteReward(st.kind)}`, color: '#8a6a3a', kind: st.kind });
   }
+  for (const m of tradeMarks) {
+    const s = screenOf(m.q, m.r, 0.2);
+    const dim = !!hover && hexDistance(hover.q, hover.r, m.q, m.r) <= 1;
+    const text = m.kind === 'both' ? 'mercado · porto' : m.kind === 'market' ? 'mercado' : 'porto';
+    markers.push({ id: 500000 + hkey(m.q, m.r), x: s.x, y: s.y, visible: s.visible, text, color: m.kind === 'port' ? '#2f6f8f' : '#6b5344', dim, kind: m.kind });
+  }
+  // Prévia da rota: o valor aparece com o fantasma numa casa que ligaria mercados ou portos.
+  if (routePeek.length && hover) {
+    const s = screenOf(hover.q, hover.r, 0.05);
+    const y = s.y + (st ? 62 : 30);
+    markers.push({ id: 210000, x: s.x, y, visible: s.visible, text: routePeek.map(routeLabel).join(' · '), color: theme.ui.accent, kind: 'route' });
+  }
   // Influência das construções: o ganho aparece com o fantasma numa casa contornada.
   const inf = hover && game.current && !st ? game.board.influenceAt(hover.q, hover.r, game.current.edges) : null;
   if (inf?.points) {
     const s = screenOf(hover!.q, hover!.r, 0.05);
-    markers.push({ id: 200000, x: s.x, y: s.y + 30, visible: s.visible, text: `✦ +${inf.points} · ${inf.kinds.map((k) => theme.synergy[k.kind]).join(', ')}`, color: theme.ui.accent, kind: 'influence' });
+    const y = s.y + 30 + (st ? 32 : 0) + (routePeek.length ? 32 : 0);
+    markers.push({ id: 200000, x: s.x, y, visible: s.visible, text: `✦ +${inf.points} · ${inf.kinds.map((k) => theme.synergy[k.kind]).join(', ')}`, color: theme.ui.accent, kind: 'influence' });
   }
   hud.updateMarkers(markers);
   cpuAcc += performance.now() - c0;

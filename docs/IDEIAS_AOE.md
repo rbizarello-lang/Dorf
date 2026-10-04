@@ -664,15 +664,15 @@ R é o raio explorado: a maior distância das peças, mais 1,5.
 
 - **Mercado:** peça com estação, ou seja, trilho de uma borda ou vila colada ao trilho dentro da peça.
 - **Porto:** vila colada ao rio ou ao lago dentro da peça.
-- **Quanto rende:** `pts = round(4 · d · (d / 6 + 1))`, com d a distância em hexágonos entre os dois:
+- **Quanto rende:** `pts = 2 · round(4 · d · (d / 6 + 1))`, com d a distância em hexágonos entre os dois. O plano pedia só o `round(4 · …)`; no play-test a IA gulosa punha cerca de 1% do placar em rotas, então o resultado dobrou depois do arredondamento e a curva ficou a mesma:
 
 | d | Pontos |
 |---|---|
-| 2 | 11 |
-| 4 | 27 |
-| 6 | 48 (+1 peça) |
-| 8 | 75 (+1 peça) |
-| 10 | 107 (+1 peça) |
+| 2 | 22 |
+| 4 | 54 |
+| 6 | 96 (+1 peça) |
+| 8 | 150 (+1 peça) |
+| 10 | 214 (+1 peça) |
 
 - **Regras do par:** só conta par novo com d ≥ 2, como o AoE II, que exige mercados a 5 tiles para render ouro. Ao conectar um mercado, paga só o par com o mercado mais distante da mesma rede.
 

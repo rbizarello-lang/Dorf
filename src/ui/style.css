@@ -1636,6 +1636,33 @@ body.capture #floaters {
   width: auto;
   filter: none;
 }
+.marker.market {
+  background: #f3e6c8;
+  color: #3a2a1c;
+  border-color: #6b5344;
+}
+.marker.port {
+  background: #d7ebf5;
+  color: #16384a;
+  border-color: #2f6f8f;
+}
+.marker.both {
+  background: #f7e7b8;
+  color: #3a2a1c;
+  border-color: #8a6a2a;
+}
+.marker.route {
+  background: var(--accent);
+  color: #fff;
+  border-style: solid;
+  border-color: transparent;
+  font-weight: 800;
+}
+.floater.route {
+  font-size: 18px;
+  color: #fff3c4;
+  -webkit-text-stroke: 4px var(--ink);
+}
 #btn-undo small {
   font-size: 10px;
   opacity: 0.7;

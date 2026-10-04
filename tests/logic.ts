@@ -322,7 +322,7 @@ function oraclePayOne(b: Board, placed: Placed, terr: T, isNode: (p: Placed) => 
   }
   if (!best) return null;
   paid.add(`${kind}:${Math.min(best.a.key, best.c.key)}:${Math.max(best.a.key, best.c.key)}`);
-  return { kind, d: best.d, points: Math.round(4 * best.d * (best.d / 6 + 1)), tiles: best.d >= 6 ? 1 : 0 };
+  return { kind, d: best.d, points: Math.round(4 * best.d * (best.d / 6 + 1)) * 2, tiles: best.d >= 6 ? 1 : 0 };
 }
 
 function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: Policy = 'greedy', mode: Mode = MODES[0], specials: SpecialKind[] = []): GameLog {

@@ -3,7 +3,7 @@
 import { Board, DEFAULT_RULES, type Rules } from '../src/core/board';
 import { Game } from '../src/core/game';
 import { DIRS, hkey } from '../src/core/hex';
-import { routePoints } from '../src/core/routes';
+import { previewRoutes, routePoints } from '../src/core/routes';
 import { T, generateTile, rotateEdges, type TileDef } from '../src/core/tiles';
 import { mulberry32 } from '../src/core/rng';
 import { timelineSvg, type TurnNote } from '../src/ui/minimap';
@@ -168,9 +168,9 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
 // ---- 8) Estrada Real: a tabela e um par de mercados a 4 casas. O clássico não paga.
 {
   console.log('Cenário 8: rotas de comércio');
-  ok(routePoints(2).points === 11 && routePoints(2).tiles === 0, 'd=2 rende 11');
-  ok(routePoints(4).points === 27 && routePoints(6).points === 48 && routePoints(6).tiles === 1, 'd=4 rende 27 e d=6 rende 48 e uma peça');
-  ok(routePoints(8).points === 75 && routePoints(10).points === 107 && routePoints(10).tiles === 1, 'd=8 rende 75 e d=10 rende 107');
+  ok(routePoints(2).points === 22 && routePoints(2).tiles === 0, 'd=2 rende 22');
+  ok(routePoints(4).points === 54 && routePoints(6).points === 96 && routePoints(6).tiles === 1, 'd=4 rende 54 e d=6 rende 96 e uma peça');
+  ok(routePoints(8).points === 150 && routePoints(10).points === 214 && routePoints(10).tiles === 1, 'd=8 rende 150 e d=10 rende 214');
   const track = (back: boolean, fwd: boolean): TileDef => {
     const edges = [T.Grass, T.Grass, T.Grass, T.Grass, T.Grass, T.Grass];
     if (fwd) edges[0] = T.Rail;
@@ -183,9 +183,15 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
     for (let q = 1; q <= 3; q++) b.placeRaw(q, 0, track(true, true), 0);
     return b.place(4, 0, track(true, false), 0);
   };
+  const previewBoard = new Board({ ...DEFAULT_RULES, routes: true, sites: 0 });
+  previewBoard.placeRaw(0, 0, track(false, true), 0);
+  for (let q = 1; q <= 3; q++) previewBoard.placeRaw(q, 0, track(true, true), 0);
+  const peek = previewRoutes(previewBoard, 4, 0, track(true, false).edges);
+  ok(peek.length === 1 && peek[0].kind === 'market' && peek[0].d === 4 && peek[0].points === 54, 'a prévia mostra os 54 pontos antes de colocar');
+  ok(previewBoard.routesPaid.size === 0, 'a prévia não marca o par como pago');
   const paid = lay(true);
-  ok(paid.routes.length === 1 && paid.routes[0].kind === 'market' && paid.routes[0].d === 4 && paid.routes[0].points === 27, 'mercados a 4 casas rendem 27');
-  ok(paid.points === 37, 'o encaixe do trilho (10) soma com a rota (27)');
+  ok(paid.routes.length === 1 && paid.routes[0].kind === 'market' && paid.routes[0].d === 4 && paid.routes[0].points === 54, 'mercados a 4 casas rendem 54');
+  ok(paid.points === 64, 'o encaixe do trilho (10) soma com a rota (54)');
   const classic = lay(false);
   ok(classic.routes.length === 0 && classic.points === 10, 'no clássico a mesma linha não rende rota');
   const near = new Board({ ...DEFAULT_RULES, routes: true, sites: 0 });
@@ -195,6 +201,25 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
   const same = (chances: boolean) => generateTile(mulberry32(7), true, ...(chances ? [0.17, 0.09] as const : []));
   const left = same(false), right = same(true);
   ok(left.edges.join() === right.edges.join() && left.seed === right.seed, 'as chances padrão não mudam a sequência de peças');
+  const g = new Game(3, { ...DEFAULT_RULES, routes: true, sites: 0, blessings: false });
+  const rand = mulberry32(3);
+  let drift = 0;
+  for (let i = 0; i < 40 && g.current; i++) {
+    const m = g.bestMove(rand);
+    if (!m) {
+      if (!g.discardIfStuck()) break;
+      continue;
+    }
+    g.rot = m.rot;
+    const edges = g.currentEdges();
+    const peek = edges ? previewRoutes(g.board, m.q, m.r, edges, g.current?.special) : [];
+    const res = g.place(m.q, m.r);
+    if (!res) break;
+    const got = res.routes.map((h) => `${h.kind}:${h.d}:${h.points}`).join();
+    const want = peek.map((h) => `${h.kind}:${h.d}:${h.points}`).join();
+    if (got !== want) drift++;
+  }
+  ok(drift === 0, 'em 40 jogadas a prévia coincide com a rota paga');
 }
 
 // ---- 9) Estação: +3 na interação da vez; o trinco fixa a estação

@@ -24,9 +24,17 @@ export interface MapSite {
   kind: SiteKind;
 }
 
+export interface MapNode {
+  q: number;
+  r: number;
+  kind: 'market' | 'port' | 'both';
+}
+
 export interface MapFrame {
   quests: readonly MapQuest[];
   sites: readonly MapSite[];
+  /** Mercados e portos da Estrada Real. */
+  nodes: readonly MapNode[];
   /** Cantos da tela no chão, na ordem do World.viewOnGround. */
   corners: readonly ({ x: number; z: number } | null)[];
 }
@@ -371,8 +379,22 @@ export class Minimap {
     const view = this.last;
     if (!view) return;
     for (const s of view.sites) this.stamp(ctx, s);
+    for (const n of view.nodes) this.node(ctx, n);
     for (const q of view.quests) this.pennant(ctx, q);
     this.trapezoid(ctx, view.corners);
+  }
+
+  private node(ctx: CanvasRenderingContext2D, n: MapNode) {
+    const { x, z } = hexToWorld(n.q, n.r);
+    const p = this.project(x, z);
+    const r = Math.max(2.2, Math.min(4.2, (this.px / this.span) * 0.28));
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = n.kind === 'port' ? '#7ec8e3' : n.kind === 'both' ? '#e7c56a' : '#f0d7a2';
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#2a2118';
+    ctx.stroke();
   }
 
   private pennant(ctx: CanvasRenderingContext2D, q: MapQuest) {

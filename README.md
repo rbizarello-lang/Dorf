@@ -71,7 +71,7 @@ O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Re
 | Zen | peças sem fim; pontos e eras por gosto |
 | Desafio do dia | semente do dia e regras padrão, iguais para todo mundo; sem desfazer |
 | Exploradores | 10 sítios e 60 peças; achar o último encerra, e cada peça que sobrou vale 20 pontos |
-| Estrada Real | mais trilhos; mercados (estação, trilho de uma borda ou vila no trilho) e portos (vila no rio) da mesma rede rendem pela distância, uma vez por par. A 2 casas são 11 pontos, a 4 são 27, a 6 são 48 e uma peça, e assim por diante. Quatro postos aparecem no mapa |
+| Estrada Real | mais trilhos; mercados (estação, trilho de uma borda ou vila no trilho) e portos (vila no rio) da mesma rede rendem pela distância, uma vez por par. A 2 casas são 22 pontos, a 4 são 54, a 6 são 96 e uma peça, e assim por diante. As etiquetas marcam mercados e portos, e a prévia mostra o valor antes de colocar. Quatro postos aparecem no mapa |
 
 **Interações:** algumas bordas diferentes também "conversam". Quando se encostam, rendem +5 e erguem uma construção na borda. A prévia acende em dourado antes de você colocar a peça.
 
