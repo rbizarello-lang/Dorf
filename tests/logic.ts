@@ -564,13 +564,24 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       const of = oracleFrontier(b);
       assert(of.size === b.frontier.size && [...of].every((k) => b.frontier.has(k)), `seed ${seed}: fronteira inconsistente`);
       // grupo: todas as peças (peça, setor) batem com o oráculo? amostra: todas as peças
-      for (const t of b.list) for (let s = 0; s < 6; s++) {
-        const a = b.groupSize(t, s);
-        const o = oracleGroupSize(b, t, s);
-        if (a !== o) {
-          fail(`seed ${seed}: groupSize(${t.q},${t.r},s${s}) = ${a}, oráculo ${o}`);
-          break;
+      const bestG = [0, 0, 0, 0, 0, 0];
+      let groupOk = true;
+      for (const t of b.list) {
+        if (!groupOk) break;
+        for (let s = 0; s < 6; s++) {
+          const a = b.groupSize(t, s);
+          const o = oracleGroupSize(b, t, s);
+          if (o > bestG[t.edges[s]]) bestG[t.edges[s]] = o;
+          if (a !== o) {
+            fail(`seed ${seed}: groupSize(${t.q},${t.r},s${s}) = ${a}, oráculo ${o}`);
+            groupOk = false;
+            break;
+          }
         }
+      }
+      if (groupOk) {
+        const lg = b.largestGroups();
+        assert(lg.every((v, i) => v === bestG[i]), `seed ${seed}: maior grupo [${lg}] != oráculo [${bestG}]`);
       }
     }
     const active = b.activeQuests().length;

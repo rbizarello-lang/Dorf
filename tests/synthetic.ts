@@ -5,6 +5,7 @@ import { Game } from '../src/core/game';
 import { DIRS, hkey } from '../src/core/hex';
 import { T, rotateEdges, type TileDef } from '../src/core/tiles';
 import { mulberry32 } from '../src/core/rng';
+import { timelineSvg, type TurnNote } from '../src/ui/minimap';
 
 const rules: Rules = { ...DEFAULT_RULES };
 let bad = 0;
@@ -128,6 +129,25 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
   ok(!anyConflict, 'rio não encosta em terra: só a célula com água de frente é rejeitada');
   void cur;
   void hkey;
+}
+
+// ---- 6) Linha do tempo: marcas de era, missão e maravilha, sem deixar cor solta entrar no SVG.
+{
+  console.log('Cenário 6: linha do tempo');
+  const turns: TurnNote[] = [
+    { score: 10, groups: [1, 1, 1, 1, 0, 0], era: null, quests: 0, wonder: null },
+    { score: 520, groups: [3, 2, 1, 2, 1, 0], era: 1, quests: 1, wonder: null },
+    { score: 3100, groups: [6, 4, 3, 5, 2, 1], era: 3, quests: 0, wonder: 'done' },
+  ];
+  const colors = ['#89b84a', '#3f8f4a', '#e8b83a', '#d9643f', '#3f8fb8', '#b9a37a'];
+  const svg = timelineSvg(turns, colors, '#c8553a', ['Prado', 'Floresta', 'Plantação', 'Vila', 'Rio', 'Estrada']);
+  ok(svg.includes('polyline') && svg.includes('maior grupo'), 'gráfico tem a pontuação e a legenda do maior grupo');
+  ok(svg.includes('data-mark="era"') && svg.includes('>II<'), 'marca a era alcançada');
+  ok(svg.includes('data-mark="quest"') && svg.includes('data-mark="wonder"') && svg.includes('★'), 'marca missão e maravilha pronta');
+  ok(svg.includes('#3f8fb8') && svg.includes('>Rio<'), 'o grupo usa a cor e o nome do terreno');
+  ok(timelineSvg([], colors, '#c8553a') === '', 'sem jogadas não desenha');
+  const dirty = timelineSvg([{ score: 1, groups: [1, 0, 0, 0, 0, 0], era: null, quests: 0, wonder: 'start' }], ['<script>'], '#c8553a');
+  ok(dirty.includes('☆') && !dirty.includes('<script>'), 'cor fora do padrão não entra no svg');
 }
 
 console.log(bad ? `\n${bad} FALHA(S)` : '\nTodos os cenários sintéticos passaram');

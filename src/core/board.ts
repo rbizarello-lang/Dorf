@@ -537,6 +537,23 @@ export class Board {
     return this.groupTiles[this.find(p.index * 6 + sector)] ?? 0;
   }
 
+  /** Maior grupo de cada terreno, em número de peças (a linha do tempo da partida). */
+  largestGroups(): number[] {
+    if (this.parent.length !== this.list.length * 6) this.computeGroups();
+    const best = [0, 0, 0, 0, 0, 0];
+    const seen = new Set<number>();
+    for (const t of this.list) {
+      for (let s = 0; s < 6; s++) {
+        const root = this.find(t.index * 6 + s);
+        if (seen.has(root)) continue;
+        seen.add(root);
+        const size = this.groupTiles[root] ?? 0;
+        if (size > best[t.edges[s]]) best[t.edges[s]] = size;
+      }
+    }
+    return best;
+  }
+
   /** Setores (peça, setor) do mesmo grupo — usado para destacar missões. */
   groupMembers(p: Placed, sector: number): Array<[Placed, number]> {
     const root = this.find(p.index * 6 + sector);

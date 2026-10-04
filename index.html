@@ -42,6 +42,11 @@
 
     <aside id="quests" class="quests" aria-label="Missões"></aside>
 
+    <aside id="minimap" class="minimap collapsed" aria-label="Minimapa">
+      <canvas id="minimap-canvas" width="140" height="140" aria-hidden="true"></canvas>
+      <button id="minimap-toggle" class="minimap-btn" type="button" title="Abrir o minimapa (M)" aria-expanded="false" aria-controls="minimap-canvas">Mapa</button>
+    </aside>
+
     <section class="stack" aria-label="Pilha de peças">
       <div id="preview" class="preview"></div>
       <div class="stack-count"><output id="stack">0</output><small>peças</small></div>
@@ -53,7 +58,7 @@
       <div class="next"><small>próxima</small><svg id="next" viewBox="-1.1 -1.1 2.2 2.2" aria-hidden="true"></svg><div id="upcoming" class="upcoming" hidden></div></div>
     </section>
 
-    <p id="hint" class="hint">Clique para colocar · <kbd>R</kbd> ou botão direito gira · arraste para mover · roda para zoom · <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera</p>
+    <p id="hint" class="hint">Clique para colocar · <kbd>R</kbd> ou botão direito gira · arraste para mover · roda para zoom · <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera · <kbd>M</kbd> o mapa</p>
 
     <div id="toasts" class="toasts" aria-live="polite"></div>
     <aside id="tip" class="tip" role="status" aria-live="polite" hidden><b></b><p></p><button type="button" class="secondary">Entendi</button></aside>

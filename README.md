@@ -86,7 +86,8 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 | Girar câmera | `Q` / `E`, ou arrastar com o botão direito | — |
 | Inclinar câmera (do horizonte à vista de mapa) | arrastar com o botão direito para cima ou para baixo, `PgUp` / `PgDn`; `Home` volta ao ângulo padrão | dois dedos para cima ou para baixo |
 | Amanhecer, dia, hora dourada, entardecer e noite | `L` ou botão ☀ | botão ☀ |
-| Som: música e efeitos, só efeitos, mudo | botão Som; `M` liga ou desliga a música | botão ♫ |
+| Som: música e efeitos, só efeitos, mudo | botão Som (cada clique alterna) | botão ♫ |
+| Minimapa | `M` abre ou fecha; clique leva a câmera | o mesmo; começa fechado |
 | Ajuda, nova partida, estatísticas | `H`, `N`, `F` | botões no topo |
 | Cor da casa e brasão | menu de temas, seção "Sua casa" | o mesmo |
 | Foto sem a interface | `P` (Espaço pausa, `L` muda a hora, Enter salva, Esc sai) | botão Câmera |

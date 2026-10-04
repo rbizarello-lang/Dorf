@@ -29,7 +29,7 @@ export interface InputHost {
   showHelp(): void;
   requestNewGame(): void;
   undo(): void;
-  toggleMusic(): void;
+  toggleMap(): void;
   /** Escolhe a carta 0 ou 1 quando a escolha de era está aberta; devolve se escolheu. */
   choose(pick: number): boolean;
 }
@@ -209,7 +209,7 @@ export function bindInput(h: InputHost): Input {
     else if (k === 'h' || k === '?') h.showHelp();
     else if (k === 'n') h.requestNewGame();
     else if (k === 'u') h.undo();
-    else if (k === 'm') h.toggleMusic();
+    else if (k === 'm') h.toggleMap();
     else if (k === 'p') capture.enterPhoto();
     else if (k === 'v') {
       if (capture.take) capture.stopTake();

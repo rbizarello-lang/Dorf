@@ -1407,12 +1407,55 @@ export class World {
   private ray = new THREE.Raycaster();
   private plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private ndc = new THREE.Vector2();
+  private groundHit = new THREE.Vector3();
 
   groundPoint(clientX: number, clientY: number, out = new THREE.Vector3()) {
     const rect = this.canvas.getBoundingClientRect();
     this.ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     this.ray.setFromCamera(this.ndc, this.camera);
     return this.ray.ray.intersectPlane(this.plane, out);
+  }
+
+  /**
+   * Os 4 cantos da tela no chão (y = 0): esquerda e direita de baixo, depois as de cima.
+   * Um raio que sobe para o céu para no horizonte, e um ponto longe demais fica preso a
+   * `maxDist` da câmera, para o trapézio do minimapa não virar uma linha infinita.
+   */
+  viewOnGround(maxDist = 160): ({ x: number; z: number } | null)[] {
+    const cam = this.camera.position;
+    const hitAt = (nx: number, ny: number) => {
+      this.ndc.set(nx, ny);
+      this.ray.setFromCamera(this.ndc, this.camera);
+      const hit = this.ray.ray.intersectPlane(this.plane, this.groundHit);
+      if (!hit) return null;
+      let x = hit.x;
+      let z = hit.z;
+      const dx = x - cam.x;
+      const dz = z - cam.z;
+      const d = Math.hypot(dx, dz);
+      if (d > maxDist) {
+        x = cam.x + (dx / d) * maxDist;
+        z = cam.z + (dz / d) * maxDist;
+      }
+      return { x, z };
+    };
+    const corner = (nx: number, ny: number) => {
+      const direct = hitAt(nx, ny);
+      if (direct) return direct;
+      let lo = -1;
+      let hi = ny;
+      let best = hitAt(nx, -1);
+      for (let i = 0; i < 8; i++) {
+        const mid = (lo + hi) / 2;
+        const h = hitAt(nx, mid);
+        if (h) {
+          best = h;
+          lo = mid;
+        } else hi = mid;
+      }
+      return best;
+    };
+    return [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
   }
 
   // Chamado a cada quadro para cada marcador do HUD: reaproveita o vetor.

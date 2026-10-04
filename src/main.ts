@@ -24,6 +24,7 @@ import { bindInput } from './ui/input';
 import { Progress, SPECIAL_NAME, UNLOCKS } from './ui/progress';
 import { Tutorial } from './ui/tutorial';
 import { blessingName, blessingRule, choiceHtml } from './ui/eraChoice';
+import { Minimap, timelineSvg, type TurnNote } from './ui/minimap';
 import './ui/style.css';
 
 // ------------------------------------------------------------------ estado
@@ -102,6 +103,9 @@ const world = await createWorld();
 }
 hud.preview.appendChild(world.preview.canvas);
 
+// Minimapa (proposta 16): o clique leva a câmera; M abre e fecha.
+const minimap = new Minimap(document.getElementById('minimap')!, store, (x, z) => world.rig.goal.set(x, 0, z));
+
 // Cor da casa e brasão (proposta 15): a cor troca o destaque do tema no HUD e no mundo.
 let house = validHouse(store.get('house'));
 let banner = (() => {
@@ -115,6 +119,8 @@ let theme: Theme = dress(themeById(params.get('theme') ?? store.get('theme')), h
 let rulesTheme: Theme = theme;
 let game: Game;
 let moves: MoveRec[] = [];
+/** Pontuação, grupos e marcas de cada jogada, para o gráfico do fim da partida. */
+let turns: TurnNote[] = [];
 let rotSteps = 0;
 let hover: { q: number; r: number } | null = null;
 let scoutPending = false;
@@ -189,11 +195,14 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   if (!replay.length) committed = false;
   undone = undos;
   moves = [];
+  turns = [];
   for (const [q, r, rot, ...picks] of replay) {
     game.rot = rot;
-    if (!game.place(q, r)) break;
+    const res = game.place(q, r);
+    if (!res) break;
     for (const p of picks) game.choose(p);
     moves.push([q, r, rot, ...picks]);
+    noteTurn(res);
     while (game.discardIfStuck());
   }
   game.rot = 0;
@@ -211,6 +220,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   hud.applyTheme(theme);
   showCrest();
   hud.renderQuests(game.board.quests, theme);
+  minimap.rebuild(game.board.list, theme.terrainColors);
   frameCamera(true);
   // Partida nova: o batedor mostra para onde fica o sítio mais perto (quando a ajuda fechar).
   scoutPending = !replay.length;
@@ -389,6 +399,8 @@ function place(q: number, r: number) {
   const rot = game.rot;
   const res = game.place(q, r)!;
   moves.push([q, r, rot]);
+  noteTurn(res);
+  minimap.add(res.placed);
   capture.take?.event({ kind: 'place', q, r, rot });
   world.placeAnimated(res.placed);
   world.updateFrontier(game.board);
@@ -505,6 +517,18 @@ function specialsLine() {
   const left = progress.pending(null);
   if (!left.length) return `<p class="muted">Todas as peças especiais liberadas: ${progress.unlocked.map((k) => SPECIAL_NAME[k]).join(', ')}.</p>`;
   return `<p class="muted">Peças especiais a liberar: ${left.map((n) => `<b>${SPECIAL_NAME[n.kind]}</b> ${n.have} de ${n.need} ${n.label}`).join(' · ')}.</p>`;
+}
+
+/** Anota a jogada para o gráfico do fim: pontos, maior grupo e o que aconteceu. */
+function noteTurn(res: PlaceResult) {
+  const w = res.wonder;
+  turns.push({
+    score: game.board.score,
+    groups: game.board.largestGroups(),
+    era: res.eraUp,
+    quests: res.questsDone.length,
+    wonder: w?.done ? 'done' : w?.started ? 'start' : null,
+  });
 }
 
 function announce(res: PlaceResult) {
@@ -630,7 +654,8 @@ function showHelp(tab = 'basico') {
         <li>Mouse: clique coloca, botão direito ou <kbd>R</kbd> gira a peça, arrastar move, roda dá zoom, <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera.</li>
         <li>Inclinar a câmera: arrastar com o botão direito para cima ou para baixo, ou <kbd>PgUp</kbd>/<kbd>PgDn</kbd>; <kbd>Home</kbd> volta ao ângulo padrão. No toque, dois dedos para cima ou para baixo.</li>
         <li>Toque: toque num espaço para ver a peça, toque de novo (ou ✓) para colocar.</li>
-        <li>O botão de som alterna entre música e efeitos, só efeitos e mudo; <kbd>M</kbd> liga ou desliga a música.</li>
+        <li>O botão de som alterna entre música e efeitos, só efeitos e mudo.</li>
+        <li><kbd>M</kbd> abre ou fecha o minimapa. Um clique ou toque nele leva a câmera até ali. No celular ele começa fechado.</li>
         <li>O botão Câmera tira fotos sem a interface (<kbd>P</kbd>) e grava vídeos de até 2 minutos (<kbd>V</kbd>), salvos em MP4 de até 4K.</li>
       </ul>`,
     ],
@@ -707,6 +732,7 @@ function showGameOver() {
       <div><b>${game.placedCount}</b><span>peças</span></div>
       <div><b>${b.questsCompleted}</b><span>missões</span></div>
     </div>
+    ${timelineSvg(turns, theme.terrainColors, theme.ui.accent, theme.terrainNames)}
     <p class="muted">Era ${eraName(b.era)}, ${b.sites.filter((x) => x.found).length} de ${b.sites.length} sítios, ${b.perfects} encaixes perfeitos, ${Object.values(b.synergyCount).reduce((a, c) => a + c, 0)} interações.</p>
     ${b.blessings.length ? `<p class="muted">Cartas da vila: ${b.blessings.map((id) => blessingName(id, theme)).join(', ')}.</p>` : ''}
     <p class="muted">Recorde em ${mode.name} · ${rulesTheme.name}: ${best.toLocaleString('pt-BR')} pontos (semente ${bestSeed}).</p>
@@ -794,6 +820,7 @@ function setHouse(color: HouseColor | null, b: Banner) {
     hud.applyTheme(theme);
     world.setTheme(theme, game.board);
     hud.renderQuests(game.board.quests, theme);
+    minimap.rebuild(game.board.list, theme.terrainColors);
     refreshHud(true);
   }
   showCrest();
@@ -812,6 +839,7 @@ function pickTheme(t: Theme) {
   world.setTheme(theme, game.board);
   sfx.setStyle(t.music, game.board.era);
   hud.renderQuests(game.board.quests, theme);
+  minimap.rebuild(game.board.list, theme.terrainColors);
   refreshHud(true);
   if (game.over) {
     rulesTheme = t;
@@ -921,7 +949,7 @@ const input = bindInput({
   showHelp: () => showHelp(),
   requestNewGame,
   undo,
-  toggleMusic,
+  toggleMap: () => minimap.toggle(),
   choose: (pick) => !!hud.modalBody.querySelector('.blessings') && chooseBlessing(pick),
 });
 
@@ -988,9 +1016,9 @@ timeBtn.addEventListener('click', cycleTime);
 // Som em três estados: música e efeitos ('1'), só efeitos ('sfx'), mudo ('0').
 type SoundMode = '1' | 'sfx' | '0';
 const SOUND: Record<SoundMode, { long: string; short: string; title: string }> = {
-  '1': { long: 'Som', short: '♫', title: 'Som: música e efeitos (M liga ou desliga a música)' },
-  sfx: { long: 'Efeitos', short: '♪', title: 'Som: só efeitos (M liga a música)' },
-  '0': { long: 'Mudo', short: '✕', title: 'Som desligado' },
+  '1': { long: 'Som', short: '♫', title: 'Som: música e efeitos (clique alterna)' },
+  sfx: { long: 'Efeitos', short: '♪', title: 'Som: só efeitos (clique alterna)' },
+  '0': { long: 'Mudo', short: '✕', title: 'Som desligado (clique alterna)' },
 };
 const soundBtn = document.getElementById('btn-sound')!;
 let soundMode: SoundMode = 'sfx';
@@ -1003,10 +1031,6 @@ function setSound(m: SoundMode, save = true) {
   soundBtn.querySelector('.short')!.textContent = SOUND[m].short;
   if (save) store.set('sound', m);
 }
-function toggleMusic() {
-  setSound(soundMode === '1' ? 'sfx' : '1');
-  hud.toast(soundMode === '1' ? 'Música ligada' : 'Música desligada');
-}
 soundBtn.addEventListener('click', () => {
   sfx.unlock();
   setSound(({ '1': 'sfx', sfx: '0', '0': '1' } as const)[soundMode]);
@@ -1017,7 +1041,10 @@ soundBtn.addEventListener('click', () => {
 }
 document.addEventListener('visibilitychange', () => sfx.pause(document.hidden));
 
-window.addEventListener('resize', () => world.resize());
+window.addEventListener('resize', () => {
+  world.resize();
+  minimap.layout();
+});
 
 // ------------------------------------------------------------------ modos especiais
 
@@ -1037,6 +1064,7 @@ function autoPlace(n: number, infinite: boolean) {
     placed.push(res.placed);
     // As jogadas entram na lista: o filme e a gravação refazem o mapa por elas.
     moves.push([m.q, m.r, m.rot]);
+    noteTurn(res);
     while (game.discardIfStuck());
   }
   const logic = performance.now() - t0;
@@ -1044,6 +1072,7 @@ function autoPlace(n: number, infinite: boolean) {
   world.placeInstant(placed, game.board);
   const bake = performance.now() - t1;
   hud.renderQuests(game.board.quests, theme);
+  minimap.rebuild(game.board.list, theme.terrainColors);
   frameCamera(true);
   refreshHud(true);
   return { logic, bake, tiles: game.board.list.length };
@@ -1106,6 +1135,20 @@ let frameNo = 0;
 for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart'])
   window.addEventListener(ev, () => (lastInput = performance.now()), { capture: true, passive: true });
 
+/** Peças já estão no canvas; aqui só o que muda sem jogada: missões, sítios e a câmera. */
+function mapFrame() {
+  const quests = [];
+  for (const q of game.board.quests) {
+    if (q.state !== 'active') continue;
+    quests.push({ q: q.anchor.q, r: q.anchor.r, color: q.kind === 'perfect' ? theme.ui.accent : theme.terrainColors[q.terrain] });
+  }
+  minimap.frame({
+    quests,
+    sites: game.board.sites.filter((s) => s.found).map((s) => ({ q: s.q, r: s.r, kind: s.kind })),
+    corners: world.viewOnGround(),
+  });
+}
+
 function frame(now: number) {
   try {
     const idle = now - lastInput;
@@ -1134,6 +1177,7 @@ function step(now: number) {
     world.scout(game.board);
   }
   world.tick(dt);
+  mapFrame();
   updateAmbience(now);
   if (capture.take && !capture.take.frame(realDt, { x: world.rig.target.x, z: world.rig.target.z, dist: world.rig.dist, yaw: world.rig.yaw, tilt: world.rig.tilt })) capture.stopTake('A gravação chegou a 2 minutos.');
   hud.tick(dt);
@@ -1244,6 +1288,8 @@ function start(data: unknown) {
 }
 
 // Ajuda para capturas de tela automatizadas: mostra a peça atual na melhor posição.
+(window as unknown as { __over: () => void }).__over = () => showGameOver();
+
 (window as unknown as { __ghostBest: () => void }).__ghostBest = () => {
   const m = game.bestMove();
   if (!m) return;
