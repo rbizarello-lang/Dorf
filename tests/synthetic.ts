@@ -1,6 +1,6 @@
 // Escrito pelo agente revisor (Sonnet) durante a QA do protótipo; adaptado para o repositório.
 // Cenários sintéticos: peça travada / descarte / fim de jogo por descarte / semente vs. sequência de peças.
-import { DEFAULT_RULES, type Rules } from '../src/core/board';
+import { Board, DEFAULT_RULES, type Rules } from '../src/core/board';
 import { Game } from '../src/core/game';
 import { DIRS, hkey } from '../src/core/hex';
 import { T, rotateEdges, type TileDef } from '../src/core/tiles';
@@ -128,6 +128,24 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
   ok(!anyConflict, 'rio não encosta em terra: só a célula com água de frente é rejeitada');
   void cur;
   void hkey;
+}
+
+// ---- 6) Estação: +3 na interação da vez; o trinco fixa a estação
+{
+  console.log('Cenário 6: estações');
+  const piece = (facing: T): TileDef => ({ edges: [T.Grass, T.Grass, T.Grass, facing, T.Grass, T.Grass], seed: 1, quest: null });
+  const score = (origin: T, facing: T, extra: Partial<Rules>, fillers = 0) => {
+    const b = new Board({ ...DEFAULT_RULES, ...extra, blessings: false, influence: false, wonderStages: 0, eraScores: [0], sites: 0 });
+    b.placeRaw(0, 0, { edges: [origin, origin, origin, origin, origin, origin], seed: 1, quest: null }, 0);
+    for (let i = 0; i < fillers; i++) b.placeRaw(4, i + 4, land(T.Grass), 0);
+    return b.place(1, 0, piece(facing), 0)!.points;
+  };
+  ok(score(T.Field, T.Grass, {}) === 8, 'primavera: colmeia vale 5+3');
+  ok(score(T.Village, T.Forest, {}) === 5, 'primavera: serraria não leva o bônus');
+  ok(score(T.Field, T.Grass, { seasonBonus: false }) === 5, 'sem o bônus de estação fica em 5');
+  ok(score(T.Village, T.Grass, { seasonLock: 3 }) === 8, 'inverno travado: pasto vale 5+3');
+  ok(score(T.Field, T.Grass, { seasonLock: 3 }) === 5, 'inverno travado: colmeia não leva o bônus');
+  ok(score(T.Village, T.Field, {}, 20) === 8, 'depois do centro e de 20 peças, a jogada seguinte é verão: moinho vale 5+3');
 }
 
 console.log(bad ? `\n${bad} FALHA(S)` : '\nTodos os cenários sintéticos passaram');

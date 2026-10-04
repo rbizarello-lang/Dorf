@@ -2,6 +2,7 @@ import { BLESSING, SYN_BLESSING, type BlessingId } from './blessings';
 import { DIRS, hexDistance, hkey, opposite } from './hex';
 import { LOOKOUT_MOVES, SITE_REWARD, type Site, type SiteKind } from './sites';
 import { SPECIALS, type SpecialKind } from './specials';
+import { SEASON_BONUS, SEASON_KIND, seasonAt } from './seasons';
 import { INFLUENCE, INFLUENCE_CAP, SYN_KINDS, type SynHit, type SynKind, synergyOf } from './synergy';
 import { T, isStrict, rotateEdges, type QuestKind, type TileDef } from './tiles';
 
@@ -24,6 +25,10 @@ export interface Rules {
   matchBonus: Partial<Record<T, number>>;
   /** Bônus do tema: pontos extras por interação de um tipo. */
   synergyBonus: Partial<Record<SynKind, number>>;
+  /** +3 na interação da estação (primavera colmeias, verão moinho, outono serraria, inverno pasto). */
+  seasonBonus: boolean;
+  /** Trava a estação da pontuação (0 primavera … 3 inverno). O desafio do dia ignora as regras do tema. */
+  seasonLock?: 0 | 1 | 2 | 3;
   /** Quantos sítios escondidos o mapa tem. */
   sites: number;
   /** Modo zen: a pilha nunca acaba. */
@@ -63,6 +68,7 @@ export const DEFAULT_RULES: Rules = {
   eraTiles: 3,
   matchBonus: {},
   synergyBonus: {},
+  seasonBonus: true,
   sites: 6,
   infinite: false,
   endOnSites: false,
@@ -302,10 +308,13 @@ export class Board {
       this.markPending = null;
     }
     points += c.synergies.length * R.synergyPoints;
+    // A peça do centro não é jogada: a primeira jogada de quem joga é a segunda peça.
+    const seasonKind = R.seasonBonus ? SEASON_KIND[seasonAt(Math.max(0, placed.index - 1), R.seasonLock)] : null;
     for (const h of c.synergies) {
       this.synergyCount[h.kind]++;
       points += R.synergyBonus[h.kind] ?? 0;
       if (this.blessed(SYN_BLESSING[h.kind])) points += BLESSING.synergy;
+      if (h.kind === seasonKind) points += SEASON_BONUS;
     }
     // Influência das construções em volta; depois, as interações desta peça marcam as vizinhas.
     points += c.influence.points;

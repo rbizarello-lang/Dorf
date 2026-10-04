@@ -7,10 +7,10 @@ import { CHARGES, HOUSE_COLORS, METALS, ORDINARIES, bannerSvg, type Banner, type
 
 const $ = <E extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as E;
 
-export const TIME_LABEL: Record<TimeOfDay, string> = { dawn: 'Amanhecer', day: 'Dia', golden: 'Hora dourada', dusk: 'Entardecer', night: 'Noite' };
-export const TIME_ICON: Record<TimeOfDay, string> = { dawn: '◒', day: '☀', golden: '☼', dusk: '◐', night: '☾' };
+export const TIME_LABEL: Record<TimeOfDay, string> = { dawn: 'Amanhecer', aurora: 'Aurora', day: 'Dia', golden: 'Hora dourada', dusk: 'Entardecer', night: 'Noite' };
+export const TIME_ICON: Record<TimeOfDay, string> = { dawn: '◒', aurora: '✺', day: '☀', golden: '☼', dusk: '◐', night: '☾' };
 /** Ordem do botão e da tecla L: o dia passa uma hora por vez. */
-export const TIME_ORDER: TimeOfDay[] = ['dawn', 'day', 'golden', 'dusk', 'night'];
+export const TIME_ORDER: TimeOfDay[] = ['dawn', 'aurora', 'day', 'golden', 'dusk', 'night'];
 
 export interface MarkerView {
   id: number;

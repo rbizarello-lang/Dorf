@@ -189,6 +189,18 @@ export type BridgeStyle =
   | 'wood' // arco alto de madeira com guarda-corpo (ponte arco-íris, taikobashi)
   | 'rope'; // ponte de corda pênsil, tabuado e cabos
 
+/** Bruma, vento e filtro de cor do tema, por cima da hora do dia. */
+export interface Atmos {
+  /** Multiplica a densidade da bruma da hora. 1 deixa a hora como está. */
+  haze: number;
+  /** Cor para onde a bruma puxa. */
+  hazeColor: string;
+  /** Força do vento nas copas e nas plantações. 1 é o de sempre. */
+  wind: number;
+  /** Multiplica a imagem final, canal a canal (vermelho, verde, azul). */
+  filter: [number, number, number];
+}
+
 /** O que flutua no ar, desenhado pelo shader (sem custo de CPU). */
 export type WeatherKind =
   | 'none'
@@ -285,6 +297,12 @@ export interface Theme {
   ui: { accent: string; panel: string; ink: string; soft: string };
   /** Gradação de cor do tema na imagem final: matiz puxado nas sombras e nos realces (só o tom conta, não o brilho) e saturação (1 = neutra). */
   grade: { shadow: string; light: string; saturation: number };
+  /** Atmosfera por cima da hora: bruma, vento e um filtro leve na imagem. */
+  atmos?: Atmos;
+  /** Trava a paisagem numa estação (0 primavera, 1 verão, 2 outono, 3 inverno). A pontuação usa `rules.seasonLock`. */
+  season?: 0 | 1 | 2 | 3;
+  /** Lanternas ao longo da estrada, acesas à noite. */
+  roadLamps?: boolean;
   /** Nomes das interações entre bordas neste tema. */
   synergy: { lumber: string; mill: string; pasture: string; apiary: string };
   rules?: Partial<Rules>;
