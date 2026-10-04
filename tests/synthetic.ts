@@ -1,9 +1,10 @@
 // Escrito pelo agente revisor (Sonnet) durante a QA do protótipo; adaptado para o repositório.
 // Cenários sintéticos: peça travada / descarte / fim de jogo por descarte / semente vs. sequência de peças.
-import { DEFAULT_RULES, type Rules } from '../src/core/board';
+import { Board, DEFAULT_RULES, type Rules } from '../src/core/board';
 import { Game } from '../src/core/game';
 import { DIRS, hkey } from '../src/core/hex';
-import { T, rotateEdges, type TileDef } from '../src/core/tiles';
+import { routePoints } from '../src/core/routes';
+import { T, generateTile, rotateEdges, type TileDef } from '../src/core/tiles';
 import { mulberry32 } from '../src/core/rng';
 import { timelineSvg, type TurnNote } from '../src/ui/minimap';
 import { monumentsDue } from '../src/ui/progress';
@@ -162,6 +163,38 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
   ok(monumentsDue({ lumber: 0, relics: 3, wonder: false }, { relics: 16, wonders: 0 }).join() === '', '19 relíquias ainda não dão o relicário');
   ok(monumentsDue({ lumber: 0, relics: 4, wonder: false }, { relics: 16, wonders: 0 }).join() === 'reliquary', '20 relíquias dão o relicário');
   ok(monumentsDue({ lumber: 10, relics: 20, wonder: true }, none).join() === 'log,statue,reliquary', 'as três conquistas juntas, na ordem fixa');
+}
+
+// ---- 8) Estrada Real: a tabela e um par de mercados a 4 casas. O clássico não paga.
+{
+  console.log('Cenário 8: rotas de comércio');
+  ok(routePoints(2).points === 11 && routePoints(2).tiles === 0, 'd=2 rende 11');
+  ok(routePoints(4).points === 27 && routePoints(6).points === 48 && routePoints(6).tiles === 1, 'd=4 rende 27 e d=6 rende 48 e uma peça');
+  ok(routePoints(8).points === 75 && routePoints(10).points === 107 && routePoints(10).tiles === 1, 'd=8 rende 75 e d=10 rende 107');
+  const track = (back: boolean, fwd: boolean): TileDef => {
+    const edges = [T.Grass, T.Grass, T.Grass, T.Grass, T.Grass, T.Grass];
+    if (fwd) edges[0] = T.Rail;
+    if (back) edges[3] = T.Rail;
+    return { edges, seed: 1, quest: null };
+  };
+  const lay = (routes: boolean) => {
+    const b = new Board({ ...DEFAULT_RULES, routes, sites: 0 });
+    b.placeRaw(0, 0, track(false, true), 0);
+    for (let q = 1; q <= 3; q++) b.placeRaw(q, 0, track(true, true), 0);
+    return b.place(4, 0, track(true, false), 0);
+  };
+  const paid = lay(true);
+  ok(paid.routes.length === 1 && paid.routes[0].kind === 'market' && paid.routes[0].d === 4 && paid.routes[0].points === 27, 'mercados a 4 casas rendem 27');
+  ok(paid.points === 37, 'o encaixe do trilho (10) soma com a rota (27)');
+  const classic = lay(false);
+  ok(classic.routes.length === 0 && classic.points === 10, 'no clássico a mesma linha não rende rota');
+  const near = new Board({ ...DEFAULT_RULES, routes: true, sites: 0 });
+  near.placeRaw(0, 0, track(false, true), 0);
+  const close = near.place(1, 0, track(true, false), 0);
+  ok(close.routes.length === 0 && close.points === 10, 'mercados vizinhos (d=1) não rendem');
+  const same = (chances: boolean) => generateTile(mulberry32(7), true, ...(chances ? [0.17, 0.09] as const : []));
+  const left = same(false), right = same(true);
+  ok(left.edges.join() === right.edges.join() && left.seed === right.seed, 'as chances padrão não mudam a sequência de peças');
 }
 
 console.log(bad ? `\n${bad} FALHA(S)` : '\nTodos os cenários sintéticos passaram');

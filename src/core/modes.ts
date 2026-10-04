@@ -3,7 +3,7 @@ import type { Rules } from './board';
 // Versões alternativas do jogo. Um modo é dado: muda regras e o que a interface oferece
 // (desfazer, semente do dia). As regras finais são padrão ← tema ← modo.
 
-export type ModeId = 'classico' | 'zen' | 'diario' | 'exploradores';
+export type ModeId = 'classico' | 'zen' | 'diario' | 'exploradores' | 'rotas';
 
 export interface Mode {
   id: ModeId;
@@ -45,6 +45,13 @@ export const MODES: readonly Mode[] = [
     tagline: 'Dez sítios escondidos. Ache todos com o mínimo de peças: cada uma que sobrar vale 20 pontos.',
     rules: { sites: 10, startTiles: 60, endOnSites: true },
     undos: 1,
+  },
+  {
+    id: 'rotas',
+    name: 'Estrada Real',
+    tagline: 'Mais trilhos. Mercados e portos da mesma rede rendem pela distância, e a rota de 6 ou mais casas devolve uma peça.',
+    rules: { railChance: 0.2, routes: true },
+    undos: 3,
   },
 ];
 

@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import type { Board, Placed } from '../core/board';
 import { DIRS, edgeMid, hexToWorld, hkey, opposite } from '../core/hex';
+import { isMarket, networks } from '../core/routes';
 import { T } from '../core/tiles';
 import type { Theme } from '../themes/types';
 import { instGeometry, setInstColor, type Lib } from './lib';
@@ -852,51 +853,9 @@ function angleDiff(a: number, b: number) {
   return d;
 }
 
-/**
- * Mercado da rota: estação especial, trilho de uma borda só, ou vila colada ao trilho.
- * A mesma condição que ergue a estação em tileBuilder.
- */
-function isMarket(p: Placed): boolean {
-  if (p.def.special === 'station') return true;
-  let rails = 0;
-  let village = false;
-  for (let i = 0; i < 6; i++) {
-    if (p.edges[i] !== T.Rail) continue;
-    rails++;
-    if (p.edges[(i + 1) % 6] === T.Village || p.edges[(i + 5) % 6] === T.Village) village = true;
-  }
-  return rails === 1 || village;
-}
-
 function strictEdges(p: Placed, terr: T) {
   const out: number[] = [];
   for (let i = 0; i < 6; i++) if (p.edges[i] === terr) out.push(i);
-  return out;
-}
-
-/** Componentes conexas da rede de um terreno contínuo (rio ou estrada). */
-function networks(board: Board, terr: T): Placed[][] {
-  const seen = new Set<number>();
-  const out: Placed[][] = [];
-  for (const start of board.list) {
-    if (seen.has(start.key) || !start.edges.includes(terr)) continue;
-    const net: Placed[] = [];
-    const stack = [start];
-    seen.add(start.key);
-    while (stack.length) {
-      const t = stack.pop()!;
-      net.push(t);
-      for (let i = 0; i < 6; i++) {
-        if (t.edges[i] !== terr) continue;
-        const n = board.tiles.get(hkey(t.q + DIRS[i][0], t.r + DIRS[i][1]));
-        if (n && !seen.has(n.key) && n.edges[opposite(i)] === terr) {
-          seen.add(n.key);
-          stack.push(n);
-        }
-      }
-    }
-    out.push(net);
-  }
   return out;
 }
 
