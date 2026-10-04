@@ -43,8 +43,9 @@ export const ROAD_HW = 0.1;
 /** Altura em que veículos andam (maglev flutua sobre a via). */
 export const ROAD_Y = { rail: 0.03, dirt: 0.006, stone: 0.008, sand: 0.006, maglev: 0.075 } as const;
 
-/** spin: pás e rodas; wander: animais; chop/tend/carry: aldeões (golpe de machado, capina, vai e vem). */
-export type Anim = 'spin-z' | 'spin-x' | 'wander' | 'chop' | 'tend' | 'carry';
+/** spin: pás e rodas; wander: animais; chop/tend/carry: aldeões (golpe de machado, capina, vai e vem);
+ * swim: peixe de cardume (gira em volta de um centro, com o raio em `orbit`); bob: barco ancorado. */
+export type Anim = 'spin-z' | 'spin-x' | 'wander' | 'chop' | 'tend' | 'carry' | 'swim' | 'bob';
 
 export interface Deco {
   key: string;
@@ -57,6 +58,8 @@ export interface Deco {
   sz: number;
   color: THREE.Color;
   anim?: Anim;
+  /** Peixe: raio do círculo que ele nada (negativo = sentido horário). O centro fica à esquerda (ou à direita) da direção da peça. */
+  orbit?: number;
   /** Só existe na peça viva (andaime de obra): o World não o grava nos blocos. */
   transient?: boolean;
 }
@@ -626,6 +629,23 @@ const WIDE_LANDMARKS: ReadonlySet<string> = new Set(['pyramid', 'pylon', 'kancha
 /** Ângulo de rotação em y que leva o eixo x local para a direção (dx, dz). */
 const yawTo = (dx: number, dz: number) => Math.atan2(-dz, dx);
 
+/** Ponto da margem mais perto de (x, z), descendo pela distância até a água, e a direção para dentro dela. */
+function shoreFrom(field: { e: (x: number, z: number) => number }, x: number, z: number) {
+  const h = 0.008;
+  for (let k = 0; k < 24; k++) {
+    const e = field.e(x, z);
+    const gx = (field.e(x + h, z) - field.e(x - h, z)) / (2 * h), gz = (field.e(x, z + h) - field.e(x, z - h)) / (2 * h);
+    const l = Math.hypot(gx, gz);
+    if (l < 1e-4) return null;
+    const nx = -gx / l, nz = -gz / l;
+    if (Math.abs(e - 0.012) < 0.004) return { x, z, nx, nz };
+    const step = Math.max(-0.05, Math.min(0.05, e - 0.012));
+    x += nx * step;
+    z += nz * step;
+  }
+  return null;
+}
+
 export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts: BuildOpts): TileBuild {
   const rng = mulberry32(seed);
   const detail = opts.detail;
@@ -982,7 +1002,23 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const [cx, cz] = corner(shared);
       const tx0 = cx * 0.46, tz0 = cz * 0.46;
       if (edges[i] === T.Field && edges[j] === T.Water) lush.add(i);
-      if (edges[i] === T.Village && edges[j] === T.Water && !watermill && water.paths.length && !(shape.lake && water.idx.length >= 2)) {
+      const lakeTile = !!shape.lake && water.idx.length >= 2;
+      // Vila na beira d'água: no lago, e em metade das peças de rio (pela semente, sem sorteio),
+      // nasce o cais de pescador em vez da roda d'água.
+      if (edges[i] === T.Village && edges[j] === T.Water && !watermill && field && (lakeTile || ((seed >>> 7) & 1) === 1)) {
+        const s = shoreFrom(field, tx0, tz0);
+        if (!s || field.e(s.x + s.nx * 0.16, s.z + s.nz * 0.16) > -0.02 || Math.hypot(s.x, s.z) > INR - 0.1) continue;
+        watermill = true;
+        const ry = yawTo(s.nx, s.nz);
+        D('pier', s.x, 0, s.z, ry, 1.25, WHITE);
+        // O barco encosta ao lado da ponta do cais, paralelo a ele.
+        const bx = s.x + s.nx * 0.11 - s.nz * 0.07, bz = s.z + s.nz * 0.11 + s.nx * 0.07;
+        if (field.e(bx, bz) < -0.03) D('moored', bx, WATER_Y, bz, ry, 0.85, WHITE, 'bob');
+        const hx = s.x - s.nx * 0.17, hz = s.z - s.nz * 0.17;
+        D('wall:0', hx, 0, hz, ry, 1.1, WHITE.clone().multiply(tc(theme.houses[0].walls[0])));
+        D('roof:0', hx, 0, hz, ry, 1.1, tc(theme.houses[0].roofs[0]).clone());
+        reserved.push([s.x, s.z, 0.12], [hx, hz, 0.13], [bx, bz, 0.08]);
+      } else if (edges[i] === T.Village && edges[j] === T.Water && !watermill && water.paths.length && !lakeTile) {
         const n = nearestOnPaths(tx0, tz0, water.paths);
         let px = tx0 - n.p[0], pz = tz0 - n.p[1];
         const l = Math.hypot(px, pz) || 1;
@@ -1324,6 +1360,27 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       if (theme.berry && berryRoll < BERRY_CHANCE && b && free(b[0], b[1], 0.07) && clear(b[0], b[1]) > 0.05) {
         D('berry', b[0], 0, b[1], r2() * Math.PI * 2, randRange(r2, 1.1, 1.5), tc(theme.berry));
         taken.push(b);
+      }
+    }
+  }
+
+  // --- Cardume: 3 peixes nadando em círculo no lago ou no remanso de uma junção de rios.
+  // Gerador à parte e por último, como a paisagem trabalhada.
+  if (field && (shape.lake || water.idx.length >= 3)) {
+    const r3 = mulberry32((seed ^ 0x51a5f15) >>> 0);
+    const cx = shape.lake ? shape.lake.x : 0, cz = shape.lake ? shape.lake.z : 0;
+    const R = Math.min(0.2, -field.e(cx, cz) - 0.06) * (0.75 + r3() * 0.25);
+    if (R >= 0.07 && (shape.lake || r3() < 0.5)) {
+      const fishCol = tc(theme.water).clone().multiplyScalar(0.3);
+      const w = r3() < 0.5 ? 1 : -1;
+      const a0 = r3() * Math.PI * 2;
+      for (let k = 0; k < 3; k++) {
+        const a = a0 + (k * Math.PI * 2) / 3 + (r3() - 0.5) * 0.6;
+        const r = R * (0.8 + r3() * 0.35);
+        const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+        // Direção da tangente: anti-horário (w = 1) ou horário.
+        D('fish', x, WATER_Y + 0.004, z, yawTo(-Math.sin(a) * w, Math.cos(a) * w), 1, fishCol, 'swim');
+        decos[decos.length - 1].orbit = r * w;
       }
     }
   }

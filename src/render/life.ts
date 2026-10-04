@@ -111,6 +111,31 @@ interface Worker {
   phase: number;
 }
 
+interface Fish {
+  cx: number;
+  cz: number;
+  r: number;
+  /** Ângulo no círculo e velocidade angular (rad/s; negativa = sentido horário). */
+  a: number;
+  w: number;
+  y: number;
+  color: THREE.Color;
+  /** Segundos até o próximo salto; durante o salto, `jump` vai de 0 a 1. */
+  next: number;
+  jump: number;
+}
+
+interface Bobber {
+  base: THREE.Matrix4;
+  color: THREE.Color;
+  phase: number;
+}
+
+/** Teto de peixes (os cardumes de lagos e remansos). */
+const FISH_MAX = 60;
+/** Duração de um salto de peixe, em segundos. */
+const JUMP_T = 0.7;
+
 /** Teto de aldeões (nas construções e nas estradas). */
 const FOLK_MAX = 120;
 
@@ -163,6 +188,10 @@ export class Life {
   private wakeList: Mover[] = [];
   private flocks: Flock[] = [];
   private workers: Worker[] = [];
+  private fish: Fish[] = [];
+  private bobbers: Bobber[] = [];
+  /** Respingo quando um peixe sai ou volta para a água (o World desenha as gotas). */
+  onSplash: (x: number, z: number) => void = () => {};
   /** Batedor do começo da partida: vai do Centro até a beira, olha o sítio e volta. */
   private scoutRide: { x0: number; z0: number; x1: number; z1: number; t: number } | null = null;
   /** Os aldeões só aparecem de perto (`World` atualiza a cada quadro). */
@@ -193,6 +222,8 @@ export class Life {
     this.movers = [];
     this.flocks = [];
     this.workers = [];
+    this.fish = [];
+    this.bobbers = [];
     this.scoutRide = null;
     this.theme = theme;
     this.beast.set(theme.animals.colors[0]);
@@ -227,6 +258,26 @@ export class Life {
     if (key !== 'folk:axe' && key !== 'folk:hoe' && key !== 'folk:sack') return;
     if (this.folkCount() >= FOLK_MAX || !this.pool(key)) return;
     this.workers.push({ key, anim, base: world.clone(), color: color.clone(), phase: Math.random() * 20 });
+  }
+
+  /** Peixe de cardume: a matriz dá a posição e a direção; `orbit` é o raio (negativo = horário). */
+  addFish(world: THREE.Matrix4, color: THREE.Color, orbit: number) {
+    if (this.fish.length >= FISH_MAX || !orbit || !this.pool('fish', false)) return;
+    const e = world.elements;
+    const px = e[12], pz = e[14];
+    const l = Math.hypot(e[0], e[2]) || 1;
+    const vx = e[0] / l, vz = e[2] / l;
+    const r = Math.abs(orbit), cw = orbit < 0;
+    // O centro fica à esquerda da direção no sentido anti-horário, à direita no horário.
+    const cx = px - r * (cw ? -vz : vz), cz = pz - r * (cw ? vx : -vx);
+    const w = ((cw ? -1 : 1) * (0.022 + Math.random() * 0.012)) / r;
+    this.fish.push({ cx, cz, r, a: Math.atan2(pz - cz, px - cx), w, y: e[13], color: color.clone(), next: 6 + Math.random() * 30, jump: -1 });
+  }
+
+  /** Barco ancorado: balança no lugar. */
+  addBobber(world: THREE.Matrix4, color: THREE.Color) {
+    if (!this.pool('moored')) return;
+    this.bobbers.push({ base: world.clone(), color: color.clone(), phase: Math.random() * 6 });
   }
 
   scout(x0: number, z0: number, x1: number, z1: number) {
@@ -340,9 +391,56 @@ export class Life {
     }
 
     this.updateMovers(dt);
+    this.updateFish(dt);
     this.updateFolk(dt);
     this.updateScout(dt);
     this.updateBirds(dt);
+  }
+
+  private updateFish(dt: number) {
+    const bp = this.pools.get('moored');
+    if (bp && this.bobbers.length) {
+      this.bobbers.forEach((b, i) => {
+        const t = this.time + b.phase;
+        m4.copy(b.base).multiply(m4b.makeRotationX(Math.sin(t * 1.3) * 0.07));
+        m4.multiply(m4b.makeTranslation(0, Math.sin(t * 1.7) * 0.004, 0));
+        bp.set(i, m4, b.color);
+      });
+      bp.commit(this.bobbers.length);
+    }
+    const p = this.pools.get('fish');
+    if (!p) return;
+    p.mesh.visible = this.folkNear;
+    this.fish.forEach((f, i) => {
+      f.a += f.w * dt;
+      const x = f.cx + Math.cos(f.a) * f.r, z = f.cz + Math.sin(f.a) * f.r;
+      // Direção da tangente no sentido do giro.
+      const s = Math.sign(f.w);
+      const heading = Math.atan2(Math.cos(f.a) * s, -Math.sin(f.a) * s);
+      let y = f.y, pitch = 0;
+      if (f.jump < 0) {
+        f.next -= dt;
+        if (f.next <= 0) {
+          f.jump = 0;
+          this.onSplash(x, z);
+        }
+      } else {
+        f.jump += dt / JUMP_T;
+        if (f.jump >= 1) {
+          f.jump = -1;
+          f.next = 18 + Math.random() * 18;
+          this.onSplash(x, z);
+        } else {
+          y += Math.sin(Math.PI * f.jump) * 0.06;
+          pitch = (0.5 - f.jump) * 1.8;
+        }
+      }
+      q4.setFromAxisAngle(UP, -heading);
+      m4.compose(v3.set(x, y, z), q4, s3.setScalar(1));
+      if (pitch) m4.multiply(m4b.makeRotationZ(pitch));
+      p.set(i, m4, f.color);
+    });
+    p.commit(this.fish.length);
   }
 
   private updateScout(dt: number) {
@@ -473,6 +571,16 @@ export class Life {
   boatPos(): { x: number; z: number } | null {
     const m = this.movers.find((m) => m.boat && m.wait <= 0);
     return m ? { x: m.x, z: m.z } : null;
+  }
+
+  /** Centro do i-ésimo cardume, ou o i-ésimo barco ancorado no cais (`pier`), ou null (capturas). */
+  fishingPos(i: number, pier: boolean): { x: number; z: number } | null {
+    if (pier) {
+      const b = this.bobbers[i];
+      return b ? { x: b.base.elements[12], z: b.base.elements[14] } : null;
+    }
+    const f = this.fish[i * 3];
+    return f ? { x: f.cx, z: f.cz } : null;
   }
 
   /** Posição do i-ésimo aldeão de construção, ou null (capturas). */

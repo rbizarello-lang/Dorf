@@ -1771,6 +1771,27 @@ function workedGeometries(theme: Theme) {
   return { stump, ore, mine, berry };
 }
 
+/** Pesca (proposta 10 do docs/IDEIAS_AOE.md): o peixe do cardume, e o cais com o varal de peixes. */
+function fishingGeometries(theme: Theme) {
+  const wood = theme.trunk;
+  // Peixe achatado, visto de cima na superfície (a água é opaca): corpo e rabo, tingidos pela instância.
+  const fish = kit([
+    { geo: oct(0.017).scale(1.5, 0.2, 0.55), color: '#ffffff', tint: 1 },
+    { geo: oct(0.01).scale(0.9, 0.2, 1).translate(-0.029, 0, 0), color: '#ffffff', tint: 1 },
+  ]);
+  // Cais: tábuas da margem para a água (+x) sobre estacas, e o varal em A com 4 peixinhos na terra.
+  const pier: Part[] = [];
+  for (let i = 0; i < 6; i++) pier.push({ geo: box(0.022, 0.004, 0.05, -0.01 + i * 0.024, 0.026, 0), color: i % 2 ? shadeHex(wood, 1.12) : wood });
+  for (const x of [0.04, 0.115]) for (const z of [-0.022, 0.022]) pier.push({ geo: cyl(0.0035, 0.004, 0.07, 5, x, -0.04, z), color: shadeHex(wood, 0.7) });
+  for (const z of [-0.03, 0.03]) {
+    pier.push({ geo: strut([-0.06, 0, z - 0.012], [-0.06, 0.05, z], 0.0025), color: wood });
+    pier.push({ geo: strut([-0.06, 0, z + 0.012], [-0.06, 0.05, z], 0.0025), color: wood });
+  }
+  pier.push({ geo: box(0.003, 0.003, 0.07, -0.06, 0.048, 0), color: wood });
+  for (let i = 0; i < 4; i++) pier.push({ geo: oct(0.006).scale(0.5, 1.6, 0.9).translate(-0.06, 0.036, -0.022 + i * 0.015), color: '#9aa4a8' });
+  return { fish, pier: kit(pier) };
+}
+
 function specialsFor(theme: Theme, walls: string, roofs: string) {
   const wood = theme.trunk;
   const logs: Part[] = [];
@@ -2025,6 +2046,9 @@ export class Lib {
     set('scout', mergeGeometries([animalGeometry(theme.animals.kind), folkGeometry('sack', folk, theme.trunk).translate(0, 0.022, 0)])!);
     for (const [k, g] of Object.entries(siteGeometries(theme))) set(k, g);
     for (const [k, g] of Object.entries(workedGeometries(theme))) set(k, g);
+    for (const [k, g] of Object.entries(fishingGeometries(theme))) set(k, g);
+    // Barco de pesca ancorado no cais: o casco do tema, sem a bandeira dos que viajam.
+    set('moored', boatBody(theme.boat, theme.boatColors));
   }
 
   geo(key: string) {

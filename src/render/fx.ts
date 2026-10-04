@@ -155,6 +155,7 @@ class SpriteLayer {
 }
 
 const WHITE = new THREE.Color(1, 1, 1);
+const SPLASH = new THREE.Color(0.95, 0.97, 1);
 
 /** Poeira (normal), brilhos (aditivos) e fumaça em bolas. */
 export class Sprites {
@@ -188,6 +189,15 @@ export class Sprites {
       const r = Math.random() * 0.6;
       const sp = 0.2 + Math.random() * 0.4;
       this.glow.add({ x: x + Math.cos(a) * r, y: y + 0.1 + Math.random() * 0.2, z: z + Math.sin(a) * r, vx: Math.cos(a) * sp, vy: 0.9 + Math.random() * 0.9, vz: Math.sin(a) * sp, age: 0, life: 0.9 + Math.random() * 0.7, size: 0.05 + Math.random() * 0.05, grow: -0.6, color, alpha: 1.6, drag: 0.8, gravity: 1.6, seed: Math.random() });
+    }
+  }
+
+  /** Respingo de peixe: gotas brancas que sobem um palmo e caem de volta na água. */
+  splash(x: number, y: number, z: number, n: number) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 0.05 + Math.random() * 0.08;
+      this.glow.add({ x: x + Math.cos(a) * 0.01, y: y + 0.005, z: z + Math.sin(a) * 0.01, vx: Math.cos(a) * sp, vy: 0.35 + Math.random() * 0.25, vz: Math.sin(a) * sp, age: 0, life: 0.45 + Math.random() * 0.2, size: 0.012 + Math.random() * 0.01, grow: -0.4, color: SPLASH, alpha: 0.9, drag: 0.5, gravity: 2.2, seed: Math.random() });
     }
   }
 

@@ -12,6 +12,32 @@ Pesquisa de inspiração (visual e mecânica) na série Age of Empires · 01/10/
 
 **Tipo** indica se a proposta é visual, mecânica ou ambos.
 
+## Andamento (04/10/2026)
+
+| Proposta | Estado |
+|---|---|
+| 1 Avanço de eras | feita (#12) |
+| 2 Arquitetura por era | feita (#38) |
+| 3 Escolha na virada de era | feita (#39) |
+| 4 Andaimes | feita (#13) |
+| 5 Legibilidade | feita (#16) |
+| 6 Bônus por tema | já existia |
+| 7 Influência das construções | feita (#40, save v9) |
+| 8 Aldeões | feita (#18) |
+| 9 Paisagem trabalhada | feita (#41) |
+| 10 Pesca e cardumes | feita (#42) |
+| 11 e 12 Sítios e terra incógnita | feitas (#21) |
+| 13 Maravilha | feita (#24) |
+| 14 Rotas de comércio | **a fazer**: no clássico, só a camada visual (carga, parada nos mercados, moeda); a regra completa, num modo próprio |
+| 15 Cor da casa, estandartes, brasão | feita (#23); **monumentos por conquista a fazer** |
+| 16 Minimapa e linha do tempo | **a fazer** |
+| 17 Interface por tema | **a fazer** |
+| 18 Som por era | feita (18a #22; 18b/c #34) |
+| 19 Atmosferas, fogo e estações | **a fazer** |
+| 20 Almanaque | feita (#33) |
+
+Próximo passo, na ordem do documento: 14, 16, 17, 19 e os monumentos. Um PR por proposta, saindo do `main`, com `npm run check` e `npm run smoke` antes do commit.
+
 ## Resumo
 
 - **O que trazer do AoE.** Nem a guerra nem a economia de quatro recursos. Valem quatro coisas:
