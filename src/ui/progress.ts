@@ -8,6 +8,27 @@ import { SPECIAL_KINDS, type SpecialKind } from '../core/specials';
 
 export const SPECIAL_NAME: Record<SpecialKind, string> = { station: 'Estação', watermill: "Moinho d'água", lighthouse: 'Farol' };
 
+/** Enfeites da praça do Centro, desbloqueados por conquista e guardados entre as partidas. */
+export const MONUMENT_KINDS = ['log', 'statue', 'reliquary'] as const;
+export type MonumentKind = (typeof MONUMENT_KINDS)[number];
+export const MONUMENT_NAME: Record<MonumentKind, string> = {
+  log: 'Tora entalhada',
+  statue: 'Estátua dourada',
+  reliquary: 'Relicário',
+};
+
+/**
+ * Quais monumentos esta partida já merece, junto do que veio de partidas anteriores.
+ * A tora pede 10 serrarias nesta partida; a estátua, a primeira maravilha; o relicário, 20 relíquias no total.
+ */
+export function monumentsDue(have: { lumber: number; relics: number; wonder: boolean }, prior: { relics: number; wonders: number }): MonumentKind[] {
+  const out: MonumentKind[] = [];
+  if (have.lumber >= 10) out.push('log');
+  if (have.wonder || prior.wonders > 0) out.push('statue');
+  if (prior.relics + have.relics >= 20) out.push('reliquary');
+  return out;
+}
+
 type Counted = 'quests' | 'synergies' | 'sites';
 /** O que libera cada peça especial (total somado de todas as partidas). */
 export const UNLOCKS: Record<SpecialKind, { what: Counted; need: number; label: string }> = {
@@ -41,6 +62,7 @@ export interface ProgressData {
   specialsPlaced: Record<SpecialKind, number>;
   themes: Record<string, ThemeRecord>;
   unlocked: SpecialKind[];
+  monuments: MonumentKind[];
 }
 
 interface Store {
@@ -58,13 +80,14 @@ function empty(): ProgressData {
     specialsPlaced: zero(SPECIAL_KINDS),
     themes: {},
     unlocked: [],
+    monuments: [],
   };
 }
 
 /** Lê o que veio do armazenamento campo a campo, contra listas fixas; o que não confere vira zero. */
 function sanitize(raw: unknown, themeIds: readonly string[]): ProgressData {
   const d = empty();
-  const r = (raw ?? {}) as { totals?: Record<string, unknown>; siteKinds?: Record<string, unknown>; specialsPlaced?: Record<string, unknown>; themes?: Record<string, unknown>; unlocked?: unknown };
+  const r = (raw ?? {}) as { totals?: Record<string, unknown>; siteKinds?: Record<string, unknown>; specialsPlaced?: Record<string, unknown>; themes?: Record<string, unknown>; unlocked?: unknown; monuments?: unknown };
   for (const k of Object.keys(d.totals) as (keyof Totals)[]) d.totals[k] = nat(r.totals?.[k]);
   for (const k of SITE_KINDS) d.siteKinds[k] = nat(r.siteKinds?.[k]);
   for (const k of SPECIAL_KINDS) d.specialsPlaced[k] = nat(r.specialsPlaced?.[k]);
@@ -74,6 +97,8 @@ function sanitize(raw: unknown, themeIds: readonly string[]): ProgressData {
   }
   const un = r.unlocked;
   if (Array.isArray(un)) d.unlocked = SPECIAL_KINDS.filter((k) => un.includes(k));
+  const mon = r.monuments;
+  if (Array.isArray(mon)) d.monuments = MONUMENT_KINDS.filter((k) => mon.includes(k));
   return d;
 }
 
@@ -123,6 +148,28 @@ export class Progress {
     return SPECIAL_KINDS.filter((k) => this.data.unlocked.includes(k));
   }
 
+  /** Monumentos da praça, na ordem fixa. */
+  get monuments(): MonumentKind[] {
+    return MONUMENT_KINDS.filter((k) => this.data.monuments.includes(k));
+  }
+
+  /**
+   * Libera os monumentos que a partida em andamento já conquistou. Devolve os recém-liberados.
+   * A maravilha pronta nesta partida conta, mesmo antes de a partida entrar nos totais.
+   */
+  unlockMonuments(b: Board, wonderDone: boolean): MonumentKind[] {
+    const due = monumentsDue(
+      { lumber: b.synergyCount.lumber, relics: b.sites.filter((s) => s.found && s.kind === 'relic').length, wonder: wonderDone },
+      { relics: this.data.siteKinds.relic, wonders: this.data.totals.wonders },
+    );
+    const fresh = due.filter((k) => !this.data.monuments.includes(k));
+    if (fresh.length) {
+      this.data.monuments.push(...fresh);
+      this.save();
+    }
+    return fresh;
+  }
+
   /**
    * Libera as peças cujo total (o guardado mais a partida em andamento) chegou à meta.
    * Devolve as recém-liberadas, para avisar na hora.
@@ -144,6 +191,8 @@ export class Progress {
   /** Soma a partida aos totais e ao registro do tema (uma vez por partida). */
   commit(b: Board, themeId: string, wonderDone: boolean): SpecialKind[] {
     const fresh = this.unlockLive(b);
+    // A jogada já avisou; aqui só garante, antes de somar os totais (senão a relíquia contaria duas vezes).
+    this.unlockMonuments(b, wonderDone);
     const c = countBoard(b, wonderDone);
     for (const k of Object.keys(c.totals) as (keyof Totals)[]) this.data.totals[k] += c.totals[k];
     for (const k of SITE_KINDS) this.data.siteKinds[k] += c.siteKinds[k];
