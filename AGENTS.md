@@ -114,6 +114,7 @@ src/themes/      temas como DADOS
   types.ts       esquema Theme, com cada kit comentado: é a referência de tudo que um tema pode escolher
   themes.ts      6 temas base, THEMES, PERIOD_LABEL/ORDER, themeById
   eras.ts        8 temas históricos (Egito, Song, Vikings, Toscana, Edo, Colonial, Oeste, Andes)
+  progress.ts    housesAtEra: as casas do tema em cada era da vila (taipa e palha, o tema, enxaimel e sobrado, flâmulas)
 src/render/
   gpu.ts         cria o WebGPURenderer (WebGPU ou WebGL2)
   materials.ts   materiais em TSL: chão, água, kits instanciados (vento, plantações, janelas), pergaminho do vazio (terra incógnita); uniformes U
@@ -160,6 +161,7 @@ scripts/         capturas, teste de carga, conversão para página publicável
 2. Em seguida chama `World.placeAnimated(...)`.
 3. O `World` chama `buildTile(edges, seed, theme, { detail, synergies, houses })`, que devolve a geometria do chão e uma lista de decorações.
 4. Quando a peça pousa, o chão vai para o **bloco estático** da região (8×8 peças), as decorações para os **pools** de `InstancedMesh` (um por chave de kit), e o que se move vai para o `Life`.
+5. Na virada de era, `Lib.setEra` troca a geometria das casas (`wall:i`, `roof:i`) e o `World` troca a dos pools delas (`Pool.retarget`): mesmas posições e cores, nada é reconstruído. A decoração sai sempre das casas do tema como ele é (`Lib.houseMeta`), e a fumaça acompanha a altura da chaminé da era (`Lib.chimScale`).
 
 ## Invariantes: não quebre
 

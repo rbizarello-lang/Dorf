@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { housesAtEra } from '../themes/progress';
 import type { SiteKind } from '../core/sites';
 import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
 import type { AnimalKind, BoatKind, BodyStyle, BridgeStyle, CenterCrown, CropStyle, GateStyle, HatStyle, HouseKind, Landmark, RoofStyle, Theme, TreeGeo, VehicleKind } from '../themes/types';
@@ -172,19 +173,19 @@ const BODY: Record<BodyStyle, { w: number; h: number; d: number }> = {
 
 const DOOR = '#4a3326';
 
-function windowsFor(style: BodyStyle, win: Col, w: number, h: number, d: number): Part[] {
+function windowsFor(style: BodyStyle, win: Col, w: number, h: number, d: number, bright = 1): Part[] {
   const parts: Part[] = [];
   // Janelas são planos (2 triângulos) voltados para fora da parede.
   const pane = (gw: number, gh: number, x: number, y: number, z: number, rotY: number) => new THREE.PlaneGeometry(gw, gh).rotateY(rotY).translate(x, y + gh / 2, z);
   const glass = (gw: number, gh: number, x: number, y: number, z: number, face: 'x' | 'z') => {
     const rot = face === 'z' ? (z > 0 ? 0 : Math.PI) : x > 0 ? Math.PI / 2 : -Math.PI / 2;
-    parts.push({ geo: pane(gw, gh, x, y, z, rot), color: win, glow: 1 });
+    parts.push({ geo: pane(gw, gh, x, y, z, rot), color: win, glow: bright });
   };
   const fz = d / 2 + 0.001, bz = -d / 2 - 0.001, sx = w / 2 + 0.001;
   if (style === 'round') {
     for (const a of [0.9, -0.9, Math.PI - 0.6, Math.PI + 0.6]) {
       const g = new THREE.PlaneGeometry(0.018, 0.02).rotateY(a).translate(Math.sin(a) * (w / 2 + 0.001), h * 0.5, Math.cos(a) * (w / 2 + 0.001));
-      parts.push({ geo: g, color: win, glow: 1 });
+      parts.push({ geo: g, color: win, glow: bright });
     }
     parts.push({ geo: pane(0.026, 0.05, 0, 0, w / 2 + 0.001, 0), color: DOOR });
     return parts;
@@ -227,15 +228,28 @@ function trimFor(style: BodyStyle, trim: Col, w: number, h: number, d: number): 
 function wallGeometry(k: HouseKind, win: Col, plinth: Col) {
   const { w, h, d } = BODY[k.body];
   const body = k.body === 'round' ? cyl(w / 2, w / 2, h, 12) : box(w, h, d);
-  const parts: Part[] = [{ geo: body, color: '#ffffff', tint: 1 }, ...windowsFor(k.body, win, w, h, d)];
+  const parts: Part[] = [{ geo: body, color: k.tone ?? '#ffffff', tint: 1 }, ...windowsFor(k.body, win, w, h, d, k.bright)];
   if (k.trim) parts.push(...trimFor(k.body, k.trim, w, h, d));
   // Soco (base) escuro, na cor da lateral das peças: dá peso à casa e a separa do chão claro
   // (legibilidade de longe, sobretudo onde parede clara encontra chão claro).
   if (k.body !== 'round') parts.push({ geo: box(w + 0.004, 0.022, d + 0.004), color: plinth });
-  return kit(parts);
+  const g = kit(parts);
+  return k.scale ? g.scale(k.scale, k.scale, k.scale) : g;
 }
 
-function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean): { geo: THREE.BufferGeometry; top: number; chim: [number, number, number] | null } {
+/** Telhado de um tipo de casa, com a flâmula da última era e a escala da era. */
+function houseRoof(k: HouseKind) {
+  const r = roofGeometry(k.roof, k.body, !!k.chimney, k.pennant);
+  const s = k.scale ?? 1;
+  if (s !== 1) {
+    r.geo.scale(s, s, s);
+    r.top *= s;
+    if (r.chim) r.chim = [r.chim[0] * s, r.chim[1] * s, r.chim[2] * s];
+  }
+  return r;
+}
+
+function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, pennant?: Col): { geo: THREE.BufferGeometry; top: number; chim: [number, number, number] | null } {
   const { w, h, d } = BODY[body];
   const o = 0.016; // beiral
   const parts: Part[] = [];
@@ -320,6 +334,15 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean): { ge
     const cy = style === 'flat' ? h + 0.02 : h + (top - h) * 0.45;
     parts.push({ geo: box(0.018, top - cy + 0.018, 0.018, cx, cy, -d * 0.12), color: '#7a6a60' });
     chim = [cx, top + 0.03, -d * 0.12];
+  }
+  if (pennant) {
+    // Mastro no alto do telhado e flâmula de rabo de andorinha, parada (a casa é instância estática).
+    const px = 0, mh = 0.06;
+    parts.push({ geo: cyl(0.0022, 0.0022, mh, 4, px, top - 0.012), color: '#3a3028' });
+    const pts = [[0, 0], [0.042, -0.004], [0.03, -0.012], [0, 0], [0.03, -0.012], [0.042, -0.02], [0, 0], [0.042, -0.02], [0, -0.024]].map(([x, y]) => new THREE.Vector3(x, y, 0));
+    // As duas faces: a mesma lista na ordem inversa.
+    const flag = new THREE.BufferGeometry().setFromPoints([...pts, ...pts.slice().reverse()]).translate(px, top - 0.012 + mh, 0);
+    parts.push({ geo: flag, color: pennant });
   }
   return { geo: kit(parts), top, chim };
 }
@@ -1875,9 +1898,29 @@ export class Lib {
   landmarkMeta: { sails: [number, number, number] | null } = { sails: null };
   /** Altura e largura do corpo da maravilha do tema (para o andaime). */
   wonderSize = { h: 0.4, w: 0.4 };
+  /** Era das casas nos pools e, por tipo de casa, a altura da chaminé dela sobre a do tema (fumaça). */
+  era = 0;
+  chimScale: number[] = [];
+  private eraGeos: { wall: THREE.BufferGeometry; roof: THREE.BufferGeometry; chimY: number }[][] = [];
+
+  /** Casas na era `era`: troca as geometrias `wall:i` e `roof:i` e devolve as chaves trocadas. */
+  setEra(era: number) {
+    this.era = era = Math.max(0, Math.min(3, era));
+    const keys: string[] = [];
+    this.eraGeos[era]?.forEach((g, i) => {
+      for (const [k, geo] of [[`wall:${i}`, g.wall], [`roof:${i}`, g.roof]] as const) {
+        if (this.geos.get(k) === geo) continue;
+        this.geos.set(k, geo);
+        keys.push(k);
+      }
+      const base = this.houseMeta[i]?.chimney?.[1];
+      this.chimScale[i] = base && g.chimY ? g.chimY / base : 1;
+    });
+    return keys;
+  }
 
   applyTheme(theme: Theme) {
-    for (const g of this.geos.values()) g.dispose();
+    for (const [k, g] of this.geos) if (!/^(wall|roof):/.test(k)) g.dispose();
     this.geos.clear();
     this.litKeys.clear();
     const set = (k: string, g: THREE.BufferGeometry | null) => g && this.geos.set(k, g);
@@ -1888,12 +1931,21 @@ export class Lib {
     for (const f of theme.forest) if (!this.geos.has(`tree:${f.geo}`)) set(`tree:${f.geo}`, FACETED.has(f.geo) ? treeGeometry(f.geo, theme.trunk) : softCanopy(treeGeometry(f.geo, theme.trunk)));
     this.domeKeys.clear();
     theme.houses.forEach((k, i) => k.roof === 'dome' && this.domeKeys.add(`roof:${i}`));
-    this.houseMeta = theme.houses.map((k, i) => {
-      set(`wall:${i}`, wallGeometry(k, theme.window, theme.sideDark));
+    // A decoração sai sempre das casas do tema como ele é (a segunda era): a era só troca a
+    // geometria dos pools `wall:i` e `roof:i` (setEra), e a fumaça acompanha a altura da chaminé.
+    this.houseMeta = theme.houses.map((k) => {
       const r = roofGeometry(k.roof, k.body, !!k.chimney);
-      set(`roof:${i}`, r.geo);
+      r.geo.dispose();
       return { h: BODY[k.body].h, top: r.top, chimney: r.chim };
     });
+    for (const g of this.eraGeos.flat()) g.wall.dispose(), g.roof.dispose();
+    this.eraGeos = [0, 1, 2, 3].map((e) =>
+      housesAtEra(theme, e).map((k) => {
+        const r = houseRoof(k);
+        return { wall: wallGeometry(k, theme.window, theme.sideDark), roof: r.geo, chimY: r.chim?.[1] ?? 0 };
+      }),
+    );
+    this.setEra(this.era);
     set('landmark', landmarkGeometry(theme.landmark, theme.landmarkColors, theme.window));
     const [lw, lr, ld] = theme.landmarkColors;
     if (theme.landmark === 'windmill' || theme.mill === 'windmill') set('sails', sailsGeometry(ld, '#f3ead8'));

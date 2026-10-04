@@ -37,7 +37,7 @@ Nas primeiras partidas, um cartão curto explica cada coisa na primeira vez que 
 
 O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Repetir a semente" joga a mesma sequência de peças de novo.
 
-**Eras da vila:** com 500, 1.500 e 3.000 pontos a vila muda de era (os nomes mudam por tema, como Borgo → Comune → Signoria → Rinascimento na Toscana) e ganha +3 peças. A cada era, o Centro da vila (no meio da primeira peça) muda de forma, de fogueira com cabanas a palácio, e uma onda dourada corre pelo mapa. A próxima peça com vila ergue o marco da era, que o fantasma já mostra antes de colocar.
+**Eras da vila:** com 500, 1.500 e 3.000 pontos a vila muda de era (os nomes mudam por tema, como Borgo → Comune → Signoria → Rinascimento na Toscana) e ganha +3 peças. A cada era, o Centro da vila (no meio da primeira peça) muda de forma, de fogueira com cabanas a palácio, e uma onda dourada corre pelo mapa. As casas do mapa inteiro mudam junto: na primeira era são menores, de taipa e palha; na segunda, o tema como ele é; na terceira ganham enxaimel ou molduras e o tipo de casa mais raro vira sobrado; na última, os sobrados hasteiam flâmulas na cor da casa e as janelas acendem mais forte à noite. A próxima peça com vila ergue o marco da era, que o fantasma já mostra antes de colocar.
 
 **Maravilha:** na última era, a próxima peça com 2 ou mais bordas de vila vira o canteiro da maravilha do tema (Castelo de Conto no Vale, Pilone de Karnak no Egito, Cúpula de Brunelleschi na Toscana, Terraços de Moray nos Andes etc.). Cada peça colocada depois avança uma etapa da obra, que sobe dentro do andaime; com as 6 etapas ela fica pronta e rende +300 pontos e +6 peças.
 

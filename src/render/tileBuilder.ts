@@ -75,7 +75,7 @@ export interface TileBuild {
    */
   wbed: Float32Array;
   decos: Deco[];
-  /** Pontos (x, y, z) de onde sai fumaça de chaminé. */
+  /** Pontos de onde sai fumaça de chaminé, de 4 em 4: x, y, z e o tipo de casa (a era muda a altura). */
   chimneys: number[];
 }
 
@@ -1160,7 +1160,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     if (meta?.chimney && rng() < 0.85) {
       const [cx, cy, cz] = meta.chimney;
       const c = Math.cos(ry), sn = Math.sin(ry);
-      chimneys.push(x + (cx * c + cz * sn) * s, cy * s * sy, z + (-cx * sn + cz * c) * s);
+      chimneys.push(x + (cx * c + cz * sn) * s, cy * s * sy, z + (-cx * sn + cz * c) * s, i);
     }
     taken.push([x, z]);
     houses.push({ x, z, s, sector });
