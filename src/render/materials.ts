@@ -95,6 +95,12 @@ export const U = {
   bounce: uniform(new THREE.Color(0, 0, 0)),
   /** Força dos lampiões (0 de dia): poças de luz na cor das janelas em volta das casas. */
   lamps: uniform(0),
+  /** Estação da partida: 0 primavera, 1 verão, 2 outono, 3 inverno. */
+  season: uniform(1),
+  /** 1 no inverno: neve nas faces viradas para cima e gelo na beira da água. */
+  snow: uniform(0),
+  /** Força do vento do tema (1 = o balanço de sempre). */
+  gust: uniform(1),
 };
 
 export const noiseTex = makeNoiseTexture();
@@ -261,14 +267,14 @@ const shadowWithClouds = Fn(([shadow]: [N]) => shadow.mul(cloudLight(positionWor
 const treeSway = (p: N3, h: N, t: N) => {
   const ph = p.x.mul(0.55).add(p.z.mul(0.45));
   const gust = sin(dot(p.xz, U.wind).mul(0.8).sub(t.mul(0.9))).mul(0.4).add(0.6);
-  return vec3(sin(t.mul(1.6).add(ph)).mul(0.05), float(0), cos(t.mul(1.3).add(ph.mul(1.2))).mul(0.04)).mul(h.mul(gust));
+  return vec3(sin(t.mul(1.6).add(ph)).mul(0.05), float(0), cos(t.mul(1.3).add(ph.mul(1.2))).mul(0.04)).mul(h.mul(gust).mul(U.gust));
 };
 
 /** Onda de vento que atravessa as plantações: dobra as plantas a favor do vento. */
 const cropBend = (p: N3, hgt: N, t: N) => {
   const wave = sin(dot(p.xz, U.wind).mul(2.4).sub(t.mul(2.2))).mul(0.5).add(0.5);
   const gust = wave.mul(wave);
-  const bend = hgt.mul(hgt).mul(gust.mul(3.8).add(1.2));
+  const bend = hgt.mul(hgt).mul(gust.mul(3.8).add(1.2)).mul(U.gust);
   const jig = vec2(sin(t.mul(3.1).add(p.x.mul(9))), cos(t.mul(2.7).add(p.z.mul(7)))).mul(hgt.mul(0.06));
   const xz = U.wind.mul(bend).add(jig);
   return { d: vec3(xz.x, bend.mul(-0.45), xz.y), gust };
@@ -296,6 +302,37 @@ interface DecoOpts {
   emissive?: string;
   emissiveIntensity?: number;
   side?: THREE.Side;
+}
+
+const SNOW = vec3(0.957, 0.973, 0.984);
+
+/** Neve nas faces de cima. `cap` limita o branco para telhado e copa não sumirem no chão. */
+const snowOn = (base: N3, cap: number): N3 => {
+  const n = texture(noiseTex, positionWorld.xz.mul(0.7)).r.mul(0.35).add(0.65);
+  const k = smoothstep(0.7, 0.9, normalWorld.y).mul(U.snow).mul(n).mul(cap);
+  return mix(base, SNOW, k);
+};
+
+/** Copas: primavera mais clara, outono puxado para ocre ou ferrugem, inverno com neve contida. */
+const seasonFoliage = (base: N3): N3 => {
+  const spring = float(1).sub(smoothstep(0.05, 0.5, abs(U.season)));
+  const autumn = float(1).sub(smoothstep(0.05, 0.5, abs(U.season.sub(2))));
+  const fall = mix(vec3(0.851, 0.51, 0.169), vec3(0.722, 0.263, 0.165), step(0.5, hash(instanceIndex)));
+  const blossomed = mix(base, mix(base, vec3(1, 0.93, 0.96), 0.35), spring);
+  return snowOn(mix(blossomed, mix(blossomed, fall, 0.4), autumn), 0.62);
+};
+
+/** Fogueira: dois cones na cor do vértice, cintilando, só com a noite. */
+function fireMaterial() {
+  const m = new THREE.MeshBasicNodeMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    fog: false,
+  });
+  const flick = sin(U.time.mul(9).add(hash(instanceIndex).mul(6.2832))).mul(0.2).add(0.8);
+  m.colorNode = vertexColor().rgb.mul(flick).mul(U.night);
+  return m;
 }
 
 /** Material dos kits instanciados: cor por vértice × cor da instância (onde tint = 1), janelas acesas à noite. */
@@ -344,7 +381,9 @@ function decoMaterial(o: DecoOpts) {
     const rows = smoothstep(0.25, 0.6, abs(fract(positionWorld.y.mul(72)).sub(0.5)).mul(2));
     base = base.mul(mix(float(1), rows.mul(0.17).add(0.85), roof.mul(smoothstep(15, 6, camDist))));
   }
-  m.colorNode = mix(base, vec3(0.02), U.silhouette);
+  // Telhados e paredes: neve contida, para o branco do inverno não apagar a casa.
+  const seasoned = o.paint === 'canopy' ? seasonFoliage(base) : snowOn(base, 0.55);
+  m.colorNode = mix(seasoned, vec3(0.02), U.silhouette);
   // Cada janela acende num momento diferente do anoitecer.
   const lit = smoothstep(0, 0.25, U.night.mul(1.25).sub(hash(instanceIndex).mul(0.5)));
   let emissive: N3 = U.glow.mul(glow).mul(varying(lit, 'vLit')).mul(2.6);
@@ -366,9 +405,9 @@ function decoMaterial(o: DecoOpts) {
   return m;
 }
 
-export type MatKey = 'deco' | 'foliage' | 'crop' | 'cropFine' | 'crystal' | 'glass';
+export type MatKey = 'deco' | 'foliage' | 'crop' | 'cropFine' | 'crystal' | 'glass' | 'fire';
 
-export function makeDecoMaterials(): Record<MatKey, THREE.MeshStandardNodeMaterial> {
+export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
   return {
     deco: decoMaterial({ shingles: true, paint: 'wall', rimSun: 0.3 }),
     foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy' }),
@@ -376,6 +415,7 @@ export function makeDecoMaterials(): Record<MatKey, THREE.MeshStandardNodeMateri
     cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true }),
     crystal: decoMaterial({ sway: 'tree', roughness: 0.25, metalness: 0.1, emissive: '#3a2a66', emissiveIntensity: 0.6 }),
     glass: decoMaterial({ roughness: 0.2, metalness: 0.2 }),
+    fire: fireMaterial(),
   };
 }
 
@@ -422,7 +462,8 @@ export function makeGroundMaterial() {
   const strata = texture(noiseTex, vec2(sideP.mul(0.9), positionWorld.y.mul(7))).g;
   const stones = smoothstep(0.66, 0.8, texture(noiseTex, vec2(sideP.mul(3.1), positionWorld.y.mul(9))).b);
   const sideF = vec3(strata.mul(0.32).add(0.8)).mul(mix(vec3(1), vec3(1.22, 1.18, 1.1), stones.mul(0.8)));
-  m.colorNode = mix(vertexColor().rgb.mul(mix(sideF, detail, top)), vec3(1), U.silhouette);
+  const ground = snowOn(vertexColor().rgb.mul(mix(sideF, detail, top)), 0.85);
+  m.colorNode = mix(ground, vec3(1), U.silhouette);
   // Relevo fino do prado e da mata: inclina a normal com o mapa de declive da água.
   const slope = texture(waterTex, p.mul(0.45)).rg.sub(0.5).mul(sp.x.add(sp.y).mul(0.5).add(0.12));
   const nW = vec3(slope.x.negate(), 1, slope.y.negate()).normalize();
@@ -685,7 +726,10 @@ export function makeWaterMaterial() {
   const streak = nn.a.mul(smoothstep(0.4, 1, speed)).mul(smoothstep(0.004, 0.014, depth)).mul(0.12);
   const foam = max(edgeLine, lace).mul(0.85).add(streak).add(extra.z).clamp(0, 1).toVar();
   const foamCol = vec3(0.97, 0.98, 1).mul(float(1).sub(U.night.mul(0.5)));
-  m.colorNode = mix(seen.add(murk), foamCol, foam);
+  const wet = mix(seen.add(murk), foamCol, foam);
+  // Beira congelada: a coluna rasa vira gelo, o leito fundo continua água.
+  const ice = smoothstep(0.02, 0, depth).mul(U.snow);
+  m.colorNode = mix(wet, vec3(0.86, 0.92, 0.96), ice.mul(0.85));
   // Normal do leito: a mesma do chão (quase "para cima", com o relevo fino do material do chão).
   const bedSlope = texture(waterTex, pBed.mul(0.45)).rg.sub(0.5).mul(0.12);
   const bedW = vec3(bedSlope.x.negate(), 1, bedSlope.y.negate()).normalize();

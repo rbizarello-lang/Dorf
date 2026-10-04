@@ -844,6 +844,11 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         for (let k = 0; k < p.pts.length - 1; k++) beam(g, p.pts[k], p.pts[k + 1], 0.024, 0.05, 0.062, beamC, shade(beamC, 0.7));
         alongPath(p.pts, 0.06, 0.16, (cx, cz, tx, tz) => beam(g, [cx - tx * 0.012, cz - tz * 0.012], [cx + tx * 0.012, cz + tz * 0.012], 0.012, 0, 0.052, shade(beamC, 0.8), shade(beamC, 0.6)));
       }
+      if (theme.roadLamps) {
+        alongPath(p.pts, 0.2, 0.32, (cx, cz, tx, tz) => {
+          D('lantern', cx - tz * (p.hw + 0.05), 0, cz + tx * (p.hw + 0.05), yawTo(tx, tz), 1, WHITE);
+        });
+      }
     }
     // Junção: pátio de cascalho cobrindo o miolo do triângulo de curvas.
     if (road.idx.length !== 2) disc(g, 0, 0, road.idx.length > 2 ? 0.3 : ROAD_HW * 1.05, BED_Y + 0.001, bed, road.idx.length > 2 ? 18 : 12);
@@ -906,6 +911,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         D('rotor', x + fx, groundY(x, z) + 0.318 * sc, z + fz, face, sc, WHITE, 'spin-z');
       }
     }
+    // Fogueira ao lado da construção: o material só acende à noite.
+    D('fire', x - mz * 0.1, 0, z + mx * 0.1, ry, 0.5, WHITE);
   }
 
   // --- Peça especial: a construção dela, sem sorteio. A estação e o moinho ficam na beira do
@@ -961,6 +968,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const R = 0.24 * sc;
       disc(g, x, z, R, 0.006, shade(tc(theme.rock), 1.18), 18, [0, 0, 0, 1]);
       D('landmark', x, 0.006, z, ry, sc, WHITE);
+      D('fire', x + Math.sin(ry) * 0.22 * sc, 0.006, z + Math.cos(ry) * 0.22 * sc, ry, 0.4, WHITE);
       scaffold(x, z, ry, (wide ? 0.42 : 0.3) * sc, (wide ? 0.3 : 0.42) * sc);
       if (theme.landmark === 'windmill') D('sails', x + Math.sin(ry) * 0.078 * sc, 0.006 + 0.255 * sc, z + Math.cos(ry) * 0.078 * sc, ry, sc, WHITE, 'spin-z');
       // Flâmulas na cor de destaque do tema, espalhadas em volta do tablado.
@@ -1086,6 +1094,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const ry = rng() * Math.PI * 2;
     const sc = LANDMARK_SCALE;
     D('landmark', 0, 0, 0, ry, sc, WHITE);
+    D('fire', Math.sin(ry) * 0.2 * sc, 0, Math.cos(ry) * 0.2 * sc, ry, 0.38, WHITE);
     if (theme.landmark === 'windmill') {
       const fx = Math.sin(ry) * 0.078 * sc, fz = Math.cos(ry) * 0.078 * sc;
       D('sails', fx, 0.255 * sc, fz, ry, sc, WHITE, 'spin-z');

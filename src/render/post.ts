@@ -63,6 +63,8 @@ export const P = {
   rayColor: uniform(new THREE.Color(1, 0.95, 0.85)),
   /** Nitidez devolvida depois do TRAA (RCAS): 0 = máxima, 2 = nenhuma. */
   sharpness: uniform(0.4),
+  /** Filtro do tema (atmos.filter): multiplica a imagem, canal a canal. */
+  filter: uniform(new THREE.Vector3(1, 1, 1)),
   /** Gradação por hora (world.ts): os realces puxam para a cor do sol e as sombras para o tom oposto. */
   shade: uniform(new THREE.Color(1, 1, 1)),
   light: uniform(new THREE.Color(1, 1, 1)),
@@ -110,7 +112,7 @@ const grade = Fn(([c]: [ReturnType<typeof vec4>]) => {
   const v = smoothstep(0.9, 0.25, length(p));
   const lit = c.rgb.mul(mix(float(1).sub(P.vignette), float(1), v));
   const l = dot(lit, vec3(0.299, 0.587, 0.114));
-  const rgb = lit.mul(mix(vec3(1), P.shade, smoothstep(0.3, 0.02, l))).mul(mix(vec3(1), P.light, smoothstep(0.35, 0.85, l)));
+  const rgb = lit.mul(mix(vec3(1), P.shade, smoothstep(0.3, 0.02, l))).mul(mix(vec3(1), P.light, smoothstep(0.35, 0.85, l))).mul(P.filter);
   const sat = P.saturation.mul(smoothstep(0, 0.06, l).mul(0.12).add(0.88));
   return vec4(shoulder(mix(vec3(l), rgb, sat)), c.a);
 });

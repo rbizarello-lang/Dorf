@@ -429,6 +429,10 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
 
     // --- pontuação esperada (inclui os bônus do tema, recalculados aqui)
     let pts = mt * rules.matchPoints + syn * rules.synergyPoints;
+    // Estação (cópia de src/core/seasons.ts): a cada 20 jogadas, +3 numa interação.
+    const seasonLock = rules.seasonLock;
+    const season = seasonLock === 0 || seasonLock === 1 || seasonLock === 2 || seasonLock === 3 ? seasonLock : Math.floor((log.moves.length - 1) / 20) % 4;
+    const seasonKind = (['apiary', 'mill', 'lumber', 'pasture'] as const)[season];
     for (let i = 0; i < 6; i++) {
       const n = b.get(m.q + DIRS[i][0], m.r + DIRS[i][1]);
       if (!n || n === res.placed) continue;
@@ -440,6 +444,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
           const kind = (['lumber', 'mill', 'pasture', 'apiary'] as const)[pair];
           pts += rules.synergyBonus[kind] ?? 0;
           if (oBless.has(kind)) pts += ORACLE_BLESS.synergy;
+          if (rules.seasonBonus && kind === seasonKind) pts += 3;
         }
       }
     }

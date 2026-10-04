@@ -2016,10 +2016,27 @@ export function setInstColor(mesh: THREE.InstancedMesh, i: number, c: THREE.Colo
   a.setXYZ(i, c.r, c.g, c.b);
 }
 
+/** Fogueira: dois cones, o de dentro mais claro e alto. A cor cintila no material `fire`. */
+function fireGeometry(): THREE.BufferGeometry {
+  return kit([
+    { geo: cone(0.05, 0.14, 5), color: '#ff9a3c' },
+    { geo: cone(0.028, 0.2, 4, 0, 0.02, 0), color: '#ffd27a' },
+  ]);
+}
+
+/** Lanterna de beira de estrada: poste, caixa acesa e chapéu. A caixa acende com a noite. */
+function lanternGeometry(): THREE.BufferGeometry {
+  return kit([
+    { geo: cyl(0.012, 0.015, 0.16, 5), color: '#3a342c' },
+    { geo: box(0.046, 0.05, 0.046, 0, 0.16, 0), color: '#ffd98a', glow: 1 },
+    { geo: cone(0.04, 0.028, 4, 0, 0.21, 0), color: '#2a2622' },
+  ]);
+}
+
 export class Lib {
   readonly ground = makeGroundMaterial();
   readonly water = makeWaterMaterial();
-  readonly mats: Record<MatKey, THREE.MeshStandardNodeMaterial> = makeDecoMaterials();
+  readonly mats: Record<MatKey, THREE.Material> = makeDecoMaterials();
   readonly geos = new Map<string, THREE.BufferGeometry>();
   houseMeta: HouseMeta[] = [];
   landmarkMeta: { sails: [number, number, number] | null } = { sails: null };
@@ -2103,6 +2120,8 @@ export class Lib {
     set('monument:statue', monumentGeometry('statue', theme.trunk));
     set('monument:reliquary', monumentGeometry('reliquary', theme.trunk));
     set('pennant', pennantGeometry(theme.trunk));
+    set('fire', fireGeometry());
+    set('lantern', lanternGeometry());
     set('scaffold', scaffoldGeometry(theme.trunk));
     const wonder = wonderGeometry(theme);
     set('wonder:base', wonder.base);
@@ -2125,6 +2144,7 @@ export class Lib {
   }
 
   material(key: string): THREE.Material {
+    if (key === 'fire') return this.mats.fire;
     if (key === 'tree:crystal') return this.mats.crystal;
     if (key.startsWith('tree:') || key === 'bush') return this.mats.foliage;
     if (key.startsWith('crop:') || key === 'grass' || key === 'reed' || key === 'flower') return this.mats.crop;
@@ -2154,6 +2174,6 @@ export class Lib {
 
   /** Plantas e capim não projetam sombra (economia grande, quase invisível). */
   castsShadow(key: string) {
-    return !(key.startsWith('crop:') || key === 'grass' || key === 'reed' || key === 'flower' || key === 'lily');
+    return !(key.startsWith('crop:') || key === 'grass' || key === 'reed' || key === 'flower' || key === 'lily' || key === 'fire' || key === 'lantern');
   }
 }

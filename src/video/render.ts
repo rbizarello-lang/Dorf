@@ -37,7 +37,7 @@ export interface RenderOptions {
   supersample: number;
 }
 
-const TIMES: readonly string[] = ['dawn', 'day', 'golden', 'dusk', 'night'];
+const TIMES: readonly string[] = ['dawn', 'aurora', 'day', 'golden', 'dusk', 'night'];
 /** Quadros desenhados antes do primeiro, com o mundo parado: shaders compilados e TRAA assentado. */
 const WARMUP = 30;
 
