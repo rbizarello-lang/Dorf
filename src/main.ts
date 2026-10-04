@@ -7,7 +7,7 @@ import { LOOKOUT_MOVES, SITE_REWARD, type SiteKind } from './core/sites';
 import { SPECIALS, SPECIAL_KINDS, type SpecialKind } from './core/specials';
 import { mulberry32 } from './core/rng';
 import { T } from './core/tiles';
-import { DIRS, hexDistance, hexToWorld, hkey, worldToHex } from './core/hex';
+import { DIRS, hexDistance, hexToWorld, hkey, unkey, worldToHex } from './core/hex';
 import type { Quality, TimeOfDay } from './render/world';
 import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
 import { DynRes } from './render/dynres';
@@ -33,7 +33,7 @@ type QualityMode = 'auto' | Quality;
 type MoveRec = number[];
 /** v4: modos, eras, sítios e bônus por tema. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 8;
+  v: 9;
   seed: number;
   rulesId: string;
   mode: ModeId;
@@ -44,7 +44,7 @@ interface Save {
   /** Peças especiais que entraram nesta partida (mudam a sequência da pilha). */
   specials: SpecialKind[];
 }
-const SAVE_VERSION = 8;
+const SAVE_VERSION = 9;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -325,9 +325,22 @@ function refreshHud(instant = false) {
   // Com 1 peça na pilha, a "próxima" só entraria se a jogada render peças: não mostra.
   hud.renderNext(game.stack <= 1 && !game.rules.infinite ? null : game.next, theme, game.board.lookout > 0 ? game.upcoming(3) : []);
   world.setPreview(game.current, rotSteps * (Math.PI / 3), game.stack);
+  showInfluence();
   updateGhost();
   if (game.current?.edges.some((e) => e === T.Water || e === T.Rail))
     tutorial.offer('estrito', `${theme.terrainNames[T.Water]} e ${theme.terrainNames[T.Rail]}`, `Estas bordas precisam continuar: só encostam nelas mesmas. Uma borda de ${theme.terrainNames[T.Water].toLowerCase()} não pode encostar num ${theme.terrainNames[T.Grass].toLowerCase()}, por exemplo.`);
+}
+
+/** Casas da fronteira onde a peça da vez aproveita a influência de construções (não depende do giro). */
+function showInfluence() {
+  const cur = game.current;
+  const cells: [number, number][] = [];
+  if (cur && game.rules.influence) for (const k of game.board.frontier) {
+    const [q, r] = unkey(k);
+    if (game.board.influenceAt(q, r, cur.edges).points > 0) cells.push([q, r]);
+  }
+  world.setInfluence(cells);
+  if (cells.length) tutorial.offer('influencia', 'Influência', `As casas com contorno dourado ficam perto de construções de interação: uma peça ali ganha pontos por setor do terreno que elas trabalham (${theme.synergy.mill.toLowerCase()} com ${theme.terrainNames[T.Field].toLowerCase()}, ${theme.synergy.lumber.toLowerCase()} com ${theme.terrainNames[T.Forest].toLowerCase()}...). O valor cresce com a era.`);
 }
 
 function updateGhost() {
@@ -602,6 +615,7 @@ function showHelp(tab = 'basico') {
       'Eras',
       `<ul>
         <li>Com ${R.eraScores.slice(1).map((v) => v.toLocaleString('pt-BR')).join(', ')} pontos a vila muda de era e ganha +${R.eraTiles} peças. O Centro, no meio da primeira peça, muda de forma, as casas mudam de estilo, e a próxima peça com vila ergue o marco da era.</li>
+        ${R.influence ? `<li><b>Influência</b>: cada interação marca as casas em volta da peça dela, com contorno dourado. Uma peça colocada ali ganha pontos por setor do terreno que a construção trabalha (até +8), e o valor cresce com a era.</li>` : ''}
         ${R.blessings ? `<li><b>Escolha da era</b>: a cada era nova a vila escolhe 1 de 2 cartas (teclas <kbd>1</kbd> e <kbd>2</kbd>), como ${blessingName('mill', theme)} ou ${blessingName('surveyors', theme)}. A carta vale até o fim da partida.</li>` : ''}
         ${wonder ? `<li><b>Maravilha</b>: na última era, a próxima peça com 2 ou mais bordas de vila vira o canteiro da maravilha do tema. Cada peça colocada depois avança uma etapa, e as ${R.wonderStages} etapas rendem +${R.wonderPoints} pontos e +${R.wonderTiles} peças.</li>` : ''}
         <li><b>Peças especiais</b>: ${SPECIAL_KINDS.map((k) => `${SPECIAL_NAME[k]} (${specialRule(k).toLowerCase().replace(/\.$/, '')}; libera com ${UNLOCKS[k].need} ${UNLOCKS[k].label})`).join('; ')}. Liberadas, entram duas vezes em cada partida, menos no Desafio do dia.</li>
@@ -1142,6 +1156,12 @@ function step(now: number) {
   if (st) {
     const s = screenOf(st.q, st.r, 0.05);
     markers.push({ id: 100000 + st.q * 1000 + st.r, x: s.x, y: s.y + 30, visible: s.visible, text: `${SITE_LABEL[st.kind].icon} ${SITE_LABEL[st.kind].name}: ${siteReward(st.kind)}`, color: '#8a6a3a', kind: st.kind });
+  }
+  // Influência das construções: o ganho aparece com o fantasma numa casa contornada.
+  const inf = hover && game.current && !st ? game.board.influenceAt(hover.q, hover.r, game.current.edges) : null;
+  if (inf?.points) {
+    const s = screenOf(hover!.q, hover!.r, 0.05);
+    markers.push({ id: 200000, x: s.x, y: s.y + 30, visible: s.visible, text: `✦ +${inf.points} · ${inf.kinds.map((k) => theme.synergy[k.kind]).join(', ')}`, color: theme.ui.accent, kind: 'influence' });
   }
   hud.updateMarkers(markers);
   cpuAcc += performance.now() - c0;
