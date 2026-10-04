@@ -1335,6 +1335,15 @@ function start(data: unknown) {
   if (zoom) world.rig.dist = world.rig.goalDist = zoom;
   return true;
 };
+// Centraliza no i-ésimo cardume, ou no i-ésimo cais de pescador com `pier` (capturas da pesca).
+(window as unknown as { __fishing: (i?: number, pier?: boolean, zoom?: number) => boolean }).__fishing = (i = 0, pier = false, zoom) => {
+  const f = world.life.fishingPos(i, pier);
+  if (!f) return false;
+  world.rig.goal.set(f.x, 0, f.z);
+  world.rig.target.set(f.x, 0, f.z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
 (window as unknown as { __boat: (zoom?: number) => boolean }).__boat = (zoom) => {
   const b = world.life.boatPos();
   if (!b) return false;

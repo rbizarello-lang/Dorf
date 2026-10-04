@@ -21,7 +21,7 @@ import { SkyEnv } from './sky';
 import { FX, Fireflies, Sprites, Weather } from './fx';
 import { LiveTile } from './liveTile';
 import { PreviewView } from './preview';
-import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, type TileBuild } from './tileBuilder';
+import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type TileBuild } from './tileBuilder';
 import { NIGHT_LIGHT } from './nightLight';
 
 export type { Quality };
@@ -525,6 +525,7 @@ export class World {
     // Névoa por altura com bruma e névoa rasteira (atmosphere.ts) no lugar do THREE.Fog.
     (this.scene as THREE.Scene & { fogNode?: THREE.Node }).fogNode = fogNode;
     this.life = new Life(this.lib, this.scene);
+    this.life.onSplash = (x, z) => this.sprites.splash(x, WATER_Y, z, 7);
 
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -1133,6 +1134,8 @@ export class World {
       if (d.anim === 'spin-z' || d.anim === 'spin-x') this.life.addSpinner(d.key, tmpM, d.anim === 'spin-x' ? 'x' : 'z');
       else if (d.anim === 'wander') this.life.addAnimal(tmpM, d.color);
       else if (d.anim === 'chop' || d.anim === 'tend' || d.anim === 'carry') this.life.addWorker(d.key, tmpM, d.color, d.anim);
+      else if (d.anim === 'swim') this.life.addFish(tmpM, d.color, d.orbit ?? 0);
+      else if (d.anim === 'bob') this.life.addBobber(tmpM, d.color);
       else this.pool(this.isLod(d.key) && this.lodFlip++ % 2 ? `${d.key}~` : d.key)?.add(tmpM, d.color);
     }
     const v = new THREE.Vector3();
