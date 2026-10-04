@@ -47,6 +47,8 @@ O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Re
 
 **Sua casa:** no topo do menu de temas, escolha uma das 8 cores da casa (ou a do tema) e monte o brasão (metal, peça e móvel). A cor aparece no placar, nos estandartes das missões, nas bandeiras do Centro, dos marcos e dos barcos e nas camisas de metade dos aldeões.
 
+**Moldura do tema:** os painéis mudam de material com o lugar (papiro no Egito, tábuas na Terra dos Vikings, seda na Dinastia Song, washi no Japão Edo, metal em Marte, cartaz no Oeste). O emblema ao lado do nome diz o tema antes do texto.
+
 **Sítios escondidos:** carimbos no mapa marcam ruínas (+60 pontos), tesouros (+2 peças), relíquias (+100 pontos e +1 peça) e mirantes (+20 pontos e as próximas 3 peças à vista por 10 jogadas). Com a peça em cima, uma etiqueta mostra a recompensa; coloque para descobrir, e o sítio vira uma ruína, um baú, um relicário ou uma torre de vigia na peça. Ficam em anéis cada vez mais longe do centro. O vazio é um mapa antigo: a tinta desbota longe das peças e uma névoa clara cobre o desconhecido. No começo da partida, um batedor sai do Centro na direção do sítio mais perto.
 
 **Peças especiais:** liberadas jogando, valem para as partidas seguintes e entram duas vezes em cada uma (menos no Desafio do dia, que é igual para todos). A **Estação** (8 missões cumpridas no total) vale +12 por peça com trilho a até 2 casas e +2 peças; o **Moinho d'água** (30 interações) vale +20 por vizinha com plantação e +1 peça; o **Farol** (6 sítios descobertos) vale +10 por peça com rio a até 2 casas e mostra as próximas peças por 5 jogadas. O fim da partida mostra quanto falta para a próxima.

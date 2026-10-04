@@ -4,6 +4,7 @@ import { corner } from '../core/hex';
 import type { TileDef } from '../core/tiles';
 import { PERIOD_LABEL, PERIOD_ORDER, THEMES, type Theme } from '../themes/themes';
 import { CHARGES, HOUSE_COLORS, METALS, ORDINARIES, bannerSvg, type Banner, type HouseColor } from './banner';
+import { applyFrame } from './frames';
 
 const $ = <E extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as E;
 
@@ -149,7 +150,8 @@ export class Hud {
     root.setProperty('--ink', theme.ui.ink);
     root.setProperty('--soft', theme.ui.soft);
     root.setProperty('--accent', theme.ui.accent);
-    root.setProperty('color-scheme', theme.id === 'marte' ? 'dark' : 'light');
+    root.setProperty('color-scheme', theme.ui.frame === 'madeira' || theme.ui.frame === 'metal' || theme.id === 'marte' ? 'dark' : 'light');
+    applyFrame(theme.ui);
     $('theme-name').textContent = theme.name;
     $('theme-swatch').innerHTML = theme.terrainColors.slice(0, 5).map((c) => `<i style="background:${c}"></i>`).join('');
     for (const el of this.questEls.values()) el.remove();

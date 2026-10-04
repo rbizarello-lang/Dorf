@@ -189,6 +189,25 @@ export type BridgeStyle =
   | 'wood' // arco alto de madeira com guarda-corpo (ponte arco-íris, taikobashi)
   | 'rope'; // ponte de corda pênsil, tabuado e cabos
 
+/** Material dos painéis: o tema escolhe, o CSS desenha sem arquivo. */
+export type FrameKind = 'papel' | 'pergaminho' | 'papiro' | 'madeira' | 'seda' | 'washi' | 'metal' | 'pedra';
+/** Emblema do tema no placar (um SVG simples, em src/ui/frames.ts). */
+export type EmblemId =
+  | 'sol'
+  | 'lirio'
+  | 'tulipa'
+  | 'ipe'
+  | 'floco'
+  | 'planeta'
+  | 'selo'
+  | 'crisantemo'
+  | 'corvo'
+  | 'trigo'
+  | 'sakura'
+  | 'caravela'
+  | 'estrela'
+  | 'condor';
+
 /** O que flutua no ar, desenhado pelo shader (sem custo de CPU). */
 export type WeatherKind =
   | 'none'
@@ -282,7 +301,7 @@ export interface Theme {
   /** Partículas no ar e sua densidade (1 = padrão). */
   weather: { kind: WeatherKind; colors: [string, string]; density: number };
   sparkle: string;
-  ui: { accent: string; panel: string; ink: string; soft: string };
+  ui: { accent: string; panel: string; ink: string; soft: string; frame: FrameKind; emblem: EmblemId };
   /** Gradação de cor do tema na imagem final: matiz puxado nas sombras e nos realces (só o tom conta, não o brilho) e saturação (1 = neutra). */
   grade: { shadow: string; light: string; saturation: number };
   /** Nomes das interações entre bordas neste tema. */
