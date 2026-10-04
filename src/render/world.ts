@@ -453,6 +453,9 @@ export class World {
   private slots: THREE.InstancedMesh;
   private slotMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.55, depthWrite: false, fog: false });
   private slotCount = 0;
+  /** Contorno tracejado dourado nas casas onde a peça da vez aproveita a influência de construções. */
+  private infl: THREE.InstancedMesh;
+  private inflMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.95, depthWrite: false, fog: false });
   private hoverRing: THREE.Mesh;
   private hoverMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.9, depthWrite: false, fog: false });
   private markers: THREE.Mesh[] = [];
@@ -558,6 +561,25 @@ export class World {
     this.slots.frustumCulled = false;
     this.slots.position.y = -0.12;
     this.scene.add(this.slots);
+    // Tracejado: 6 lados com 3 traços cada, um pouco para dentro da borda da casa.
+    const dashes: THREE.BufferGeometry[] = [];
+    for (let i = 0; i < 6; i++) {
+      const a0 = (i * Math.PI) / 3, a1 = ((i + 1) * Math.PI) / 3;
+      const p0 = new THREE.Vector2(Math.cos(a0), Math.sin(a0)).multiplyScalar(0.8), p1 = new THREE.Vector2(Math.cos(a1), Math.sin(a1)).multiplyScalar(0.8);
+      for (let d = 0; d < 3; d++) {
+        const t0 = (d + 0.2) / 3, t1 = (d + 0.8) / 3;
+        const x0 = p0.x + (p1.x - p0.x) * t0, z0 = p0.y + (p1.y - p0.y) * t0;
+        const x1 = p0.x + (p1.x - p0.x) * t1, z1 = p0.y + (p1.y - p0.y) * t1;
+        const len = Math.hypot(x1 - x0, z1 - z0);
+        dashes.push(new THREE.PlaneGeometry(len, 0.07).rotateX(-Math.PI / 2).rotateY(-Math.atan2(z1 - z0, x1 - x0)).translate((x0 + x1) / 2, 0, (z0 + z1) / 2));
+      }
+    }
+    this.infl = new THREE.InstancedMesh(mergeGeometries(dashes)!, this.inflMat, 256);
+    this.infl.count = 0;
+    this.infl.frustumCulled = false;
+    this.infl.position.y = -0.11;
+    this.infl.renderOrder = 2;
+    this.scene.add(this.infl);
 
     this.hoverRing = new THREE.Mesh(new THREE.RingGeometry(0.84, 0.97, 6).rotateX(-Math.PI / 2), this.hoverMat);
     this.hoverRing.visible = false;
@@ -636,6 +658,7 @@ export class World {
     // Nanquim dos carimbos: a tinta do tema diluída no papel.
     if (this.theme) this.stampMat.color.set(this.theme.ui.ink).lerp(s.fill, 0.5);
     this.slotMat.opacity = 0.55 - s.night * 0.3;
+    this.inflMat.color.set('#e0981c');
     this.sun.color.copy(s.sun);
     this.sun.intensity = s.sunI;
     U.sun.value.copy(s.sun);
@@ -1137,6 +1160,18 @@ export class World {
     this.voidGoal = maxR + 1;
     this.updateStamps(board);
     this.rig.bounds = maxR;
+  }
+
+  /** Casas (vazias) onde a peça da vez ganharia pontos de influência. */
+  setInfluence(cells: readonly (readonly [number, number])[]) {
+    let i = 0;
+    for (const [q, r] of cells) {
+      if (i >= 256) break;
+      const { x, z } = hexToWorld(q, r);
+      this.infl.setMatrixAt(i++, tmpM.makeTranslation(x, 0, z));
+    }
+    this.infl.count = i;
+    this.infl.instanceMatrix.needsUpdate = true;
   }
 
   /** O batedor sai do Centro na direção do sítio mais perto, olha da beira da peça e volta. */
@@ -1641,6 +1676,7 @@ export class World {
     this.sprites.update(dt);
     this.updateFxUniforms();
     this.slots.visible = this.slotCount > 0 && this.showSlots;
+    this.infl.visible = this.infl.count > 0 && this.showSlots;
     // Grão do Cinema: um padrão novo a cada quadro (passageiro, não precisa de semente).
     P.grainSeed.value = Math.floor(Math.random() * 3e6);
 

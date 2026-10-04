@@ -33,6 +33,16 @@ const ORACLE_SPECIAL: Record<SpecialKind, { edges: T[]; terrain: T; radius: numb
 const ORACLE_BLESS = { synergy: 5, perfect: 10, closed: 1, quest: 2, site: 1, lookout: 10 };
 const BLESS_IDS = ['lumber', 'mill', 'pasture', 'apiary', 'surveyors', 'builders', 'pilgrims', 'cartographers'];
 
+// Influência das construções (cópia independente de src/core/synergy.ts): terrenos que contam
+// e pontos por setor em cada era; teto por peça.
+const ORACLE_INF: Record<string, { terrains: T[]; per: number[] }> = {
+  lumber: { terrains: [T.Forest], per: [1, 2, 2, 3] },
+  mill: { terrains: [T.Field], per: [1, 2, 2, 3] },
+  pasture: { terrains: [T.Grass], per: [1, 2, 2, 3] },
+  apiary: { terrains: [T.Grass, T.Field], per: [1, 1, 1, 2] },
+};
+const ORACLE_INF_CAP = 8;
+
 // Math.random determinístico para tornar bestMove reprodutível nos testes.
 function seedMathRandom(seed: number) {
   const r = mulberry32(seed);
@@ -241,6 +251,8 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
   // Cartas escolhidas e escolhas ainda na mesa (oráculo).
   const oBless = new Set<string>();
   let oOffers = 0;
+  // Influência (oráculo): casa → tipos de construção vizinha.
+  const oInf = new Map<string, Set<string>>();
   const game = new Game(seed, rules, specials);
   const b = game.board;
   const specialsSeen = new Set<SpecialKind>();
@@ -342,6 +354,24 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       }
     }
     assert(res.synergies.length === syn, `seed ${seed}: interações ${res.synergies.length} != oráculo ${syn}`);
+    // Influência: casa marcada por interações anteriores; cada tipo uma vez, com teto.
+    let inf = 0;
+    if (rules.influence) {
+      for (const kind of oInf.get(`${m.q},${m.r}`) ?? []) {
+        const O = ORACLE_INF[kind];
+        inf += edges.filter((e) => O.terrains.includes(e)).length * O.per[Math.min(expectedEra, 3)];
+      }
+      inf = Math.min(ORACLE_INF_CAP, inf);
+      oInf.delete(`${m.q},${m.r}`);
+      for (const kind of synKinds) for (const [dq, dr] of DIRS) if (!b.get(m.q + dq, m.r + dr)) {
+        const k = `${m.q + dq},${m.r + dr}`;
+        if (!oInf.has(k)) oInf.set(k, new Set());
+        oInf.get(k)!.add(kind);
+      }
+    }
+    pts += inf;
+    assert(res.influence.points === inf, `seed ${seed}: influência ${res.influence.points} != oráculo ${inf}`);
+    if (inf) inc('influencia');
     const perfect = nbs >= 2 && mt === nbs;
     if (perfect) pts += rules.perfectBonus + (oBless.has('surveyors') ? ORACLE_BLESS.perfect : 0);
     assert(res.perfect === perfect, `seed ${seed}: perfect diverge`);

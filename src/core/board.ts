@@ -2,7 +2,7 @@ import { BLESSING, SYN_BLESSING, type BlessingId } from './blessings';
 import { DIRS, hexDistance, hkey, opposite } from './hex';
 import { LOOKOUT_MOVES, SITE_REWARD, type Site, type SiteKind } from './sites';
 import { SPECIALS, type SpecialKind } from './specials';
-import { type SynHit, type SynKind, synergyOf } from './synergy';
+import { INFLUENCE, INFLUENCE_CAP, SYN_KINDS, type SynHit, type SynKind, synergyOf } from './synergy';
 import { T, isStrict, rotateEdges, type QuestKind, type TileDef } from './tiles';
 
 export interface Rules {
@@ -38,6 +38,8 @@ export interface Rules {
   wonderStages: number;
   /** Escolha de 1 entre 2 cartas a cada era nova (src/core/blessings.ts). */
   blessings: boolean;
+  /** Influência das construções: peça nova perto de uma interação ganha pontos (src/core/synergy.ts). */
+  influence: boolean;
   /** Pontos e peças ao completar a maravilha. */
   wonderPoints: number;
   wonderTiles: number;
@@ -66,6 +68,7 @@ export const DEFAULT_RULES: Rules = {
   endOnSites: false,
   leftoverPoints: 20,
   blessings: true,
+  influence: true,
   wonderStages: 6,
   wonderPoints: 300,
   wonderTiles: 6,
@@ -136,6 +139,8 @@ export interface Check {
   eraMark: number | null;
   /** Esta peça viraria o canteiro da maravilha (o fantasma já mostra o meio livre). */
   wonder: boolean;
+  /** Influência das construções vizinhas: pontos (já com o teto) e quanto cada tipo deu. */
+  influence: { points: number; kinds: { kind: SynKind; points: number }[] };
 }
 
 export interface PlaceResult {
@@ -160,6 +165,8 @@ export interface PlaceResult {
   leftoverBonus?: number;
   /** Peça especial colocada: quantas peças à volta contaram, pontos e peças ganhos. */
   special: { kind: SpecialKind; count: number; points: number; tiles: number } | null;
+  /** Influência das construções vizinhas que esta peça aproveitou. */
+  influence: Check['influence'];
 }
 
 export class Board {
@@ -181,6 +188,8 @@ export class Board {
   lookout = 0;
   /** Maravilha: peça do canteiro e etapa (pronta quando chega a `rules.wonderStages`). */
   wonder: { tile: Placed; stage: number } | null = null;
+  /** Casas vazias sob influência de construções: chave da casa → tipos de interação. */
+  readonly influence = new Map<number, Set<SynKind>>();
   /** Cartas escolhidas nas viradas de era (src/core/blessings.ts), na ordem. */
   readonly blessings: BlessingId[] = [];
   private questSeq = 0;
@@ -227,7 +236,28 @@ export class Board {
     const R = this.rules;
     const lastEra = R.eraScores.length > 1 && this.era === R.eraScores.length - 1;
     const wonder = !this.wonder && R.wonderStages > 0 && lastEra && eraMark === null && edges.filter((e) => e === T.Village).length >= 2;
-    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, synergies, site: this.siteAt(q, r), eraMark, wonder };
+    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, synergies, site: this.siteAt(q, r), eraMark, wonder, influence: this.influenceAt(q, r, edges) };
+  }
+
+  /**
+   * Bônus de influência de uma peça com estas bordas em (q, r). Só conta quantos setores de
+   * cada terreno a peça tem, então não depende do giro (o mapa mostra as casas que rendem).
+   */
+  influenceAt(q: number, r: number, edges: readonly T[]) {
+    const kinds: { kind: SynKind; points: number }[] = [];
+    const here = this.rules.influence ? this.influence.get(hkey(q, r)) : undefined;
+    let points = 0;
+    if (here) {
+      for (const kind of SYN_KINDS) {
+        if (!here.has(kind)) continue;
+        const inf = INFLUENCE[kind];
+        const per = inf.per[Math.min(this.era, inf.per.length - 1)];
+        const n = edges.filter((e) => inf.terrains.includes(e)).length;
+        if (n) kinds.push({ kind, points: n * per });
+        points += n * per;
+      }
+    }
+    return { points: Math.min(INFLUENCE_CAP, points), kinds };
   }
 
   /** Sítio ainda não descoberto em (q, r). */
@@ -276,6 +306,20 @@ export class Board {
       this.synergyCount[h.kind]++;
       points += R.synergyBonus[h.kind] ?? 0;
       if (this.blessed(SYN_BLESSING[h.kind])) points += BLESSING.synergy;
+    }
+    // Influência das construções em volta; depois, as interações desta peça marcam as vizinhas.
+    points += c.influence.points;
+    if (R.influence) {
+      for (const h of c.synergies) {
+        for (const [dq, dr] of DIRS) {
+          const k = hkey(q + dq, r + dr);
+          if (this.tiles.has(k)) continue;
+          let set = this.influence.get(k);
+          if (!set) this.influence.set(k, (set = new Set()));
+          set.add(h.kind);
+        }
+      }
+      this.influence.delete(placed.key);
     }
     // Bônus do tema por terreno encaixado.
     for (let i = 0; i < 6; i++) if (c.edgeState[i] === 1) points += R.matchBonus[edges[i]] ?? 0;
@@ -395,7 +439,7 @@ export class Board {
       eraUp = this.era;
       this.markPending = this.era;
     }
-    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special };
+    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special, influence: c.influence };
   }
 
   blessed(id: BlessingId) {

@@ -25,3 +25,17 @@ export interface SynHit {
   edge: number;
   kind: SynKind;
 }
+
+/**
+ * Influência das construções (proposta 7 do docs/IDEIAS_AOE.md): cada interação marca as 6
+ * casas vizinhas da peça onde nasceu, e uma peça colocada depois numa delas ganha pontos por
+ * setor do terreno que a construção trabalha. O valor por setor cresce com a era (índice).
+ */
+export const INFLUENCE: Record<SynKind, { terrains: readonly T[]; per: readonly number[] }> = {
+  lumber: { terrains: [T.Forest], per: [1, 2, 2, 3] },
+  mill: { terrains: [T.Field], per: [1, 2, 2, 3] },
+  pasture: { terrains: [T.Grass], per: [1, 2, 2, 3] },
+  apiary: { terrains: [T.Grass, T.Field], per: [1, 1, 1, 2] },
+};
+/** Teto do bônus de influência por peça; influências do mesmo tipo não se somam. */
+export const INFLUENCE_CAP = 8;
