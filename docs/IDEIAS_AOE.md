@@ -30,7 +30,7 @@ Pesquisa de inspiração (visual e mecânica) na série Age of Empires · 01/10/
 | 13 Maravilha | feita (#24) |
 | 14 Rotas de comércio | visual feita (carga, parada de 0,8 s e moeda no clássico); **a regra completa, num modo próprio, a fazer** |
 | 15 Cor da casa, estandartes, brasão | feita (#23); **monumentos por conquista a fazer** |
-| 16 Minimapa e linha do tempo | feita |
+| 16 Minimapa e linha do tempo | feita (#44) |
 | 17 Interface por tema | **a fazer** |
 | 18 Som por era | feita (18a #22; 18b/c #34) |
 | 19 Atmosferas, fogo e estações | **a fazer** |
