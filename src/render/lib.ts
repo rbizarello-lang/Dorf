@@ -1729,6 +1729,48 @@ function centerGeometry(era: number, theme: Theme): THREE.BufferGeometry {
 
 // ---------------------------------------------------------------- estruturas das interações
 
+/**
+ * Paisagem trabalhada (proposta 9 do docs/IDEIAS_AOE.md): toco com a tora caída ao lado (clareira
+ * da serraria), jazida (pedras com pepitas que a instância tinge na cor do minério), mina (galpão,
+ * carrinho nos trilhos e monte de minério) e arbusto de frutas (a instância tinge as frutas).
+ */
+const shadeHex = (c: Col, f: number) => `#${new THREE.Color(c).multiplyScalar(f).getHexString()}`;
+
+function workedGeometries(theme: Theme) {
+  const wood = theme.trunk, rock = theme.rock;
+  const stump = kit([
+    { geo: cyl(0.02, 0.024, 0.016, 7), color: wood, grad: [0.75, 1, 0, 0.016] },
+    { geo: cyl(0.0185, 0.0185, 0.002, 7, 0, 0.016), color: '#d8c094' },
+    { geo: cyl(0.011, 0.013, 0.1, 6).rotateZ(Math.PI / 2).translate(0.065, 0.012, 0.03), color: wood, grad: [0.8, 1.05, 0, 0.024] },
+    { geo: cyl(0.0105, 0.0105, 0.002, 6).rotateZ(Math.PI / 2).translate(0.116, 0.012, 0.03), color: '#d8c094' },
+  ]);
+  const stones = (x: number, z: number, r: number, k: number) => ({ geo: jitter(new THREE.DodecahedronGeometry(r, 0), r * 0.15, k).scale(1, 0.62, 1).translate(x, r * 0.4, z), color: rock });
+  const nuggets = [
+    [0.012, 0.022, 0.006],
+    [-0.016, 0.018, 0.012],
+    [0.004, 0.026, -0.014],
+    [-0.006, 0.012, -0.024],
+  ].map(([x, y, z]) => ({ geo: oct(0.008).translate(x, y, z), color: '#ffffff', tint: 1, glow: 0.2 }));
+  const ore = kit([stones(0, 0, 0.03, 1), stones(-0.03, 0.02, 0.022, 2), stones(0.026, -0.022, 0.018, 3), ...nuggets]);
+  // Mina: galpão de tábuas na boca, dois trilhos curtos com o carrinho e o monte de minério.
+  const mine = kit([
+    stones(-0.02, -0.03, 0.045, 4),
+    { geo: box(0.06, 0.05, 0.04, -0.02, 0, 0.0), color: wood },
+    { geo: box(0.074, 0.006, 0.056).rotateX(0.32).translate(-0.02, 0.062, 0.0), color: shadeHex(wood, 0.72) },
+    { geo: box(0.026, 0.034, 0.002, -0.02, 0, 0.0205), color: '#2a2220' },
+    { geo: box(0.004, 0.003, 0.11, 0.035, 0, 0.03), color: '#5a5450' },
+    { geo: box(0.004, 0.003, 0.11, 0.055, 0, 0.03), color: '#5a5450' },
+    { geo: box(0.03, 0.018, 0.034, 0.045, 0.006, 0.05), color: shadeHex(wood, 0.85) },
+    { geo: oct(0.012).scale(1.2, 0.6, 1.2).translate(0.045, 0.026, 0.05), color: '#ffffff', tint: 1, glow: 0.2 },
+    { geo: cone(0.026, 0.024, 6, 0.04, 0, -0.035), color: '#ffffff', tint: 1, grad: [0.55, 0.9, 0, 0.024] },
+  ]);
+  const berry = kit([
+    { geo: jitter(ico(0.042, 0), 0.008, 12).scale(1.1, 0.8, 1.1).translate(0, 0.03, 0), color: '#4e7038', grad: [0.75, 1.1, 0, 0.06] },
+    ...[0, 1, 2, 3, 4, 5].map((i) => ({ geo: oct(0.0085).translate(Math.cos(i * 1.05) * 0.036, 0.03 + (i % 3) * 0.009, Math.sin(i * 1.05) * 0.036), color: '#ffffff', tint: 1 })),
+  ]);
+  return { stump, ore, mine, berry };
+}
+
 function specialsFor(theme: Theme, walls: string, roofs: string) {
   const wood = theme.trunk;
   const logs: Part[] = [];
@@ -1982,6 +2024,7 @@ export class Lib {
     // Batedor do começo da partida: um aldeão montado no animal do tema (a instância tinge os dois).
     set('scout', mergeGeometries([animalGeometry(theme.animals.kind), folkGeometry('sack', folk, theme.trunk).translate(0, 0.022, 0)])!);
     for (const [k, g] of Object.entries(siteGeometries(theme))) set(k, g);
+    for (const [k, g] of Object.entries(workedGeometries(theme))) set(k, g);
   }
 
   geo(key: string) {

@@ -154,6 +154,8 @@ const UP: V3 = [0, 1, 0];
 const WHITE = new THREE.Color(1, 1, 1);
 /** Árvores e marcos maiores que a escala natural: com a câmera baixa, o que conta a história da peça precisa ler de longe. */
 const TREE_SCALE = 1.3;
+/** Chance de um arbusto de frutas por setor de prado (nos temas com `berry`). */
+const BERRY_CHANCE = 0.06;
 const LANDMARK_SCALE = 1.25;
 const LUSH = new THREE.Color('#5fa83a');
 
@@ -1131,11 +1133,21 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
 
   // --- Árvores, casas, capim, animais.
   const forestKinds = theme.forest.map((k) => [k, k.weight] as const);
+  // Clareira da serraria: as árvores perto dela viram tocos (sem sorteio a mais, para o resto
+  // da peça sair igual).
+  const clearings = (opts.synergies ?? []).filter((h) => h.kind === 'lumber').map((h) => edgeMid(h.sector));
   const addTree = (x: number, z: number) => {
     const kind = weighted(rng, forestKinds);
     const s = randRange(rng, 0.9, 1.4) * TREE_SCALE * (kind.geo === 'crystal' ? 1.4 : kind.geo === 'cactus' ? 1.1 : 1);
-    D(`tree:${kind.geo}`, x, 0, z, rng() * Math.PI * 2, [s, s * randRange(rng, 0.9, 1.15), s], vary(rng, tc(pick(rng, kind.colors))));
+    const ry = rng() * Math.PI * 2;
+    const sy = s * randRange(rng, 0.9, 1.15);
+    const color = vary(rng, tc(pick(rng, kind.colors)));
     taken.push([x, z]);
+    if (kind.geo !== 'crystal' && clearings.some(([mx, mz]) => Math.hypot(x - mx * 0.64, z - mz * 0.64) < 0.34)) {
+      D('stump', x, 0, z, ry, 1.2, tc(theme.trunk));
+      return;
+    }
+    D(`tree:${kind.geo}`, x, 0, z, ry, [s, sy, s], color);
     trees.push([x, z, s]);
   };
   const trees: [number, number, number][] = [];
@@ -1290,6 +1302,28 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       if (hs.length >= 3 && free(px, pz, 0.05) && clear(px, pz) > 0.08) {
         D('well', px, 0, pz, Math.atan2(pz, px), 1, WHITE);
         taken.push([px, pz]);
+      }
+    }
+  }
+
+  // --- Paisagem trabalhada: jazidas (mina, quando a vila encosta nelas dentro da peça) e
+  // arbustos de frutas no prado. Gerador à parte e por último, para não mexer no resto da peça.
+  if (theme.ore || theme.berry) {
+    const r2 = mulberry32((seed ^ 0x7e57a11) >>> 0);
+    for (let i = 0; i < 6; i++) {
+      if (edges[i] !== T.Grass) continue;
+      const oreRoll = r2(), berryRoll = r2();
+      const p = samplePoint(r2, i, 0.16, 0.12);
+      if (theme.ore && oreRoll < theme.ore.chance && p && free(p[0], p[1], 0.1) && clear(p[0], p[1]) > 0.08) {
+        const mine = edges[(i + 1) % 6] === T.Village || edges[(i + 5) % 6] === T.Village;
+        D(mine ? 'mine' : 'ore', p[0], 0, p[1], r2() * Math.PI * 2, mine ? 1.5 : 1.3, tc(theme.ore.color));
+        taken.push(p);
+        continue;
+      }
+      const b = samplePoint(r2, i, 0.12, 0.08);
+      if (theme.berry && berryRoll < BERRY_CHANCE && b && free(b[0], b[1], 0.07) && clear(b[0], b[1]) > 0.05) {
+        D('berry', b[0], 0, b[1], r2() * Math.PI * 2, randRange(r2, 1.1, 1.5), tc(theme.berry));
+        taken.push(b);
       }
     }
   }
