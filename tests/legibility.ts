@@ -4,6 +4,7 @@
 import { T } from '../src/core/tiles';
 import { THEMES } from '../src/themes/themes';
 import { NIGHT_LIGHT } from '../src/render/nightLight';
+import { frameColors } from '../src/ui/frames';
 
 const ROOF_MIN = 15;
 const WALL_MIN = 12;
@@ -80,4 +81,25 @@ for (const th of THEMES) {
   console.log(`  ${th.id.padEnd(9)} noite: prado, mata e plantação ΔE mín ${night.toFixed(1).padStart(5)} (dia ${day.toFixed(1).padStart(5)}, ${Math.round((night / day) * 100)}%)${bad ? '  ← somem no escuro' : ''}`);
 }
 console.log(`Noite: ${THEMES.length} temas, ${darkFailed} com terrenos que se confundem no escuro`);
-if (failed || darkFailed) process.exit(1);
+
+// Painéis do tema: a tinta sobre a moldura em 7:1 ou mais (WCAG AAA para texto).
+const rel = (hex: string) => {
+  const n = parseInt(hex.slice(1), 16);
+  const lin = (c: number) => ((c /= 255) <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const r = lin(n >> 16), g = lin((n >> 8) & 255), b = lin(n & 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const ratio = (a: string, b: string) => {
+  const x = rel(a), y = rel(b);
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+};
+let frameFailed = 0;
+for (const th of THEMES) {
+  const { panel, ink } = frameColors(th.ui);
+  const c = ratio(panel, ink);
+  const bad = c < 7;
+  if (bad) frameFailed++;
+  console.log(`  ${th.id.padEnd(9)} ${th.ui.frame.padEnd(11)} tinta × painel ${c.toFixed(1)}:1${bad ? '  ← abaixo de 7:1' : ''}`);
+}
+console.log(`Molduras: ${THEMES.length} temas, ${frameFailed} com contraste abaixo de 7:1`);
+if (failed || darkFailed || frameFailed) process.exit(1);
