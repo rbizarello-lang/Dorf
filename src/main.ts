@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { Sfx } from './audio';
+import { SEASON_KIND, SEASON_NAME, seasonAt } from './core/seasons';
 import { DEFAULT_RULES, type PlaceResult, type Rules } from './core/board';
 import { Game } from './core/game';
 import { MODES, dailySeed, modeById, type Mode, type ModeId } from './core/modes';
@@ -32,9 +33,9 @@ import './ui/style.css';
 type QualityMode = 'auto' | Quality;
 /** q, r, giro e as escolhas de era (0 ou 1) feitas logo depois da jogada. */
 type MoveRec = number[];
-/** v4: modos, eras, sítios e bônus por tema. Guarda a pontuação para conferir o replay. */
+/** v10: estação na pontuação. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 9;
+  v: 10;
   seed: number;
   rulesId: string;
   mode: ModeId;
@@ -45,7 +46,7 @@ interface Save {
   /** Peças especiais que entraram nesta partida (mudam a sequência da pilha). */
   specials: SpecialKind[];
 }
-const SAVE_VERSION = 9;
+const SAVE_VERSION = 10;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -331,7 +332,8 @@ function refreshHud(instant = false) {
   hud.setStack(game.stack, game.rules.infinite);
   const b = game.board, es = game.rules.eraScores;
   const nextAt = es[b.era + 1];
-  hud.setEra(es.length > 1 ? `Era ${['I', 'II', 'III', 'IV', 'V', 'VI'][b.era] ?? b.era + 1} · ${eraName(b.era)} · ${mode.name}` : mode.name, nextAt === undefined ? null : Math.min(1, (b.score - es[b.era]) / (nextAt - es[b.era])));
+  const season = SEASON_NAME[seasonAt(Math.max(0, b.list.length - 2), game.rules.seasonLock)];
+  hud.setEra(es.length > 1 ? `Era ${['I', 'II', 'III', 'IV', 'V', 'VI'][b.era] ?? b.era + 1} · ${eraName(b.era)} · ${season} · ${mode.name}` : `${mode.name} · ${season}`, nextAt === undefined ? null : Math.min(1, (b.score - es[b.era]) / (nextAt - es[b.era])));
   hud.setUndo(Math.min(mode.undos - undone, moves.length ? 99 : 0));
   // Com 1 peça na pilha, a "próxima" só entraria se a jogada render peças: não mostra.
   hud.renderNext(game.stack <= 1 && !game.rules.infinite ? null : game.next, theme, game.board.lookout > 0 ? game.upcoming(3) : []);
@@ -615,6 +617,10 @@ function announce(res: PlaceResult) {
     sfx.special(sp.kind);
   }
   if (res.leftoverBonus) hud.toast(`Todos os sítios achados! Peças que sobraram: +${res.leftoverBonus} pontos`, 'good');
+  if (game.rules.seasonBonus && theme.season === undefined && game.rules.seasonLock === undefined && res.placed.index > 1 && (res.placed.index - 1) % 20 === 0) {
+    const s = seasonAt(res.placed.index - 1);
+    hud.toast(`${SEASON_NAME[s]}: ${theme.synergy[SEASON_KIND[s]]} rende +3.`, 'good');
+  }
   hud.renderQuests(game.board.quests, theme);
 }
 
@@ -635,6 +641,7 @@ function showHelp(tab = 'basico') {
         <li><b>${theme.terrainNames[4]}</b> e <b>${theme.terrainNames[5]}</b> precisam continuar: só encostam neles mesmos.</li>
         <li><b>Encaixe perfeito</b>: a peça encosta em 2 ou mais vizinhas e todas as bordas combinam (+${R.perfectBonus}).</li>
         <li>Cercar uma peça com 6 vizinhas encaixadas rende <b>+${R.closedTiles} peça</b>.</li>
+        <li>A cada 20 jogadas a estação muda (primavera, verão, outono, inverno) e uma interação rende +3: colmeias, moinho, serraria e pasto, nessa ordem.</li>
         <li>A partida acaba quando a pilha esvazia. <kbd>U</kbd> desfaz a última jogada (o número de vezes depende do modo).</li>
       </ul>`,
     ],
@@ -1021,7 +1028,7 @@ function cycleTime() {
   const next = TIME_ORDER[(TIME_ORDER.indexOf(world.timeOfDay) + 1) % TIME_ORDER.length];
   world.setTimeOfDay(next);
   setTimeLabel(next);
-  sfx.setMood(next);
+  sfx.setMood(next === 'aurora' ? 'dawn' : next);
   store.set('time', next);
   capture.take?.event({ kind: 'time', tod: next });
   capture.timeChanged();
@@ -1032,7 +1039,7 @@ timeBtn.addEventListener('click', cycleTime);
   if (saved && Object.hasOwn(TIME_LABEL, saved)) {
     world.setTimeOfDay(saved);
     setTimeLabel(saved);
-    sfx.setMood(saved);
+    sfx.setMood(saved === 'aurora' ? 'dawn' : saved);
   }
 }
 

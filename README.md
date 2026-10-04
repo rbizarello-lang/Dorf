@@ -37,6 +37,8 @@ Nas primeiras partidas, um cartão curto explica cada coisa na primeira vez que 
 
 O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Repetir a semente" joga a mesma sequência de peças de novo.
 
+**Estações:** a cada 20 jogadas a paisagem muda — primavera, verão, outono e inverno — e uma interação passa a valer +3: colmeias, moinho, serraria e pasto, nessa ordem. No inverno a neve pousa nas faces de cima e a beira dos rios congela. O Inverno Nórdico fica no inverno e o Jardim Sakura na primavera. No Desafio do dia a pontuação da estação gira igual para todos; esses dois temas continuam com a paisagem da estação deles. À noite, as construções têm fogueira e, em alguns temas, a estrada ganha lanternas. O botão de hora também tem a aurora, com sol baixo e rosado.
+
 **Eras da vila:** com 500, 1.500 e 3.000 pontos a vila muda de era (os nomes mudam por tema, como Borgo → Comune → Signoria → Rinascimento na Toscana) e ganha +3 peças. A cada era, o Centro da vila (no meio da primeira peça) muda de forma, de fogueira com cabanas a palácio, e uma onda dourada corre pelo mapa. As casas do mapa inteiro mudam junto: na primeira era são menores, de taipa e palha; na segunda, o tema como ele é; na terceira ganham enxaimel ou molduras e o tipo de casa mais raro vira sobrado; na última, os sobrados hasteiam flâmulas na cor da casa e as janelas acendem mais forte à noite. A próxima peça com vila ergue o marco da era, que o fantasma já mostra antes de colocar.
 
 **Influência:** cada interação marca as casas vazias em volta da peça onde nasceu, que ganham um contorno dourado tracejado. Uma peça colocada numa delas ganha pontos por setor do terreno que a construção trabalha: floresta para a serraria, plantação para o moinho, prado para o pasto e os dois para as colmeias. Vale +1 por setor na primeira era, +2 na segunda e na terceira e +3 na última (as colmeias, +1 e, na última era, +2). Cada tipo conta uma vez por casa, e o bônus vai até +8 por peça. Com o fantasma numa casa contornada, a etiqueta mostra o ganho.
@@ -135,7 +137,7 @@ O botão de qualidade abre a lista: **Auto**, **Cinema**, **Ultra**, **Alta**, *
 |---|---|
 | `?theme=toscana` | tema inicial (ids em `src/themes/themes.ts` e `eras.ts`) |
 | `?seed=123` | partida reproduzível: a mesma semente dá a mesma sequência de peças |
-| `?time=night` | `dawn`, `day`, `golden`, `dusk` ou `night` |
+| `?time=night` | `dawn`, `aurora`, `day`, `golden`, `dusk` ou `night` |
 | `?quality=high` | `auto`, `cinema`, `ultra`, `high`, `medium` ou `low` |
 | `?webgl` | força o WebGL2 em vez do WebGPU |
 | `?mode=zen` | modo inicial: `classico`, `zen`, `diario`, `exploradores` ou `rotas` |

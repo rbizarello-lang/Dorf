@@ -197,5 +197,23 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
   ok(left.edges.join() === right.edges.join() && left.seed === right.seed, 'as chances padrão não mudam a sequência de peças');
 }
 
+// ---- 9) Estação: +3 na interação da vez; o trinco fixa a estação
+{
+  console.log('Cenário 9: estações');
+  const piece = (facing: T): TileDef => ({ edges: [T.Grass, T.Grass, T.Grass, facing, T.Grass, T.Grass], seed: 1, quest: null });
+  const score = (origin: T, facing: T, extra: Partial<Rules>, fillers = 0) => {
+    const b = new Board({ ...DEFAULT_RULES, ...extra, blessings: false, influence: false, wonderStages: 0, eraScores: [0], sites: 0 });
+    b.placeRaw(0, 0, { edges: [origin, origin, origin, origin, origin, origin], seed: 1, quest: null }, 0);
+    for (let i = 0; i < fillers; i++) b.placeRaw(4, i + 4, land(T.Grass), 0);
+    return b.place(1, 0, piece(facing), 0)!.points;
+  };
+  ok(score(T.Field, T.Grass, {}) === 8, 'primavera: colmeia vale 5+3');
+  ok(score(T.Village, T.Forest, {}) === 5, 'primavera: serraria não leva o bônus');
+  ok(score(T.Field, T.Grass, { seasonBonus: false }) === 5, 'sem o bônus de estação fica em 5');
+  ok(score(T.Village, T.Grass, { seasonLock: 3 }) === 8, 'inverno travado: pasto vale 5+3');
+  ok(score(T.Field, T.Grass, { seasonLock: 3 }) === 5, 'inverno travado: colmeia não leva o bônus');
+  ok(score(T.Village, T.Field, {}, 20) === 8, 'depois do centro e de 20 peças, a jogada seguinte é verão: moinho vale 5+3');
+}
+
 console.log(bad ? `\n${bad} FALHA(S)` : '\nTodos os cenários sintéticos passaram');
 process.exit(bad ? 1 : 0);

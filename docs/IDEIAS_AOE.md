@@ -33,10 +33,10 @@ Pesquisa de inspiração (visual e mecânica) na série Age of Empires · 01/10/
 | 16 Minimapa e linha do tempo | feita (#44) |
 | 17 Interface por tema | feita |
 | 18 Som por era | feita (18a #22; 18b/c #34) |
-| 19 Atmosferas, fogo e estações | **a fazer** |
+| 19 Atmosferas, fogo e estações | feita (save v10) |
 | 20 Almanaque | feita (#33) |
 
-Próximo passo, na ordem do documento: 19. Um PR por proposta, saindo do `main`, com `npm run check` e `npm run smoke` antes do commit.
+As vinte propostas numeradas estão feitas. Um PR novo sai do `main`, com `npm run check` e `npm run smoke` antes do commit.
 
 ## Resumo
 

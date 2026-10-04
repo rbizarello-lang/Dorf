@@ -4,6 +4,7 @@ import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Board, Check, PlaceResult, Placed } from '../core/board';
 import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey } from '../core/hex';
+import { seasonAt } from '../core/seasons';
 import type { SiteKind } from '../core/sites';
 import type { SynHit, SynKind } from '../core/synergy';
 import { T, rotateEdges, type TileDef } from '../core/tiles';
@@ -25,7 +26,7 @@ import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, ty
 import { NIGHT_LIGHT } from './nightLight';
 
 export type { Quality };
-export type TimeOfDay = 'dawn' | 'day' | 'golden' | 'dusk' | 'night';
+export type TimeOfDay = 'dawn' | 'aurora' | 'day' | 'golden' | 'dusk' | 'night';
 
 const CHUNK = 8;
 /** O alto do céu um pouco mais azul que a cor "do céu" do tema (que é quase branca). */
@@ -354,6 +355,22 @@ function skyFor(theme: Theme, tod: TimeOfDay): Sky {
       haze: 0.03,
       mist: 0.8,
     };
+  if (tod === 'aurora')
+    // Sol ainda mais baixo que o amanhecer, rosado, com sombra comprida.
+    return {
+      bg: mix(theme.bg, '#f3c2b4', 0.38),
+      fill: mix(theme.voidFill, '#f6d2c6', 0.34),
+      line: mix(theme.voidLine, '#fbe4da', 0.28),
+      sun: C('#ffc9a8'),
+      sunI: theme.sunIntensity * 0.78,
+      sunDir: sunAt(8, -55),
+      hemiSky: mix(theme.hemiSky, '#f0b8b0', 0.4),
+      hemiGround: mix(theme.hemiGround, '#6a5048', 0.3),
+      hemiI: theme.hemiIntensity * 0.82,
+      night: 0.08,
+      haze: 0.028,
+      mist: 0.35,
+    };
   if (tod === 'golden')
     // Fim de tarde: sol baixo e dourado, sombras compridas, ar morno.
     return {
@@ -633,6 +650,15 @@ export class World {
     }
   }
 
+  /** Estação visual: o tema pode travar (Inverno, Sakura); senão segue as jogadas, com o mesmo trinco da pontuação. */
+  private applySeason() {
+    const n = this.board?.list.length ?? 0;
+    // A peça do centro não conta: a estação visível é a da última jogada.
+    const s = this.theme?.season ?? seasonAt(Math.max(0, n - 2), this.board?.rules.seasonLock);
+    U.season.value = s;
+    U.snow.value = s === 3 ? 1 : 0;
+  }
+
   private applySky() {
     const s = this.sky;
     if (!(this.scene.background instanceof THREE.Color)) this.scene.background = s.bg.clone();
@@ -643,7 +669,9 @@ export class World {
     // A névoa rasteira é mais clara que o fundo e pega um pouco da cor do sol.
     A.mistColor.value.copy(s.bg).lerp(WHITE, 0.3 * (1 - s.night * 0.7)).add(tmpColor.copy(s.sun).multiplyScalar(0.05 * s.sunI * (1 - s.night)));
     A.glow.value.copy(s.sun).multiplyScalar(0.12 * s.sunI);
-    A.hazeDensity.value = s.haze;
+    const atmos = this.theme?.atmos;
+    A.hazeDensity.value = s.haze * (atmos?.haze ?? 1);
+    if (atmos) A.haze.value.lerp(tmpColor.set(atmos.hazeColor), 0.5);
     A.mist.value = s.mist;
     // Luz que o chão recebe (o sol pela altura dele e o céu), devolvida na cor do mapa do chão.
     const up = Math.max(0, s.sunDir.y / s.sunDir.length());
@@ -883,6 +911,7 @@ export class World {
 
   rebuild(board: Board) {
     this.board = board;
+    this.applySeason();
     for (const c of this.chunks.values()) c.dispose(this.staticRoot);
     this.chunks.clear();
     for (const p of this.pools.values()) p.dispose();
@@ -1423,20 +1452,28 @@ export class World {
     else this.sprites.sparkle(x, z, tc(this.theme.sparkle), n, y);
   }
 
+  private smokeCursor = 0;
+
   private spawnSmoke(dt: number) {
     const n = this.chimneys.length / 4;
     if (!n || this.sprites.count > 380) return;
-    this.smokeClock += dt * Math.min(n * 0.25, 7);
+    const winter = U.season.value === 3;
+    this.smokeClock += dt * Math.min(n * (winter ? 0.8 : 0.25), winter ? 14 : 7);
     const tx = this.rig.target.x, tz = this.rig.target.z;
     const view = this.rig.dist * 1.1;
-    while (this.smokeClock > 1) {
+    const puff = (i: number) => {
+      const x = this.chimneys[i], y = this.chimneys[i + 1] * (this.lib.chimScale[this.chimneys[i + 3]] ?? 1), z = this.chimneys[i + 2];
+      if (Math.abs(x - tx) > view || Math.abs(z - tz) > view) return false;
+      this.sprites.smoke(x, y, z, tc(this.theme.smoke), U.wind.value);
+      return true;
+    };
+    while (this.smokeClock > 1 && this.sprites.count <= 380) {
       this.smokeClock -= 1;
-      for (let tries = 0; tries < 6; tries++) {
-        const i = Math.floor(Math.random() * n) * 4;
-        const x = this.chimneys[i], y = this.chimneys[i + 1] * (this.lib.chimScale[this.chimneys[i + 3]] ?? 1), z = this.chimneys[i + 2];
-        if (Math.abs(x - tx) > view || Math.abs(z - tz) > view) continue;
-        this.sprites.smoke(x, y, z, tc(this.theme.smoke), U.wind.value);
-        break;
+      if (winter) {
+        // Cada chaminé à vista solta fumaça na sua vez.
+        for (let k = 0; k < n && this.sprites.count <= 380; k++) if (puff((this.smokeCursor++ % n) * 4)) break;
+      } else {
+        for (let tries = 0; tries < 6; tries++) if (puff(Math.floor(Math.random() * n) * 4)) break;
       }
     }
   }
@@ -1584,6 +1621,8 @@ export class World {
     // O vento muda de direção devagar.
     const wa = 0.65 + Math.sin(this.time * 0.05) * 0.5;
     U.wind.value.set(Math.cos(wa), Math.sin(wa));
+    U.gust.value = this.theme?.atmos?.wind ?? 1;
+    this.applySeason();
     this.stepSky(realDt);
     this.voidU.radius.value += (this.voidGoal - this.voidU.radius.value) * Math.min(1, realDt / 1.2);
     this.rig.update(realDt);
@@ -1618,6 +1657,8 @@ export class World {
     P.shade.value.multiply(tintOf(tmpColor.set(g.shadow), 0.16 * gk, tmpGrade));
     P.light.value.multiply(tintOf(tmpColor.set(g.light), 0.09 * gk, tmpGrade));
     P.saturation.value = 1.06 * g.saturation;
+    const filt = this.theme.atmos?.filter;
+    P.filter.value.set(filt?.[0] ?? 1, filt?.[1] ?? 1, filt?.[2] ?? 1);
 
     // Sol acompanha o alvo; área da sombra acompanha o zoom.
     const sd = this.sky.sunDir;
@@ -1749,7 +1790,9 @@ export class World {
     // Entre 11,5 e 14,5 de distância, cada planta dessa metade afunda no chão na sua vez.
     // Ultra e Cinema guardam o detalhe fino até mais longe (a mesma conta da densidade de decoração).
     const reach = this.quality === 'cinema' ? 1.6 : this.quality === 'ultra' ? 1.35 : 1;
-    const fine = 1 - THREE.MathUtils.smoothstep(this.rig.dist, 11.5 * reach, 14.5 * reach);
+    // Primavera: a metade fina das plantas (flores) fica de pé até mais longe.
+    const spring = U.season.value === 0 ? 1.35 : 1;
+    const fine = 1 - THREE.MathUtils.smoothstep(this.rig.dist, 11.5 * reach * spring, 14.5 * reach * spring);
     U.fine.value = fine;
     for (const [k, p] of this.pools) if (k.endsWith('~')) p.mesh.visible = fine > 0;
 

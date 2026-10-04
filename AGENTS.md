@@ -179,7 +179,7 @@ scripts/         capturas, teste de carga, conversão para página publicável
    Mude os três juntos ou nenhum.
 5. **Rio e estrada são estritos** (`isStrict`): só encostam neles mesmos. Os 4 terrenos comuns aceitam qualquer vizinho, mas só pontuam quando iguais. As interações pontuam pares diferentes.
 6. **Saves:**
-   - o formato é `{ v, seed, rulesId, mode, moves, undone, score, specials }` (v9), guardado em `localStorage` com o prefixo `retalhos.`; cada jogada é `[q, r, giro, ...escolhas]`, com as cartas da era (0 ou 1) escolhidas logo depois dela;
+   - o formato é `{ v, seed, rulesId, mode, moves, undone, score, specials }` (v10), guardado em `localStorage` com o prefixo `retalhos.`; cada jogada é `[q, r, giro, ...escolhas]`, com as cartas da era (0 ou 1) escolhidas logo depois dela;
    - o progresso entre partidas (totais, registro por tema e peças especiais liberadas) fica em `retalhos.progress` (`src/ui/progress.ts`), validado campo a campo ao ler;
    - ao carregar, a partida é **reconstruída pelo replay** das jogadas e conferida contra a pontuação.
    - Se você mudar regras, pontuação ou geração de peças de um jeito que altere o replay, **aumente `SAVE_VERSION` em `main.ts`**. Saves antigos mostram um aviso e são descartados.
