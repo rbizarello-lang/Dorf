@@ -394,6 +394,7 @@ export const BASE_THEMES: Theme[] = [
       { weight: 0.65, body: 'round', roof: 'dome', walls: ['#e8e6ea', '#cfd3da', '#f2f0f4'], roofs: ['#9fd9ff', '#bfe6ff', '#8fc9f5'] },
       { weight: 0.35, body: 'cube', roof: 'flat', walls: ['#d8dce4', '#c4cad4'], roofs: ['#9aa3b2', '#b0b8c4'], trim: '#36d1d1' },
     ],
+    eraHouses: false,
     landmark: 'dome',
     landmarkChance: 0.15,
     landmarkColors: ['#e8e6ea', '#9fd9ff', '#36d1d1'],

@@ -55,6 +55,15 @@ export interface HouseKind {
   trim?: string;
   /** Chaminé com fumaça. */
   chimney?: boolean;
+  // Os campos abaixo vêm da era da vila (src/themes/progress.ts); o tema não precisa escrevê-los.
+  /** Escala da casa inteira (padrão 1). */
+  scale?: number;
+  /** Tom multiplicado na parede, por cima da cor sorteada (taipa na primeira era). */
+  tone?: string;
+  /** Flâmula na cumeeira, nesta cor. */
+  pennant?: string;
+  /** Brilho das janelas à noite (padrão 1). */
+  bright?: number;
 }
 
 /** Remate do palácio no Centro da vila, na última era. */
@@ -276,6 +285,8 @@ export interface Theme {
   rules?: Partial<Rules>;
   /** Nomes das 4 eras da vila (padrão: Aldeia, Vila, Burgo, Cidade). */
   eras?: [string, string, string, string];
+  /** `false` = as casas não mudam com a era (módulos pré-fabricados não começam como taipa e palha). */
+  eraHouses?: false;
   /** Remate do Centro da vila na última era (padrão: 'spire'). */
   center?: CenterCrown;
   /** Maravilha da última era: nome, forma, cores [principal, telhado, detalhe] e andares (pagode). */

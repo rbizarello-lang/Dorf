@@ -119,6 +119,18 @@ class Pool {
     this.mesh.count = this.count;
   }
 
+  /** Troca a forma de todas as instâncias (casas na virada de era): mesma posição e mesma cor. */
+  retarget(geo: THREE.BufferGeometry) {
+    const old = this.mesh;
+    this.geo = geo;
+    this.mesh = this.make(this.cap, old.geometry.getAttribute('iColor').array as Float32Array);
+    (this.mesh.instanceMatrix.array as Float32Array).set(old.instanceMatrix.array as Float32Array);
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.parent.remove(old);
+    old.geometry.dispose();
+    old.dispose();
+  }
+
   flush() {
     this.mesh.instanceMatrix.needsUpdate = true;
     this.mesh.geometry.getAttribute('iColor').needsUpdate = true;
@@ -858,6 +870,7 @@ export class World {
     this.flows.clear();
     this.widths.clear();
     groundMap.clear();
+    this.lib.setEra(board.era);
     for (const p of board.list) this.bake(p, this.buildPlaced(p), false);
     for (const pool of this.pools.values()) pool.flush();
     this.updateFrontier(board);
@@ -912,7 +925,30 @@ export class World {
   showEra(era: number, waveAge = -1) {
     this.centerAnim = -1;
     this.setCenter(era);
+    this.setHouseEra(era, false);
     if (waveAge >= 0) U.eraWave.value.set(0, 0, this.time - waveAge, 1);
+  }
+
+  /**
+   * Arquitetura da era (src/themes/progress.ts): as casas do mapa inteiro trocam de forma de uma
+   * vez, junto com o Centro, sem reconstruir nada. Com `dust`, levanta poeira nas casas à vista.
+   */
+  private setHouseEra(era: number, dust: boolean) {
+    for (const k of this.lib.setEra(era)) {
+      const pool = this.pools.get(k);
+      const geo = this.lib.geo(k);
+      if (!pool || !geo) continue;
+      pool.retarget(geo);
+      if (!dust || !k.startsWith('wall:')) continue;
+      const a = pool.mesh.instanceMatrix.array;
+      const tx = this.rig.target.x, tz = this.rig.target.z, view = this.rig.dist * 0.8;
+      for (let i = 0, n = 0; i < pool.count && n < 8; i++) {
+        const x = a[i * 16 + 12], z = a[i * 16 + 14];
+        if (Math.abs(x - tx) > view || Math.abs(z - tz) > view) continue;
+        this.burst(x, z, 'dust', 5);
+        n++;
+      }
+    }
   }
 
   private stepCenter(dt: number) {
@@ -925,6 +961,7 @@ export class World {
       if (this.centerEra !== this.centerNext) {
         this.setCenter(this.centerNext);
         this.burst(0, 0, 'dust', 34);
+        this.setHouseEra(this.centerNext, true);
       }
       const b = Math.min(1, (t - SINK) / RISE);
       y = Math.max(0.02, easeOutBack(b));
@@ -1076,9 +1113,9 @@ export class World {
       else this.pool(this.isLod(d.key) && this.lodFlip++ % 2 ? `${d.key}~` : d.key)?.add(tmpM, d.color);
     }
     const v = new THREE.Vector3();
-    for (let i = 0; i < b.chimneys.length; i += 3) {
+    for (let i = 0; i < b.chimneys.length; i += 4) {
       v.set(b.chimneys[i], b.chimneys[i + 1], b.chimneys[i + 2]).applyMatrix4(m);
-      this.chimneys.push(v.x, v.y, v.z);
+      this.chimneys.push(v.x, v.y, v.z, b.chimneys[i + 3]);
     }
     if (flush) for (const pool of this.pools.values()) pool.flush();
   }
@@ -1309,7 +1346,7 @@ export class World {
   }
 
   private spawnSmoke(dt: number) {
-    const n = this.chimneys.length / 3;
+    const n = this.chimneys.length / 4;
     if (!n || this.sprites.count > 380) return;
     this.smokeClock += dt * Math.min(n * 0.25, 7);
     const tx = this.rig.target.x, tz = this.rig.target.z;
@@ -1317,8 +1354,8 @@ export class World {
     while (this.smokeClock > 1) {
       this.smokeClock -= 1;
       for (let tries = 0; tries < 6; tries++) {
-        const i = Math.floor(Math.random() * n) * 3;
-        const x = this.chimneys[i], y = this.chimneys[i + 1], z = this.chimneys[i + 2];
+        const i = Math.floor(Math.random() * n) * 4;
+        const x = this.chimneys[i], y = this.chimneys[i + 1] * (this.lib.chimScale[this.chimneys[i + 3]] ?? 1), z = this.chimneys[i + 2];
         if (Math.abs(x - tx) > view || Math.abs(z - tz) > view) continue;
         this.sprites.smoke(x, y, z, tc(this.theme.smoke), U.wind.value);
         break;
