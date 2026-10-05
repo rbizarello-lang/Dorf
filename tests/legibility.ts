@@ -5,6 +5,7 @@ import { T } from '../src/core/tiles';
 import { THEMES } from '../src/themes/themes';
 import { NIGHT_LIGHT } from '../src/render/nightLight';
 import { frameColors } from '../src/ui/frames';
+import { SAFE_TERRAIN } from '../src/ui/a11y';
 
 const ROOF_MIN = 15;
 const WALL_MIN = 12;
@@ -102,4 +103,12 @@ for (const th of THEMES) {
   console.log(`  ${th.id.padEnd(9)} ${th.ui.frame.padEnd(11)} tinta × painel ${c.toFixed(1)}:1${bad ? '  ← abaixo de 7:1' : ''}`);
 }
 console.log(`Molduras: ${THEMES.length} temas, ${frameFailed} com contraste abaixo de 7:1`);
-if (failed || darkFailed || frameFailed) process.exit(1);
+let safeFailed = 0;
+for (let i = 0; i < SAFE_TERRAIN.length; i++) {
+  for (let j = i + 1; j < SAFE_TERRAIN.length; j++) {
+    const d = dE(SAFE_TERRAIN[i], SAFE_TERRAIN[j]);
+    if (d < 25) safeFailed++;
+  }
+}
+console.log(`Cores seguras: ${SAFE_TERRAIN.length} terrenos, ${safeFailed} pares com ΔE abaixo de 25`);
+if (failed || darkFailed || frameFailed || safeFailed) process.exit(1);

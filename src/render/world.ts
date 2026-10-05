@@ -506,6 +506,8 @@ export class World {
   private fixed: { w: number; h: number; ratio: number } | null = null;
   /** 0 congela o mundo (modo foto); a câmera e a luz continuam respondendo. */
   timeScale = 1;
+  /** Menos movimento: sem onda dourada, sem voo de câmera e sem o quique da peça. */
+  reducedMotion = false;
   /** Vagas da fronteira, aro e marcas do fantasma (o modo foto e o vídeo podem esconder). */
   showSlots = true;
 
@@ -1005,6 +1007,13 @@ export class World {
    * corre pelo mapa a partir dele.
    */
   eraUp(era: number) {
+    if (this.reducedMotion) {
+      this.centerAnim = -1;
+      this.setCenter(era);
+      this.setHouseEra(era, false);
+      U.eraWave.value.w = 0;
+      return;
+    }
     this.centerNext = era;
     this.centerAnim = 0;
     U.eraWave.value.set(0, 0, this.time, 1);
@@ -1376,6 +1385,7 @@ export class World {
 
   /** Anel dourado que sai das bordas da peça e se apaga; acima de 1 a cor alimenta o bloom. */
   halo(x: number, z: number, strength = 1) {
+    if (this.reducedMotion) return;
     let h = this.halos.find((o) => !o.mesh.visible);
     if (!h) {
       if (this.halos.length >= 6) h = this.halos[0];
@@ -1423,15 +1433,18 @@ export class World {
     if (res.site) this.burst(x, z, 'sparkle', 46);
     if (res.eraUp !== null) {
       this.eraUp(res.eraUp);
-      this.ripple(x, z, 2.2);
-      this.burst(x, z, 'sparkle', 60);
-      this.halo(x, z, 2);
-      this.flushBirds(x, z);
+      if (!this.reducedMotion) {
+        this.ripple(x, z, 2.2);
+        this.burst(x, z, 'sparkle', 60);
+        this.halo(x, z, 2);
+        this.flushBirds(x, z);
+      }
     }
   }
 
   /** Bando de pássaros que levanta voo do lugar (marcos da partida). */
   flushBirds(x: number, z: number) {
+    if (this.reducedMotion) return;
     this.life.flush(x, z);
   }
 
@@ -1625,6 +1638,7 @@ export class World {
     this.applySeason();
     this.stepSky(realDt);
     this.voidU.radius.value += (this.voidGoal - this.voidU.radius.value) * Math.min(1, realDt / 1.2);
+    this.rig.snap = this.reducedMotion;
     this.rig.update(realDt);
     this.rig.apply(this.camera);
 
@@ -1709,7 +1723,8 @@ export class World {
       const k = 1 - Math.exp(-realDt * 16);
       g.position.x += (this.ghostTarget.x - g.position.x) * k;
       g.position.z += (this.ghostTarget.z - g.position.z) * k;
-      g.position.y += (this.ghostTarget.y + Math.sin(this.time * 2.4) * 0.025 - g.position.y) * k;
+      const bob = this.reducedMotion ? 0 : Math.sin(this.time * 2.4) * 0.025;
+      g.position.y += (this.ghostTarget.y + bob - g.position.y) * k;
       const inner = this.ghost.inner;
       inner.rotation.y += (-this.ghostAngle - inner.rotation.y) * (1 - Math.exp(-realDt * 18));
       // Inclina na direção em que desliza, como uma bandeja carregada.
@@ -1717,8 +1732,9 @@ export class World {
       this.ghostVel.x += ((g.position.x - this.ghostPrev.x) / Math.max(realDt, 1e-3) - this.ghostVel.x) * kv;
       this.ghostVel.y += ((g.position.z - this.ghostPrev.z) / Math.max(realDt, 1e-3) - this.ghostVel.y) * kv;
       this.ghostPrev.copy(g.position);
-      g.rotation.x = THREE.MathUtils.clamp(this.ghostVel.y * 0.035, -0.22, 0.22);
-      g.rotation.z = THREE.MathUtils.clamp(-this.ghostVel.x * 0.035, -0.22, 0.22);
+      const lean = this.reducedMotion ? 0 : 0.035;
+      g.rotation.x = THREE.MathUtils.clamp(this.ghostVel.y * lean, -0.22, 0.22);
+      g.rotation.z = THREE.MathUtils.clamp(-this.ghostVel.x * lean, -0.22, 0.22);
       for (let i = 0; i < 6; i++) if (this.markers[i].visible) this.markers[i].position.copy(g.position).add(this.markerLocal[i]);
     }
 
@@ -1748,7 +1764,8 @@ export class World {
           this.ripple(g.position.x, g.position.z);
         }
         const u = (d.t - fall) / 0.32;
-        g.scale.set(1 + Math.sin(Math.min(1, u) * Math.PI) * 0.03, 1 - Math.sin(Math.min(1, u) * Math.PI) * 0.08, 1 + Math.sin(Math.min(1, u) * Math.PI) * 0.03);
+        const squash = this.reducedMotion ? 0 : Math.sin(Math.min(1, u) * Math.PI);
+        g.scale.set(1 + squash * 0.03, 1 - squash * 0.08, 1 + squash * 0.03);
         const tt = d.t - fall;
         if (!d.cleared && tt >= SCAFFOLD_DOWN) {
           // A obra acabou: o andaime some numa nuvem de poeira.

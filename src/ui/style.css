@@ -167,6 +167,20 @@ kbd {
   gap: 8px;
 }
 
+/* No toque (ou numa tela estreita) ficam o tema, o desfazer e o menu ⋯. */
+#btn-more {
+  display: none;
+}
+
+@media (pointer: coarse), (max-width: 520px) {
+  .tools .extra {
+    display: none;
+  }
+  #btn-more {
+    display: inline-flex;
+  }
+}
+
 .chip,
 .icon-btn {
   display: inline-flex;
@@ -1531,6 +1545,87 @@ body.capture #floaters {
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* Opção "menos movimento" do painel, além da preferência do sistema. */
+html.calm *,
+html.calm *::before,
+html.calm *::after {
+  animation-duration: 0.01ms !important;
+  transition-duration: 0.01ms !important;
+}
+
+html[data-text='s'] .hud-top,
+html[data-text='s'] .quests,
+html[data-text='s'] .stack,
+html[data-text='s'] .hint,
+html[data-text='s'] .tip,
+html[data-text='s'] .toasts,
+html[data-text='s'] .modal,
+html[data-text='s'] .popover,
+html[data-text='s'] .minimap {
+  zoom: 0.9;
+}
+
+html[data-text='l'] .hud-top,
+html[data-text='l'] .quests,
+html[data-text='l'] .stack,
+html[data-text='l'] .hint,
+html[data-text='l'] .tip,
+html[data-text='l'] .toasts,
+html[data-text='l'] .modal,
+html[data-text='l'] .popover,
+html[data-text='l'] .minimap {
+  zoom: 1.25;
+}
+
+.a11y {
+  display: grid;
+  gap: 12px;
+}
+
+.a11y legend {
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.a11y label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+}
+
+.a11y p {
+  margin: 0;
+  color: var(--soft);
+  font-size: 13px;
+}
+
+.quest-fold {
+  display: none;
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+}
+
+@media (pointer: coarse), (max-width: 520px) {
+  .quests {
+    pointer-events: auto;
+  }
+  .quest-fold {
+    display: block;
+  }
+  .quests:not(.open) .quest {
+    display: none;
   }
 }
 

@@ -5,7 +5,7 @@ import type { World } from '../render/world';
 import type { Capture } from './capture';
 import type { Hud } from './hud';
 
-// Entrada no tabuleiro: mouse, toque (um dedo, pinça, dois dedos na vertical) e teclado.
+// Entrada no tabuleiro: mouse, toque (um dedo, pinça, torção, dois dedos na vertical) e teclado.
 // Os botões da interface ficam no main.ts; aqui só o canvas e as teclas.
 
 type Hex = { q: number; r: number };
@@ -44,8 +44,9 @@ export function bindInput(h: InputHost): Input {
   const { canvas, world, hud, sfx, capture } = h;
   const pointers = new Map<number, { x: number; y: number }>();
   let drag: { button: number; x: number; y: number; moved: boolean; ground: THREE.Vector3 | null; touch: boolean } | null = null;
-  // Dois dedos: decide no começo do gesto se é pinça (zoom e pan) ou arraste vertical (inclinação).
-  let pinch: { d: number; mx: number; my: number; mode: 'pending' | 'zoom' | 'tilt'; ad: number; ax: number; ay: number } | null = null;
+  // Dois dedos: no começo do gesto decide se é pinça (zoom), torção (giro) ou arraste vertical (inclinação).
+  let pinch: { d: number; ang: number; mx: number; my: number; mode: 'pending' | 'zoom' | 'tilt' | 'yaw'; ad: number; ax: number; ay: number; aang: number } | null = null;
+  const wrapAng = (d: number) => (d > Math.PI ? d - Math.PI * 2 : d < -Math.PI ? d + Math.PI * 2 : d);
 
   /** Inclina a câmera e guarda o ajuste para a próxima partida (gravado quando o gesto para). */
   let tiltSave = 0;
@@ -66,11 +67,12 @@ export function bindInput(h: InputHost): Input {
     sfx.unlock();
     hud.closeThemeMenu();
     if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 2) return;
-    canvas.setPointerCapture(e.pointerId);
+    // Um evento sintético não tem ponteiro ativo; no dedo de verdade a captura funciona.
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* segue o gesto mesmo assim */ }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
-      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, mode: 'pending', ad: 0, ax: 0, ay: 0 };
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), ang: Math.atan2(b.y - a.y, b.x - a.x), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, mode: 'pending', ad: 0, ax: 0, ay: 0, aang: 0 };
       drag = null;
       return;
     }
@@ -82,14 +84,26 @@ export function bindInput(h: InputHost): Input {
     if (pinch && pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
+      const ang = Math.atan2(b.y - a.y, b.x - a.x);
+      const dang = wrapAng(ang - pinch.ang);
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       if (pinch.mode === 'pending') {
         // Os dois dedos subindo ou descendo juntos, sem abrir nem fechar: inclinação.
+        // Torcer (o ângulo entre os dedos) gira a câmera, no lugar de dar zoom.
         pinch.ad += d - pinch.d;
         pinch.ax += mx - pinch.mx;
         pinch.ay += my - pinch.my;
-        if (Math.hypot(pinch.ad, pinch.ax, pinch.ay) > 14) pinch.mode = Math.abs(pinch.ay) > 2 * Math.abs(pinch.ad) && Math.abs(pinch.ay) > Math.abs(pinch.ax) ? 'tilt' : 'zoom';
-      } else if (pinch.mode === 'tilt') tiltBy((my - pinch.my) * 0.006);
+        pinch.aang += dang;
+        const twist = Math.abs(pinch.aang) * 80;
+        if (Math.hypot(pinch.ad, pinch.ax, pinch.ay, twist) > 14) {
+          pinch.mode = twist > Math.abs(pinch.ad) && twist > Math.abs(pinch.ay) && twist > Math.abs(pinch.ax)
+            ? 'yaw'
+            : Math.abs(pinch.ay) > 2 * Math.abs(pinch.ad) && Math.abs(pinch.ay) > Math.abs(pinch.ax)
+              ? 'tilt'
+              : 'zoom';
+        }
+      } else if (pinch.mode === 'yaw') world.rig.rotate(dang);
+      else if (pinch.mode === 'tilt') tiltBy((my - pinch.my) * 0.006);
       else {
         world.rig.zoom(pinch.d / Math.max(d, 1));
         const before = world.groundPoint(pinch.mx, pinch.my);
@@ -97,6 +111,7 @@ export function bindInput(h: InputHost): Input {
         if (before && after) world.rig.panWorld(before.x - after.x, before.z - after.z, true);
       }
       pinch.d = d;
+      pinch.ang = ang;
       pinch.mx = mx;
       pinch.my = my;
       return;

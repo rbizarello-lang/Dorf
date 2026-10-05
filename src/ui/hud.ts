@@ -139,6 +139,7 @@ export class Hud {
   readonly hint = $('hint');
   readonly confirm = $<HTMLButtonElement>('confirm');
   private questEls = new Map<number, HTMLElement>();
+  private foldBtn: HTMLButtonElement | null = null;
   private markerEls = new Map<number, HTMLElement>();
   private shownScore = 0;
   private targetScore = 0;
@@ -248,6 +249,11 @@ export class Hud {
   }
 
   renderQuests(quests: Quest[], theme: Theme) {
+    const fold = this.ensureFold();
+    const n = quests.filter((q) => q.state === 'active').length;
+    fold.hidden = n === 0;
+    fold.textContent = n === 1 ? '1 missão' : `${n} missões`;
+    fold.setAttribute('aria-expanded', String(this.quests.classList.contains('open')));
     for (const q of quests) {
       let el = this.questEls.get(q.id);
       if (q.state === 'active' && !el) {
@@ -272,6 +278,23 @@ export class Hud {
         this.questEls.delete(q.id);
       }
     }
+  }
+
+  /** No toque as missões ficam neste botão até alguém abrir a lista. */
+  private ensureFold() {
+    if (this.foldBtn) return this.foldBtn;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'quest-fold';
+    b.hidden = true;
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.quests.classList.toggle('open');
+      b.setAttribute('aria-expanded', String(this.quests.classList.contains('open')));
+    });
+    this.quests.prepend(b);
+    this.foldBtn = b;
+    return b;
   }
 
   updateMarkers(list: MarkerView[]) {

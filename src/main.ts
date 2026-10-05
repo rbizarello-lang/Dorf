@@ -19,6 +19,7 @@ import { FX_FLAGS } from './render/post';
 import { U } from './render/materials';
 import { World } from './render/world';
 import { THEMES, themeById, type Theme } from './themes/themes';
+import { withSafeColors } from './ui/a11y';
 import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor } from './ui/banner';
 import { Capture, VIDEO_QUALITIES } from './ui/capture';
 import { Hud, TIME_ICON, TIME_LABEL, TIME_ORDER, glyph, questLabel, questMarker } from './ui/hud';
@@ -118,6 +119,71 @@ let banner = (() => {
   }
 })();
 let theme: Theme = dress(themeById(params.get('theme') ?? store.get('theme')), house);
+const a11yText = store.get('a11y-text');
+const a11yCalm = store.get('a11y-calm');
+const a11y = {
+  text: a11yText === 's' || a11yText === 'l' ? a11yText : 'm',
+  safe: store.get('a11y-safe') === '1',
+  calm: a11yCalm === '1' || (a11yCalm !== '0' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)),
+};
+
+/** Tema como a tela mostra: com as cores seguras, quando a opção está ligada. */
+function shownTheme(): Theme {
+  return a11y.safe ? withSafeColors(theme) : theme;
+}
+
+function applyA11y() {
+  if (a11y.text === 'm') delete document.documentElement.dataset.text;
+  else document.documentElement.dataset.text = a11y.text;
+  document.documentElement.classList.toggle('calm', a11y.calm);
+  world.reducedMotion = a11y.calm;
+  world.rig.snap = a11y.calm;
+}
+
+/** Vibração curta. Só chama se o navegador oferece (o iPhone não oferece). */
+function buzz(ms: number) {
+  const nav = navigator as Navigator & { vibrate?: (pattern: number) => boolean };
+  if (typeof nav.vibrate !== 'function') return;
+  try {
+    nav.vibrate(ms);
+  } catch {
+    /* a função existe e a chamada é recusada */
+  }
+}
+
+function showA11y() {
+  hud.showModal(`<h2 id="modal-title">Acessibilidade</h2>
+    <form class="a11y">
+      <fieldset>
+        <legend>Tamanho do texto</legend>
+        <label><input type="radio" name="text" value="s"${a11y.text === 's' ? ' checked' : ''}> Menor</label>
+        <label><input type="radio" name="text" value="m"${a11y.text === 'm' ? ' checked' : ''}> Normal</label>
+        <label><input type="radio" name="text" value="l"${a11y.text === 'l' ? ' checked' : ''}> Maior</label>
+      </fieldset>
+      <label><input type="checkbox" name="safe"${a11y.safe ? ' checked' : ''}> Cores seguras para daltônicos</label>
+      <p>As bordas passam a amarelo, verde-azulado, laranja, roxo, azul e cinza, no chão e nos ícones.</p>
+      <label><input type="checkbox" name="calm"${a11y.calm ? ' checked' : ''}> Menos movimento</label>
+      <p>A onda dourada, os voos da câmera, o bando de pássaros e o quique da peça param. O vento e a água continuam.</p>
+      <button type="button" class="secondary">Fechar</button>
+    </form>`);
+  const form = hud.modalBody.querySelector('form')!;
+  form.addEventListener('change', () => {
+    const text = (form.querySelector('input[name="text"]:checked') as HTMLInputElement | null)?.value;
+    a11y.text = text === 's' || text === 'l' ? text : 'm';
+    a11y.safe = (form.querySelector('input[name="safe"]') as HTMLInputElement).checked;
+    a11y.calm = (form.querySelector('input[name="calm"]') as HTMLInputElement).checked;
+    store.set('a11y-text', a11y.text);
+    store.set('a11y-safe', a11y.safe ? '1' : '0');
+    store.set('a11y-calm', a11y.calm ? '1' : '0');
+    applyA11y();
+    const s = shownTheme();
+    world.setTheme(s, game.board);
+    hud.applyTheme(s);
+    hud.renderQuests(game.board.quests, s);
+    minimap.rebuild(game.board.list, s.terrainColors);
+  });
+  form.querySelector('button')!.addEventListener('click', () => hud.hideModal());
+}
 let rulesTheme: Theme = theme;
 let game: Game;
 let moves: MoveRec[] = [];
@@ -222,14 +288,14 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   recordCheered = false;
   hud.hint.style.opacity = moves.length >= 6 ? '0' : '';
   world.dropGhost();
-  world.setTheme(theme, game.board);
+  world.setTheme(shownTheme(), game.board);
   world.setMonuments(progress.monuments);
   sfx.setStyle(theme.music, game.board.era);
-  hud.applyTheme(theme);
+  hud.applyTheme(shownTheme());
   showCrest();
-  hud.renderQuests(game.board.quests, theme);
+  hud.renderQuests(game.board.quests, shownTheme());
   refreshTradeMarks();
-  minimap.rebuild(game.board.list, theme.terrainColors);
+  minimap.rebuild(game.board.list, shownTheme().terrainColors);
   frameCamera(true);
   // Partida nova: o batedor mostra para onde fica o sítio mais perto (quando a ajuda fechar).
   scoutPending = !replay.length;
@@ -418,6 +484,7 @@ function place(q: number, r: number) {
   }
   const rot = game.rot;
   const res = game.place(q, r)!;
+  buzz(res.perfect ? 20 : 12);
   moves.push([q, r, rot]);
   noteTurn(res);
   refreshTradeMarks();
@@ -682,7 +749,7 @@ function announce(res: PlaceResult) {
     const s = seasonAt(res.placed.index - 1);
     hud.toast(`${SEASON_NAME[s]}: ${theme.synergy[SEASON_KIND[s]]} rende +3.`, 'good');
   }
-  hud.renderQuests(game.board.quests, theme);
+  hud.renderQuests(game.board.quests, shownTheme());
 }
 
 // ------------------------------------------------------------------ telas
@@ -690,7 +757,7 @@ function announce(res: PlaceResult) {
 /** Ajuda em abas: o básico primeiro, o resto por assunto. */
 function showHelp(tab = 'basico') {
   const R = game.rules;
-  const legend = theme.terrainNames.map((n, i) => `<span><i style="background:${theme.terrainColors[i]}">${glyph(`t${i}`, theme.terrainColors[i])}</i>${n}</span>`).join('');
+  const legend = theme.terrainNames.map((n, i) => `<span><i style="background:${shownTheme().terrainColors[i]}">${glyph(`t${i}`, shownTheme().terrainColors[i])}</i>${n}</span>`).join('');
   const wonder = R.wonderStages > 0 && R.eraScores.length > 1;
   const tabs: [string, string, string][] = [
     [
@@ -738,8 +805,9 @@ function showHelp(tab = 'basico') {
       'Controles',
       `<ul>
         <li>Mouse: clique coloca, botão direito ou <kbd>R</kbd> gira a peça, arrastar move, roda dá zoom, <kbd>Q</kbd>/<kbd>E</kbd> giram a câmera.</li>
-        <li>Inclinar a câmera: arrastar com o botão direito para cima ou para baixo, ou <kbd>PgUp</kbd>/<kbd>PgDn</kbd>; <kbd>Home</kbd> volta ao ângulo padrão. No toque, dois dedos para cima ou para baixo.</li>
-        <li>Toque: toque num espaço para ver a peça, toque de novo (ou ✓) para colocar.</li>
+        <li>Inclinar a câmera: arrastar com o botão direito para cima ou para baixo, ou <kbd>PgUp</kbd>/<kbd>PgDn</kbd>; <kbd>Home</kbd> volta ao ângulo padrão. No toque, dois dedos para cima ou para baixo. Torcer os dois dedos gira a câmera.</li>
+        <li>Toque: toque num espaço para ver a peça, toque de novo (ou ✓) para colocar. No celular o topo fica com o tema, o desfazer e o menu ⋯, e as missões cabem num botão.</li>
+        <li>O botão Aa (no ⋯, no celular) abre o tamanho do texto, as cores para daltônicos e o menos movimento.</li>
         <li>O botão de som alterna entre música e efeitos, só efeitos e mudo.</li>
         <li><kbd>M</kbd> abre ou fecha o minimapa. Um clique ou toque nele leva a câmera até ali. No celular ele começa fechado.</li>
         <li>O botão Câmera tira fotos sem a interface (<kbd>P</kbd>) e grava vídeos de até 2 minutos (<kbd>V</kbd>), salvos em MP4 de até 4K.</li>
@@ -808,7 +876,7 @@ function almanac() {
 
 function synergyLegend() {
   const T4 = theme.terrainNames;
-  const C = theme.terrainColors;
+  const C = shownTheme().terrainColors;
   const row = (a: number, b: number, name: string) => `<span><i style="background:${C[a]}"></i><i style="background:${C[b]}"></i>${T4[a]} + ${T4[b]} = <b>${name}</b></span>`;
   return [row(3, 1, theme.synergy.lumber), row(3, 2, theme.synergy.mill), row(3, 0, theme.synergy.pasture), row(2, 0, theme.synergy.apiary)].join('');
 }
@@ -825,7 +893,7 @@ function showGameOver() {
       <div><b>${game.placedCount}</b><span>peças</span></div>
       <div><b>${b.questsCompleted}</b><span>missões</span></div>
     </div>
-    ${timelineSvg(turns, theme.terrainColors, theme.ui.accent, theme.terrainNames)}
+    ${timelineSvg(turns, shownTheme().terrainColors, theme.ui.accent, theme.terrainNames)}
     <p class="muted">Era ${eraName(b.era)}, ${b.sites.filter((x) => x.found).length} de ${b.sites.length} sítios, ${b.perfects} encaixes perfeitos, ${Object.values(b.synergyCount).reduce((a, c) => a + c, 0)} interações.</p>
     ${b.blessings.length ? `<p class="muted">Cartas da vila: ${b.blessings.map((id) => blessingName(id, theme)).join(', ')}.</p>` : ''}
     <p class="muted">Recorde em ${mode.name} · ${rulesTheme.name}: ${best.toLocaleString('pt-BR')} pontos (semente ${bestSeed}).</p>
@@ -910,10 +978,10 @@ function setHouse(color: HouseColor | null, b: Banner) {
   store.set('banner', JSON.stringify(b));
   if (recolor) {
     theme = dress(themeById(theme.id), house);
-    hud.applyTheme(theme);
-    world.setTheme(theme, game.board);
-    hud.renderQuests(game.board.quests, theme);
-    minimap.rebuild(game.board.list, theme.terrainColors);
+    hud.applyTheme(shownTheme());
+    world.setTheme(shownTheme(), game.board);
+    hud.renderQuests(game.board.quests, shownTheme());
+    minimap.rebuild(game.board.list, shownTheme().terrainColors);
     refreshHud(true);
   }
   showCrest();
@@ -927,12 +995,12 @@ function pickTheme(t: Theme) {
   if (capture.take) capture.stopTake('A gravação terminou aqui: o vídeo fica no tema em que começou.');
   theme = dress(t, house);
   store.set('theme', t.id);
-  hud.applyTheme(theme);
+  hud.applyTheme(shownTheme());
   showCrest();
-  world.setTheme(theme, game.board);
+  world.setTheme(shownTheme(), game.board);
   sfx.setStyle(t.music, game.board.era);
-  hud.renderQuests(game.board.quests, theme);
-  minimap.rebuild(game.board.list, theme.terrainColors);
+  hud.renderQuests(game.board.quests, shownTheme());
+  minimap.rebuild(game.board.list, shownTheme().terrainColors);
   refreshHud(true);
   if (game.over) {
     rulesTheme = t;
@@ -1058,8 +1126,7 @@ hud.confirm.addEventListener('click', () => {
   if (hover) place(hover.q, hover.r);
 });
 document.getElementById('btn-help')!.addEventListener('click', () => showHelp());
-// No celular as missões ficam em linhas finas; um toque abre ou fecha os detalhes.
-hud.quests.addEventListener('click', () => hud.quests.classList.toggle('open'));
+document.getElementById('btn-a11y')!.addEventListener('click', () => showA11y());
 document.getElementById('btn-new')!.addEventListener('click', requestNewGame);
 document.getElementById('btn-undo')!.addEventListener('click', undo);
 hud.themeBtn.addEventListener('click', () => {
@@ -1132,6 +1199,25 @@ soundBtn.addEventListener('click', () => {
   const saved = store.get('sound');
   setSound(saved === '0' || saved === 'sfx' ? saved : '1', false);
 }
+document.getElementById('btn-more')!.addEventListener('click', () => {
+  const btn = document.getElementById('btn-more')!;
+  hud.toggleMenu(
+    btn,
+    [
+      { id: 'time', label: 'Hora do dia', note: TIME_LABEL[world.timeOfDay] },
+      { id: 'quality', label: 'Qualidade', note: qualityLabel[qualityMode] },
+      { id: 'camera', label: 'Foto e vídeo' },
+      { id: 'sound', label: 'Som', note: soundBtn.querySelector('.long')!.textContent ?? '' },
+      { id: 'help', label: 'Como jogar' },
+      { id: 'new', label: 'Nova partida' },
+      { id: 'a11y', label: 'Acessibilidade' },
+    ],
+    (id) => {
+      if (id === 'a11y') showA11y();
+      else document.getElementById(`btn-${id}`)?.click();
+    },
+  );
+});
 document.addEventListener('visibilitychange', () => sfx.pause(document.hidden));
 
 window.addEventListener('resize', () => {
@@ -1164,9 +1250,9 @@ function autoPlace(n: number, infinite: boolean) {
   const t1 = performance.now();
   world.placeInstant(placed, game.board);
   const bake = performance.now() - t1;
-  hud.renderQuests(game.board.quests, theme);
+  hud.renderQuests(game.board.quests, shownTheme());
   refreshTradeMarks();
-  minimap.rebuild(game.board.list, theme.terrainColors);
+  minimap.rebuild(game.board.list, shownTheme().terrainColors);
   frameCamera(true);
   refreshHud(true);
   scheduleGameOver();
@@ -1235,7 +1321,7 @@ function mapFrame() {
   const quests = [];
   for (const q of game.board.quests) {
     if (q.state !== 'active') continue;
-    quests.push({ q: q.anchor.q, r: q.anchor.r, color: q.kind === 'perfect' ? theme.ui.accent : theme.terrainColors[q.terrain] });
+    quests.push({ q: q.anchor.q, r: q.anchor.r, color: q.kind === 'perfect' ? theme.ui.accent : shownTheme().terrainColors[q.terrain] });
   }
   minimap.frame({
     quests,
@@ -1283,7 +1369,7 @@ function step(now: number) {
     const s = screenOf(q.anchor.q, q.anchor.r, 0.55);
     // O estandarte não tapa a jogada: apaga quando o fantasma passa na peça dele ou numa vizinha.
     const dim = !!hover && hexDistance(hover.q, hover.r, q.anchor.q, q.anchor.r) <= 1;
-    markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: questMarker(q), color: q.kind === 'perfect' ? theme.ui.accent : theme.terrainColors[q.terrain], dim });
+    markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: questMarker(q), color: q.kind === 'perfect' ? theme.ui.accent : shownTheme().terrainColors[q.terrain], dim });
   }
   // Maravilha em obra: etiqueta com a etapa sobre o canteiro.
   const wd = game.board.wonder;
@@ -1375,6 +1461,7 @@ function start(data: unknown) {
     (window as unknown as { __load: unknown }).__load = r;
   } else if (params.has('auto')) autoPlace(Number(params.get('auto')) || 40, false);
   if (params.has('debug')) hud.stats.hidden = false;
+  applyA11y();
   // Legibilidade: decorações pretas sobre chão branco (vilas, construções e marcos precisam ler de longe).
   if (params.has('silhueta')) U.silhouette.value = 1;
   (window as unknown as { __pools: () => unknown }).__pools = () => world.poolReport();

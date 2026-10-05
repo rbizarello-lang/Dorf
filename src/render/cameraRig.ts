@@ -26,6 +26,8 @@ export class CameraRig {
   /** Ajuste de inclinação de quem joga, somado à curva do zoom (radianos). */
   tilt = 0;
   goalTilt = 0;
+  /** Sem amortecimento: a câmera chega no mesmo quadro (opção "menos movimento"). */
+  snap = false;
 
   /**
    * Ângulo acima do chão. A curva do zoom fica baixa como no Dorfromantik: 32° de perto, ~38° no
@@ -46,7 +48,7 @@ export class CameraRig {
   }
 
   update(dt: number) {
-    const k = 1 - Math.exp(-dt * 9);
+    const k = this.snap ? 1 : 1 - Math.exp(-dt * 9);
     this.target.lerp(this.goal, k);
     this.yaw += (this.goalYaw - this.yaw) * k;
     this.dist += (this.goalDist - this.dist) * k;
