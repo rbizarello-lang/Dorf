@@ -22,7 +22,7 @@ npm run check      # typecheck + testes + build (o mesmo que a CI roda em cada p
 
 ## Como jogar
 
-Coloque peças encostadas no mapa. A pilha começa com 50 peças. Cada borda que combina com a vizinha vale 10 pontos. **Rio e estrada** precisam continuar: só encostam neles mesmos. Os rios mudam de largura de peça em peça; peças com várias bordas de água vizinhas trazem um lago, e lagos encostados pela boca viram um lago só. Quando a peça encosta em 2 ou mais vizinhas e todas as bordas combinam, o encaixe é **perfeito**. Cercar uma peça com 6 vizinhas encaixadas devolve uma peça à pilha. A partida acaba quando a pilha esvazia.
+Coloque peças encostadas no mapa. A pilha começa com 50 peças. Cada borda que combina com a vizinha vale 10 pontos. **Rio e estrada** precisam continuar: só encostam neles mesmos. Os rios mudam de largura de peça em peça; peças com várias bordas de água vizinhas trazem um lago, e lagos encostados pela boca viram um lago só. Quando a peça encosta em 2 ou mais vizinhas e todas as bordas combinam, o encaixe é **perfeito**. Cercar uma peça com 6 vizinhas encaixadas devolve uma peça à pilha. Com o fantasma sobre uma casa válida, a etiqueta mostra os pontos daquela jogada antes de soltar a peça. A partida acaba quando a pilha esvazia.
 
 **Missões** chegam em algumas peças (marcadas com "!") e dão peças extras:
 

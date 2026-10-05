@@ -29,6 +29,17 @@ export type { Quality };
 export type TimeOfDay = 'dawn' | 'aurora' | 'day' | 'golden' | 'dusk' | 'night';
 
 const CHUNK = 8;
+/**
+ * Decoração em super-blocos de 32×32, centrados na vila. Uma partida redonda de até
+ * ~700 peças cabe num lote por kit (as chamadas não sobem). O mapa maior transborda,
+ * e a câmera (e a sombra) deixam de desenhar o bloco fora de vista.
+ */
+const REGION = 32;
+/** A chave do lote é `kit@cq,cr`. O kit pode ter `:` (`wall:0`), nunca `@`. */
+function poolKey(id: string) {
+  const at = id.lastIndexOf('@');
+  return at < 0 ? id : id.slice(0, at);
+}
 /** O alto do céu um pouco mais azul que a cor "do céu" do tema (que é quase branca). */
 const ZENITH_TINT = new THREE.Color(0.86, 0.93, 1.08);
 // Ultra e Cinema passam de 1: mais árvores, capim e plantações de perto (alvo: GPUs acima da atual).
@@ -99,7 +110,8 @@ class Pool {
     m.count = this.count;
     m.castShadow = this.shadows;
     m.receiveShadow = true;
-    m.frustumCulled = false;
+    // A esfera é a da região, não a do kit na origem: sem ela o recorte esconderia o lote inteiro.
+    m.frustumCulled = true;
     this.parent.add(m);
     return m;
   }
@@ -118,6 +130,7 @@ class Pool {
     setInstColor(this.mesh, this.count, c);
     this.count++;
     this.mesh.count = this.count;
+    this.boundsDirty = true;
   }
 
   /** Troca a forma de todas as instâncias (casas na virada de era): mesma posição e mesma cor. */
@@ -127,14 +140,22 @@ class Pool {
     this.mesh = this.make(this.cap, old.geometry.getAttribute('iColor').array as Float32Array);
     (this.mesh.instanceMatrix.array as Float32Array).set(old.instanceMatrix.array as Float32Array);
     this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.boundingSphere = old.boundingSphere;
     this.parent.remove(old);
     old.geometry.dispose();
     old.dispose();
   }
 
+  private boundsDirty = false;
+
   flush() {
     this.mesh.instanceMatrix.needsUpdate = true;
     this.mesh.geometry.getAttribute('iColor').needsUpdate = true;
+    if (!this.boundsDirty || this.count === 0) return;
+    this.mesh.computeBoundingSphere();
+    // Folga para a árvore na divisa e para o balanço do vento, que o shader empurra para fora da esfera.
+    if (this.mesh.boundingSphere) this.mesh.boundingSphere.radius += 1.6;
+    this.boundsDirty = false;
   }
 
   dispose() {
@@ -448,6 +469,14 @@ export class World {
   private board: Board | null = null;
   private chimneys: number[] = [];
   private sun = new THREE.DirectionalLight();
+  /**
+   * Alta e Média têm uma sombra só. Ela não redesenha todo quadro: a câmera andou, uma peça
+   * assentou, ou passou 0,25 s (barcos, moinhos e o vento da sombra acompanham a 4 Hz).
+   * Ultra e Cinema usam cascatas, que o three redesenha sempre.
+   */
+  private shadowAt = new THREE.Vector2(1e9, 0);
+  private shadowDist = 0;
+  private shadowClock = 0.25;
   /** Sombras em cascata do sol (Ultra e Cinema): nítidas perto da câmera, cobrindo até a névoa. */
   private csm: CSMShadowNode | null = null;
   /**
@@ -548,6 +577,7 @@ export class World {
     this.life.onTrade = (x, z) => this.burst(x, z, 'sparkle', 12, 0.12);
 
     this.sun.castShadow = true;
+    this.sun.shadow.autoUpdate = false;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.02;
@@ -650,6 +680,7 @@ export class World {
       this.sky = skyFor(this.theme, tod);
       this.applySky();
     }
+    this.shadowClock = 0.25;
   }
 
   /** Estação visual: o tema pode travar (Inverno, Sakura); senão segue as jogadas, com o mesmo trinco da pontuação. */
@@ -764,6 +795,9 @@ export class World {
       this.dropGhost();
       this.rebuild(this.board);
     }
+    // Cascatas redesenham sozinhas; a sombra única espera o próximo quadro pedir.
+    this.sun.shadow.autoUpdate = !!this.csm;
+    this.shadowClock = 0.25;
     this.resize();
   }
 
@@ -1033,18 +1067,21 @@ export class World {
    */
   private setHouseEra(era: number, dust: boolean) {
     for (const k of this.lib.setEra(era)) {
-      const pool = this.pools.get(k);
       const geo = this.lib.geo(k);
-      if (!pool || !geo) continue;
-      pool.retarget(geo);
-      if (!dust || !k.startsWith('wall:')) continue;
-      const a = pool.mesh.instanceMatrix.array;
+      if (!geo) continue;
       const tx = this.rig.target.x, tz = this.rig.target.z, view = this.rig.dist * 0.8;
-      for (let i = 0, n = 0; i < pool.count && n < 8; i++) {
-        const x = a[i * 16 + 12], z = a[i * 16 + 14];
-        if (Math.abs(x - tx) > view || Math.abs(z - tz) > view) continue;
-        this.burst(x, z, 'dust', 5);
-        n++;
+      let dustLeft = 8;
+      for (const [id, pool] of this.pools) {
+        if (poolKey(id) !== k) continue;
+        pool.retarget(geo);
+        if (!dust || !k.startsWith('wall:') || dustLeft <= 0) continue;
+        const a = pool.mesh.instanceMatrix.array;
+        for (let i = 0; i < pool.count && dustLeft > 0; i++) {
+          const x = a[i * 16 + 12], z = a[i * 16 + 14];
+          if (Math.abs(x - tx) > view || Math.abs(z - tz) > view) continue;
+          this.burst(x, z, 'dust', 5);
+          dustLeft--;
+        }
       }
     }
   }
@@ -1172,8 +1209,11 @@ export class World {
     return c;
   }
 
-  private pool(key: string) {
-    let p = this.pools.get(key);
+  private pool(key: string, q: number, r: number) {
+    const cq = Math.floor((q + REGION / 2) / REGION);
+    const cr = Math.floor((r + REGION / 2) / REGION);
+    const id = `${key}@${cq},${cr}`;
+    let p = this.pools.get(id);
     if (!p) {
       // Chave com "~" = metade "fina" de plantas e capim, escondida de longe (nível de detalhe).
       const fine = key.endsWith('~');
@@ -1181,7 +1221,7 @@ export class World {
       const geo = this.lib.geo(base);
       if (!geo) return null;
       p = new Pool(geo, fine ? this.lib.fineMaterial(base) : this.lib.material(base), this.staticRoot, this.lib.castsShadow(base));
-      this.pools.set(key, p);
+      this.pools.set(id, p);
     }
     return p;
   }
@@ -1210,7 +1250,7 @@ export class World {
       else if (d.anim === 'chop' || d.anim === 'tend' || d.anim === 'carry') this.life.addWorker(d.key, tmpM, d.color, d.anim);
       else if (d.anim === 'swim') this.life.addFish(tmpM, d.color, d.orbit ?? 0);
       else if (d.anim === 'bob') this.life.addBobber(tmpM, d.color);
-      else this.pool(this.isLod(d.key) && this.lodFlip++ % 2 ? `${d.key}~` : d.key)?.add(tmpM, d.color);
+      else this.pool(this.isLod(d.key) && this.lodFlip++ % 2 ? `${d.key}~` : d.key, p.q, p.r)?.add(tmpM, d.color);
     }
     const v = new THREE.Vector3();
     for (let i = 0; i < b.chimneys.length; i += 4) {
@@ -1218,6 +1258,8 @@ export class World {
       this.chimneys.push(v.x, v.y, v.z, b.chimneys[i + 3]);
     }
     if (flush) for (const pool of this.pools.values()) pool.flush();
+    // A peça nova entra na sombra no próximo redesenho, sem esperar o relógio de 0,25 s.
+    this.shadowClock = 0.25;
   }
 
   updateFrontier(board: Board) {
@@ -1558,7 +1600,8 @@ export class World {
   poolReport() {
     return [...this.pools.entries()]
       .map(([k, p]) => {
-        const base = k.endsWith('~') ? k.slice(0, -1) : k;
+        const kit = poolKey(k);
+        const base = kit.endsWith('~') ? kit.slice(0, -1) : kit;
         return { k, n: p.count, tris: (p.count * (this.lib.geo(base)?.attributes.position.count ?? 0)) / 3, shadow: p.mesh.castShadow };
       })
       .sort((a, b) => b.tris - a.tris);
@@ -1570,7 +1613,7 @@ export class World {
     for (const c of this.chunks.values()) tris += c.triangles();
     let inst = 0;
     for (const p of this.pools.values()) inst += p.count;
-    return { calls: info.render.drawCalls, triangles: info.render.triangles, chunks: this.chunks.size, instances: inst, groundTris: tris, life: this.life.counts(), backend: this.backend };
+    return { calls: info.render.drawCalls, triangles: info.render.triangles, chunks: this.chunks.size, pools: this.pools.size, instances: inst, groundTris: tris, life: this.life.counts(), backend: this.backend };
   }
 
   setPreview(def: TileDef | null, angle: number, stack: number) {
@@ -1675,46 +1718,63 @@ export class World {
     P.filter.value.set(filt?.[0] ?? 1, filt?.[1] ?? 1, filt?.[2] ?? 1);
 
     // Sol acompanha o alvo; área da sombra acompanha o zoom.
+    // Com sombra única, o mapa só é redesenhado quando a câmera anda, o zoom muda, uma peça
+    // assenta (shadowClock forçado no bake) ou passam 0,25 s. Entre um redesenho e outro a
+    // luz fica parada, senão o mapa velho escorrega em relação ao chão.
+    this.shadowClock += realDt;
     const sd = this.sky.sunDir;
     const ext = Math.min(28, this.rig.dist * 0.95 + 2);
-    // Sem cascatas, o centro da sombra anda de texel em texel no plano da luz: as bordas não
-    // tremem quando a câmera desliza (as cascatas do Ultra já se prendem à grade sozinhas).
-    const t = this.csm ? this.rig.target : snapToTexel(this.rig.target, sd, (2 * ext) / this.sun.shadow.mapSize.x, tmpSnap);
-    this.sun.target.position.copy(t);
-    this.sun.position.set(t.x + sd.x * 20, t.y + sd.y * 20, t.z + sd.z * 20);
-    if (this.csm) {
-      // As cascatas vão da câmera até onde a névoa fecha; acompanham o zoom.
-      const far = Math.round(this.rig.eye * 4.7 * 4) / 4;
-      if (this.csm.maxFar !== far && this.csm.camera) {
-        this.csm.maxFar = far;
-        this.csm.updateFrustums();
+    const tx = this.rig.target.x, tz = this.rig.target.z;
+    const shadowDue = !!this.csm
+      || this.shadowClock >= 0.25
+      || Math.hypot(tx - this.shadowAt.x, tz - this.shadowAt.y) > 0.35
+      || Math.abs(this.rig.dist - this.shadowDist) > 0.4;
+    if (shadowDue) {
+      this.shadowAt.set(tx, tz);
+      this.shadowDist = this.rig.dist;
+      this.shadowClock = 0;
+      if (!this.csm) this.sun.shadow.needsUpdate = true;
+      // Sem cascatas, o centro da sombra anda de texel em texel no plano da luz: as bordas não
+      // tremem quando a câmera desliza (as cascatas do Ultra já se prendem à grade sozinhas).
+      const t = this.csm ? this.rig.target : snapToTexel(this.rig.target, sd, (2 * ext) / this.sun.shadow.mapSize.x, tmpSnap);
+      this.sun.target.position.copy(t);
+      this.sun.position.set(t.x + sd.x * 20, t.y + sd.y * 20, t.z + sd.z * 20);
+      if (this.csm) {
+        // As cascatas vão da câmera até onde a névoa fecha; acompanham o zoom.
+        const far = Math.round(this.rig.eye * 4.7 * 4) / 4;
+        if (this.csm.maxFar !== far && this.csm.camera) {
+          this.csm.maxFar = far;
+          this.csm.updateFrustums();
+        }
+      }
+      if (this.rayLight.parent) {
+        this.rayLight.target.position.copy(t);
+        this.rayLight.position.copy(this.sun.position);
+        const rc = this.rayLight.shadow.camera;
+        if (rc.right !== ext) {
+          rc.left = -ext;
+          rc.right = ext;
+          rc.top = ext;
+          rc.bottom = -ext;
+          rc.updateProjectionMatrix();
+        }
+      }
+      const cam = this.sun.shadow.camera;
+      if (!this.csm && cam.right !== ext) {
+        cam.left = -ext;
+        cam.right = ext;
+        cam.top = ext;
+        cam.bottom = -ext;
+        cam.near = 1;
+        cam.far = 60;
+        cam.updateProjectionMatrix();
       }
     }
     if (this.rayLight.parent) {
-      this.rayLight.target.position.copy(t);
-      this.rayLight.position.copy(this.sun.position);
-      const rc = this.rayLight.shadow.camera;
-      if (rc.right !== ext) {
-        rc.left = -ext;
-        rc.right = ext;
-        rc.top = ext;
-        rc.bottom = -ext;
-        rc.updateProjectionMatrix();
-      }
       // Feixes só com o sol baixo (entardecer): ao meio-dia viram um véu branco sem forma.
       const low = 1 - THREE.MathUtils.clamp(sd.y / Math.max(1e-3, Math.hypot(sd.x, sd.y, sd.z)), 0, 1);
       P.rays.value = THREE.MathUtils.clamp((low - 0.25) / 0.4, 0, 1) * 0.4 * (1 - this.sky.night) * Math.min(1, this.sky.sunI);
       P.rayColor.value.copy(this.sky.sun);
-    }
-    const cam = this.sun.shadow.camera;
-    if (!this.csm && cam.right !== ext) {
-      cam.left = -ext;
-      cam.right = ext;
-      cam.top = ext;
-      cam.bottom = -ext;
-      cam.near = 1;
-      cam.far = 60;
-      cam.updateProjectionMatrix();
     }
 
     // Fantasma: flutua e gira suavemente até a orientação escolhida.
@@ -1811,7 +1871,7 @@ export class World {
     const spring = U.season.value === 0 ? 1.35 : 1;
     const fine = 1 - THREE.MathUtils.smoothstep(this.rig.dist, 11.5 * reach * spring, 14.5 * reach * spring);
     U.fine.value = fine;
-    for (const [k, p] of this.pools) if (k.endsWith('~')) p.mesh.visible = fine > 0;
+    for (const [k, p] of this.pools) if (poolKey(k).endsWith('~')) p.mesh.visible = fine > 0;
 
     // Aldeões só de perto, com o mesmo limiar da metade fina das plantas.
     this.life.folkNear = this.rig.dist < 13 * reach;

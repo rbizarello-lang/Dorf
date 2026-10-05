@@ -334,6 +334,23 @@ export class Hud {
     }
   }
 
+  /** Um cartão só com o que a jogada causou. Aviso ruim fica mais tempo. */
+  summary(lines: { text: string; kind?: '' | 'good' | 'bad' }[]) {
+    if (!lines.length) return;
+    const el = document.createElement('div');
+    const bad = lines.some((l) => l.kind === 'bad');
+    el.className = `toast summary${bad ? ' bad' : ''}`;
+    for (const l of lines) {
+      const p = document.createElement('p');
+      if (l.kind) p.className = l.kind;
+      p.textContent = l.text;
+      el.appendChild(p);
+    }
+    this.toasts.appendChild(el);
+    while (this.toasts.children.length > 2) this.toasts.firstElementChild!.remove();
+    setTimeout(() => el.remove(), bad ? 6400 : 4200);
+  }
+
   toast(text: string, kind: '' | 'good' | 'bad' = '') {
     const el = document.createElement('div');
     el.className = `toast ${kind}`;

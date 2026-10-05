@@ -938,6 +938,48 @@ if (contBad) fail(`continuação pós-replay divergiu em ${contBad} partidas`);
   if (bad) fail(`sítios: ${bad} erros de geração`);
 }
 
+// Prévia da jogada: o total mostrado no fantasma tem de ser o que `place` paga depois,
+// em todos os modos, sem alterar o tabuleiro.
+{
+  let checked = 0;
+  let mismatch = 0;
+  for (const mode of MODES) {
+    if (mode.id === 'zen') continue;
+    for (let seed = 1; seed <= 8; seed++) {
+      const theme = THEMES[seed % THEMES.length];
+      const game = new Game(seed + mode.id.length * 100, rulesFor(theme, mode), seed % 2 ? ['station', 'lighthouse'] : []);
+      const rand = mulberry32((seed ^ 0x5eed) >>> 0);
+      let guard = 0;
+      while (game.current && guard++ < 60) {
+        const m = game.bestMove(rand);
+        if (!m) {
+          if (!game.discardIfStuck()) break;
+          continue;
+        }
+        game.rot = m.rot;
+        const score = game.board.score;
+        const paid = game.board.routesPaid.size;
+        const tiles = game.board.list.length;
+        const peek = game.preview(m.q, m.r);
+        const again = game.preview(m.q, m.r);
+        if (game.board.score !== score || game.board.routesPaid.size !== paid || game.board.list.length !== tiles) mismatch++;
+        const res = game.place(m.q, m.r);
+        checked++;
+        if (!peek || !again || !res || peek.points !== res.points || again.points !== res.points) mismatch++;
+        else if (peek.routes.length !== res.routes.length || peek.routes.some((h, i) => h.d !== res.routes[i].d || h.points !== res.routes[i].points || h.tiles !== res.routes[i].tiles)) mismatch++;
+        else if ((peek.leftoverBonus ?? 0) !== (res.leftoverBonus ?? 0) || peek.matches !== res.matches || peek.perfect !== res.perfect) mismatch++;
+        while (game.offers.length) game.choose(0);
+        while (game.discardIfStuck());
+      }
+    }
+  }
+  const idle = new Game(1, DEFAULT_RULES);
+  const idleScore = idle.board.score;
+  if (idle.preview(0, 0) !== null || idle.board.score !== idleScore) mismatch++;
+  console.log(`Prévia: ${checked} jogadas conferidas contra o place, divergências ${mismatch}`);
+  if (mismatch) fail(`prévia: ${mismatch} divergências`);
+}
+
 // ------------------------------------------------------------------ resumo
 console.log('\nContadores:', JSON.stringify(counters));
 // Duração da partida no modo clássico, por jogador: é a medida do balanceamento (pilha, missões, recompensas).

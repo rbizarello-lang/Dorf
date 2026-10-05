@@ -112,6 +112,26 @@ export class Game {
     return edges ? this.board.check(q, r, edges) : null;
   }
 
+  /**
+   * O que a jogada renderia em (q, r) com o giro atual, sem colocar a peça e sem mexer
+   * na pilha, nas rotas pagas ou na sequência. O total inclui a sobra dos Exploradores.
+   */
+  preview(q: number, r: number): PlaceResult | null {
+    const def = this.current;
+    if (!def) return null;
+    const board = this.board.clone();
+    const edges = rotateEdges(def.edges, this.rot);
+    if (!board.check(q, r, edges).valid) return null;
+    const res = board.place(q, r, def, this.rot);
+    if (this.rules.endOnSites && board.sites.length && board.sitesLeft() === 0) {
+      const left = Math.max(0, this.stack + res.tilesGained - 1);
+      const bonus = left * this.rules.leftoverPoints;
+      res.points += bonus;
+      res.leftoverBonus = bonus;
+    }
+    return res;
+  }
+
   place(q: number, r: number): PlaceResult | null {
     const def = this.current;
     if (!def) return null;

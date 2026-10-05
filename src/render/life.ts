@@ -42,6 +42,7 @@ class AnimPool {
   private make(cap: number, colors?: Float32Array) {
     const m = new THREE.InstancedMesh(instGeometry(this.geo, cap, colors), this.mat, cap);
     m.count = 0;
+    // Sem recorte: barcos e animais atravessam o mapa, e a esfera do lote ficaria para trás.
     m.frustumCulled = false;
     m.castShadow = this.shadows;
     m.receiveShadow = true;
