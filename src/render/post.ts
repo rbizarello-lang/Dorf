@@ -16,9 +16,9 @@ import { indirectShare, ssrMask } from './materials';
 // Pós-processamento por perfil de qualidade, montado como um grafo de nós (RenderPipeline).
 //   cinema: o Ultra com mais amostras na luz indireta e nos raios, reflexo em resolução cheia,
 //          aberração cromática da lente e grão de filme (a supersamplagem vem de world.ts)
-//   ultra: iluminação indireta com oclusão (SSGI) + reflexos na água (SSR) + raios de luz
-//          (godrays) + bloom + profundidade de campo + antisserrilhado temporal (TRAA)
-//   high:  GTAO em meia resolução + bloom + profundidade de campo + TRAA
+//   ultra: iluminação indireta com oclusão (SSGI) + reflexos na água (SSR, meia resolução)
+//          + raios de luz + bloom + profundidade de campo + TRAA + o grão e a lente do Cinema
+//   high:  GTAO em meia resolução + bloom + profundidade de campo + TRAA + o mesmo grão e lente
 //          (GTAO lê a profundidade, que no WebGPU não pode ser multiamostrada: por isso TRAA, não MSAA)
 //   (cinema, ultra e high também desenham o traço de tinta, o contorno dos objetos)
 //   medium: MSAA 4× + gradação e vinheta (um passe barato)
@@ -36,14 +36,16 @@ interface Config {
   /** Traço de tinta (contorno); precisa ler a profundidade, então não combina com MSAA. */
   ink: boolean;
   aa: 'traa' | 'msaa' | 'fxaa';
-  /** Acabamento de cinema: mais amostras, reflexo em resolução cheia, aberração e grão. */
+  /** Grão e aberração, depois do TRAA. Barato: não mexe em amostras nem em resolução. */
+  finish?: boolean;
+  /** Cinema: mais amostras, reflexo em resolução cheia, e o acabamento (`finish`). */
   film?: boolean;
 }
 
 const CONFIG: Record<Exclude<Quality, 'low'>, Config> = {
   cinema: { ao: 0, gi: true, ssr: true, rays: true, bloom: true, dof: true, ink: true, aa: 'traa', film: true },
-  ultra: { ao: 0, gi: true, ssr: true, rays: true, bloom: true, dof: true, ink: true, aa: 'traa' },
-  high: { ao: 0.5, gi: false, ssr: false, rays: false, bloom: true, dof: true, ink: true, aa: 'traa' },
+  ultra: { ao: 0, gi: true, ssr: true, rays: true, bloom: true, dof: true, ink: true, aa: 'traa', finish: true },
+  high: { ao: 0.5, gi: false, ssr: false, rays: false, bloom: true, dof: true, ink: true, aa: 'traa', finish: true },
   medium: { ao: 0, gi: false, ssr: false, rays: false, bloom: false, dof: false, ink: false, aa: 'msaa' },
 };
 
@@ -233,8 +235,8 @@ export interface Post {
   dispose(): void;
 }
 
-/** Efeitos que `?fx=` pode ligar um a um (depuração de custo): ao, gi, ssr, rays, traa, msaa, bloom, dof, ink, film. */
-export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'dof', 'ink', 'film'] as const;
+/** Efeitos que `?fx=` pode ligar um a um (depuração de custo): ao, gi, ssr, rays, traa, msaa, bloom, dof, ink, finish, film. */
+export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'dof', 'ink', 'finish', 'film'] as const;
 
 /**
  * `rayLight` é a luz cujo mapa de sombra os raios percorrem. Precisa ser uma DirectionalLight
@@ -243,7 +245,7 @@ export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'do
  */
 export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, q: Exclude<Quality, 'low'>, fx?: string[], rayLight?: THREE.DirectionalLight, clouds?: THREE.Scene): Post {
   const cfg: Config = fx
-    ? { ao: fx.includes('ao') ? CONFIG[q].ao || 0.5 : 0, gi: fx.includes('gi'), ssr: fx.includes('ssr'), rays: fx.includes('rays'), bloom: fx.includes('bloom'), dof: fx.includes('dof'), ink: fx.includes('ink') && !fx.includes('msaa'), aa: fx.includes('traa') ? 'traa' : fx.includes('msaa') ? 'msaa' : 'fxaa', film: fx.includes('film') }
+    ? { ao: fx.includes('ao') ? CONFIG[q].ao || 0.5 : 0, gi: fx.includes('gi'), ssr: fx.includes('ssr'), rays: fx.includes('rays'), bloom: fx.includes('bloom'), dof: fx.includes('dof'), ink: fx.includes('ink') && !fx.includes('msaa'), aa: fx.includes('traa') ? 'traa' : fx.includes('msaa') ? 'msaa' : 'fxaa', finish: fx.includes('finish'), film: fx.includes('film') }
     : { ...CONFIG[q] };
   if (!rayLight) cfg.rays = false;
   const disposables: { dispose(): void }[] = [];
@@ -396,7 +398,11 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
     node = d;
   }
 
-  if (cfg.film) {
+  // Grão e lente: o Cinema (`film`, junto com as amostras a mais) e também o Ultra e a Alta
+  // (`finish`). Vêm depois do TRAA para a média temporal não apagá-los. A cópia da imagem
+  // e as três leituras da aberração são o custo inteiro.
+  const polish = cfg.film || cfg.finish;
+  if (polish) {
     const tex = convertToTexture(node);
     disposables.push(tex);
     node = aberration(tex);
@@ -406,7 +412,7 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
   pipeline.outputColorTransform = false;
   node = renderOutput(grade(node));
   if (cfg.aa === 'fxaa') node = fxaa(node);
-  pipeline.outputNode = dither(cfg.film ? grain(node) : node);
+  pipeline.outputNode = dither(polish ? grain(node) : node);
   return {
     pipeline,
     gi: cfg.gi,

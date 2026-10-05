@@ -1023,9 +1023,9 @@ function pickTheme(t: Theme) {
 
 const qualityLabel: Record<QualityMode, string> = { auto: 'Auto', cinema: 'Cinema', ultra: 'Ultra', high: 'Alta', medium: 'Média', low: 'Baixa' };
 const QUALITY_NOTE: Record<Quality, string> = {
-  cinema: 'Desenha 1,5× acima da tela, com grão de filme e lente. Para placas de topo (classe RTX 4080)',
-  ultra: 'Luz indireta, reflexos na água e raios de sol. Para placas acima da RX 580',
-  high: 'Oclusão, bloom e profundidade de campo',
+  cinema: 'Desenha 1,5× acima da tela, com mais luz, sombra e vegetação, grão e lente. Para placas de topo (classe RTX 4080)',
+  ultra: 'Luz indireta, reflexos, raios de sol, grão de filme e lente. Para placas acima da RX 580',
+  high: 'Oclusão, bloom, profundidade de campo, grão de filme e lente',
   medium: 'Leve, para notebooks e celulares',
   low: 'Sem sombras nem pós-processamento',
 };

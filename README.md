@@ -119,7 +119,8 @@ O botão de qualidade abre a lista: **Auto**, **Cinema**, **Ultra**, **Alta**, *
 
 - **Auto** escolhe o começo pelo nome da placa de vídeo (por exemplo, Alta numa RX 580 e Ultra numa RTX 3060). Se o quadro ficar lento, primeiro baixa a resolução interna, em degraus até 60%, e só depois desce de nível. O nome da placa e o nível escolhido aparecem no título do botão.
 - **Celular e tablet:** com a tela parada (sem toque e sem peça caindo), o jogo desenha a 30 quadros e, depois de 15 s, a 20, para poupar bateria; o mundo continua animado. No computador nada muda. No toque, o topo fica com o tema, o desfazer e o menu ⋯, e as missões cabem num botão que abre a lista. Torcer dois dedos gira a câmera. O botão Aa (dentro do ⋯) muda o tamanho do texto, liga cores que se separam para quem não distingue verde de vermelho, e o "menos movimento", que também para a onda dourada, os voos da câmera e o quique da peça. Uma vibração curta ao encaixar só acontece nos navegadores que aceitam.
-- **Cinema** é para placas de topo e para fotos e vídeos: desenha 1,5× acima da tela, com mais amostras de luz e de reflexo, sombras mais finas, mais vegetação, grão de filme e uma leve aberração de lente. O Auto nunca escolhe o Cinema.
+- **Cinema** é para placas de topo e para fotos e vídeos: desenha 1,5× acima da tela, com mais amostras de luz e de reflexo, sombras mais finas e mais vegetação. O Auto nunca escolhe o Cinema.
+- **Ultra** e **Alta** usam o mesmo grão de filme e a mesma aberração de lente do Cinema. O que não desce de nível é o que pesa: no Ultra ficam a luz indireta, o reflexo na água, os raios de sol, as três cascatas de sombra e a vegetação extra; na Alta ficam a oclusão em meia resolução, o bloom, o desfoque e uma sombra só.
 
 ## Temas
 

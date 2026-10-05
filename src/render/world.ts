@@ -878,7 +878,7 @@ export class World {
     }
     this.size.set(w, h);
     this.renderer.setPixelRatio(Math.max(0.5, dpr));
-    // O grão do Cinema tem o tamanho de um pixel da tela ou do vídeo (post.ts).
+    // O grão (Ultra, Alta e Cinema) tem o tamanho de um pixel da tela ou do vídeo (post.ts).
     P.grainCell.value = Math.max(1, cell);
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
@@ -1883,7 +1883,7 @@ export class World {
     this.updateFxUniforms();
     this.slots.visible = this.slotCount > 0 && this.showSlots;
     this.infl.visible = this.infl.count > 0 && this.showSlots;
-    // Grão do Cinema: um padrão novo a cada quadro (passageiro, não precisa de semente).
+    // Grão: um padrão novo a cada quadro (passageiro, não precisa de semente). Sem o nó, o uniforme não entra no shader.
     P.grainSeed.value = Math.floor(Math.random() * 3e6);
 
     if (this.post) this.post.pipeline.render();
