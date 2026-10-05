@@ -39,6 +39,7 @@ npm run dev          # servidor de desenvolvimento (Vite)
 npm run check        # typecheck + testes + build: rode antes de todo commit
 npm run typecheck    # tsc --noEmit
 npm test             # 600 partidas simuladas com oráculos independentes, cenários sintéticos e legibilidade das cores (tests/legibility.ts)
+npm run balance      # painel de equilíbrio (tests/balance.ts): média, p10/p50/p90 e origem dos pontos, por modo e por tema. Não entra no check. `npm run balance -- 40` muda o tamanho da amostra (padrão 80)
 npm run build        # dist/index.html (arquivo único)
 npm run smoke        # depois do build: abre o jogo em WebGPU e WebGL2 e falha com erro no console
 node scripts/artifact.mjs   # depois do build: dist/artifact/retalhos.html (formato de página publicável)
