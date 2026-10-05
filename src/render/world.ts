@@ -29,8 +29,12 @@ export type { Quality };
 export type TimeOfDay = 'dawn' | 'aurora' | 'day' | 'golden' | 'dusk' | 'night';
 
 const CHUNK = 8;
-/** Decoração em super-blocos de 16×16: a câmera (e a sombra) descartam o que não veem. */
-const REGION = 16;
+/**
+ * Decoração em super-blocos de 32×32, centrados na vila. Uma partida redonda de até
+ * ~700 peças cabe num lote por kit (as chamadas não sobem). O mapa maior transborda,
+ * e a câmera (e a sombra) deixam de desenhar o bloco fora de vista.
+ */
+const REGION = 32;
 /** A chave do lote é `kit@cq,cr`. O kit pode ter `:` (`wall:0`), nunca `@`. */
 function poolKey(id: string) {
   const at = id.lastIndexOf('@');
@@ -1197,8 +1201,8 @@ export class World {
   }
 
   private pool(key: string, q: number, r: number) {
-    const cq = Math.floor(q / REGION);
-    const cr = Math.floor(r / REGION);
+    const cq = Math.floor((q + REGION / 2) / REGION);
+    const cr = Math.floor((r + REGION / 2) / REGION);
     const id = `${key}@${cq},${cr}`;
     let p = this.pools.get(id);
     if (!p) {

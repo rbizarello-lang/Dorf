@@ -126,7 +126,7 @@ Teste de carga (`scripts/stress.mjs`): a IA gulosa coloca N peças; depois medim
 **Como ler:**
 - **Draw calls ficam baixas em qualquer tamanho** (61 a 102). A meta citada para mobile é ~100 e, para desktop, algumas centenas. O chão é agrupado em blocos de 8×8 peças que só recebem vértices novos, e cada tipo de objeto é um único InstancedMesh.
 - **Colocar uma peça é barato**: gerar a geometria leva ~0,3 ms, e as regras (validação, pontuação, grupos, missões) levam 0,14 ms com 300 peças e 1,4 ms com 2.500 (média medida em Node). Não há engasgo ao jogar.
-- **Triângulos crescem com o que está na tela.** A decoração estática vai em lotes de 16×16 peças, e a câmera deixa de desenhar o lote fora de vista. Barcos, animais e aldeões continuam num lote só (eles andam, e a esfera de um lote ficaria para trás). Numa partida típica isso cabe folgado em GPU integrada de desktop. No celular, o perfil Média/Baixa corta sombras e pós-processamento.
+- **Triângulos crescem com o que está na tela.** A decoração estática vai em lotes de 32×32 peças centrados na vila, e a câmera deixa de desenhar o lote fora de vista. Barcos, animais e aldeões continuam num lote só (eles andam, e a esfera de um lote ficaria para trás). Numa partida típica isso cabe folgado em GPU integrada de desktop. No celular, o perfil Média/Baixa corta sombras e pós-processamento.
 
 ### Orçamento por aparelho (estimativa; confirmar em hardware real)
 
@@ -138,9 +138,19 @@ Teste de carga (`scripts/stress.mjs`): a IA gulosa coloca N peças; depois medim
 
 **Para validar de verdade:** rode `npm run dev` e abra `http://localhost:5173/?stress=1000&quality=high&perf` no computador (na mesma rede, com `npm run dev -- --host`). O `?perf` mede 5 segundos e escreve na tela o FPS mediano e o p95; o mesmo número fica em `window.__perfResult`. Durante uma partida, a tecla `F` mostra as estatísticas do quadro, e `window.__perf(5)` no console mede sem recarregar. No SwiftShader o FPS não vale: o que importa no PC é essa mediana.
 
+**Corte por região (outubro de 2026), no mesmo SwiftShader, qualidade Alta, semente 42.** A câmera enquadra o mapa até o zoom máximo (46). "Antes" é um lote de decoração para o mapa inteiro; "depois" são lotes de 32×32 centrados na vila.
+
+| Peças | Draw calls antes → depois | Triângulos antes → depois | CPU/quadro antes → depois |
+|---|---|---|---|
+| 301 | 140 → 106 | 1,28 M → 0,96 M | 27,9 ms → 21,6 ms |
+| 1.001 | 169 → 184 | 4,17 M → 3,07 M | 20,7 ms → 34,3 ms |
+| 2.501 | 198 → 325 | 10,15 M → 7,29 M | 38,9 ms → 39,4 ms |
+
+A partida de 300 peças cabe num lote por kit, e as chamadas até caem: a sombra deixa de receber árvore que está fora do retângulo dela. No mapa de 2.500 a câmera ainda vê vários blocos, então as chamadas sobem (a justificativa do orçamento de ~10%): o que sai são os triângulos da borda, cerca de 28% a menos. A CPU por quadro no SwiftShader oscila e não serve de medida. Com a câmera baixa e perto, o cone de visão alcança o horizonte e o corte rende menos; o ganho grande aparece quando o mapa não cabe na tela. Na Alta e na Média a sombra única redesenha no máximo 4 vezes por segundo. Nesta tabela cada quadro do SwiftShader já dura mais que isso, então a sombra entrou na conta. Numa placa de verdade, a maior parte dos quadros pula o passe de sombra: é isso que o `?perf` no PC do Roger mede, e que esta tabela não mostra.
+
 ### Otimizações ainda não feitas (folga disponível)
 
-1. **LOD da decoração**: trocar árvores distantes por versões de 1/4 dos polígonos. O corte por super-bloco de 16×16 já existe (a câmera e a sombra deixam de desenhar o lote fora de vista).
+1. **LOD da decoração**: trocar árvores distantes por versões de 1/4 dos polígonos. O corte por super-bloco de 32×32, centrado na vila, já existe (a câmera e a sombra deixam de desenhar o lote fora de vista). Uma partida redonda de até umas 700 peças continua num lote por kit.
 2. **Sombra em cache no Ultra e no Cinema**: a Alta e a Média redesenham a sombra única quando a câmera anda, uma peça assenta, ou a cada 0,25 s. As cascatas ainda redesenham todo quadro.
 3. **Renderizar sob demanda**: em repouso, cair para 30 FPS ou menos (economiza bateria). No toque, a partida parada já desenha a 30 e depois a 20.
 4. **Árvores mais leves**: a árvore redonda tem 80 triângulos e a cerejeira, 240. Dá para chegar a 30–60 sem perda visível de qualidade nessa escala.
@@ -312,7 +322,7 @@ O detalhe tem preço. A primeira medição da v3 mostrou **3,1 M de triângulos 
 | 1.000 | 86 | 2,17 M | 123 | 4,55 M | 7,2 ms |
 | 2.500 (baixa) | 90 | 2,93 M | 114 | 5,58 M | 6,6 ms |
 
-Medido em renderização por software, como na seção 5. **Leitura:** uma partida típica ficou com cerca do dobro da v1, o que ainda cabe folgado em GPU de desktop. No celular, o modo Auto começa em Média, com metade das plantas e sem sombras. Mapas grandes deixam de desenhar a decoração fora da câmera (lotes de 16×16, seção 5).
+Medido em renderização por software, como na seção 5. **Leitura:** uma partida típica ficou com cerca do dobro da v1, o que ainda cabe folgado em GPU de desktop. No celular, o modo Auto começa em Média, com metade das plantas e sem sombras. Mapas grandes deixam de desenhar a decoração fora da câmera (lotes de 32×32 centrados na vila, seção 5).
 
 ### O que falta para os temas ficarem mais fiéis
 

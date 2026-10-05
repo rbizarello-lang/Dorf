@@ -21,7 +21,8 @@ for (const r of runs) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  await page.goto(`${base}?stress=${r.n}&quality=${r.quality}&seed=42`);
+  // Fechar a cena anterior no SwiftShader pode passar de 30 s; o mapa grande espera o mesmo prazo da montagem.
+  await page.goto(`${base}?stress=${r.n}&quality=${r.quality}&seed=42`, { timeout: 120000 });
   await page.waitForFunction(() => window.__load && window.__stats, null, { timeout: 120000 });
   await page.waitForTimeout(6000);
   const { load, stats, heap } = await page.evaluate(() => ({ load: window.__load, stats: window.__stats, heap: performance.memory?.usedJSHeapSize ?? 0 }));
