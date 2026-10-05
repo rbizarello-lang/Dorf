@@ -292,6 +292,40 @@ export class Board {
     return this.sites.filter((s) => !s.found).length;
   }
 
+  /**
+   * Cópia para a prévia da jogada. A cópia recebe o `place`; o tabuleiro de verdade não muda.
+   * Peças, missões e sítios são objetos novos, para um `found` ou um par de rota pago na cópia
+   * não vazar para a partida.
+   */
+  clone(): Board {
+    const b = new Board(this.rules);
+    for (const p of this.list) {
+      const c = b.placeRaw(p.q, p.r, p.def, p.rot);
+      c.closed = p.closed;
+      c.synergies = p.synergies.map((s) => ({ ...s }));
+      if (p.eraMark !== undefined) c.eraMark = p.eraMark;
+      if (p.site) c.site = p.site;
+      if (p.wonder) c.wonder = true;
+    }
+    b.score = this.score;
+    b.perfects = this.perfects;
+    b.questsCompleted = this.questsCompleted;
+    for (const k of SYN_KINDS) b.synergyCount[k] = this.synergyCount[k];
+    b.era = this.era;
+    b.markPending = this.markPending;
+    b.lookout = this.lookout;
+    b.questSeq = this.questSeq;
+    b.sites = this.sites.map((s) => ({ ...s }));
+    if (this.wonder) b.wonder = { tile: b.list[this.wonder.tile.index], stage: this.wonder.stage };
+    for (const [k, set] of this.influence) b.influence.set(k, new Set(set));
+    b.blessings.push(...this.blessings);
+    for (const k of this.routesPaid) b.routesPaid.add(k);
+    b.posts = this.posts.map((p) => ({ ...p }));
+    for (const q of this.quests) b.quests.push({ ...q, anchor: b.list[q.anchor.index] });
+    b.computeGroups();
+    return b;
+  }
+
   /** Coloca sem pontuar (peça inicial, reconstrução de estado). */
   placeRaw(q: number, r: number, def: TileDef, rot: number): Placed {
     const key = hkey(q, r);

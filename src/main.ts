@@ -9,7 +9,7 @@ import { SPECIALS, SPECIAL_KINDS, type SpecialKind } from './core/specials';
 import { mulberry32 } from './core/rng';
 import { T } from './core/tiles';
 import { DIRS, hexDistance, hexToWorld, hkey, unkey, worldToHex } from './core/hex';
-import { previewRoutes, routeMarks, type RouteHit, type RouteMark } from './core/routes';
+import { routeMarks, type RouteHit, type RouteMark } from './core/routes';
 import type { Quality, TimeOfDay } from './render/world';
 import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
 import { DynRes } from './render/dynres';
@@ -127,6 +127,7 @@ let turns: TurnNote[] = [];
 let tradeMarks: RouteMark[] = [];
 /** Rota que a peça da vez renderia na casa do fantasma. */
 let routePeek: RouteHit[] = [];
+let scorePeek: number | null = null;
 let routePeekAt = '';
 let rotSteps = 0;
 let hover: { q: number; r: number } | null = null;
@@ -374,6 +375,7 @@ function updateGhost() {
   if (!game.current || !hover || !game.board.frontier.has(hkey(hover.q, hover.r)) || hud.modalOpen || capture.stage !== 'play') {
     world.clearGhost();
     routePeek = [];
+    scorePeek = null;
     routePeekAt = '';
     hud.confirm.hidden = true;
     capture.take?.event({ kind: 'noghost' });
@@ -592,19 +594,20 @@ function refreshTradeMarks() {
   tradeMarks = routeMarks(game.board);
 }
 
-/** Prévia da rota na casa do fantasma. Só recalcula quando a casa ou o giro mudam. */
+/** Prévia dos pontos na casa do fantasma. Só recalcula quando a casa ou o giro mudam. */
 function refreshRoutePeek() {
-  if (!game.rules.routes || !hover || !game.current) {
+  if (!hover || !game.current) {
     routePeek = [];
+    scorePeek = null;
     routePeekAt = '';
     return;
   }
   const key = `${hover.q}:${hover.r}:${game.rot}`;
   if (key === routePeekAt) return;
   routePeekAt = key;
-  const edges = game.currentEdges();
-  const check = edges ? game.check(hover.q, hover.r) : null;
-  routePeek = edges && check?.valid ? previewRoutes(game.board, hover.q, hover.r, edges, game.current.special) : [];
+  const peek = game.preview(hover.q, hover.r);
+  scorePeek = peek ? peek.points : null;
+  routePeek = peek?.routes ?? [];
 }
 
 function announce(res: PlaceResult) {
@@ -622,8 +625,9 @@ function announce(res: PlaceResult) {
     sfx.perfect();
     hud.floater(s.x, s.y - 46, 'Perfeito!', 'big');
   }
+  const notes: { text: string; kind?: '' | 'good' | 'bad' }[] = [];
   res.routes.forEach((rt, i) => {
-    hud.toast(`${rt.kind === 'market' ? 'Rota de mercado' : 'Rota de porto'}: ${rt.d} casas, +${rt.points}${rt.tiles ? ' e +1 peça' : ''}.`, 'good');
+    notes.push({ text: routeLabel(rt), kind: 'good' });
     hud.floater(s.x, s.y - (res.perfect ? 78 : 46) - i * 28, routeLabel(rt), 'route');
   });
   // Interações: um aviso por borda, perto dela.
@@ -638,26 +642,26 @@ function announce(res: PlaceResult) {
     }, 250 + k * 160));
   });
   if (res.synergies.length || res.placed.eraMark !== undefined) sfx.hammer(0.3);
-  if (res.placed.eraMark !== undefined) hud.toast(`Marco da era erguido: ${eraName(res.placed.eraMark)}`, 'good');
+  if (res.placed.eraMark !== undefined) notes.push({ text: `Marco da era: ${eraName(res.placed.eraMark)}`, kind: 'good' });
   for (const t of res.closed) {
     const p = screenOf(t.q, t.r);
     hud.floater(p.x, p.y - 20, '+1 peça', 'tiles');
   }
   for (const q of res.questsDone) {
     sfx.quest();
-    hud.toast(`Missão cumprida: ${questLabel(q, theme)} · +${q.reward} peças`, 'good');
+    notes.push({ text: `Missão cumprida: ${questLabel(q, theme)} · +${q.reward} peças`, kind: 'good' });
   }
   for (const q of res.questsFailed) {
     sfx.fail();
-    hud.toast(`Missão perdida: ${questLabel(q, theme)} (passou de ${q.target})`, 'bad');
+    notes.push({ text: `Missão perdida: ${questLabel(q, theme)} (passou de ${q.target})`, kind: 'bad' });
   }
-  if (res.newQuest) hud.toast(`Nova missão: ${questLabel(res.newQuest, theme)}`);
+  if (res.newQuest) notes.push({ text: `Nova missão: ${questLabel(res.newQuest, theme)}` });
   if (res.site) {
-    hud.toast(`${SITE_LABEL[res.site.kind].name} descoberta: ${siteReward(res.site.kind)}`, 'good');
+    notes.push({ text: `${SITE_LABEL[res.site.kind].name}: ${siteReward(res.site.kind)}`, kind: 'good' });
     sfx.discover();
   }
   if (res.eraUp !== null) {
-    hud.toast(`Nova era: ${eraName(res.eraUp)} · +${game.rules.eraTiles} peças · a próxima vila ergue o marco`, 'good');
+    notes.push({ text: `Nova era: ${eraName(res.eraUp)} · +${game.rules.eraTiles} peças`, kind: 'good' });
     sfx.eraFanfare(res.eraUp);
     sfx.hammer(0.45);
     const el = document.getElementById('era')!;
@@ -666,21 +670,25 @@ function announce(res: PlaceResult) {
     el.classList.add('up');
   }
   if (res.wonder?.started) {
-    hud.toast(`Canteiro da maravilha: ${theme.wonder?.name ?? 'Maravilha'}. Cada peça colocada avança uma etapa (${game.rules.wonderStages} no total)`, 'good');
+    notes.push({ text: `Canteiro: ${theme.wonder?.name ?? 'Maravilha'} (${game.rules.wonderStages} etapas)`, kind: 'good' });
     sfx.hammer(0.2);
   } else if (res.wonder?.done) {
-    hud.toast(`${theme.wonder?.name ?? 'Maravilha'} concluída: +${game.rules.wonderPoints} pontos · +${game.rules.wonderTiles} peças · P para a foto`, 'good');
+    notes.push({ text: `${theme.wonder?.name ?? 'Maravilha'} pronta: +${game.rules.wonderPoints} · +${game.rules.wonderTiles} peças`, kind: 'good' });
     sfx.eraFanfare(game.board.era);
   } else if (res.wonder) sfx.hammer(0.4);
   if (res.special) {
     const sp = res.special;
-    hud.toast(`${SPECIAL_NAME[sp.kind]}: ${sp.count} ${sp.count === 1 ? 'peça' : 'peças'} com ${theme.terrainNames[SPECIALS[sp.kind].terrain].toLowerCase()} por perto · +${sp.points} pontos${sp.tiles ? ` · +${sp.tiles} peça${sp.tiles > 1 ? 's' : ''}` : ''}${SPECIALS[sp.kind].lookout ? ` · próximas peças à vista por ${SPECIALS[sp.kind].lookout} jogadas` : ''}`, 'good');
+    notes.push({ text: `${SPECIAL_NAME[sp.kind]}: +${sp.points}${sp.tiles ? ` · +${sp.tiles} peça${sp.tiles > 1 ? 's' : ''}` : ''}`, kind: 'good' });
     sfx.special(sp.kind);
   }
-  if (res.leftoverBonus) hud.toast(`Todos os sítios achados! Peças que sobraram: +${res.leftoverBonus} pontos`, 'good');
+  if (res.leftoverBonus) notes.push({ text: `Sítios completos: +${res.leftoverBonus} pelas peças que sobraram`, kind: 'good' });
   if (game.rules.seasonBonus && theme.season === undefined && game.rules.seasonLock === undefined && res.placed.index > 1 && (res.placed.index - 1) % 20 === 0) {
     const s = seasonAt(res.placed.index - 1);
-    hud.toast(`${SEASON_NAME[s]}: ${theme.synergy[SEASON_KIND[s]]} rende +3.`, 'good');
+    notes.push({ text: `${SEASON_NAME[s]}: ${theme.synergy[SEASON_KIND[s]]} rende +3`, kind: 'good' });
+  }
+  if (notes.length) {
+    if (res.points > 0) notes.unshift({ text: `+${res.points}`, kind: 'good' });
+    hud.summary(notes);
   }
   hud.renderQuests(game.board.quests, theme);
 }
@@ -703,7 +711,8 @@ function showHelp(tab = 'basico') {
         <li><b>Encaixe perfeito</b>: a peça encosta em 2 ou mais vizinhas e todas as bordas combinam (+${R.perfectBonus}).</li>
         <li>Cercar uma peça com 6 vizinhas encaixadas rende <b>+${R.closedTiles} peça</b>.</li>
         <li>A cada 20 jogadas a estação muda (primavera, verão, outono, inverno) e uma interação rende +3: colmeias, moinho, serraria e pasto, nessa ordem.</li>
-        ${R.routes ? `<li><b>Estrada Real</b>: mercados e portos da mesma rede rendem pela distância, uma vez. 2 casas valem 22, 4 valem 54 e 6 valem 96 e devolvem uma peça. A etiqueta marca cada um no mapa, e a prévia mostra o valor antes de colocar.</li>` : ''}
+        <li>Com o fantasma sobre a casa, a etiqueta mostra os pontos da jogada antes de colocar.</li>
+        ${R.routes ? `<li><b>Estrada Real</b>: mercados e portos da mesma rede rendem pela distância, uma vez. 2 casas valem 22, 4 valem 54 e 6 valem 96 e devolvem uma peça. A etiqueta marca cada um no mapa, e a prévia soma a rota no total.</li>` : ''}
         <li>A partida acaba quando a pilha esvazia. <kbd>U</kbd> desfaz a última jogada (o número de vezes depende do modo).</li>
       </ul>`,
     ],
@@ -1303,17 +1312,17 @@ function step(now: number) {
     const text = m.kind === 'both' ? 'mercado · porto' : m.kind === 'market' ? 'mercado' : 'porto';
     markers.push({ id: 500000 + hkey(m.q, m.r), x: s.x, y: s.y, visible: s.visible, text, color: m.kind === 'port' ? '#2f6f8f' : '#6b5344', dim, kind: m.kind });
   }
-  // Prévia da rota: o valor aparece com o fantasma numa casa que ligaria mercados ou portos.
-  if (routePeek.length && hover) {
-    const s = screenOf(hover.q, hover.r, 0.05);
-    const y = s.y + (st ? 62 : 30);
-    markers.push({ id: 210000, x: s.x, y, visible: s.visible, text: routePeek.map(routeLabel).join(' · '), color: theme.ui.accent, kind: 'route' });
+  // Prévia: o total da jogada, e a rota quando ela entra na conta.
+  if (scorePeek !== null && hover) {
+    const s = screenOf(hover.q, hover.r, 0.55);
+    const route = routePeek.length ? ` · ${routePeek.map(routeLabel).join(' · ')}` : '';
+    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${route}`, color: theme.ui.accent, kind: 'score' });
   }
   // Influência das construções: o ganho aparece com o fantasma numa casa contornada.
   const inf = hover && game.current && !st ? game.board.influenceAt(hover.q, hover.r, game.current.edges) : null;
   if (inf?.points) {
     const s = screenOf(hover!.q, hover!.r, 0.05);
-    const y = s.y + 30 + (st ? 32 : 0) + (routePeek.length ? 32 : 0);
+    const y = s.y + 30 + (st ? 32 : 0);
     markers.push({ id: 200000, x: s.x, y, visible: s.visible, text: `✦ +${inf.points} · ${inf.kinds.map((k) => theme.synergy[k.kind]).join(', ')}`, color: theme.ui.accent, kind: 'influence' });
   }
   hud.updateMarkers(markers);
