@@ -743,6 +743,35 @@ kbd {
   color: var(--bad);
 }
 
+.toast.summary {
+  border-radius: 16px;
+  padding: 10px 16px;
+  text-align: left;
+  font-weight: 700;
+  animation-duration: 4.4s;
+}
+
+.toast.summary.bad {
+  animation-duration: 6.4s;
+}
+
+.toast.summary p {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.toast.summary p.good {
+  color: var(--good);
+}
+
+.toast.summary p.bad {
+  color: var(--bad);
+}
+
+.toast.summary p:first-child {
+  font-weight: 800;
+}
+
 @keyframes toast {
   0% {
     opacity: 0;
@@ -1651,7 +1680,8 @@ body.capture #floaters {
   color: #3a2a1c;
   border-color: #8a6a2a;
 }
-.marker.route {
+.marker.route,
+.marker.score {
   background: var(--accent);
   color: #fff;
   border-style: solid;
