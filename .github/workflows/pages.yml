@@ -1,0 +1,46 @@
+# Publica o jogo no GitHub Pages a cada push na main.
+# O Vite já usa base './' (vite.config.ts): o index.html é um arquivo único e os
+# caminhos relativos funcionam em https://rbizarello-lang.github.io/Dorf/ sem
+# prefixo absoluto. Não troque o base por '/' — num repositório de projeto isso
+# aponta para a raiz do usuário e a página quebra.
+name: Páginas
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

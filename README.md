@@ -8,6 +8,7 @@ Puzzle relaxante de peças hexagonais, no gênero de Dorfromantik, com **14 tema
 - **Pesquisa de mecânicas, stacks, mercado e aspectos legais:** [docs/PESQUISA.md](docs/PESQUISA.md)
 - **Pesquisa dos temas históricos:** [docs/TEMAS.md](docs/TEMAS.md)
 - **Para agentes de IA e quem vai mexer no código:** [AGENTS.md](AGENTS.md) (arquitetura, invariantes, como estender e verificar)
+- **Jogar no celular:** [rbizarello-lang.github.io/Dorf](https://rbizarello-lang.github.io/Dorf/)
 
 ## Rodar
 
