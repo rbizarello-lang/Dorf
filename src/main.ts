@@ -1189,6 +1189,8 @@ function demoStep(dt: number) {
 // ------------------------------------------------------------------ laço
 
 const statsText = { fps: 0, ms: 0, cpu: 0 };
+/** Linha da medição de `window.__perf` (FPS mediano), quando alguém pediu. */
+let perfNote = '';
 let statsClock = 0;
 let frames = 0;
 let cpuAcc = 0;
@@ -1338,6 +1340,7 @@ function step(now: number) {
         `instâncias ${s.instances.toLocaleString('pt-BR')}`,
         `qualidade ${qualityLabel[qualityMode]}${qualityMode === 'auto' ? ` (${autoNote()})` : ''}`,
         `placa ${gpuLabel || '?'}`,
+        ...(perfNote ? [perfNote] : []),
       ].join('\n');
     }
     (window as unknown as { __stats: unknown }).__stats = { ...statsText, ...world.stats(), tiles: game.board.list.length, quality: world.quality, res: dynres.scale, gpu: gpuLabel };
@@ -1378,6 +1381,37 @@ function start(data: unknown) {
   // Legibilidade: decorações pretas sobre chão branco (vilas, construções e marcos precisam ler de longe).
   if (params.has('silhueta')) U.silhouette.value = 1;
   (window as unknown as { __pools: () => unknown }).__pools = () => world.poolReport();
+  // Medição para o PC de quem joga: `window.__perf(5)` ou `?perf`. A mediana ignora um quadro lento.
+  (window as unknown as { __perf: (seconds?: number) => Promise<Record<string, unknown>> }).__perf = (seconds = 5) =>
+    new Promise((resolve) => {
+      const n = Math.min(30, Math.max(1, Number(seconds) || 5));
+      const samples: number[] = [];
+      let prev = performance.now();
+      const stop = prev + n * 1000;
+      const sample = (now: number) => {
+        samples.push(now - prev);
+        prev = now;
+        if (now < stop) requestAnimationFrame(sample);
+        else {
+          samples.sort((a, b) => a - b);
+          const mid = samples[Math.floor(samples.length / 2)] ?? 0;
+          const p95 = samples[Math.min(samples.length - 1, Math.floor(samples.length * 0.95))] ?? 0;
+          const result = {
+            fps: mid > 0 ? Math.round(1000 / mid) : 0,
+            frameMs: Math.round(mid * 10) / 10,
+            p95Ms: Math.round(p95 * 10) / 10,
+            frames: samples.length,
+            ...(window as unknown as { __stats?: object }).__stats,
+          };
+          perfNote = `medição ${result.fps} FPS (mediana) · p95 ${result.p95Ms} ms`;
+          (window as unknown as { __perfResult: unknown }).__perfResult = result;
+          hud.stats.hidden = false;
+          resolve(result);
+        }
+      };
+      requestAnimationFrame(sample);
+    });
+  if (params.has('perf')) void (window as unknown as { __perf: (s?: number) => Promise<unknown> }).__perf(5);
   if (params.has('gallery')) (window as unknown as { __gallery: string[] }).__gallery = world.showGallery();
   if (params.has('yaw')) world.rig.yaw = world.rig.goalYaw = Number(params.get('yaw'));
   if (params.has('zoom')) world.rig.dist = world.rig.goalDist = Number(params.get('zoom'));

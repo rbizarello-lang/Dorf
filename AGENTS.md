@@ -72,6 +72,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | Gancho | O que faz |
 |---|---|
 | `?debug` | mostra FPS, draw calls, triângulos e instâncias |
+| `?perf` | mede 5 s e mostra o FPS mediano e o p95; `window.__perf(segundos)` devolve o mesmo, com as estatísticas do último quadro |
 | `?gallery&theme=<id>` | mostra todos os kits do tema lado a lado; `window.__gallery` lista as chaves |
 | `?auto=40` | a IA gulosa coloca 40 peças |
 | `?stress=1000` | teste de carga; o resultado fica em `window.__load` |
@@ -268,8 +269,8 @@ São opcionais no tema (`gate`, `bridge`) e não pontuam. O `buildTile` decide o
 - **Feito (v4, outubro de 2026):** renderização WebGPU/TSL com GTAO, TRAA, bloom e profundidade de campo; rios escavados com correnteza; céu procedural (IBL); chão com detalhe por terreno; clima por tema; vilas com trilhas; eras da vila, sítios, bônus por tema, desfazer e 4 modos. O andamento do plano de Age of Empires está no topo de `docs/IDEIAS_AOE.md`; faltam a regra das rotas num modo próprio, interface por tema, atmosferas e estações, e monumentos por conquista. O minimapa e a linha do tempo da partida já existem (proposta 16).
 - **Feito (v3):** 14 temas, kits detalhados, 4 interações com prévia em dourado, mundo animado, dia/entardecer/noite, qualidade adaptativa, save v3 com replay, duas rodadas de revisão de código com correções. O histórico está em `docs/VIABILIDADE.md`, Apêndice A.
 - **Pendente:**
-  - medir o FPS numa GPU real (`?stress=1000&debug`) no PC e no celular;
+  - medir o FPS numa GPU real (`?stress=1000&quality=high&perf`, ou `window.__perf(5)` com a tecla `F`) no PC e no celular;
   - kits de fidelidade histórica que ainda faltam (`docs/TEMAS.md`, fim): roda-d'água como `MillStyle`, cipreste em alameda, estação de fim de linha por tema;
   - funções de jogo: bandeiras (`docs/VIABILIDADE.md` §12); as peças especiais já existem (`specials.ts`). Desfazer e as 3 próximas peças já existem na v4: as próximas peças aparecem como recompensa do mirante;
-  - otimizações com folga conhecida: culling por super-bloco, sombra em cache, renderizar sob demanda (`docs/VIABILIDADE.md` §5).
+  - otimizações com folga conhecida: LOD de árvores distantes, sombra em cache no Ultra e no Cinema, renderizar sob demanda no computador (`docs/VIABILIDADE.md` §5). O corte por super-bloco de 16×16 e a sombra única a 4 Hz já existem.
 - **Publicação:** o build de página única (`scripts/artifact.mjs`) é o que vai para o link público do protótipo.
