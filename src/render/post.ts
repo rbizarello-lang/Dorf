@@ -40,6 +40,8 @@ interface Config {
   finish?: boolean;
   /** Cinema: mais amostras, reflexo em resolução cheia, e o acabamento (`finish`). */
   film?: boolean;
+  /** Reflexo de vidro nas bordas (opção, desligada nos níveis). */
+  glass?: boolean;
 }
 
 const CONFIG: Record<Exclude<Quality, 'low'>, Config> = {
@@ -70,6 +72,9 @@ export const P = {
   /** Gradação por hora (world.ts): os realces puxam para a cor do sol e as sombras para o tom oposto. */
   shade: uniform(new THREE.Color(1, 1, 1)),
   light: uniform(new THREE.Color(1, 1, 1)),
+  /** Luz de vitrine (world.ts): contraste em torno do cinza médio (1 = neutro) e preto levantado, na cor do preenchimento. */
+  contrast: uniform(1),
+  lift: uniform(new THREE.Color(0, 0, 0)),
   /** Cinema: deslocamento das cores nos cantos da tela (fração da tela) e força do grão. */
   aberration: uniform(0.0028),
   grain: uniform(0.032),
@@ -114,9 +119,24 @@ const grade = Fn(([c]: [ReturnType<typeof vec4>]) => {
   const v = smoothstep(0.9, 0.25, length(p));
   const lit = c.rgb.mul(mix(float(1).sub(P.vignette), float(1), v));
   const l = dot(lit, vec3(0.299, 0.587, 0.114));
-  const rgb = lit.mul(mix(vec3(1), P.shade, smoothstep(0.3, 0.02, l))).mul(mix(vec3(1), P.light, smoothstep(0.35, 0.85, l))).mul(P.filter);
+  const toned = lit.mul(mix(vec3(1), P.shade, smoothstep(0.3, 0.02, l))).mul(mix(vec3(1), P.light, smoothstep(0.35, 0.85, l))).mul(P.filter);
+  const rgb = mix(vec3(0.18), toned, P.contrast).add(P.lift.mul(float(1).sub(l.clamp(0, 1))));
   const sat = P.saturation.mul(smoothstep(0, 0.06, l).mul(0.12).add(0.88));
   return vec4(shoulder(mix(vec3(l), rgb, sat)), c.a);
+});
+
+/**
+ * Reflexo de vidro (opção `glass`): como numa vitrine, um brilho fino de borda, um clarão morno
+ * no canto de cima à esquerda (onde estaria a luz) e uma faixa de brilho na diagonal. Soma em sRGB,
+ * por cima do que já foi gradado; no meio da tela não há nada.
+ */
+const glass = Fn(([c]: [ReturnType<typeof vec4>]) => {
+  const uv = screenUV;
+  const edge = uv.x.min(float(1).sub(uv.x)).min(uv.y.min(float(1).sub(uv.y)));
+  const rim = smoothstep(0.07, 0, edge).pow(2).mul(0.07);
+  const glare = smoothstep(0.55, 0, length(uv.sub(vec2(0.06, 0.08)).mul(vec2(1, 1.3)))).pow(2).mul(0.16);
+  const band = smoothstep(0.05, 0, uv.x.mul(0.8).add(uv.y.mul(0.6)).sub(0.62).abs()).mul(0.022);
+  return vec4(c.rgb.add(vec3(1, 0.9, 0.74).mul(rim.add(glare).add(band))), c.a);
 });
 
 /**
@@ -235,19 +255,20 @@ export interface Post {
   dispose(): void;
 }
 
-/** Efeitos que `?fx=` pode ligar um a um (depuração de custo): ao, gi, ssr, rays, traa, msaa, bloom, dof, ink, finish, film. */
-export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'dof', 'ink', 'finish', 'film'] as const;
+/** Efeitos que `?fx=` pode ligar um a um (depuração de custo): ao, gi, ssr, rays, traa, msaa, bloom, dof, ink, finish, film, glass. */
+export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'dof', 'ink', 'finish', 'film', 'glass'] as const;
 
 /**
  * `rayLight` é a luz cujo mapa de sombra os raios percorrem. Precisa ser uma DirectionalLight
  * com sombra própria: as cascatas do sol (CSMShadowNode) não expõem um mapa único.
  * `clouds` é a cena das nuvens, desenhada por cima da cena principal.
  */
-export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, q: Exclude<Quality, 'low'>, fx?: string[], rayLight?: THREE.DirectionalLight, clouds?: THREE.Scene): Post {
+export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, q: Exclude<Quality, 'low'>, fx?: string[], rayLight?: THREE.DirectionalLight, clouds?: THREE.Scene, glassOn?: boolean): Post {
   const cfg: Config = fx
-    ? { ao: fx.includes('ao') ? CONFIG[q].ao || 0.5 : 0, gi: fx.includes('gi'), ssr: fx.includes('ssr'), rays: fx.includes('rays'), bloom: fx.includes('bloom'), dof: fx.includes('dof'), ink: fx.includes('ink') && !fx.includes('msaa'), aa: fx.includes('traa') ? 'traa' : fx.includes('msaa') ? 'msaa' : 'fxaa', finish: fx.includes('finish'), film: fx.includes('film') }
+    ? { ao: fx.includes('ao') ? CONFIG[q].ao || 0.5 : 0, gi: fx.includes('gi'), ssr: fx.includes('ssr'), rays: fx.includes('rays'), bloom: fx.includes('bloom'), dof: fx.includes('dof'), ink: fx.includes('ink') && !fx.includes('msaa'), aa: fx.includes('traa') ? 'traa' : fx.includes('msaa') ? 'msaa' : 'fxaa', finish: fx.includes('finish'), film: fx.includes('film'), glass: fx.includes('glass') }
     : { ...CONFIG[q] };
   if (!rayLight) cfg.rays = false;
+  if (glassOn !== undefined && !fx) cfg.glass = glassOn;
   const disposables: { dispose(): void }[] = [];
   const pipeline = new THREE.RenderPipeline(renderer);
   const scenePass = pass(scene, camera, { samples: cfg.aa === 'msaa' ? 4 : 0 });
@@ -411,6 +432,7 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
   // A conversão para sRGB fica aqui, e não no fim do pipeline, para o dither vir depois dela.
   pipeline.outputColorTransform = false;
   node = renderOutput(grade(node));
+  if (cfg.glass) node = glass(node);
   if (cfg.aa === 'fxaa') node = fxaa(node);
   pipeline.outputNode = dither(polish ? grain(node) : node);
   return {

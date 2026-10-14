@@ -327,6 +327,8 @@ interface Sky {
 }
 
 const tmpSnap = new THREE.Vector3();
+const VITRINE_AMBER = new THREE.Color('#e8a458');
+const VITRINE_CREAM = new THREE.Color('#ffe6c4');
 const tmpGrade = new THREE.Color();
 const axX = new THREE.Vector3();
 const axY = new THREE.Vector3();
@@ -351,7 +353,23 @@ function tintOf(c: THREE.Color, k: number, out: THREE.Color) {
   return out.setRGB(1 + (c.r / l - 1) * k, 1 + (c.g / l - 1) * k, 1 + (c.b / l - 1) * k);
 }
 
+/** Luz de vitrine: o céu da hora com o preenchimento puxado para o âmbar e o sol um pouco mais brando. Cai à noite, que já tem a cor do luar. */
+function vitrineSky(s: Sky): Sky {
+  const k = 1 - s.night * 0.75;
+  s.hemiGround.lerp(VITRINE_AMBER, 0.8 * k);
+  s.hemiSky.lerp(VITRINE_CREAM, 0.4 * k);
+  s.hemiI *= 1 + 0.5 * k;
+  s.sunI *= 1 - 0.22 * k;
+  s.sun.lerp(VITRINE_CREAM, 0.35 * k);
+  return s;
+}
+
 function skyFor(theme: Theme, tod: TimeOfDay): Sky {
+  const s = baseSky(theme, tod);
+  return theme.light === 'vitrine' ? vitrineSky(s) : s;
+}
+
+function baseSky(theme: Theme, tod: TimeOfDay): Sky {
   const C = (h: string) => new THREE.Color(h);
   const mix = (a: string, b: string, t: number) => C(a).lerp(C(b), t);
   const [dx, dy, dz] = theme.sunDir;
@@ -546,6 +564,8 @@ export class World {
   onBaked?: (p: Placed) => void;
   /** Depuração: efeitos ligados um a um (?fx=ao.traa.bloom.dof). */
   fx?: string[];
+  /** Reflexo de vidro nas bordas (?glass, ou `glass` em ?fx=). */
+  glass?: boolean;
 
   /** Cria o renderizador (WebGPU ou WebGL2) e o mundo. */
   static async create(canvas: HTMLCanvasElement, forceWebGL = false) {
@@ -724,6 +744,14 @@ export class World {
     this.inflMat.color.set('#e0981c');
     this.sun.color.copy(s.sun);
     this.sun.intensity = s.sunI;
+    // Vitrine: a sombra fica clara (o ambiente morno a preenche) e com penumbra maior.
+    const vit = this.theme?.light === 'vitrine' ? 1 - s.night : 0;
+    const shadows: THREE.LightShadow[] = [this.sun.shadow];
+    for (const l of this.csm?.lights ?? []) if (l.shadow) shadows.push(l.shadow);
+    for (const sh of shadows) {
+      sh.intensity = 1 - 0.5 * vit;
+      sh.radius = 1.6 + 1.8 * vit;
+    }
     U.sun.value.copy(s.sun);
     U.sunDir.value.copy(s.sunDir).normalize();
     this.envColors.zenith.copy(s.hemiSky).multiply(ZENITH_TINT);
@@ -780,7 +808,7 @@ export class World {
       this.post?.dispose();
       const rays = CASCADES[q].length > 0 && (!this.fx || this.fx.includes('rays'));
       this.setRayLight(rays);
-      this.post = q === 'low' ? null : buildPost(this.renderer, this.scene, this.camera, q, this.fx, rays ? this.rayLight : undefined, this.cloudScene);
+      this.post = q === 'low' ? null : buildPost(this.renderer, this.scene, this.camera, q, this.fx, rays ? this.rayLight : undefined, this.cloudScene, this.glass);
       CL.temporal.value = this.post?.temporal ? 1 : 0;
       // O vazio quase todo emissivo clarearia a luz indireta: ele não entra como cor difusa,
       // e o alfa 1 mantém a oclusão inteira nele, como nos materiais sem luz indireta separada.
@@ -1707,7 +1735,11 @@ export class World {
     P.inkFar.value = eye * 3.8;
     // Gradação: realces na cor do sol e sombras no tom oposto (frias com o sol quente da tarde).
     const day = 1 - this.sky.night;
-    tintOf(this.sky.sun, -0.14 * day, P.shade.value);
+    // Vitrine: o tom frio da sombra vira o do preenchimento morno, o contraste cai e o preto sobe um pouco.
+    const vit = this.theme.light === 'vitrine' ? day : 0;
+    tintOf(this.sky.sun, THREE.MathUtils.lerp(-0.14, 0.2, vit) * day, P.shade.value);
+    P.contrast.value = 1 - 0.17 * vit;
+    P.lift.value.copy(VITRINE_AMBER).multiplyScalar(0.045 * vit);
     tintOf(this.sky.sun, 0.08 * day, P.light.value);
     // Gradação do tema por cima da hora: mais leve à noite, que já tem a cor do luar.
     const g = this.theme.grade, gk = 0.55 + 0.45 * day;
