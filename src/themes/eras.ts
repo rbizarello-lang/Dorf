@@ -117,7 +117,7 @@ export const ERA_THEMES: Theme[] = [
     vehicleColors: ['#7a5238', '#b23a2e'],
     forest: [
       { geo: 'bamboo', weight: 0.4, colors: ['#6f9f4f', '#82b05c', '#5f9048'] },
-      { geo: 'conifer', weight: 0.3, colors: ['#3f6b4e', '#4b7a58', '#35604a'] },
+      { geo: 'conifer', weight: 0.3, colors: ['#30594a', '#3a6757', '#294d3f'] },
       { geo: 'willow', weight: 0.15, colors: ['#8fb86a', '#a0c477', '#7fa85e'] },
       { geo: 'blossom', weight: 0.15, colors: ['#f3c9d2', '#eab5c4', '#f7dbe0'] },
     ],
@@ -197,9 +197,9 @@ export const ERA_THEMES: Theme[] = [
     vehicle: 'cart',
     vehicleColors: ['#6a4a34', '#9a3b2e'],
     forest: [
-      { geo: 'conifer', weight: 0.5, colors: ['#2f5a44', '#3a6a50', '#274c3c', '#35604a'] },
-      { geo: 'birch', weight: 0.3, colors: ['#8faa62', '#a3b870'] },
-      { geo: 'oak', weight: 0.2, colors: ['#4a6a3a', '#55763f', '#3f6038'] },
+      { geo: 'conifer', weight: 0.5, colors: ['#234c3c', '#2c5a46', '#1d4034', '#2a5242'] },
+      { geo: 'birch', weight: 0.3, colors: ['#7f9f5a', '#92ad66'] },
+      { geo: 'oak', weight: 0.2, colors: ['#35603a', '#3f6b40', '#2e5434'] },
     ],
     trunk: '#4a3a2e',
     treesPerSector: [5, 8],
@@ -356,7 +356,7 @@ export const ERA_THEMES: Theme[] = [
     vehicle: 'caravan',
     vehicleColors: ['#3f5578', '#d0b880'],
     forest: [
-      { geo: 'conifer', weight: 0.4, colors: ['#3d5f4a', '#35543f', '#46705a'] },
+      { geo: 'conifer', weight: 0.4, colors: ['#2f5340', '#284836', '#3a6049'] },
       { geo: 'bamboo', weight: 0.25, colors: ['#7fa050', '#8db35c'] },
       { geo: 'blossom', weight: 0.2, colors: ['#f3c2cf', '#eeaebf', '#f7d4dc'] },
       { geo: 'round', weight: 0.15, colors: ['#c8583c', '#d9703f', '#b84a34'] },

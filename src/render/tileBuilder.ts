@@ -155,8 +155,15 @@ class Buf {
 
 const UP: V3 = [0, 1, 0];
 const WHITE = new THREE.Color(1, 1, 1);
-/** Árvores e marcos maiores que a escala natural: com a câmera baixa, o que conta a história da peça precisa ler de longe. */
-const TREE_SCALE = 1.3;
+/**
+ * Árvores do tamanho de uma casa (no máximo ~1,3× a altura dela), como na referência: a mata lê como
+ * massa fechada de muitas copas pequenas, não como árvores soltas sobre grama, e a vila não some
+ * atrás de uma copa. A leitura de longe vem da mancha escura da mata inteira (valor e quantidade),
+ * não do tamanho de cada árvore. Os marcos seguem maiores que o natural (`LANDMARK_SCALE`).
+ */
+const TREE_SCALE = 0.85;
+/** Mistura no `mulberry32(seed ^ …)` que sorteia as árvores das peças de mata, para o resto da peça não depender da quantidade delas. */
+const FOREST_SEED = 0x5f0e5;
 /** Chance de um arbusto de frutas por setor de prado (nos temas com `berry`). */
 const BERRY_CHANCE = 0.06;
 const LANDMARK_SCALE = 1.25;
@@ -648,6 +655,7 @@ function shoreFrom(field: { e: (x: number, z: number) => number }, x: number, z:
 
 export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts: BuildOpts): TileBuild {
   const rng = mulberry32(seed);
+  const frng = mulberry32((seed ^ FOREST_SEED) >>> 0);
   const detail = opts.detail;
   const g = new Buf(true);
     const decos: Deco[] = [];
@@ -1181,12 +1189,12 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // Clareira da serraria: as árvores perto dela viram tocos (sem sorteio a mais, para o resto
   // da peça sair igual).
   const clearings = (opts.synergies ?? []).filter((h) => h.kind === 'lumber').map((h) => edgeMid(h.sector));
-  const addTree = (x: number, z: number) => {
-    const kind = weighted(rng, forestKinds);
-    const s = randRange(rng, 0.9, 1.4) * TREE_SCALE * (kind.geo === 'crystal' ? 1.4 : kind.geo === 'cactus' ? 1.1 : 1);
-    const ry = rng() * Math.PI * 2;
-    const sy = s * randRange(rng, 0.9, 1.15);
-    const color = vary(rng, tc(pick(rng, kind.colors)));
+  const addTree = (x: number, z: number, r: Rng = rng, small = 1) => {
+    const kind = weighted(r, forestKinds);
+    const s = randRange(r, 0.85, 1.25) * TREE_SCALE * small * (kind.geo === 'crystal' ? 1.4 : kind.geo === 'cactus' ? 1.1 : 1);
+    const ry = r() * Math.PI * 2;
+    const sy = s * randRange(r, 0.9, 1.15);
+    const color = vary(r, tc(pick(r, kind.colors)), 0.1);
     taken.push([x, z]);
     if (kind.geo !== 'crystal' && clearings.some(([mx, mz]) => Math.hypot(x - mx * 0.64, z - mz * 0.64) < 0.34)) {
       D('stump', x, 0, z, ry, 1.2, tc(theme.trunk));
@@ -1228,13 +1236,36 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const terr = edges[i];
     const sectorAng = -(Math.PI / 6 + (Math.PI / 3) * i);
     if (terr === T.Forest) {
-      // Árvores maiores e menos numerosas: cada copa se lê sozinha, como as casas.
-      const n = Math.max(2, Math.round(randInt(rng, theme.treesPerSector[0], theme.treesPerSector[1]) * 0.7));
-      for (let k = 0, tries = 0; k < n && tries < n * 5; tries++) {
-        const p = samplePoint(rng, i, 0.1, 0.07);
-        if (!p || !free(p[0], p[1], 0.125) || clear(p[0], p[1]) < 0.05) continue;
-        addTree(p[0], p[1]);
+      // Mata em massa: muitas copas pequenas, 2 a 3× o número antigo, num gerador derivado (o resto da peça não muda com a contagem).
+      // Cada árvore é a melhor de alguns candidatos (a mais longe das vizinhas): sem buracos nem grumos.
+      // Franja: perto de um setor vizinho que não é mata, as árvores ficam menores e mais ralas, com arbusto no meio.
+      const n = Math.max(5, Math.round(randInt(frng, theme.treesPerSector[0], theme.treesPerSector[1]) * 1.75));  // o antigo era ×0,7: aqui ≈2,5× a contagem de antes
+      const [cax, caz] = corner(i), [cbx, cbz] = corner((i + 1) % 6);
+      const fringeOf = (x: number, z: number) => {
+        // Distância até a divisa com cada setor vizinho (a reta do centro ao canto), só se o vizinho não é mata.
+        let d = Infinity;
+        if (edges[(i + 5) % 6] !== T.Forest) d = Math.min(d, Math.abs(x * caz - z * cax) / Math.hypot(cax, caz));
+        if (edges[(i + 1) % 6] !== T.Forest) d = Math.min(d, Math.abs(x * cbz - z * cbx) / Math.hypot(cbx, cbz));
+        return d < 0.16;
+      };
+      for (let k = 0, tries = 0; k < n && tries < n * 4; tries++) {
+        let best: V2 | null = null, bestD = -1;
+        for (let c = 0; c < 4; c++) {
+          const p = samplePoint(frng, i, 0.1, 0.05);
+          if (!p || !free(p[0], p[1], 0.055) || clear(p[0], p[1]) < 0.04) continue;
+          let md = Infinity;
+          for (const [tx, tz] of taken) md = Math.min(md, (tx - p[0]) ** 2 + (tz - p[1]) ** 2);
+          if (md > bestD) { bestD = md; best = p; }
+        }
+        if (!best) continue;
         k++;
+        if (fringeOf(best[0], best[1])) {
+          if (frng() < 0.4) continue;
+          if (frng() < 0.3) {
+            D('bush', best[0], 0, best[1], frng() * 6, randRange(frng, 0.9, 1.5), vary(frng, tc(pick(frng, theme.bush))));
+            taken.push(best);
+          } else addTree(best[0], best[1], frng, 0.72);
+        } else addTree(best[0], best[1], frng);
       }
       for (let k = Math.round(4 * detail); k > 0; k--) {
         const p = samplePoint(rng, i, 0.1, 0.05);
@@ -1287,8 +1318,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
 
   // Chão de mata sob cada árvore: terra escura que assenta a copa no chão (Dorfromantik).
   if (trees.length) {
-    const floor = tc(theme.ground[T.Forest]).clone().lerp(tc(theme.trunk), 0.35).multiplyScalar(0.72);
-    for (const [x, z, s] of trees) disc(g, x, z, 0.055 * s, 0.0025, floor, 7, [0, 1, 0, 0]);
+    const floor = tc(theme.ground[T.Forest]).clone().lerp(tc(theme.trunk), 0.35).multiplyScalar(0.62);
+    // Discos maiores que a copa de baixo: com a mata mais cheia eles se unem num chão escuro contínuo.
+    for (const [x, z, s] of trees) disc(g, x, z, 0.075 * s, 0.0025, floor, 5, [0, 1, 0, 0]);
   }
 
   // Centro: segue o terreno dominante, quando não há rio, estrada ou marco.

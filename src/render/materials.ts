@@ -318,8 +318,10 @@ const seasonFoliage = (base: N3): N3 => {
   const spring = float(1).sub(smoothstep(0.05, 0.5, abs(U.season)));
   const autumn = float(1).sub(smoothstep(0.05, 0.5, abs(U.season.sub(2))));
   const fall = mix(vec3(0.851, 0.51, 0.169), vec3(0.722, 0.263, 0.165), step(0.5, hash(instanceIndex)));
+  // Só parte das árvores vira (hash por instância): o resto da mata segue verde e o contraste de valor fica.
+  const turns = step(hash(instanceIndex.add(13)), 0.3);
   const blossomed = mix(base, mix(base, vec3(1, 0.93, 0.96), 0.35), spring);
-  return snowOn(mix(blossomed, mix(blossomed, fall, 0.4), autumn), 0.62);
+  return snowOn(mix(blossomed, mix(blossomed, fall, turns.mul(0.3)), autumn), 0.62);
 };
 
 /** Fogueira: dois cones na cor do vértice, cintilando, só com a noite. */
@@ -366,7 +368,7 @@ function decoMaterial(o: DecoOpts) {
     if (o.paint === 'canopy') {
       const b = texture(brushTex, vec2(pg.x.add(pg.z.mul(0.6)), pg.y.add(pg.z.mul(0.3))).mul(3).add(off));
       // Toque claro ou escuro, e um tom mais quente ou mais frio de um toque para outro.
-      const dab = vec3(b.g.mul(0.28).add(0.86)).mul(mix(vec3(0.95, 1.0, 1.05), vec3(1.06, 1.0, 0.88), b.b));
+      const dab = vec3(b.g.mul(0.4).add(0.8)).mul(mix(vec3(0.95, 1.0, 1.05), vec3(1.06, 1.0, 0.88), b.b));
       base = base.mul(mix(vec3(1), dab, tint));
     } else {
       const wall = tint.mul(smoothstep(0.5, 0.3, abs(normalWorld.y)));

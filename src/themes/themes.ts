@@ -37,10 +37,11 @@ export const BASE_THEMES: Theme[] = [
     vehicle: 'steam',
     vehicleColors: ['#c8553a', '#3b2a24'],
     forest: [
-      { geo: 'conifer', weight: 0.4, colors: ['#2e6a3c', '#3b7c45', '#26583a', '#46864a'] },
-      { geo: 'oak', weight: 0.3, colors: ['#5c9b3d', '#79ae45', '#4c8a48'] },
-      { geo: 'round', weight: 0.2, colors: ['#6aa843', '#93b84e', '#5a9a40'] },
-      { geo: 'round', weight: 0.1, colors: ['#8a70b4', '#a07cc4', '#d98a3d'] },
+      // Mata de valor baixo e frio (verde-azulado escuro e saturado) contra o prado claro; ~7% de acentos vivos.
+      { geo: 'conifer', weight: 0.38, colors: ['#1f5a48', '#26664d', '#1b4f41', '#2a6e50'] },
+      { geo: 'oak', weight: 0.3, colors: ['#2a6f4c', '#2f7a52', '#256448'] },
+      { geo: 'round', weight: 0.25, colors: ['#3b8a4e', '#4c9a50', '#33805a'] },
+      { geo: 'round', weight: 0.07, colors: ['#d95a3d', '#e0873a', '#8a86b8'] },
     ],
     trunk: '#6b4a32',
     treesPerSector: [5, 8],
@@ -109,9 +110,11 @@ export const BASE_THEMES: Theme[] = [
     vehicle: 'cart',
     vehicleColors: ['#6a4a34', '#c9a24a'],
     forest: [
-      { geo: 'oak', weight: 0.45, colors: ['#4f7a3a', '#5f8a42', '#57803e'] },
-      { geo: 'round', weight: 0.3, colors: ['#6a9448', '#76a050'] },
-      { geo: 'birch', weight: 0.25, colors: ['#8fb05a', '#9dbb66'] },
+      // Bosque de valor baixo contra o pólder claro; a bétula fica mais clara e os acentos são raros.
+      { geo: 'oak', weight: 0.42, colors: ['#245a4a', '#2d6a50', '#2a5f46'] },
+      { geo: 'round', weight: 0.3, colors: ['#2f7a52', '#3a8454', '#2b6e4e'] },
+      { geo: 'birch', weight: 0.21, colors: ['#5f8f52', '#6c9d5a'] },
+      { geo: 'round', weight: 0.07, colors: ['#c9803a', '#b8553a', '#8a86b8'] },
     ],
     trunk: '#5a4232',
     treesPerSector: [4, 7],
