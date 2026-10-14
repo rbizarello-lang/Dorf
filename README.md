@@ -107,7 +107,7 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 
 O botão **Câmera** abre três opções:
 
-- **Foto** (`P`): a interface some, o mundo pode ficar parado ou continuar animado, e a imagem sai em PNG no tamanho da tela, em 4K ou em 8K.
+- **Foto** (`P`): a interface some, o mundo pode ficar parado ou continuar animado, e a imagem sai em PNG no tamanho da tela, em 4K ou em 8K. A foto sempre sai em qualidade Cinema, mesmo com o jogo na Alta: o jogo liga o Cinema só para tirar, desenha 1,5× acima do tamanho final, reduz e volta ao nível anterior (a troca leva alguns segundos).
 - **Gravar vídeo** (`V`): grava até 2 minutos do que você fizer. Ao parar, você escolhe o tamanho (1080p, 1440p ou 4K), a qualidade (Cinema, Ultra ou Alta) e a câmera: como foi gravada, suave ou cinematográfica.
 - **Filme da partida**: a partida inteira refeita peça por peça, com a câmera se afastando conforme o mapa cresce, na hora do dia que você escolher.
 
@@ -115,11 +115,11 @@ Durante a gravação, o jogo anota só a câmera e as jogadas, então não fica 
 
 ## Qualidade gráfica
 
-O botão de qualidade abre a lista: **Auto**, **Cinema**, **Ultra**, **Alta**, **Média** e **Baixa**, cada uma com uma linha dizendo para que placa serve.
+O botão de qualidade abre a lista: **Auto**, **Ultra**, **Alta**, **Média** e **Baixa**, cada uma com uma linha dizendo para que placa serve.
 
 - **Auto** escolhe o começo pelo nome da placa de vídeo (por exemplo, Alta numa RX 580 e Ultra numa RTX 3060). Se o quadro ficar lento, primeiro baixa a resolução interna, em degraus até 60%, e só depois desce de nível. O nome da placa e o nível escolhido aparecem no título do botão.
 - **Celular e tablet:** com a tela parada (sem toque e sem peça caindo), o jogo desenha a 30 quadros e, depois de 15 s, a 20, para poupar bateria; o mundo continua animado. No computador nada muda. No toque, o topo fica com o tema, o desfazer e o menu ⋯, e as missões cabem num botão que abre a lista. Torcer dois dedos gira a câmera. O botão Aa (dentro do ⋯) muda o tamanho do texto, liga cores que se separam para quem não distingue verde de vermelho, e o "menos movimento", que também para a onda dourada, os voos da câmera e o quique da peça. Uma vibração curta ao encaixar só acontece nos navegadores que aceitam.
-- **Cinema** é para placas de topo e para fotos e vídeos: desenha 1,5× acima da tela, com mais amostras de luz e de reflexo, sombras mais finas e mais vegetação. O Auto nunca escolhe o Cinema.
+- **Cinema** não está na lista: é o nível das fotos e dos vídeos, que o jogo liga sozinho só na hora de tirar a foto ou desenhar o vídeo. Desenha 1,5× acima da tela, com mais amostras de luz e de reflexo, sombras mais finas e mais vegetação. O Auto nunca escolhe o Cinema.
 - **Ultra** e **Alta** usam o mesmo grão de filme e a mesma aberração de lente do Cinema. O que não desce de nível é o que pesa: no Ultra ficam a luz indireta, o reflexo na água, os raios de sol, as três cascatas de sombra e a vegetação extra; na Alta ficam a oclusão em meia resolução, o bloom, o desfoque e uma sombra só.
 
 ## Temas
@@ -140,7 +140,7 @@ O botão de qualidade abre a lista: **Auto**, **Cinema**, **Ultra**, **Alta**, *
 | `?theme=toscana` | tema inicial (ids em `src/themes/themes.ts` e `eras.ts`) |
 | `?seed=123` | partida reproduzível: a mesma semente dá a mesma sequência de peças |
 | `?time=night` | `dawn`, `aurora`, `day`, `golden`, `dusk` ou `night` |
-| `?quality=high` | `auto`, `cinema`, `ultra`, `high`, `medium` ou `low` |
+| `?quality=high` | `auto`, `ultra`, `high`, `medium` ou `low` (`cinema` vira `ultra`; só vale junto de `?debug`, `?perf`, `?stress`, `?auto` ou `?demo`, para medir) |
 | `?webgl` | força o WebGL2 em vez do WebGPU |
 | `?mode=zen` | modo inicial: `classico`, `zen`, `diario`, `exploradores` ou `rotas` |
 | `?debug` | mostra FPS, draw calls, triângulos e instâncias |
