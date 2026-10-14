@@ -1197,18 +1197,18 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   };
   const trees: [number, number, number][] = [];
   const houseKinds = theme.houses.map((h, i) => [i, h.weight] as const);
-  const houses: { x: number; z: number; s: number; sector: number }[] = [];
+  const houses: { x: number; z: number; s: number; sector: number; door?: V2 }[] = [];
   // Cor do telhado por peça (uma por tipo de casa), com uma ou outra exceção: de longe a vila lê
   // como um bloco de cor, não como confete de telhados vermelhos, azuis e amarelos misturados.
   const tileRoof = new Map<number, string>();
-  const addHouse = (x: number, z: number, baseAng: number, sector = -1) => {
+  const addHouse = (x: number, z: number, baseAng: number, sector = -1, door?: V2) => {
     const i = weighted(rng, houseKinds);
     const kind = theme.houses[i];
     const meta = opts.houses[i];
-    // Poucas casas grandes, alinhadas à borda: de longe cada uma se lê sozinha.
-    const s = randRange(rng, 1.5, 1.8) * (kind.body === 'long' ? 0.9 : 1);
+    // Poucas casas grandes, de cumeeira paralela à rua: de longe cada uma se lê sozinha.
+    const s = randRange(rng, 1.65, 1.95) * (kind.body === 'long' ? 0.9 : 1);
     const sy = randRange(rng, 0.92, 1.12);
-    const ry = baseAng + (rng() < 0.5 ? 0 : Math.PI / 2) + (rng() - 0.5) * 0.12;
+    const ry = sector >= 0 ? baseAng + (rng() - 0.5) * 0.08 : baseAng + (rng() < 0.5 ? 0 : Math.PI / 2) + (rng() - 0.5) * 0.12;
     D(`wall:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(pick(rng, kind.walls)), 0.04));
     let roof = tileRoof.get(i);
     if (roof === undefined) tileRoof.set(i, (roof = pick(rng, kind.roofs)));
@@ -1220,7 +1220,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       chimneys.push(x + (cx * c + cz * sn) * s, cy * s * sy, z + (-cx * sn + cz * c) * s, i);
     }
     taken.push([x, z]);
-    houses.push({ x, z, s, sector });
+    houses.push({ x, z, s, sector, door });
   };
 
   const grassN = Math.round(randInt(rng, 9, 15) * detail);
@@ -1241,11 +1241,20 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         if (p && clear(p[0], p[1]) > 0.03 && free(p[0], p[1], 0.03)) D('grass', p[0], 0, p[1], rng() * 6, randRange(rng, 0.9, 1.4), shade(tc(pick(rng, theme.grass)), 0.8));
       }
     } else if (terr === T.Village) {
-      const n = randInt(rng, 1, 2);
-      for (let k = 0, tries = 0; k < n && tries < n * 6; tries++) {
-        const p = samplePoint(rng, i, 0.15, 0.13);
-        if (!p || !free(p[0], p[1], 0.27) || clear(p[0], p[1]) < 0.16) continue;
-        addHouse(p[0], p[1], sectorAng, i);
+      // Quarteirão: a rua vai do meio da borda ao centro e os lotes ficam dos dois lados dela,
+      // de frente para ela. A primeira casa escolhe o lado pela semente; a segunda (em 30% dos
+      // setores) vem do lado oposto, um pouco mais para dentro.
+      const [mx, mz] = edgeMid(i);
+      const ux = mx / INR, uz = mz / INR;
+      const side = rng() < 0.5 ? 1 : -1;
+      const lots: [number, number][] = [[0.52, side], [0.4, -side]];
+      const n = rng() < 0.3 ? 2 : 1;
+      for (let k = 0, tries = 0; k < n && tries < 4; tries++) {
+        const [along, sd] = lots[(k + (tries > 0 ? 1 : 0)) % 2];
+        const off = 0.2 * (tries > 1 ? -sd : sd);
+        const hx = ux * INR * along - uz * off, hz = uz * INR * along + ux * off;
+        if (!free(hx, hz, 0.3) || clear(hx, hz) < 0.15 || Math.hypot(hx, hz) > INR - 0.12) continue;
+        addHouse(hx, hz, sectorAng, i, [ux * INR * along - uz * 0.03 * Math.sign(off), uz * INR * along + ux * 0.03 * Math.sign(off)]);
         k++;
       }
       for (let k = Math.round(3 * detail); k > 0; k--) {
@@ -1297,7 +1306,6 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     for (const e of edges) count.set(e, (count.get(e) ?? 0) + 1);
     const [top, n] = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
     if (n >= 3 && top === T.Forest && free(0, 0, 0.09)) addTree((rng() - 0.5) * 0.05, (rng() - 0.5) * 0.05);
-    if (n >= 3 && top === T.Village && free(0, 0, 0.2)) addHouse(0, 0, rng() * 6);
   }
 
   // Praça de terra batida sob o Centro da vila.
@@ -1306,48 +1314,50 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     disc(g, 0, 0, 0.29, 0.004, vg.clone().lerp(tc(theme.roadBed), 0.35).multiplyScalar(0.92), 18, [0, 0, 0, 1]);
   }
 
-  // --- Vida na vila: pegada de terra batida sob as casas, trilhas até uma pracinha e,
-  // nas vilas com 3 ou mais casas, um poço. Sem sorteio: sai das posições das casas.
-  if (houses.length) {
+  // --- Vida na vila: lotes de terra batida sob as casas, uma rua clara do meio de cada borda de
+  // vila até o centro (ela emenda com a da peça vizinha) e, com vila em 3 ou mais bordas, uma
+  // pracinha com poço onde as ruas se encontram. Sem sorteio: sai das posições das casas.
+  const vSectors = [0, 1, 2, 3, 4, 5].filter((i) => edges[i] === T.Village);
+  if (vSectors.length) {
     const vg = tc(theme.ground[T.Village]);
     const dirt = vg.clone().lerp(tc(theme.roadBed), 0.45).multiplyScalar(0.8);
-    const trail = vg.clone().lerp(tc(theme.roadBed), 0.2).multiplyScalar(1.14);
+    // Rua e pracinha bem mais claras que o chão da vila: é a malha que faz as casas lerem em quarteirões.
+    const trail = vg.clone().lerp(tc(theme.roadBed), 0.25).lerp(WHITE, 0.38);
     const VILLAGE: Splat = [0, 0, 0, 1];
-    // Trechos contíguos de setores de vila (a casa do centro vai para o maior).
-    const runs: number[][] = [];
-    const start = edges.findIndex((e, i) => e === T.Village && edges[(i + 5) % 6] !== T.Village);
-    if (start < 0) runs.push([0, 1, 2, 3, 4, 5]);
-    else {
-      for (let k = 0; k < 6; k++) {
-        const i = (start + k) % 6;
-        if (edges[i] !== T.Village) continue;
-        if (edges[(i + 5) % 6] === T.Village && runs.length) runs[runs.length - 1].push(i);
-        else runs.push([i]);
+    const plaza = !opts.center && vSectors.length >= 3 && clear(0, 0) > 0.14 && free(0, 0, 0.12);
+    // Trechos da rua que não pisam em rio, estrada nem construção reservada.
+    const open = (x: number, z: number) => clear(x, z) > 0.035 && reserved.every(([rx, rz, rr]) => (rx - x) ** 2 + (rz - z) ** 2 > rr * rr * 0.8);
+    const lane = (a: V2, b: V2, hw: number) => {
+      let run: V2[] = [];
+      for (const p of line(a, b, 10)) {
+        if (open(p[0], p[1])) run.push(p);
+        else {
+          if (run.length > 1) strip(g, run, hw, 0.0045, trail, VILLAGE);
+          run = [];
+        }
+      }
+      if (run.length > 1) strip(g, run, hw, 0.0045, trail, VILLAGE);
+    };
+    for (const i of vSectors) {
+      const [mx, mz] = edgeMid(i);
+      const l = Math.hypot(mx, mz) || 1;
+      const end = plaza ? 0.14 : opts.center ? 0.3 : vSectors.length >= 2 || houses.some((h) => h.sector === i) ? 0 : 0.25;
+      lane([mx * 0.94, mz * 0.94], [(mx / l) * end, (mz / l) * end], 0.036);
+    }
+    for (const h of houses) {
+      disc(g, h.x, h.z, 0.075 * h.s, 0.004, dirt, 8, VILLAGE);
+      if (h.door) {
+        // Caminho curto da porta até a rua.
+        const [mx, mz] = edgeMid(h.sector);
+        const l = Math.hypot(mx, mz) || 1;
+        const t = (h.x * mx + h.z * mz) / (l * l);
+        lane([h.x, h.z], [mx * t, mz * t], 0.018);
       }
     }
-    runs.sort((a, b) => b.length - a.length);
-    for (const run of runs) {
-      const hs = houses.filter((h) => run.includes(h.sector) || (h.sector < 0 && run === runs[0]));
-      for (const h of hs) disc(g, h.x, h.z, 0.075 * h.s, 0.004, dirt, 8, VILLAGE);
-      if (hs.length < 2) continue;
-      let px = hs.reduce((a, h) => a + h.x, 0) / hs.length, pz = hs.reduce((a, h) => a + h.z, 0) / hs.length;
-      // A praça não pode cair dentro de uma casa: escorrega em direção ao centro da peça.
-      for (let k = 0; k < 6 && hs.some((h) => Math.hypot(h.x - px, h.z - pz) < 0.1); k++) {
-        px *= 0.82;
-        pz *= 0.82;
-      }
-      for (const h of hs) {
-        // Trilha com uma leve curva (para um lado ou outro, conforme a posição da casa).
-        const mx = (h.x + px) / 2, mz = (h.z + pz) / 2;
-        const dx = px - h.x, dz = pz - h.z, l = Math.hypot(dx, dz) || 1;
-        const bend = Math.sin(h.x * 37.1 + h.z * 19.7) * 0.18 * l;
-        strip(g, bezier([h.x, h.z], [mx - (dz / l) * bend, mz + (dx / l) * bend], [px, pz], 6), 0.024, 0.0045, trail, VILLAGE);
-      }
-      disc(g, px, pz, 0.065, 0.005, trail, 10, VILLAGE);
-      if (hs.length >= 3 && free(px, pz, 0.05) && clear(px, pz) > 0.08) {
-        D('well', px, 0, pz, Math.atan2(pz, px), 1, WHITE);
-        taken.push([px, pz]);
-      }
+    if (plaza) {
+      disc(g, 0, 0, 0.17, 0.005, trail, 16, VILLAGE);
+      D('well', 0, 0, 0, rng() * 6, 1.15, WHITE);
+      taken.push([0, 0]);
     }
   }
 
