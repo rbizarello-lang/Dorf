@@ -61,6 +61,7 @@ import {
   vertexColor,
 } from 'three/tsl';
 import { GROUND_EXTENT, GROUND_SIZE, groundMap } from './groundMap';
+import { SEA_DMAX, seaMap } from './seaMap';
 import { CAUSTIC_FRAMES, CAUSTIC_SIZE, makeBrushTexture, makeCausticTexture, makeNoiseTexture, makeWaterTexture } from './noise';
 
 // Materiais do jogo em TSL (nós do three.js), que compilam tanto para WebGPU
@@ -760,6 +761,14 @@ export function makeVoidMaterial() {
     center: uniform(new THREE.Vector2()),
     /** Raio explorado R (o World persegue o alvo com amortecimento). */
     radius: uniform(6),
+    /** Entorno do tema (aos poucos): mar e areia, de 0 a 1; o resto é pergaminho. */
+    sea: uniform(0),
+    sand: uniform(0),
+    /** Cores do mar (raso e fundo), da areia e do céu refletido na água. */
+    shallow: uniform(new THREE.Color('#5fd0c8')),
+    deep: uniform(new THREE.Color('#1c5a9c')),
+    sandCol: uniform(new THREE.Color('#e6d4a6')),
+    sky: uniform(new THREE.Color('#9cc8ee')),
   };
   // Parte iluminada (recebe a sombra do tabuleiro e a oclusão) e parte emissiva (a cor
   // do tema se mantém igual ao fundo e à névoa, que não são iluminados).
@@ -803,9 +812,72 @@ export function makeVoidMaterial() {
     const white = mix(vec3(1), u.fill, U.night.mul(0.8));
     return mix(col, white, veil.mul(0.2));
   })();
-  const LIT = 0.4;
-  m.colorNode = grid.mul(LIT);
-  m.emissiveNode = grid.mul(1 - LIT * 0.95);
+
+  // Mar e areia em volta das peças: a distância até a peça mais próxima vem do `seaMap`
+  // (0 em cima da peça, DMAX ou mais longe). Do tabuleiro para fora: faixa de areia, espuma
+  // que lambe a areia, água rasa e turquesa que vai ficando funda; mais longe que o raio
+  // explorado, tudo desbota para a cor do fundo, para o mar não parecer infinito.
+  const p = positionWorld.xz;
+  const d = texture(seaMap.texture, p.div(GROUND_EXTENT * 2).add(0.5)).r.mul(SEA_DMAX).toVar();
+  const t = U.time;
+  const far = smoothstep(u.radius.add(3), u.radius.add(11), length(p.sub(u.center)));
+  const big = texture(waterTex, p.mul(0.23).add(vec2(t.mul(-0.004), t.mul(0.006))));
+  const wA = texture(waterTex, p.div(1.35).add(vec2(t.mul(0.011), t.mul(-0.007))));
+  const wB = texture(waterTex, p.div(1.1).add(vec2(t.mul(-0.009).add(0.37), t.mul(0.008).add(0.61))));
+  const wave = wA.rg.add(wB.rg).sub(1).mul(0.5);
+  const slope = wave.mul(0.5).add(big.rg.sub(0.5).mul(0.35)).mul(u.sea).mul(float(1).sub(far.mul(0.6)));
+  const nW = vec3(slope.x.negate(), 1, slope.y.negate()).normalize();
+  m.normalNode = cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize();
+  m.roughnessNode = mix(float(1), mix(float(0.16), float(0.6), far), u.sea);
+
+  const seaLook = Fn(() => {
+    const wobble = big.b.sub(0.5).mul(0.2).add(wA.b.sub(0.5).mul(0.08));
+    const dd = d.add(wobble);
+    // Água: do raso turquesa ao fundo, acompanhando a distância; ondas escuras e claras.
+    const depth = smoothstep(0.1, 2.6, dd);
+    let water: N = mix(u.shallow, u.deep, depth.pow(0.7));
+    water = water.mul(float(0.9).add(wA.b.mul(0.2)).add(wB.b.mul(0.1)).sub(0.1));
+    // Brilho do céu pela inclinação da onda (Fresnel simples): mais forte rente ao horizonte.
+    const view = cameraPosition.sub(positionWorld).normalize();
+    const fres = float(1).sub(dot(view, nW).max(0)).pow(4).mul(0.85).add(0.04);
+    water = mix(water, u.sky, fres.mul(float(1).sub(far)).mul(0.45));
+    // Espuma: a faixa que avança e recua sobre a areia, mais a renda de dois ruídos.
+    const lap = sin(t.mul(1.05).add(big.b.mul(10))).mul(0.06).add(0.3);
+    const foamEdge = smoothstep(lap.sub(0.15), lap.sub(0.03), dd).mul(float(1).sub(smoothstep(lap, lap.add(0.17), dd)));
+    const n1 = texture(waterTex, p.mul(2.1).add(vec2(t.mul(0.021), t.mul(-0.013)))).b;
+    const n2 = texture(waterTex, p.mul(2.9).add(vec2(t.mul(-0.017), t.mul(0.019))).add(0.5)).b;
+    const lace = smoothstep(0.09, 0, abs(n1.sub(n2))).mul(float(1).sub(smoothstep(0.35, 0.95, dd))).mul(smoothstep(0.1, 0.25, dd));
+    const foam = max(foamEdge, lace.mul(0.8)).clamp(0, 1).mul(float(1).sub(far));
+    const foamCol = vec3(0.97, 0.98, 1).mul(float(1).sub(U.night.mul(0.45)));
+    // Areia molhada logo abaixo da espuma, seca mais perto da peça.
+    const wet = smoothstep(0.0, 0.3, dd);
+    const sandNear = mix(u.sandCol, u.sandCol.mul(0.78), wet);
+    const shore = smoothstep(0.34, 0.2, dd);
+    let col: N = mix(water, sandNear, shore);
+    col = mix(col, foamCol, foam);
+    // Longe: a cor do fundo (a mesma da névoa).
+    return mix(col, u.bg.mul(0.9), far.mul(0.85));
+  })();
+
+  const sandLook = Fn(() => {
+    // Dunas: cristas largas e rugas finas, ±7%; a areia escurece e desbota longe do tabuleiro.
+    const ridge = sin(p.x.mul(0.7).add(p.y.mul(0.35)).add(big.b.mul(7)).mul(2.2)).mul(0.5).add(0.5);
+    const fine = texture(noiseTex, p.mul(1.7)).b.sub(0.5);
+    const shade = float(0.94).add(ridge.mul(0.09)).add(fine.mul(0.08));
+    const dust = smoothstep(0.0, 0.45, d).mul(0.08);
+    const farS = smoothstep(u.radius.add(6), u.radius.add(16), length(p.sub(u.center)));
+    const col = mix(u.sandCol.mul(shade), u.sandCol.mul(0.8), dust);
+    return mix(col, u.bg.mul(0.95), farS.mul(0.8));
+  })();
+
+  const surround = mix(mix(grid, seaLook, u.sea), sandLook, u.sand);
+  // Mar e areia usam a luz da cena (sol, sombra do tabuleiro). A areia guarda mais emissão que o mar:
+  // sob o céu colorido de um tema (Marte) a parte iluminada sozinha tingiria demais a cor dela.
+  const dim = float(1).sub(U.night.mul(0.7));
+  const LIT = float(0.4).add(u.sea.mul(0.32)).add(u.sand.mul(0.1));
+  const emitK = mix(mix(float(1 - 0.4 * 0.95), float(0.2).mul(dim), u.sea), float(0.45).mul(dim), u.sand);
+  m.colorNode = surround.mul(LIT);
+  m.emissiveNode = surround.mul(emitK);
   m.fog = true;
   return { material: m, u };
 }

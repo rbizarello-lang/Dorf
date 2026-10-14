@@ -126,6 +126,7 @@ src/render/
   noise.ts       texturas de ruído periódicas geradas em código (nuvens, chão, ondulação da água)
   atmosphere.ts  névoa da cena (scene.fogNode): bruma e névoa rasteira por altura, e a névoa de alcance
   groundMap.ts   mapa do chão visto de cima: cor do terreno (luz rebatida) e poças dos lampiões
+  seaMap.ts      distância de cada ponto até a peça mais próxima (1 canal, só cresce): o mar, a espuma e a areia em volta do tabuleiro
   clouds.ts      nuvens volumétricas do zoom aberto, marchadas numa laje acima do tabuleiro
   post.ts        pós-processamento por perfil: SSGI ou GTAO, reflexos (SSR), raios de luz, TRAA, bloom,
                  profundidade de campo, vinheta, ombro de tons
@@ -198,6 +199,7 @@ scripts/         capturas, teste de carga, conversão para página publicável
    - A névoa é um nó (`scene.fogNode`, `atmosphere.ts`), não `THREE.Fog`: bruma e névoa rasteira com densidade que cai com a altura (integral exata ao longo do raio), mais a névoa de alcance para a cor do fundo. Densidades e cores vêm da hora do dia (`skyFor` em `world.ts`).
    - As nuvens do céu (`clouds.ts`) e a sombra delas no chão (`cloudLight`) leem o mesmo ruído (`cloudField`, `cloudPuff`); a sombra é lida no ponto em que o raio até o sol cruza a camada das nuvens. As nuvens ficam numa cena própria, que o pós compõe antes do TRAA (`buildPost(..., clouds)`): no passe da cena, um transparente não grava profundidade nem normal, e a oclusão e a luz rebatida do chão de baixo vazariam nele.
    - Sem tone mapping do renderizador: o pós-processamento aplica um ombro suave que preserva as paletas dos temas.
+   - O entorno do tabuleiro é `Theme.surround` (`'mar' | 'areia' | 'pergaminho'`, padrão pergaminho): o próprio `makeVoidMaterial` vira mar (água funda que ganha cor do tema, espuma e faixa de areia lidas do `seaMap`, brilho do céu) ou dunas de areia, sem malha nem draw call a mais, e desbota para a cor do fundo além do raio explorado.
    - Se um nó falhar ao compilar, o erro aparece no console das capturas.
 10. **Blocos estáticos só crescem** (append-only), e o mapa do chão (`groundMap.ts`) também: cada peça pinta a sua parte quando assenta. Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim (nível de detalhe): entre `rig.dist` 11,5 e 14,5 cada planta dessa metade afunda no chão na sua vez (`U.fine`, material `cropFine`), e mais longe o pool fica escondido. No Ultra e no Cinema a faixa vai 1,35× e 1,6× mais longe. Quem consulta geometria pela chave precisa tirar o `~`.
 11. **Construções internas não pontuam.** A roda d'água (vila na beira do rio), a irrigação, a estação e o silo (junto à ferrovia) são só visuais. Pontos de interação vêm apenas de `synergy.ts` × `Rules.synergyPoints`.

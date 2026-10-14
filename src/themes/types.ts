@@ -243,6 +243,8 @@ export interface Theme {
   bg: string;
   voidFill: string;
   voidLine: string;
+  /** O que cerca o tabuleiro: 'mar' (água funda, espuma e faixa de areia nas bordas), 'areia' (dunas, a cor sai do chão do tema) ou 'pergaminho' (a terra incógnita; o padrão). */
+  surround?: 'mar' | 'pergaminho' | 'areia';
   sun: string;
   sunIntensity: number;
   sunDir: [number, number, number];

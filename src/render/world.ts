@@ -16,6 +16,7 @@ import { Life } from './life';
 import { CLOUD_TOP, U, makeVoidMaterial, softShadowFilter } from './materials';
 import { A, fogNode } from './atmosphere';
 import { CL, makeCloudMesh } from './clouds';
+import { seaMap } from './seaMap';
 import { groundMap } from './groundMap';
 import { P, buildPost, type Post, type Quality } from './post';
 import { SkyEnv } from './sky';
@@ -652,11 +653,26 @@ export class World {
 
   // ---------------------------------------------------------------- tema, luz, qualidade
 
+  /** Entorno do tabuleiro (`surround`): o vazio vira mar, areia ou fica pergaminho; as cores saem da água e do chão do tema. */
+  private setSurround(theme: Theme) {
+    const mode = theme.surround ?? 'pergaminho';
+    this.voidU.sea.value = mode === 'mar' ? 1 : 0;
+    this.voidU.sand.value = mode === 'areia' ? 1 : 0;
+    const hsl = { h: 0, s: 0, l: 0 };
+    tmpColor.set(theme.water).getHSL(hsl);
+    // Raso: a cor da água, mais clara; fundo: o azul que o tema puxa, saturado e escuro.
+    this.voidU.shallow.value.setHSL(hsl.h, Math.min(0.85, hsl.s * 1.1 + 0.1), Math.min(0.62, hsl.l + 0.1));
+    this.voidU.deep.value.setHSL(THREE.MathUtils.lerp(hsl.h, 0.6, 0.65), 0.9, 0.27);
+    this.voidU.sandCol.value.set(mode === 'areia' ? theme.ground[0] : '#e9d8aa');
+    if (mode === 'areia') this.voidU.sandCol.value.lerp(tmpColor.set('#ead9b0'), 0.4);
+  }
+
   setTheme(theme: Theme, board: Board) {
     this.theme = theme;
     this.lib.applyTheme(theme);
     this.waterColor.set(theme.water);
     U.clouds.value = theme.period === 'futuro' ? 0.08 : 0.16;
+    this.setSurround(theme);
     this.skyTarget = skyFor(theme, this.timeOfDay);
     this.sky = skyFor(theme, this.timeOfDay);
     this.applySky();
@@ -715,12 +731,14 @@ export class World {
     CL.sky.value.copy(s.hemiSky).multiplyScalar(s.hemiI * 0.35);
     CL.ground.value.copy(s.hemiGround).multiplyScalar(s.hemiI * 0.18);
     this.voidU.bg.value.copy(s.bg);
+    this.voidU.sky.value.copy(s.hemiSky).multiplyScalar(Math.min(1, s.hemiI * 0.75));
     this.voidU.fill.value.copy(s.fill);
     this.voidU.line.value.copy(s.line);
     this.slotMat.color.copy(s.line);
     // Nanquim dos carimbos: a tinta do tema diluída no papel.
     if (this.theme) this.stampMat.color.set(this.theme.ui.ink).lerp(s.fill, 0.5);
-    this.slotMat.opacity = 0.55 - s.night * 0.3;
+    // Sobre o mar e a areia as casas livres são só uma sombra leve: o fundo já é cenário, não papel.
+    this.slotMat.opacity = (0.55 - s.night * 0.3) * (this.voidU.sea.value ? 0.4 : this.voidU.sand.value ? 0.65 : 1);
     this.inflMat.color.set('#e0981c');
     this.sun.color.copy(s.sun);
     this.sun.intensity = s.sunI;
@@ -960,6 +978,7 @@ export class World {
     this.flows.clear();
     this.widths.clear();
     groundMap.clear();
+    seaMap.clear();
     this.lib.setEra(board.era);
     for (const p of board.list) this.bake(p, this.buildPlaced(p), false);
     for (const pool of this.pools.values()) pool.flush();
@@ -1235,6 +1254,7 @@ export class World {
     const m = tileMatrix(p.q, p.r, p.rot);
     this.chunkFor(p.q, p.r).append(b, m);
     groundMap.add(b, m, this.waterColor);
+    seaMap.add(p.q, p.r);
     for (const d of b.decos) {
       if (d.transient) continue;
       decoMatrix(d, tmpM);
@@ -1690,6 +1710,7 @@ export class World {
     A.near.value = eye * 1.5;
     A.far.value = eye * 4.2;
     groundMap.flush();
+    seaMap.flush();
     // As nuvens aparecem quando a câmera sobe bem acima delas (não no nível Baixo).
     // A laje é marchada de cima: com a câmera inclinada até perto dela, as nuvens somem.
     const cloudHigh = THREE.MathUtils.smoothstep(this.camera.position.y, CLOUD_TOP + 1.5, CLOUD_TOP + 4);
