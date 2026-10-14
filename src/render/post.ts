@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { Fn, convertToTexture, diffuseColor, dot, float, hash, length, max, mix, mrt, normalView, output, packNormalToRGB, pass, perspectiveDepthToViewZ, renderOutput, rtt, roughness, sample, screenCoordinate, screenUV, smoothstep, uniform, unpackRGBToNormal, vec2, vec3, vec4, velocity } from 'three/tsl';
+import { Fn, convertToTexture, diffuseColor, dot, float, hash, length, max, mix, mrt, normalView, output, packNormalToRGB, pass, perspectiveDepthToViewZ, renderOutput, rtt, roughness, sample, screenCoordinate, screenUV, select, smoothstep, uniform, unpackRGBToNormal, vec2, vec3, vec4, velocity } from 'three/tsl';
 import { bilateralBlur } from 'three/addons/tsl/display/BilateralBlurNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
@@ -157,9 +157,15 @@ const tiltShift = (full: any) => {
     { resolutionScale: 0.5 },
   );
   const out = Fn(() => {
-    const dy = screenUV.y.sub(0.5).abs();
-    // Faixa nítida de 22% da altura; daí para as bordas o desfoque cresce com a potência 1,5.
-    const m = dy.sub(0.11).div(0.39).clamp(0, 1).pow(1.5).mul(P.tilt);
+    const dyS = screenUV.y.sub(0.5);
+    const dy = dyS.abs();
+    // Assimétrica: no topo (tabuleiro distante) a faixa nítida é mais larga (40% da altura, contra 22% no pé)
+    // e o desfoque máximo é 60% do do pé. Daí para as bordas o desfoque cresce com a potência 1,5.
+    const top = dyS.greaterThan(0);
+    const half0 = select(top, float(0.2), float(0.11));
+    const span = select(top, float(0.3), float(0.39));
+    const gain = select(top, float(0.6), float(1));
+    const m = dy.sub(half0).div(span).clamp(0, 1).pow(1.5).mul(gain).mul(P.tilt);
     const sharp = full.sample(screenUV);
     // Raio em fração da altura da tela, com o x corrigido pela proporção.
     const aspect = vec2(texel.x.div(texel.y), 1);
