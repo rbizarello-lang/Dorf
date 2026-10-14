@@ -1191,7 +1191,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         return [x, z];
       };
       const outer = pts.map(([x, z]) => clampIn(cx + (x - cx) * 1.2, cz + (z - cz) * 1.2));
-      const spIn: Splat = [0, 0, 1, 0], spOut: Splat = [0, 0, 0.6, 0];
+      const spIn: Splat = [0, 0, 0.6, 0], spOut: Splat = [0, 0, 0.25, 0];
       for (let j = 0; j < sides; j++) {
         const j2 = (j + 1) % sides;
         const a = pts[j], b = pts[j2], ao = outer[j], bo = outer[j2];
@@ -1201,8 +1201,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       }
       // Fileiras: direção aleatória por parcela; densidade cai com a qualidade.
       const inner = pts; // 100% do polígono: a escala e o descarte nas plantas fazem o recuo
-      // Sorteios das plantas num gerador derivado: o resto da peça não muda com o número delas.
+      const old = pts.map(([x, z]) => [cx + (x - cx) * 0.86, cz + (z - cz) * 0.86] as V2);
+      // Geradores derivados (descarte e plantas da faixa nova): o rng da peça não muda com eles.
       const pr = mulberry32((seed ^ 0x5ca1ed) + i * 131 + k * 17);
+      const fr = mulberry32((seed ^ 0x7d15c4) + i * 131 + k * 17);
       const dens = 1 / Math.sqrt(Math.max(0.3, detail));
       const gap = L.rowGap * dens, step = L.step * dens;
       const dir = rng() * Math.PI;
@@ -1215,17 +1217,20 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           const x = cx + ux * t - uz * o + (rng() - 0.5) * step * 0.25;
           const z = cz + uz * t + ux * o + (rng() - 0.5) * step * 0.25;
           if (!insidePoly(x, z, inner) || !free(x, z, 0)) continue; // não planta dentro de construções
+          // Dentro do polígono antigo (86%) os sorteios saem do rng da peça, na mesma ordem de
+          // antes: cultura e cor das parcelas não mudam. Só a faixa nova de borda usa o derivado.
+          const hedge = crop.style === 'tea' || crop.style === 'vineyard' || crop.style === 'lavender';
+          const R = insidePoly(x, z, old) ? rng : pr;
           // Perto da borda da parcela as plantas diminuem e rareiam (degradê até o prado).
           const edgeT = smooth(0, 0.08, polyEdgeDist(x, z, pts));
-          const s0 = randRange(pr, L.scale[0], L.scale[1]);
-          let c = rowCol ?? (pr() < 0.7 ? base : tc(pick(pr, crop.colors)));
-          c = vary(pr, c, 0.06);
-          const yaw = pr() * Math.PI * 2;
-          if (pr() < (1 - edgeT) * 0.5) continue;
+          const s0 = randRange(R, L.scale[0], L.scale[1]);
+          let c = rowCol ?? (R() < 0.7 ? base : tc(pick(R, crop.colors)));
+          c = vary(R, c, 0.06);
+          const yaw = hedge ? yawTo(ux, uz) : R() * Math.PI * 2;
+          if (fr() < (1 - edgeT) * 0.55) continue;
           const s = s0 * (isLush ? 1.12 : 1) * (0.45 + 0.55 * edgeT);
           if (isLush && !rowCol) c = c.lerp(LUSH, 0.22);
-          const hedge = crop.style === 'tea' || crop.style === 'vineyard' || crop.style === 'lavender';
-          D(`crop:${crop.style}`, x, h, z, hedge ? yawTo(ux, uz) : yaw, s, c);
+          D(`crop:${crop.style}`, x, h, z, yaw, s, c);
         }
       }
     }
