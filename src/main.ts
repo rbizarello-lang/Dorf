@@ -13,6 +13,7 @@ import { routeMarks, type RouteHit, type RouteMark } from './core/routes';
 import type { Quality, TimeOfDay } from './render/world';
 import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
 import { DynRes } from './render/dynres';
+import { dtCap, shouldRender, targetFps } from './render/framePacing';
 import { readGpuInfo } from './render/gpu';
 import { gpuName, tierForGpu } from './render/gpuTier';
 import { FX_FLAGS } from './render/post';
@@ -1319,13 +1320,22 @@ function updateAmbience(now: number) {
   });
 }
 
-// Bateria: em tela de toque, com o jogo parado (sem toque, tecla ou peça caindo), desenha a 30
-// quadros e, depois de 15 s, a 20. O mundo continua animado; no computador nada muda.
-const saveBattery = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-let lastInput = 0;
-let frameNo = 0;
+// Economia de quadros (src/render/framePacing.ts): com o jogo parado (sem entrada e sem nada se
+// movendo), desenha a 30 quadros e, depois de 15 s, a 20; sem foco na janela, 20. O mundo continua
+// animado, só em menos quadros, e o `dt` do tick é o tempo real decorrido. Qualquer entrada volta
+// à taxa cheia na hora. Gravação, foto, ?perf/?bench/?stress e `__perf` desligam a economia.
+let lastInput = performance.now();
+let winFocused = document.hasFocus();
+let measuring = 0;
+let lastStep = 0;
+let paceFps = 0;
+let wasPaced = false;
+let stepCount = 0;
+const noPacing = params.has('stress') || params.has('perf') || params.has('bench') || params.has('auto') || params.has('demo') || params.get('economia') === '0';
 for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart'])
   window.addEventListener(ev, () => (lastInput = performance.now()), { capture: true, passive: true });
+window.addEventListener('focus', () => ((winFocused = true), (lastInput = performance.now())));
+window.addEventListener('blur', () => (winFocused = false));
 
 /** Peças já estão no canvas; aqui só o que muda sem jogada: missões, sítios e a câmera. */
 function mapFrame() {
@@ -1344,9 +1354,16 @@ function mapFrame() {
 
 function frame(now: number) {
   try {
-    const idle = now - lastInput;
-    const skip = saveBattery && !special && capture.stage === 'play' && !capture.take && !capture.shooting && idle > 4000 ? (idle > 15000 ? 3 : 2) : 1;
-    if (++frameNo % skip === 0) step(now);
+    paceFps = targetFps({
+      enabled: !noPacing && !measuring && capture.stage === 'play' && !capture.take && !capture.shooting,
+      idleMs: now - lastInput,
+      focused: winFocused,
+      busy: world.isSettling(),
+    });
+    if (shouldRender(now, lastStep, paceFps)) {
+      lastStep = now;
+      step(now);
+    }
   } finally {
     requestAnimationFrame(frame);
   }
@@ -1357,7 +1374,7 @@ const timeScale = THREE.MathUtils.clamp(Number(params.get('timescale')) || 1, 0.
 
 function step(now: number) {
   const realDt = (now - last) / 1000;
-  const dt = Math.min(0.05, realDt) * timeScale;
+  const dt = Math.min(dtCap(paceFps), realDt) * timeScale;
   last = now;
   // A foto e o vídeo desenham por conta própria.
   if (capture.stage === 'export' || capture.shooting) return;
@@ -1435,13 +1452,17 @@ function step(now: number) {
         `instâncias ${s.instances.toLocaleString('pt-BR')}`,
         `qualidade ${qualityLabel[qualityMode]}${qualityMode === 'auto' ? ` (${autoNote()})` : ''}`,
         `placa ${gpuLabel || '?'}`,
+        `taxa-alvo ${paceFps ? `${paceFps} qps (economia)` : `cheia${world.settlingWhy() ? ` (${world.settlingWhy()})` : ''}`}`,
         ...(perfNote ? [perfNote] : []),
       ].join('\n');
     }
-    (window as unknown as { __stats: unknown }).__stats = { ...statsText, ...world.stats(), tiles: game.board.list.length, quality: world.quality, res: dynres.scale, gpu: gpuLabel };
+    (window as unknown as { __stats: unknown }).__stats = { ...statsText, ...world.stats(), tiles: game.board.list.length, quality: world.quality, res: dynres.scale, pace: paceFps, steps: stepCount, settling: world.settlingWhy(), gpu: gpuLabel };
     if (capture.take) capture.updateCameraBtn();
   }
-  adaptQuality(realDt, now);
+  stepCount++;
+  // Quadros espaçados pela economia não dizem nada sobre a velocidade da placa.
+  if (paceFps === 0 && !wasPaced) adaptQuality(realDt, now);
+  wasPaced = paceFps > 0;
 }
 
 // ------------------------------------------------------------------ início
@@ -1481,6 +1502,7 @@ function start(data: unknown) {
   (window as unknown as { __perf: (seconds?: number) => Promise<Record<string, unknown>> }).__perf = (seconds = 5) =>
     new Promise((resolve) => {
       const n = Math.min(30, Math.max(1, Number(seconds) || 5));
+      measuring++;
       const samples: number[] = [];
       let prev = performance.now();
       const stop = prev + n * 1000;
@@ -1499,6 +1521,7 @@ function start(data: unknown) {
             frames: samples.length,
             ...(window as unknown as { __stats?: object }).__stats,
           };
+          measuring--;
           perfNote = `medição ${result.fps} FPS (mediana) · p95 ${result.p95Ms} ms`;
           (window as unknown as { __perfResult: unknown }).__perfResult = result;
           hud.stats.hidden = false;

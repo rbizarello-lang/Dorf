@@ -1,6 +1,7 @@
 // Testes do vídeo, da resolução dinâmica e do nível pela placa de vídeo (lógica pura, em Node).
 // O MP4 é conferido por um leitor de caixas escrito aqui, independente do gravador.
 import { DynRes, RES_STEPS } from '../src/render/dynres';
+import { dtCap, shouldRender, targetFps, type PacingState } from '../src/render/framePacing';
 import { gpuName, tierForGpu } from '../src/render/gpuTier';
 import { fitDist, planFilm } from '../src/video/film';
 import { mp4Header, type Mp4Sample } from '../src/video/mp4';
@@ -257,6 +258,31 @@ console.log('Filme da partida');
   ok(fitDist(2) === 9.2 && fitDist(100) === 46, 'enquadramento: 9,2 para o mapa pequeno, 46 no máximo');
   const long = planFilm(Array.from({ length: 2000 }, (_, i) => [i, 0, 0] as [number, number, number]), 0);
   ok(long.duration < 220, `partida longa: as peças caem mais rápido (${long.duration.toFixed(0)} s)`);
+}
+
+console.log('Economia de quadros');
+{
+  const st = (o: Partial<PacingState> = {}): PacingState => ({ enabled: true, idleMs: 0, focused: true, busy: false, ...o });
+  ok(targetFps(st()) === 0 && targetFps(st({ idleMs: 3999 })) === 0, 'com entrada recente, taxa cheia');
+  ok(targetFps(st({ idleMs: 4001 })) === 30 && targetFps(st({ idleMs: 14999 })) === 30, 'parado há mais de 4 s: 30 qps');
+  ok(targetFps(st({ idleMs: 15001 })) === 20 && targetFps(st({ idleMs: 600000 })) === 20, 'parado há mais de 15 s: 20 qps');
+  ok(targetFps(st({ idleMs: 20000, busy: true })) === 0, 'peça caindo ou câmera andando: taxa cheia, mesmo sem entrada');
+  ok(targetFps(st({ idleMs: 20000, busy: true, focused: false })) === 20 && targetFps(st({ focused: false })) === 20, 'janela sem foco: 20 qps');
+  ok(targetFps(st({ idleMs: 20000 })) === 20 && targetFps(st({ idleMs: 0 })) === 0, 'qualquer entrada volta à taxa cheia na hora');
+  ok(targetFps(st({ enabled: false, idleMs: 99999, focused: false })) === 0, 'gravação, foto e medição desligam a economia');
+  // Simula um monitor: quantos quadros de fato são desenhados em 10 s?
+  const run = (hz: number, fps: number) => {
+    let last = 0, n = 0, maxGap = 0;
+    for (let t = 0; t < 10000; t += 1000 / hz) if (shouldRender(t, last, fps)) { maxGap = Math.max(maxGap, t - last); last = t; n++; }
+    return { n, maxGap };
+  };
+  for (const hz of [60, 75, 120, 144, 240]) {
+    const a = run(hz, 30), b = run(hz, 20);
+    ok(a.n / 10 <= 30 + 1 && a.n / 10 >= 24 && a.maxGap <= 1000 / 30 + 1000 / hz, `${hz} Hz a 30 qps: ${(a.n / 10).toFixed(1)} quadros por segundo (nunca acima do alvo, quantizado pelo monitor)`);
+    ok(b.n / 10 <= 20 + 1 && b.n / 10 >= 16 && b.maxGap <= 1000 / 20 + 1000 / hz, `${hz} Hz a 20 qps: ${(b.n / 10).toFixed(1)} quadros por segundo`);
+  }
+  ok(run(60, 0).n >= 599, 'sem limite desenha todo quadro do monitor');
+  ok(dtCap(0) === 0.05 && dtCap(20) === 0.1 && dtCap(30) === 0.1, 'o teto do dt acomoda o intervalo da economia (o mundo não fica lento)');
 }
 
 if (bad) {

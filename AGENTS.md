@@ -78,6 +78,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?auto=40` | a IA gulosa coloca 40 peças |
 | `?stress=1000` | teste de carga; o resultado fica em `window.__load` |
 | `?focus=4` | centraliza a câmera na peça com mais bordas do terreno (4 = rio); `window.__focus(t, zoom)` |
+| `?economia=0` | desliga a economia de quadros (ver Orçamento de desempenho) |
 | `?webgl` | força o backend WebGL2 (o padrão é WebGPU quando o navegador oferece) |
 | `?fx=ao.gi.ssr.rays.traa.bloom.dof.ink.finish.film` | liga os efeitos de pós um a um (medir custo; `finish` é só o grão e a lente, `film` soma as amostras a mais do Cinema); `?fx=` desliga todos |
 | `?timescale=0.05` | desacelera o mundo (animações nas capturas por software) |
@@ -221,6 +222,7 @@ Números de 2026-10-02, depois do traço, do pincel, dos aldeões, dos estandart
 
 - **Regra prática:** uma mudança visual não deve subir triângulos ou draw calls em mais de ~10% sem justificativa escrita no commit.
 - **Qualidade:** Cinema (placas de topo, fotos e vídeos: desenha 1,5× acima da tela e reduz, SSGI e reflexos com mais amostras, 4 cascatas de sombra, 60% mais vegetação, grão de filme e aberração de lente), Ultra (pensado para GPUs acima da RX 580: sombras em 3 cascatas de 4096, luz indireta SSGI, reflexos na água em meia resolução, raios de luz no entardecer, TRAA, bloom, profundidade de campo, o mesmo grão e a mesma lente, DPR até 2 e 35% mais vegetação), Alta (GTAO em meia resolução, sombra única de 2048, bloom, profundidade de campo, TRAA, o mesmo grão e a mesma lente), Média (MSAA, sem pós pesado) e Baixa (sem pós e sem sombras). Cada nível tem um teto de pixels desenhados (Cinema 4K × 2,25, Ultra 4K, Alta 1440p, Média e Baixa 1080p; `PIXELS` em `world.ts`): numa tela 4K, descer de nível também reduz a resolução interna. A densidade de decoração é multiplicada por 1,6 (cinema), 1,35 (ultra), 1 (alta), 0,65 (média) ou 0,4 (baixa).
+- **Economia de quadros:** com o jogo parado (4 s sem entrada e nada se movendo: peça caindo, câmera, fantasma, troca de hora), desenha a 30 qps e, depois de 15 s, a 20; janela sem foco, 20; qualquer entrada volta à taxa cheia. A regra é pura (`framePacing.ts`, testada em `tests/video.ts`) e o `dt` do tick segue o tempo real, então o mundo não salta. Gravação, foto, `?perf`, `?stress`, `?auto`, `?demo`, `?economia=0` e `window.__perf` desligam a economia, para a medida não ser falseada; o `?debug` mostra a taxa-alvo.
 - **Modo automático:** começa pelo nome da placa de vídeo (`gpuTier.ts`: Alta na RX 580, Ultra da RTX 3060 e da RX 6600 para cima, Média no Iris Xe e nos celulares); sem um nome conhecido, começa em Ultra no computador e em Média nas telas de toque. Nunca escolhe o Cinema. Se o quadro passar de ~26 ms, primeiro baixa a resolução interna em degraus de 10% até 60% (`dynres.ts`) e só no último degrau desce de nível.
 - **Ainda não foi medido:** o FPS numa GPU de verdade.
 
