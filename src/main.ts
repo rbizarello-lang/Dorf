@@ -100,7 +100,7 @@ async function createWorld(): Promise<World> {
 }
 const world = await createWorld();
 {
-  // ?fx=ao.traa.bloom.dof.ink liga os efeitos um a um (medir custo); só nomes conhecidos.
+  // ?fx=ao.traa.bloom.dof.tilt.ink liga os efeitos um a um (medir custo); só nomes conhecidos.
   const fx = params.get('fx');
   if (fx !== null) world.fx = fx.split('.').filter((f) => (FX_FLAGS as readonly string[]).includes(f));
 }
@@ -1029,8 +1029,8 @@ function pickTheme(t: Theme) {
 const qualityLabel: Record<QualityMode, string> = { auto: 'Auto', cinema: 'Cinema', ultra: 'Ultra', high: 'Alta', medium: 'Média', low: 'Baixa' };
 const QUALITY_NOTE: Record<Quality, string> = {
   cinema: 'Desenha 1,5× acima da tela, com mais luz, sombra e vegetação, grão e lente. Para placas de topo (classe RTX 4080)',
-  ultra: 'Luz indireta, reflexos, raios de sol, grão de filme e lente. Para placas acima da RX 580',
-  high: 'Oclusão, bloom, profundidade de campo, grão de filme e lente',
+  ultra: 'Luz indireta, reflexos, raios de sol, desfoque de miniatura, grão de filme e lente. Para placas acima da RX 580',
+  high: 'Oclusão, bloom, desfoque de miniatura, grão de filme e lente',
   medium: 'Leve, para notebooks e celulares',
   low: 'Sem sombras nem pós-processamento',
 };
