@@ -653,6 +653,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
 
     // --- exploradores: último sítio encerra e as peças que sobram viram pontos
     const allFound = rules.endOnSites && b.sites.length > 0 && b.sites.every((st) => st.found);
+    if (rules.fixedStack) gained = 0; // pilha fixa: nada devolve peças
     if (!rules.infinite) expectedStack += gained - 1;
     if (allFound) {
       const bonus = Math.max(0, expectedStack) * rules.leftoverPoints;
@@ -788,6 +789,13 @@ for (let g = 0; g < N_GAMES; g++) {
   inc('partidas_' + policy);
   inc('modo_' + mode.id);
   logs.push(lg);
+}
+// Partida rápida: a pilha de 30 nunca cresce, então colocadas + descartadas ≤ 30 em toda partida.
+{
+  const quick = logs.filter((l) => l.mode === 'rapida');
+  assert(quick.length > 0, 'nenhuma partida simulada no modo rápido');
+  for (const l of quick) assert(l.placed + l.discarded <= 30 && l.finalStack === 0, `rápida: ${l.placed} colocadas + ${l.discarded} descartes, pilha final ${l.finalStack}`);
+  console.log(`Partida rápida: ${quick.length} partidas, no máximo ${Math.max(...quick.map((l) => l.placed + l.discarded))} peças`);
 }
 console.log(`Simulação: ${N_GAMES} partidas em ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 

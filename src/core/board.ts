@@ -34,6 +34,8 @@ export interface Rules {
   sites: number;
   /** Modo zen: a pilha nunca acaba. */
   infinite: boolean;
+  /** Pilha fixa: nenhuma jogada devolve peças (missão, encaixe, era, sítio, peça especial). Partida rápida. */
+  fixedStack: boolean;
   /** A partida acaba quando todos os sítios forem achados (cada peça que sobrou vale `leftoverPoints`). */
   endOnSites: boolean;
   leftoverPoints: number;
@@ -78,6 +80,7 @@ export const DEFAULT_RULES: Rules = {
   seasonBonus: true,
   sites: 6,
   infinite: false,
+  fixedStack: false,
   endOnSites: false,
   leftoverPoints: 20,
   blessings: true,

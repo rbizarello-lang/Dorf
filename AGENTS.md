@@ -112,7 +112,7 @@ src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em
   game.ts        Game: semente, pilha, sorteio por peça, descarte, bestMove (IA gulosa), upcoming (mirante)
   blessings.ts   cartas da virada de era: 1 de 2 por era, oferecidas pela semente; a escolha vai no save junto da jogada
   sites.ts       sítios escondidos (ruína, tesouro, relíquia, mirante), da semente por um gerador à parte
-  modes.ts       modos: Clássico, Zen, Desafio do dia, Exploradores (regras + desfazer)
+  modes.ts       modos: Clássico, Zen, Desafio do dia, Exploradores, Estrada Real, Partida rápida (regras + desfazer; `fixedStack` = pilha de 30 sem peças de volta). O recorde é por modo e tema (`best.<modo>.<tema>`)
   specials.ts    peças especiais (estação, moinho d'água, farol): bordas, pontos e posições na pilha
   rng.ts         mulberry32 e utilitários de sorteio
 src/themes/      temas como DADOS
