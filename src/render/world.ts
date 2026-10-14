@@ -326,8 +326,20 @@ interface Sky {
   mist: number;
 }
 
+/** Clima passageiro (o jogador toca no céu ou no botão): chuva, neve ou sol limpo. */
+export type PassingWeather = 'rain' | 'snow' | 'sun';
+/** Quanto dura o clima tocável (segundos do mundo) e quanto leva para entrar e sair. */
+export const WEATHER_SECONDS = 30;
+const WEATHER_FADE = 2.5;
+const WX: Record<PassingWeather, { kind: 'rain' | 'snow' | 'pollen'; colors: [string, string]; density: number; size: number; opacity: number; clouds: number; tint: string; tintK: number; sunI: number; hemiI: number; mist: number }> = {
+  rain: { kind: 'rain', colors: ['#d8e4f2', '#b4c8de'], density: 1, size: 1, opacity: 0.8, clouds: 0.36, tint: '#9fb0c6', tintK: 0.55, sunI: 0.4, hemiI: 0.9, mist: 0.35 },
+  snow: { kind: 'snow', colors: ['#ffffff', '#e6eefa'], density: 1.6, size: 1.5, opacity: 1, clouds: 0.3, tint: '#c4d2e4', tintK: 0.4, sunI: 0.6, hemiI: 0.95, mist: 0.3 },
+  sun: { kind: 'pollen', colors: ['#fff3b8', '#ffd47a'], density: 1.5, size: 2.4, opacity: 1, clouds: 0, tint: '#ffe0a0', tintK: 0.28, sunI: 1.2, hemiI: 1.04, mist: -1 },
+};
+
 const tmpSnap = new THREE.Vector3();
 const tmpGrade = new THREE.Color();
+const tmpColor2 = new THREE.Color();
 const axX = new THREE.Vector3();
 const axY = new THREE.Vector3();
 const axZ = new THREE.Vector3();
@@ -516,6 +528,14 @@ export class World {
   private drops: Drop[] = [];
   private sprites = new Sprites();
   private weather = new Weather();
+  /** Chuva, neve ou pólen do clima tocável: uma segunda camada, escondida quando não há clima. */
+  private precip = new Weather();
+  private wx: { kind: PassingWeather; age: number } | null = null;
+  /** Tipo cuja luz e partículas estão no ar (fica até a saída terminar) e a força atual, de 0 a 1. */
+  private wxKind: PassingWeather | null = null;
+  private wxAmt = 0;
+  private cloudsBase = 0.16;
+  private wxSkyBuf: Sky | null = null;
   private fireflies = new Fireflies();
   private smokeClock = 0;
   /** Velocidade suavizada do fantasma (inclina na direção do movimento). */
@@ -645,7 +665,8 @@ export class World {
       this.scene.add(m);
     }
 
-    this.scene.add(this.sprites.group, this.weather.mesh, this.fireflies.mesh);
+    this.precip.mesh.visible = false;
+    this.scene.add(this.sprites.group, this.weather.mesh, this.precip.mesh, this.fireflies.mesh);
     this.cloudScene.add(this.clouds);
     (this.cloudScene as THREE.Scene & { fogNode?: THREE.Node }).fogNode = fogNode;
   }
@@ -656,7 +677,8 @@ export class World {
     this.theme = theme;
     this.lib.applyTheme(theme);
     this.waterColor.set(theme.water);
-    U.clouds.value = theme.period === 'futuro' ? 0.08 : 0.16;
+    this.cloudsBase = theme.period === 'futuro' ? 0.08 : 0.16;
+    U.clouds.value = this.cloudsBase;
     this.skyTarget = skyFor(theme, this.timeOfDay);
     this.sky = skyFor(theme, this.timeOfDay);
     this.applySky();
@@ -692,8 +714,71 @@ export class World {
     U.snow.value = s === 3 ? 1 : 0;
   }
 
+  /** Tipo do clima tocável em curso (ou null). */
+  get passingWeather(): PassingWeather | null {
+    return this.wx?.kind ?? null;
+  }
+
+  /** Começa o clima tocável (30 s, com entrada e saída suaves); `null` encerra o que estiver passando. */
+  setWeather(kind: PassingWeather | null, age = 0) {
+    if (!kind) {
+      if (this.wx) this.wx.age = Math.max(this.wx.age, WEATHER_SECONDS - WEATHER_FADE);
+      return;
+    }
+    const w = WX[kind];
+    this.wx = { kind, age };
+    this.wxKind = kind;
+    // Com `age` (capturas por software, onde o quadro é lento), o clima já entra com essa idade.
+    if (age > 0) this.wxAmt = Math.min(1, age / WEATHER_FADE);
+    this.precip.setKind(w.kind, w.colors, w.density, w.size);
+    this.precip.setDetail(this.quality === 'low' ? 0.8 : WEATHER[this.quality]);
+  }
+
+  /** Passo do clima tocável pelo tempo do mundo (`dt` já multiplicado por `timeScale`). */
+  private stepWeather(dt: number) {
+    const w = this.wx;
+    if (!w && this.wxAmt === 0) return;
+    if (w) w.age += dt;
+    const target = w && w.age < WEATHER_SECONDS - WEATHER_FADE ? 1 : 0;
+    const d = dt / WEATHER_FADE;
+    this.wxAmt = Math.max(0, Math.min(1, this.wxAmt + Math.max(-d, Math.min(d, target - this.wxAmt))));
+    const e = this.wxAmt * this.wxAmt * (3 - 2 * this.wxAmt);
+    const k = this.wxKind ? WX[this.wxKind] : null;
+    this.precip.setAmount(e * (k?.opacity ?? 0));
+    this.precip.mesh.visible = e > 1e-3;
+    U.clouds.value = THREE.MathUtils.lerp(this.cloudsBase, k?.clouds ?? this.cloudsBase, e);
+    if (this.wxAmt === 0 && target === 0) {
+      this.wx = null;
+      this.wxKind = null;
+      U.clouds.value = this.cloudsBase;
+    }
+  }
+
+  /** O céu do tema com a luz do clima tocável por cima (mais fria e fraca na chuva, quente e limpa no sol). */
+  private weatherSky(): Sky {
+    const s = this.sky, k = this.wxKind ? WX[this.wxKind] : null;
+    const e = this.wxAmt * this.wxAmt * (3 - 2 * this.wxAmt);
+    if (!k || e < 1e-3) return s;
+    const o = (this.wxSkyBuf ??= { ...s, bg: s.bg.clone(), fill: s.fill.clone(), line: s.line.clone(), sun: s.sun.clone(), sunDir: s.sunDir.clone(), hemiSky: s.hemiSky.clone(), hemiGround: s.hemiGround.clone() });
+    const t = tmpColor2.set(k.tint);
+    const f = e * k.tintK;
+    o.bg.copy(s.bg).lerp(t, f * 0.7);
+    o.fill.copy(s.fill).lerp(t, f * 0.5);
+    o.line.copy(s.line).lerp(t, f * 0.4);
+    o.sun.copy(s.sun).lerp(t, f);
+    o.hemiSky.copy(s.hemiSky).lerp(t, f);
+    o.hemiGround.copy(s.hemiGround).lerp(t, f * 0.4);
+    o.sunDir.copy(s.sunDir);
+    o.sunI = s.sunI * THREE.MathUtils.lerp(1, k.sunI, e);
+    o.hemiI = s.hemiI * THREE.MathUtils.lerp(1, k.hemiI, e);
+    o.night = s.night;
+    o.haze = s.haze;
+    o.mist = k.mist < 0 ? s.mist * (1 - e) : Math.max(s.mist, k.mist * e);
+    return o;
+  }
+
   private applySky() {
-    const s = this.sky;
+    const s = this.weatherSky();
     if (!(this.scene.background instanceof THREE.Color)) this.scene.background = s.bg.clone();
     else this.scene.background.copy(s.bg);
     A.bg.value.copy(s.bg);
@@ -776,6 +861,7 @@ export class World {
     }
     this.setCascades(CASCADES[q]);
     this.weather.setDetail(WEATHER[q]);
+    this.precip.setDetail(q === 'low' ? 0.8 : WEATHER[q]);
     if (postChanged) {
       this.post?.dispose();
       const rays = CASCADES[q].length > 0 && (!this.fx || this.fx.includes('rays'));
@@ -1679,6 +1765,7 @@ export class World {
     U.wind.value.set(Math.cos(wa), Math.sin(wa));
     U.gust.value = this.theme?.atmos?.wind ?? 1;
     this.applySeason();
+    this.stepWeather(dt);
     this.stepSky(realDt);
     this.voidU.radius.value += (this.voidGoal - this.voidU.radius.value) * Math.min(1, realDt / 1.2);
     this.rig.snap = this.reducedMotion;
