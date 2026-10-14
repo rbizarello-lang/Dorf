@@ -1218,12 +1218,23 @@ export class World {
       // Chave com "~" = metade "fina" de plantas e capim, escondida de longe (nível de detalhe).
       const fine = key.endsWith('~');
       const base = fine ? key.slice(0, -1) : key;
-      const geo = this.lib.geo(base);
+      const geo = (this.farTrees && !fine && this.lib.farGeo(base)) || this.lib.geo(base);
       if (!geo) return null;
       p = new Pool(geo, fine ? this.lib.fineMaterial(base) : this.lib.material(base), this.staticRoot, this.lib.castsShadow(base));
       this.pools.set(id, p);
     }
     return p;
+  }
+
+  /** Árvores, arbustos e pedras de longe: os lotes com versão leve (`Lib.farGeo`) trocam para a geometria leve (mesmas instâncias e cores, `Pool.retarget`). */
+  private farTrees = false;
+  private setFarTrees(on: boolean) {
+    if (on === this.farTrees) return;
+    this.farTrees = on;
+    for (const [id, pool] of this.pools) {
+      const k = poolKey(id);
+      if (this.lib.farGeo(k)) pool.retarget((on ? this.lib.farGeo(k) : this.lib.geo(k))!);
+    }
   }
 
   private lodFlip = 0;
@@ -1602,7 +1613,7 @@ export class World {
       .map(([k, p]) => {
         const kit = poolKey(k);
         const base = kit.endsWith('~') ? kit.slice(0, -1) : kit;
-        return { k, n: p.count, tris: (p.count * (this.lib.geo(base)?.attributes.position.count ?? 0)) / 3, shadow: p.mesh.castShadow };
+        return { k, n: p.count, tris: (p.count * (((this.farTrees && this.lib.farGeo(base)) || this.lib.geo(base))?.attributes.position.count ?? 0)) / 3, shadow: p.mesh.castShadow };
       })
       .sort((a, b) => b.tris - a.tris);
   }
@@ -1872,6 +1883,10 @@ export class World {
     const fine = 1 - THREE.MathUtils.smoothstep(this.rig.dist, 11.5 * reach * spring, 14.5 * reach * spring);
     U.fine.value = fine;
     for (const [k, p] of this.pools) if (poolKey(k).endsWith('~')) p.mesh.visible = fine > 0;
+    // Árvores leves: bem depois de a metade fina sumir, quando a copa já é uma mancha de poucos pixels
+    // (com folga de ±0,4, para não piscar no limite).
+    const treeEdge = 18 * reach * spring;
+    this.setFarTrees(this.rig.dist > treeEdge + (this.farTrees ? -0.4 : 0.4));
 
     // Aldeões só de perto, com o mesmo limiar da metade fina das plantas.
     this.life.folkNear = this.rig.dist < 13 * reach;
