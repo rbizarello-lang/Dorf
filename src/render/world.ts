@@ -71,6 +71,10 @@ const SUPERSAMPLE: Record<Quality, number> = { cinema: 1.5, ultra: 1, high: 1, m
 const MAX_SIDE = 8192;
 /** Quanto da luz que chega ao chão ele devolve para paredes e copas (a cor vem do mapa do chão). */
 const BOUNCE = 0.7;
+/** O Ultra não tem o SSGI (ver post.ts): o mapa do chão devolve um pouco mais de luz para compensar. */
+const BOUNCE_ULTRA = 1.3;
+/** E as poças dos lampiões: o SSGI espalhava também a luz das janelas acesas. */
+const LAMPS_ULTRA = 7.5;
 /** Força das poças dos lampiões com a noite fechada. */
 const LAMPS = 5;
 
@@ -708,8 +712,8 @@ export class World {
     A.mist.value = s.mist;
     // Luz que o chão recebe (o sol pela altura dele e o céu), devolvida na cor do mapa do chão.
     const up = Math.max(0, s.sunDir.y / s.sunDir.length());
-    U.bounce.value.copy(s.sun).multiplyScalar(s.sunI * up).add(tmpColor.copy(s.hemiSky).multiplyScalar(s.hemiI)).multiplyScalar(BOUNCE);
-    U.lamps.value = THREE.MathUtils.smoothstep(s.night, 0.25, 0.9) * LAMPS;
+    U.bounce.value.copy(s.sun).multiplyScalar(s.sunI * up).add(tmpColor.copy(s.hemiSky).multiplyScalar(s.hemiI)).multiplyScalar(this.quality === 'ultra' ? BOUNCE_ULTRA : BOUNCE);
+    U.lamps.value = THREE.MathUtils.smoothstep(s.night, 0.25, 0.9) * (this.quality === 'ultra' ? LAMPS_ULTRA : LAMPS);
     // Nuvens: o topo ao sol um pouco mais claro que o fundo do tema, a base na cor do chão.
     CL.sun.value.copy(s.sun).multiplyScalar(s.sunI * 0.42);
     CL.sky.value.copy(s.hemiSky).multiplyScalar(s.hemiI * 0.35);
@@ -761,6 +765,8 @@ export class World {
     const detailChanged = DETAIL[q] !== DETAIL[this.quality];
     const postChanged = q !== this.quality || !this.post;
     this.quality = q;
+    // O reforço da luz rebatida do Ultra vale já; no construtor o céu ainda não existe.
+    if (this.sky) this.applySky();
     const shadows = q !== 'low';
     if (this.renderer.shadowMap.enabled !== shadows) {
       this.renderer.shadowMap.enabled = shadows;
@@ -778,7 +784,8 @@ export class World {
     this.weather.setDetail(WEATHER[q]);
     if (postChanged) {
       this.post?.dispose();
-      const rays = CASCADES[q].length > 0 && (!this.fx || this.fx.includes('rays'));
+      // Raios de luz só no Cinema (o Ultra os trocou por barateza); `?fx=` decide quando presente.
+      const rays = CASCADES[q].length > 0 && (this.fx ? this.fx.includes('rays') : q === 'cinema');
       this.setRayLight(rays);
       this.post = q === 'low' ? null : buildPost(this.renderer, this.scene, this.camera, q, this.fx, rays ? this.rayLight : undefined, this.cloudScene);
       CL.temporal.value = this.post?.temporal ? 1 : 0;
