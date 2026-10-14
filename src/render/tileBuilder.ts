@@ -344,6 +344,33 @@ const smooth = (a: number, b: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
+/** Ruído de valor em (x, z), determinístico pela semente (sem Math.random): 0..1, célula ~0,3. */
+function bNoise(seed: number, x: number, z: number): number {
+  const h = (ix: number, iz: number) => {
+    let n = (Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + Math.imul(seed | 0, 2246822519)) | 0;
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+  };
+  const fx = Math.floor(x / 0.3), fz = Math.floor(z / 0.3);
+  const u = x / 0.3 - fx, v = z / 0.3 - fz;
+  const su = u * u * (3 - 2 * u), sv = v * v * (3 - 2 * v);
+  const a = h(fx, fz) + (h(fx + 1, fz) - h(fx, fz)) * su;
+  const b = h(fx, fz + 1) + (h(fx + 1, fz + 1) - h(fx, fz + 1)) * su;
+  return a + (b - a) * sv;
+}
+
+/** Distância de (x, z) à aresta mais próxima do polígono. */
+function polyEdgeDist(x: number, z: number, pts: V2[]) {
+  let best = Infinity;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, zi] = pts[i], [xj, zj] = pts[j];
+    const dx = xj - xi, dz = zj - zi;
+    const t = Math.max(0, Math.min(1, ((x - xi) * dx + (z - zi) * dz) / (dx * dx + dz * dz || 1)));
+    best = Math.min(best, Math.hypot(x - xi - dx * t, z - zi - dz * t));
+  }
+  return best;
+}
+
 export interface WaterShape {
   /** Bordas de água. */
   idx: number[];
@@ -700,8 +727,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const mixS = (o: number[], t: number) => (sp = sp.map((v, k) => v + (o[k] - v) * t));
     const sum = a + b;
     if (sum > 0) {
-      const sAng = b / sum; // 0 no lado do canto i, 1 no lado do canto i+1
-      const tA = 0.5 * (1 - smooth(0, 0.3, sAng)), tB = 0.5 * (1 - smooth(0, 0.3, 1 - sAng));
+      // Faixa de mistura larga (0,6 do arco) com o limite torcido por ruído da semente e da
+      // posição: a fronteira entre terrenos vira lóbulos, não uma reta.
+      const sAng = Math.max(0, Math.min(1, b / sum + (bNoise(seed ^ 0x3b0d, x, z) - 0.5) * 0.3)); // 0 no lado do canto i, 1 no lado do canto i+1
+      const tA = 0.5 * (1 - smooth(0, 0.6, sAng)), tB = 0.5 * (1 - smooth(0, 0.6, 1 - sAng));
       c.lerp(groundCols[(i + 5) % 6], tA);
       mixS(oneHot(edges[(i + 5) % 6]), tA);
       c.lerp(groundCols[(i + 1) % 6], tB);
@@ -1145,14 +1174,37 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       // De longe a parcela precisa "ler" como a cultura: a terra puxa a cor da planta.
       const tintAmt = crop.style === 'rice' ? 0.2 : crop.style === 'tulip' ? 0.1 : 0.42;
       const sc = vary(rng, soil.clone().lerp(tc(crop.colors[0]), tintAmt), 0.08);
-      const dark = shade(sc, 0.72);
+      // Sem parede lateral: o leque tem dois anéis, o interno na cor da terra e o externo
+      // (bisel de ~0,04, altura 0) misturado ao chão, para a parcela se fundir ao prado.
+      const gc = groundCols[i];
+      const edge = sc.clone().lerp(gc, 0.6);
+      const clampIn = (x: number, z: number): V2 => {
+        for (let e = 0; e < 6; e++) {
+          const [mx, mz] = edgeMid(e);
+          const proj = (x * mx + z * mz) / INR;
+          const lim = INR - 0.02;
+          if (proj > lim) {
+            x -= (mx / INR) * (proj - lim);
+            z -= (mz / INR) * (proj - lim);
+          }
+        }
+        return [x, z];
+      };
+      const outer = pts.map(([x, z]) => clampIn(cx + (x - cx) * 1.2, cz + (z - cz) * 1.2));
+      const spIn: Splat = [0, 0, 0.6, 0], spOut: Splat = [0, 0, 0.25, 0];
       for (let j = 0; j < sides; j++) {
-        const a = pts[j], b = pts[(j + 1) % sides];
-        g.tri([cx, h, cz], [a[0], h, a[1]], [b[0], h, b[1]], sc, sc, sc, UP);
-        g.quad([a[0], h, a[1]], [b[0], h, b[1]], [b[0], 0, b[1]], [a[0], 0, a[1]], dark, dark, dark, dark, [(a[0] + b[0]) / 2 - cx, 0, (a[1] + b[1]) / 2 - cz]);
+        const j2 = (j + 1) % sides;
+        const a = pts[j], b = pts[j2], ao = outer[j], bo = outer[j2];
+        g.tri([cx, h, cz], [a[0], h, a[1]], [b[0], h, b[1]], sc, sc, sc, UP, spIn);
+        g.tri([a[0], h, a[1]], [ao[0], 0.001, ao[1]], [bo[0], 0.001, bo[1]], sc, edge, edge, UP, spIn, spOut, spOut);
+        g.tri([a[0], h, a[1]], [bo[0], 0.001, bo[1]], [b[0], h, b[1]], sc, edge, sc, UP, spIn, spOut, spIn);
       }
       // Fileiras: direção aleatória por parcela; densidade cai com a qualidade.
-      const inner = pts.map(([x, z]) => [cx + (x - cx) * 0.86, cz + (z - cz) * 0.86] as V2);
+      const inner = pts; // 100% do polígono: a escala e o descarte nas plantas fazem o recuo
+      const old = pts.map(([x, z]) => [cx + (x - cx) * 0.86, cz + (z - cz) * 0.86] as V2);
+      // Geradores derivados (descarte e plantas da faixa nova): o rng da peça não muda com eles.
+      const pr = mulberry32((seed ^ 0x5ca1ed) + i * 131 + k * 17);
+      const fr = mulberry32((seed ^ 0x7d15c4) + i * 131 + k * 17);
       const dens = 1 / Math.sqrt(Math.max(0.3, detail));
       const gap = L.rowGap * dens, step = L.step * dens;
       const dir = rng() * Math.PI;
@@ -1165,12 +1217,20 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           const x = cx + ux * t - uz * o + (rng() - 0.5) * step * 0.25;
           const z = cz + uz * t + ux * o + (rng() - 0.5) * step * 0.25;
           if (!insidePoly(x, z, inner) || !free(x, z, 0)) continue; // não planta dentro de construções
-          const s = randRange(rng, L.scale[0], L.scale[1]) * (isLush ? 1.12 : 1);
-          let c = rowCol ?? (rng() < 0.7 ? base : tc(pick(rng, crop.colors)));
-          c = vary(rng, c, 0.06);
-          if (isLush && !rowCol) c = c.lerp(LUSH, 0.22);
+          // Dentro do polígono antigo (86%) os sorteios saem do rng da peça, na mesma ordem de
+          // antes: cultura e cor das parcelas não mudam. Só a faixa nova de borda usa o derivado.
           const hedge = crop.style === 'tea' || crop.style === 'vineyard' || crop.style === 'lavender';
-          D(`crop:${crop.style}`, x, h, z, hedge ? yawTo(ux, uz) : rng() * Math.PI * 2, s, c);
+          const R = insidePoly(x, z, old) ? rng : pr;
+          // Perto da borda da parcela as plantas diminuem e rareiam (degradê até o prado).
+          const edgeT = smooth(0, 0.08, polyEdgeDist(x, z, pts));
+          const s0 = randRange(R, L.scale[0], L.scale[1]);
+          let c = rowCol ?? (R() < 0.7 ? base : tc(pick(R, crop.colors)));
+          c = vary(R, c, 0.06);
+          const yaw = hedge ? yawTo(ux, uz) : R() * Math.PI * 2;
+          if (fr() < (1 - edgeT) * 0.55) continue;
+          const s = s0 * (isLush ? 1.12 : 1) * (0.45 + 0.55 * edgeT);
+          if (isLush && !rowCol) c = c.lerp(LUSH, 0.22);
+          D(`crop:${crop.style}`, x, h, z, yaw, s, c);
         }
       }
     }
