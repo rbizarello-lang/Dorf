@@ -79,7 +79,8 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?stress=1000` | teste de carga; o resultado fica em `window.__load` |
 | `?focus=4` | centraliza a câmera na peça com mais bordas do terreno (4 = rio); `window.__focus(t, zoom)` |
 | `?webgl` | força o backend WebGL2 (o padrão é WebGPU quando o navegador oferece) |
-| `?fx=ao.gi.ssr.rays.traa.bloom.dof.ink.finish.film` | liga os efeitos de pós um a um (medir custo; `finish` é só o grão e a lente, `film` soma as amostras a mais do Cinema); `?fx=` desliga todos |
+| `?fx=ao.gi.ssr.rays.traa.bloom.dof.ink.finish.film.glass` | liga os efeitos de pós um a um (medir custo; `finish` é só o grão e a lente, `film` soma as amostras a mais do Cinema, `glass` o reflexo de vidro nas bordas); `?fx=` desliga todos |
+| `?glass` | liga só o reflexo de vidro (brilho de borda, clarão morno no canto e uma faixa na diagonal) e deixa os efeitos do nível como estão; desligado por padrão |
 | `?timescale=0.05` | desacelera o mundo (animações nas capturas por software) |
 | `?silhueta` | decorações pretas sobre chão branco: confere se vilas, construções e marcos leem de longe |
 | `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
@@ -116,7 +117,7 @@ src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em
   specials.ts    peças especiais (estação, moinho d'água, farol): bordas, pontos e posições na pilha
   rng.ts         mulberry32 e utilitários de sorteio
 src/themes/      temas como DADOS
-  types.ts       esquema Theme, com cada kit comentado: é a referência de tudo que um tema pode escolher
+  types.ts       esquema Theme, com cada kit comentado: é a referência de tudo que um tema pode escolher (`light: 'vitrine'` = luz de diorama sob vidro: `vitrineSky` em `world.ts` aquece o ambiente e abranda o sol, `applySky` clareia e amacia a sombra, `P.contrast` e `P.lift` em `post.ts` baixam o contraste; some à noite; o Vale usa)
   themes.ts      6 temas base, THEMES, PERIOD_LABEL/ORDER, themeById
   eras.ts        8 temas históricos (Egito, Song, Vikings, Toscana, Edo, Colonial, Oeste, Andes)
   progress.ts    housesAtEra: as casas do tema em cada era da vila (taipa e palha, o tema, enxaimel e sobrado, flâmulas)

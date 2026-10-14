@@ -103,6 +103,8 @@ const world = await createWorld();
   // ?fx=ao.traa.bloom.dof.ink liga os efeitos um a um (medir custo); só nomes conhecidos.
   const fx = params.get('fx');
   if (fx !== null) world.fx = fx.split('.').filter((f) => (FX_FLAGS as readonly string[]).includes(f));
+  // ?glass liga só o reflexo de vidro, com os efeitos do nível como estão.
+  if (params.has('glass')) world.glass = true;
 }
 hud.preview.appendChild(world.preview.canvas);
 

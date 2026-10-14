@@ -315,6 +315,8 @@ export interface Theme {
   ui: { accent: string; panel: string; ink: string; soft: string; frame: FrameKind; emblem: EmblemId };
   /** Gradação de cor do tema na imagem final: matiz puxado nas sombras e nos realces (só o tom conta, não o brilho) e saturação (1 = neutra). */
   grade: { shadow: string; light: string; saturation: number };
+  /** Luz de vitrine (diorama sob vidro): sombra mais clara e macia, preenchimento morno (âmbar) nas faces longe do sol, contraste de tons menor. Omitir = a luz do tema como ela é. */
+  light?: 'vitrine';
   /** Atmosfera por cima da hora: bruma, vento e um filtro leve na imagem. */
   atmos?: Atmos;
   /** Trava a paisagem numa estação (0 primavera, 1 verão, 2 outono, 3 inverno). A pontuação usa `rules.seasonLock`. */

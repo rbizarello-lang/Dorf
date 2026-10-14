@@ -74,6 +74,7 @@ export const BASE_THEMES: Theme[] = [
     sparkle: '#fff6c4',
     ui: { accent: '#c8553a', panel: '#fff8f3', ink: '#3b2a24', soft: '#8a6e62', frame: 'papel', emblem: 'trigo' },
     grade: { shadow: '#7f74c4', light: '#ffcf9e', saturation: 1.04 },
+    light: 'vitrine',
     atmos: { haze: 0.9, hazeColor: '#e7f0e4', wind: 0.85, filter: [1.02, 1.01, 0.98] },
     synergy: { lumber: 'Serraria', mill: 'Moinho', pasture: 'Pasto', apiary: 'Colmeias' },
     folk: { skin: '#d9a982', hat: 'cap', hatColor: '#7a4a2a' },
