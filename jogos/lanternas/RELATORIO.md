@@ -25,8 +25,8 @@ Um jogo de cartas e exploração numa ilha hexagonal coberta de névoa, em 3D, q
 
 ## Como abrir e jogar
 
-- **Mais simples:** abrir o arquivo `jogos/lanternas/dist/index.html` direto no navegador, com duplo clique. É um arquivo único e funciona offline. Conferi abrindo por `file://` num Chromium: o jogo carrega, mostra as 3 cartas e não dá nenhum erro no console.
-- **Para mexer no código:** `cd jogos/lanternas && npm install && npm run dev`. Para refazer o arquivo único: `npm run build`.
+- **Mais simples:** o arquivo `jogos/lanternas/dist/index.html` já vem pronto no repositório. Basta baixá-lo e abrir com dois cliques, direto no navegador, sem instalar nada. É um arquivo único e funciona offline. Conferi abrindo por `file://` num Chromium: o jogo carrega, mostra as 3 cartas e não dá nenhum erro no console.
+- **Para mexer no código:** `cd jogos/lanternas && npm install && npm run dev`. Para refazer o arquivo único depois de mudar o código: `npm run build`, que sobrescreve `dist/index.html`.
 - **Controles:**
   - clicar numa carta para escolhê-la (ou as teclas 1, 2 e 3);
   - clicar num hexágono brilhante para colocar a carta (no celular, o primeiro toque mostra a peça e o segundo confirma);
