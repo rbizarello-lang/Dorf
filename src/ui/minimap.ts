@@ -162,6 +162,8 @@ export class Minimap {
     private readonly root: HTMLElement,
     private readonly store: Store,
     private readonly onGoto: (x: number, z: number) => void,
+    /** Sem preferência salva, o mapa começa fechado (interface mínima). */
+    quiet = false,
   ) {
     this.canvas = root.querySelector('canvas') as HTMLCanvasElement;
     this.btn = root.querySelector('button') as HTMLButtonElement;
@@ -186,7 +188,7 @@ export class Minimap {
       this.onGoto(w.x, w.z);
     });
     const saved = store.get('map');
-    const open = saved === '0' || saved === '1' ? saved === '1' : !window.matchMedia(NARROW).matches;
+    const open = saved === '0' || saved === '1' ? saved === '1' : !quiet && !window.matchMedia(NARROW).matches;
     this.layout(false);
     this.setCollapsed(!open, false);
   }
