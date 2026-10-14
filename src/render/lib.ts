@@ -61,8 +61,10 @@ const box = (w: number, h: number, d: number, x = 0, y = 0, z = 0) => new THREE.
 // Árvore leve de longe (treeGeometry com `farTree`): mesmas medidas e partes, com bem menos faces.
 // Copas viram octaedros (tetraedros as pequenas), o tronco vira um cartão de 2 triângulos e os cones, 3 lados sem fundo.
 let farTree = false;
-const cyl = (rt: number, rb: number, h: number, seg: number, x = 0, y = 0, z = 0) => (farTree ? new THREE.PlaneGeometry(rb * 2, h) : new THREE.CylinderGeometry(rt, rb, h, seg)).translate(x, y + h / 2, z);
-const cone = (r: number, h: number, seg: number, x = 0, y = 0, z = 0) => (farTree ? new THREE.ConeGeometry(r, h, 3, 1, true) : new THREE.ConeGeometry(r, h, seg)).translate(x, y + h / 2, z);
+// Dentro de treeGeometry: troncos e cones sem tampa (o fundo da saia e o topo do tronco ficam sob a copa e a vista nunca os alcança).
+let treeBuild = false;
+const cyl = (rt: number, rb: number, h: number, seg: number, x = 0, y = 0, z = 0) => (farTree ? new THREE.PlaneGeometry(rb * 2, h) : new THREE.CylinderGeometry(rt, rb, h, seg, 1, treeBuild)).translate(x, y + h / 2, z);
+const cone = (r: number, h: number, seg: number, x = 0, y = 0, z = 0) => (farTree ? new THREE.ConeGeometry(r, h, 3, 1, true) : new THREE.ConeGeometry(r, h, seg, 1, treeBuild)).translate(x, y + h / 2, z);
 const ico = (r: number, detail = 0) => (farTree ? (r < 0.08 ? new THREE.TetrahedronGeometry(r * 1.25, 0) : new THREE.OctahedronGeometry(r, 0)) : new THREE.IcosahedronGeometry(r, detail));
 const oct = (r: number) => new THREE.OctahedronGeometry(r, 0);
 
@@ -352,24 +354,25 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
 
 // ---------------------------------------------------------------- árvores
 
+/** Copas de poucas faces (icosaedro, cones de 5 lados): a mata em massa tem 2 a 3× mais árvores por peça, e `softCanopy` alisa as normais. */
 function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
   const T = (h: number, r = 0.02) => ({ geo: cyl(r * 0.7, r, h, 5), color: trunk, grad: [0.8, 1.05, 0, h] as [number, number, number, number] });
   switch (geo) {
     case 'conifer':
       return kit([
         ...(farTree ? [] : [T(0.1)]), // de longe o tronco some sob a primeira saia
-        { geo: cone(0.11, 0.2, 7, 0, 0.09), color: '#fff', tint: 1, grad: [0.78, 1.0, 0.09, 0.47] },
-        { geo: cone(0.085, 0.17, 7, 0, 0.2), color: '#fff', tint: 1, grad: [0.85, 1.05, 0.09, 0.47] },
-        { geo: cone(0.055, 0.14, 7, 0, 0.31), color: '#fff', tint: 1, grad: [0.9, 1.1, 0.09, 0.47] },
+        { geo: cone(0.11, 0.2, 5, 0, 0.09), color: '#fff', tint: 1, grad: [0.78, 1.0, 0.09, 0.47] },
+        { geo: cone(0.085, 0.17, 5, 0, 0.2), color: '#fff', tint: 1, grad: [0.85, 1.05, 0.09, 0.47] },
+        { geo: cone(0.055, 0.14, 5, 0, 0.31), color: '#fff', tint: 1, grad: [0.9, 1.1, 0.09, 0.47] },
       ]);
     case 'round':
-      return kit([...(farTree ? [] : [T(0.13)]), { geo: jitter(ico(0.1, 1), 0.018, 1).scale(1, 1.1, 1).translate(0, 0.21, 0), color: '#fff', tint: 1, grad: [0.8, 1.08, 0.1, 0.32] }]);
+      return kit([...(farTree ? [] : [T(0.13)]), { geo: jitter(ico(0.1, 0), 0.018, 1).scale(1, 1.1, 1).translate(0, 0.21, 0), color: '#fff', tint: 1, grad: [0.8, 1.08, 0.1, 0.32] }]);
     case 'blossom':
       return kit([
         T(0.14),
-        { geo: jitter(ico(0.085, 1), 0.02, 2).translate(0.035, 0.2, 0.01), color: '#fff', tint: 1, grad: [0.85, 1.08, 0.12, 0.34] },
-        { geo: jitter(ico(0.075, 1), 0.02, 3).translate(-0.045, 0.22, -0.02), color: '#fff', tint: 1, grad: [0.85, 1.08, 0.12, 0.34] },
-        { geo: jitter(ico(0.065, 1), 0.02, 4).translate(0, 0.28, 0.02), color: '#fff', tint: 1, grad: [0.85, 1.08, 0.12, 0.34] },
+        { geo: jitter(ico(0.085, 0), 0.02, 2).translate(0.035, 0.2, 0.01), color: '#fff', tint: 1, grad: [0.85, 1.08, 0.12, 0.34] },
+        { geo: jitter(ico(0.075, 0), 0.02, 3).translate(-0.045, 0.22, -0.02), color: '#fff', tint: 1, grad: [0.85, 1.08, 0.12, 0.34] },
+        { geo: jitter(ico(0.065, 0), 0.02, 4).translate(0, 0.28, 0.02), color: '#fff', tint: 1, grad: [0.85, 1.08, 0.12, 0.34] },
       ]);
     case 'palm': {
       const parts: Part[] = [];
@@ -392,17 +395,17 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
         { geo: oct(0.035).scale(1, 2.2, 1).rotateZ(-0.4).translate(-0.05, 0.08, -0.03), color: '#fff', tint: 1 },
       ]);
     case 'cypress':
-      return kit([T(0.06, 0.016), { geo: jitter(ico(0.1, 1), 0.012, 5).scale(0.42, 2.0, 0.42).translate(0, 0.25, 0), color: '#fff', tint: 1, grad: [0.75, 1.05, 0.05, 0.45] }]);
+      return kit([T(0.06, 0.016), { geo: jitter(ico(0.1, 0), 0.012, 5).scale(0.42, 2.0, 0.42).translate(0, 0.25, 0), color: '#fff', tint: 1, grad: [0.75, 1.05, 0.05, 0.45] }]);
     case 'olive':
       return kit([
         { geo: cyl(0.014, 0.024, 0.09, 5).rotateZ(0.25), color: trunk },
         { geo: cyl(0.012, 0.016, 0.06, 5).rotateZ(-0.5).translate(0.03, 0.06, 0), color: trunk },
-        { geo: jitter(ico(0.1, 1), 0.02, 6).scale(1.35, 0.62, 1.2).translate(0.01, 0.15, 0), color: '#fff', tint: 1, grad: [0.8, 1.1, 0.1, 0.2] },
+        { geo: jitter(ico(0.1, 0), 0.02, 6).scale(1.35, 0.62, 1.2).translate(0.01, 0.15, 0), color: '#fff', tint: 1, grad: [0.8, 1.1, 0.1, 0.2] },
       ]);
     case 'oak':
       return kit([
         T(0.13, 0.028),
-        { geo: jitter(ico(0.09, 1), 0.02, 7).translate(0, 0.25, 0), color: '#fff', tint: 1, grad: [0.78, 1.08, 0.12, 0.34] },
+        { geo: jitter(ico(0.09, 0), 0.02, 7).translate(0, 0.25, 0), color: '#fff', tint: 1, grad: [0.78, 1.08, 0.12, 0.34] },
         { geo: jitter(ico(0.072, 0), 0.016, 8).translate(0.07, 0.19, 0.02), color: '#fff', tint: 1, grad: [0.78, 1.08, 0.12, 0.34] },
         { geo: jitter(ico(0.072, 0), 0.016, 9).translate(-0.06, 0.2, -0.03), color: '#fff', tint: 1, grad: [0.78, 1.08, 0.12, 0.34] },
       ]);
@@ -411,8 +414,8 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
         { geo: cyl(0.011, 0.015, 0.22, 5), color: '#ece8e0' },
         { geo: cyl(0.0155, 0.0155, 0.008, 5, 0, 0.05), color: '#3a3430' },
         { geo: cyl(0.0145, 0.0145, 0.008, 5, 0, 0.11), color: '#3a3430' },
-        { geo: jitter(ico(0.06, 1), 0.015, 10).scale(0.9, 1.4, 0.9).translate(0.01, 0.24, 0), color: '#fff', tint: 1, grad: [0.85, 1.1, 0.15, 0.32] },
-        { geo: jitter(ico(0.045, 1), 0.012, 11).translate(-0.03, 0.18, 0.02), color: '#fff', tint: 1 },
+        { geo: jitter(ico(0.06, 0), 0.015, 10).scale(0.9, 1.4, 0.9).translate(0.01, 0.24, 0), color: '#fff', tint: 1, grad: [0.85, 1.1, 0.15, 0.32] },
+        { geo: jitter(ico(0.045, 0), 0.012, 11).translate(-0.03, 0.18, 0.02), color: '#fff', tint: 1 },
       ]);
     case 'cactus':
       return kit([
@@ -451,7 +454,7 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
       // Copa baixa e larga com cortina de ramos: cones de ponta para baixo em volta.
       const parts: Part[] = [
         { geo: cyl(0.016, 0.026, 0.15, 5).rotateZ(0.12), color: trunk, grad: [0.8, 1.05, 0, 0.15] },
-        { geo: jitter(ico(0.09, 1), 0.016, 31).scale(1.25, 0.6, 1.25).translate(0.015, 0.2, 0), color: '#fff', tint: 1, grad: [0.85, 1.1, 0.15, 0.25] },
+        { geo: jitter(ico(0.09, 0), 0.016, 31).scale(1.25, 0.6, 1.25).translate(0.015, 0.2, 0), color: '#fff', tint: 1, grad: [0.85, 1.1, 0.15, 0.25] },
       ];
       for (let i = 0; i < 8; i++) {
         const a = (i / 8) * Math.PI * 2 + 0.2;
@@ -465,7 +468,7 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
       return kit([
         { geo: cyl(0.012, 0.02, 0.17, 5).rotateZ(0.1), color: trunk, grad: [0.8, 1.05, 0, 0.17] },
         { geo: cyl(0.01, 0.012, 0.1, 5).rotateZ(-0.18).translate(-0.006, 0.16, 0), color: trunk },
-        { geo: jitter(ico(0.1, 1), 0.016, 32).scale(1.55, 0.36, 1.45).translate(0.006, 0.27, 0), color: '#fff', tint: 1, grad: [0.72, 1.1, 0.24, 0.3] },
+        { geo: jitter(ico(0.1, 0), 0.016, 32).scale(1.55, 0.36, 1.45).translate(0.006, 0.27, 0), color: '#fff', tint: 1, grad: [0.72, 1.1, 0.24, 0.3] },
       ]);
     case 'waxpalm': {
       // Palmeira-de-cera dos Andes: o tronco claro e altíssimo é o que a identifica.
@@ -2081,11 +2084,13 @@ export class Lib {
       if (this.geos.has(`tree:${f.geo}`)) continue;
       const build = (far: boolean) => {
         farTree = far;
+        treeBuild = true;
         try {
           const g = treeGeometry(f.geo, theme.trunk);
           return FACETED.has(f.geo) ? g : softCanopy(g);
         } finally {
           farTree = false;
+          treeBuild = false;
         }
       };
       set(`tree:${f.geo}`, build(false));
