@@ -194,6 +194,26 @@ let tradeMarks: RouteMark[] = [];
 /** Rota que a peça da vez renderia na casa do fantasma. */
 let routePeek: RouteHit[] = [];
 let scorePeek: number | null = null;
+/** "Onde encaixa": as melhores casas da peça atual. Valem só para a jogada e o giro em que foram pedidas. */
+let hints: { q: number; r: number; rot: number; points: number }[] | null = null;
+let hintsKey = '';
+const hintsKeyNow = () => `${moves.length}:${game.board.list.length}:${game.rot}:${game.stack}:${game.seed}`;
+function clearHints() {
+  if (!hints) return;
+  hints = null;
+  document.getElementById('btn-hints')!.setAttribute('aria-pressed', 'false');
+}
+function toggleHints() {
+  const btn = document.getElementById('btn-hints')!;
+  if (hints || !game.current || game.over || hud.modalOpen || capture.stage !== 'play') {
+    hints = null;
+  } else {
+    hints = game.rankMoves(3);
+    hintsKey = hintsKeyNow();
+    if (!hints.length) hints = null;
+  }
+  btn.setAttribute('aria-pressed', String(!!hints));
+}
 let routePeekAt = '';
 let rotSteps = 0;
 let hover: { q: number; r: number } | null = null;
@@ -269,6 +289,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   if (!replay.length) committed = false;
   undone = undos;
   moves = [];
+  clearHints();
   turns = [];
   for (const [q, r, rot, ...picks] of replay) {
     game.rot = rot;
@@ -456,6 +477,7 @@ function updateGhost() {
 function rotate(dir: 1 | -1) {
   if (!game.current) return;
   game.rotate(dir);
+  clearHints();
   rotSteps += dir;
   sfx.rotate(dir);
   world.setPreview(game.current, rotSteps * (Math.PI / 3), game.stack);
@@ -475,6 +497,7 @@ function place(q: number, r: number) {
     showChoice();
     return;
   }
+  clearHints();
   const check = game.check(q, r);
   if (!check?.valid) {
     if (check && !check.occupied && check.neighbors > 0) {
@@ -1120,6 +1143,7 @@ const input = bindInput({
   requestNewGame,
   undo,
   toggleMap: () => minimap.toggle(),
+  toggleHints,
   choose: (pick) => !!hud.modalBody.querySelector('.blessings') && chooseBlessing(pick),
 });
 
@@ -1138,6 +1162,7 @@ document.getElementById('btn-help')!.addEventListener('click', () => showHelp())
 document.getElementById('btn-a11y')!.addEventListener('click', () => showA11y());
 document.getElementById('btn-new')!.addEventListener('click', requestNewGame);
 document.getElementById('btn-undo')!.addEventListener('click', undo);
+document.getElementById('btn-hints')!.addEventListener('click', toggleHints);
 hud.themeBtn.addEventListener('click', () => {
   if (hud.themeMenu.hidden) hud.openThemeMenu(theme, pickTheme, { color: house, banner, themeAccent: themeById(theme.id).ui.accent, onChange: setHouse });
   else hud.closeThemeMenu();
@@ -1217,6 +1242,7 @@ document.getElementById('btn-more')!.addEventListener('click', () => {
       { id: 'quality', label: 'Qualidade', note: qualityLabel[qualityMode] },
       { id: 'camera', label: 'Foto e vídeo' },
       { id: 'sound', label: 'Som', note: soundBtn.querySelector('.long')!.textContent ?? '' },
+      { id: 'hints', label: 'Onde encaixa' },
       { id: 'help', label: 'Como jogar' },
       { id: 'new', label: 'Nova partida' },
       { id: 'a11y', label: 'Acessibilidade' },
@@ -1399,6 +1425,16 @@ function step(now: number) {
     const dim = !!hover && hexDistance(hover.q, hover.r, m.q, m.r) <= 1;
     const text = m.kind === 'both' ? 'mercado · porto' : m.kind === 'market' ? 'mercado' : 'porto';
     markers.push({ id: 500000 + hkey(m.q, m.r), x: s.x, y: s.y, visible: s.visible, text, color: m.kind === 'port' ? '#2f6f8f' : '#6b5344', dim, kind: m.kind });
+  }
+  // Onde encaixa: some ao colocar a peça ou girar (a chave muda).
+  if (hints && hintsKey !== hintsKeyNow()) clearHints();
+  if (hints) {
+    hints.forEach((m, i) => {
+      const s = screenOf(m.q, m.r, 0.5);
+      const turn = (m.rot - game.rot + 6) % 6;
+      const girar = turn ? ` · girar ${turn}×` : '';
+      markers.push({ id: 300000 + i, x: s.x, y: s.y, visible: s.visible, text: `${i + 1}º · +${m.points}${girar}`, color: theme.ui.accent, kind: 'score' });
+    });
   }
   // Prévia: o total da jogada, e a rota quando ela entra na conta.
   if (scorePeek !== null && hover) {
