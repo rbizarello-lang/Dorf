@@ -37,7 +37,7 @@ type QualityMode = 'auto' | Quality;
 type MoveRec = number[];
 /** v11: a rota da Estrada Real dobrou de peso. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 11;
+  v: 12;
   seed: number;
   rulesId: string;
   mode: ModeId;
@@ -48,7 +48,7 @@ interface Save {
   /** Peças especiais que entraram nesta partida (mudam a sequência da pilha). */
   specials: SpecialKind[];
 }
-const SAVE_VERSION = 11;
+const SAVE_VERSION = 12;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -354,9 +354,12 @@ function readSave(): Save | null {
 /** Nova partida pedida pelo jogador: confirma se há uma partida em andamento. */
 function requestNewGame() {
   const warn = !game.over && moves.length >= 3 ? `<p class="muted">A partida atual (${moves.length} peças, ${game.board.score.toLocaleString('pt-BR')} pontos) será descartada.</p>` : '';
-  const cards = MODES.map(
-    (m) => `<button class="mode-card" type="button" data-act="mode" data-mode="${m.id}" aria-current="${m.id === mode.id}"><strong>${m.name}</strong><span>${m.tagline}</span></button>`,
-  ).join('');
+  const card = (m: Mode) =>
+    `<button class="mode-card" type="button" data-act="mode" data-mode="${m.id}" aria-current="${m.id === mode.id}"><strong>${m.name}${m.more ? ' <em>em teste</em>' : ''}</strong><span>${m.tagline}</span></button>`;
+  const more = MODES.filter((m) => m.more);
+  const cards =
+    MODES.filter((m) => !m.more).map(card).join('') +
+    (more.length ? `<details class="more-modes"${mode.more ? ' open' : ''}><summary>Mais modos</summary>${more.map(card).join('')}</details>` : '');
   hud.showModal(`
     <h2 id="modal-title">Nova partida</h2>
     <p>Escolha o modo. O tema continua: ${theme.name}.</p>

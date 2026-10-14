@@ -14,6 +14,8 @@ export interface Mode {
   undos: number;
   /** Semente do dia: a mesma sequência de peças para todo mundo, e as regras padrão (sem as do tema). */
   daily?: boolean;
+  /** Modo ainda em teste: o menu o põe em "Mais modos", fora da lista principal, até ser equilibrado. */
+  more?: boolean;
 }
 
 export const MODES: readonly Mode[] = [
@@ -43,7 +45,8 @@ export const MODES: readonly Mode[] = [
     id: 'exploradores',
     name: 'Exploradores',
     tagline: 'Dez sítios escondidos. Ache todos com o mínimo de peças: cada uma que sobrar vale 20 pontos.',
-    rules: { sites: 10, startTiles: 60, endOnSites: true },
+    // Sítios à metade da distância: com o padrão (até 15 casas), nem quem caça sítios achava os 10 com 60 peças.
+    rules: { sites: 10, siteScale: 0.5, startTiles: 60, endOnSites: true },
     undos: 1,
   },
   {
@@ -52,6 +55,7 @@ export const MODES: readonly Mode[] = [
     tagline: 'Mais trilhos. Mercados e portos da mesma rede rendem pela distância, e a rota de 6 ou mais casas devolve uma peça.',
     rules: { railChance: 0.2, routes: true },
     undos: 3,
+    more: true,
   },
 ];
 

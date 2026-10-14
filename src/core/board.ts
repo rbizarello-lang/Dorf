@@ -32,6 +32,8 @@ export interface Rules {
   seasonLock?: 0 | 1 | 2 | 3;
   /** Quantos sítios escondidos o mapa tem. */
   sites: number;
+  /** Escala dos anéis onde os sítios aparecem (1 = padrão; 0,5 = metade da distância ao Centro). */
+  siteScale: number;
   /** Modo zen: a pilha nunca acaba. */
   infinite: boolean;
   /** A partida acaba quando todos os sítios forem achados (cada peça que sobrou vale `leftoverPoints`). */
@@ -77,6 +79,7 @@ export const DEFAULT_RULES: Rules = {
   synergyBonus: {},
   seasonBonus: true,
   sites: 6,
+  siteScale: 1,
   infinite: false,
   endOnSites: false,
   leftoverPoints: 20,
