@@ -1198,8 +1198,11 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const trees: [number, number, number][] = [];
   const houseKinds = theme.houses.map((h, i) => [i, h.weight] as const);
   const houses: { x: number; z: number; s: number; sector: number }[] = [];
-  // Cor do telhado por peça (uma por tipo de casa), com uma ou outra exceção: de longe a vila lê
-  // como um bloco de cor, não como confete de telhados vermelhos, azuis e amarelos misturados.
+  // Cor por casa, com viés: ~60% das casas usam a cor de telhado da peça (uma por tipo de casa) e o resto
+  // sorteia da paleta do tipo, para a vila ler como confete de telhados e de paredes claras e escuras.
+  // O sorteio extra vem de um gerador à parte (consome sempre o mesmo tanto), então o resto da peça
+  // não muda; as chamadas ao `rng` abaixo seguem a ordem antiga.
+  const crng = mulberry32((seed ^ 0x5c0105) >>> 0);
   const tileRoof = new Map<number, string>();
   const addHouse = (x: number, z: number, baseAng: number, sector = -1) => {
     const i = weighted(rng, houseKinds);
@@ -1209,11 +1212,13 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const s = randRange(rng, 1.5, 1.8) * (kind.body === 'long' ? 0.9 : 1);
     const sy = randRange(rng, 0.92, 1.12);
     const ry = baseAng + (rng() < 0.5 ? 0 : Math.PI / 2) + (rng() - 0.5) * 0.12;
-    D(`wall:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(pick(rng, kind.walls)), 0.04));
+    D(`wall:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(pick(rng, kind.walls)), 0.08));
     let roof = tileRoof.get(i);
     if (roof === undefined) tileRoof.set(i, (roof = pick(rng, kind.roofs)));
     else if (rng() < 0.2) roof = pick(rng, kind.roofs);
-    D(`roof:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(roof), 0.05));
+    const own = pick(crng, kind.roofs);
+    if (crng() >= 0.6) roof = own;
+    D(`roof:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(roof), 0.06));
     if (meta?.chimney && rng() < 0.85) {
       const [cx, cy, cz] = meta.chimney;
       const c = Math.cos(ry), sn = Math.sin(ry);
