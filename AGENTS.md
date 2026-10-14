@@ -73,6 +73,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | Gancho | O que faz |
 |---|---|
 | `?debug` | mostra FPS, draw calls, triângulos e instâncias |
+| `?bench` | monta `seed=7` com 60 peças e passa por Baixa, Média, Alta e Ultra (15 s cada, câmera girando devagar); mostra placa, nível, FPS mediano, p95, draw calls e triângulos num painel com botão "Copiar" (markdown); `window.__bench` guarda `{ done, rows }` |
 | `?perf` | mede 5 s e mostra o FPS mediano e o p95; `window.__perf(segundos)` devolve o mesmo, com as estatísticas do último quadro |
 | `?gallery&theme=<id>` | mostra todos os kits do tema lado a lado; `window.__gallery` lista as chaves |
 | `?auto=40` | a IA gulosa coloca 40 peças |
