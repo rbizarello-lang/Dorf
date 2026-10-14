@@ -70,7 +70,7 @@ O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Re
 |---|---|
 | Clássico | missões, eras e sítios; acaba quando a pilha esvazia |
 | Zen | peças sem fim; pontos e eras por gosto |
-| Desafio do dia | semente do dia e regras padrão, iguais para todo mundo; sem desfazer |
+| Desafio do dia | semente do dia e **regra do dia**, iguais para todo mundo; sem desfazer. A regra (uma de oito, como interações em dobro, rios valorizados ou pilha curta) sai da data local AAAA-MM-DD e aparece ao começar e no topo da tela. No fim, **Compartilhar** copia `Retalhos 14/10 · 1.240 · 🌲🌾🏘` (os três terrenos com mais pontos de encaixe) e um link `?mode=diario&seed=AAAAMMDD` que reproduz o mesmo desafio |
 | Exploradores | 10 sítios e 60 peças; achar o último encerra, e cada peça que sobrou vale 20 pontos |
 | Estrada Real | mais trilhos; mercados (estação, trilho de uma borda ou vila no trilho) e portos (vila no rio) da mesma rede rendem pela distância, uma vez por par. A 2 casas são 22 pontos, a 4 são 54, a 6 são 96 e uma peça, e assim por diante. As etiquetas marcam mercados e portos, e a prévia mostra o valor antes de colocar. Quatro postos aparecem no mapa |
 
