@@ -58,9 +58,12 @@ function kit(parts: Part[]): THREE.BufferGeometry {
 // ---------------------------------------------------------------- primitivas
 
 const box = (w: number, h: number, d: number, x = 0, y = 0, z = 0) => new THREE.BoxGeometry(w, h, d).translate(x, y + h / 2, z);
-const cyl = (rt: number, rb: number, h: number, seg: number, x = 0, y = 0, z = 0) => new THREE.CylinderGeometry(rt, rb, h, seg).translate(x, y + h / 2, z);
-const cone = (r: number, h: number, seg: number, x = 0, y = 0, z = 0) => new THREE.ConeGeometry(r, h, seg).translate(x, y + h / 2, z);
-const ico = (r: number, detail = 0) => new THREE.IcosahedronGeometry(r, detail);
+// Árvore leve de longe (treeGeometry com `farTree`): mesmas medidas e partes, com bem menos faces.
+// Copas viram octaedros (tetraedros as pequenas), o tronco vira um cartão de 2 triângulos e os cones, 3 lados sem fundo.
+let farTree = false;
+const cyl = (rt: number, rb: number, h: number, seg: number, x = 0, y = 0, z = 0) => (farTree ? new THREE.PlaneGeometry(rb * 2, h) : new THREE.CylinderGeometry(rt, rb, h, seg)).translate(x, y + h / 2, z);
+const cone = (r: number, h: number, seg: number, x = 0, y = 0, z = 0) => (farTree ? new THREE.ConeGeometry(r, h, 3, 1, true) : new THREE.ConeGeometry(r, h, seg)).translate(x, y + h / 2, z);
+const ico = (r: number, detail = 0) => (farTree ? (r < 0.08 ? new THREE.TetrahedronGeometry(r * 1.25, 0) : new THREE.OctahedronGeometry(r, 0)) : new THREE.IcosahedronGeometry(r, detail));
 const oct = (r: number) => new THREE.OctahedronGeometry(r, 0);
 
 function jitter(geo: THREE.BufferGeometry, amount: number, seed: number) {
@@ -354,13 +357,13 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
   switch (geo) {
     case 'conifer':
       return kit([
-        T(0.1),
+        ...(farTree ? [] : [T(0.1)]), // de longe o tronco some sob a primeira saia
         { geo: cone(0.11, 0.2, 7, 0, 0.09), color: '#fff', tint: 1, grad: [0.78, 1.0, 0.09, 0.47] },
         { geo: cone(0.085, 0.17, 7, 0, 0.2), color: '#fff', tint: 1, grad: [0.85, 1.05, 0.09, 0.47] },
         { geo: cone(0.055, 0.14, 7, 0, 0.31), color: '#fff', tint: 1, grad: [0.9, 1.1, 0.09, 0.47] },
       ]);
     case 'round':
-      return kit([T(0.13), { geo: jitter(ico(0.1, 1), 0.018, 1).scale(1, 1.1, 1).translate(0, 0.21, 0), color: '#fff', tint: 1, grad: [0.8, 1.08, 0.1, 0.32] }]);
+      return kit([...(farTree ? [] : [T(0.13)]), { geo: jitter(ico(0.1, 1), 0.018, 1).scale(1, 1.1, 1).translate(0, 0.21, 0), color: '#fff', tint: 1, grad: [0.8, 1.08, 0.1, 0.32] }]);
     case 'blossom':
       return kit([
         T(0.14),
@@ -414,7 +417,7 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
     case 'cactus':
       return kit([
         { geo: cyl(0.022, 0.026, 0.26, 8), color: '#fff', tint: 1, grad: [0.85, 1.05, 0, 0.26] },
-        { geo: new THREE.SphereGeometry(0.022, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 0.26, 0), color: '#fff', tint: 1 },
+        { geo: new THREE.SphereGeometry(0.022, farTree ? 4 : 8, farTree ? 2 : 4, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 0.26, 0), color: '#fff', tint: 1 },
         { geo: cyl(0.013, 0.013, 0.05, 6).rotateZ(Math.PI / 2).translate(0.04, 0.12, 0), color: '#fff', tint: 1 },
         { geo: cyl(0.013, 0.014, 0.08, 6, 0.064, 0.12, 0), color: '#fff', tint: 1 },
         { geo: cyl(0.012, 0.012, 0.04, 6).rotateZ(Math.PI / 2).translate(-0.035, 0.08, 0), color: '#fff', tint: 1 },
@@ -2072,7 +2075,22 @@ export class Lib {
     U.sparkle.value.set(theme.sparkle);
     U.glow.value.set(theme.window);
 
-    for (const f of theme.forest) if (!this.geos.has(`tree:${f.geo}`)) set(`tree:${f.geo}`, FACETED.has(f.geo) ? treeGeometry(f.geo, theme.trunk) : softCanopy(treeGeometry(f.geo, theme.trunk)));
+    for (const g of this.farGeos.values()) g.dispose();
+    this.farGeos.clear();
+    for (const f of theme.forest) {
+      if (this.geos.has(`tree:${f.geo}`)) continue;
+      const build = (far: boolean) => {
+        farTree = far;
+        try {
+          const g = treeGeometry(f.geo, theme.trunk);
+          return FACETED.has(f.geo) ? g : softCanopy(g);
+        } finally {
+          farTree = false;
+        }
+      };
+      set(`tree:${f.geo}`, build(false));
+      this.farGeos.set(`tree:${f.geo}`, build(true));
+    }
     this.domeKeys.clear();
     theme.houses.forEach((k, i) => k.roof === 'dome' && this.domeKeys.add(`roof:${i}`));
     // A decoração sai sempre das casas do tema como ele é (a segunda era): a era só troca a
@@ -2105,6 +2123,9 @@ export class Lib {
     set('reed', kit(tuft(5, 0.07, 0.004, 0.012, 0.8, 0.01, 29).map((geo) => ({ geo, color: '#4f7a3a', grad: [0.6, 1.1, 0, 0.07] as [number, number, number, number] }))));
     set('bush', softCanopy(kit([{ geo: jitter(ico(0.05, 0), 0.01, 5).translate(0, 0.03, 0), color: '#fff', tint: 1, grad: [0.8, 1.1, 0, 0.07] }])));
     set('rock', kit([{ geo: new THREE.DodecahedronGeometry(0.04, 0).scale(1, 0.6, 1).translate(0, 0.012, 0), color: '#fff', tint: 1 }]));
+    // Versões leves para o zoom aberto (octaedros), no mesmo molde das árvores.
+    this.farGeos.set('bush', softCanopy(kit([{ geo: jitter(new THREE.OctahedronGeometry(0.05, 0), 0.01, 5).translate(0, 0.03, 0), color: '#fff', tint: 1, grad: [0.8, 1.1, 0, 0.07] }])));
+    this.farGeos.set('rock', kit([{ geo: new THREE.OctahedronGeometry(0.042, 0).scale(1, 0.55, 1).translate(0, 0.012, 0), color: '#fff', tint: 1 }]));
     set('flower', kit([{ geo: oct(0.014).translate(0, 0.024, 0), color: '#fff', tint: 1 }, { geo: tri([-0.002, 0, 0], [0.002, 0, 0], [0, 0.02, 0]), color: '#4f7a3a' }]));
     set('lily', kit([{ geo: cyl(0.035, 0.035, 0.006, 7, 0, 0.011), color: '#fff', tint: 1 }, { geo: oct(0.008).translate(0.01, 0.02, 0.006), color: '#f7c6d8' }]));
     set('animal', animalGeometry(theme.animals.kind));
@@ -2142,6 +2163,12 @@ export class Lib {
   geo(key: string) {
     return this.geos.get(key) ?? null;
   }
+
+  /** Versão leve (árvore, arbusto, pedra) para o zoom aberto: mesma silhueta e cores, bem menos faces. */
+  farGeo(key: string) {
+    return this.farGeos.get(key) ?? null;
+  }
+  private farGeos = new Map<string, THREE.BufferGeometry>();
 
   material(key: string): THREE.Material {
     if (key === 'fire') return this.mats.fire;
