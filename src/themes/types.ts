@@ -226,7 +226,8 @@ export type WeatherKind =
   | 'petals' // pétalas ovais que giram e viram no ar
   | 'leaves' // folhas alongadas, caem rodopiando
   | 'dust' // poeira fina levada pelo vento, quase na horizontal
-  | 'pollen'; // penugem e pólen flutuando, brilham contra a luz
+  | 'pollen' // penugem e pólen flutuando, brilham contra a luz
+  | 'rain'; // riscos finos e rápidos: só o clima tocável usa (nenhum tema escolhe)
 
 export interface Theme {
   id: string;

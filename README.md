@@ -94,12 +94,15 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 | Girar câmera | `Q` / `E`, ou arrastar com o botão direito | torcer dois dedos |
 | Inclinar câmera (do horizonte à vista de mapa) | arrastar com o botão direito para cima ou para baixo, `PgUp` / `PgDn`; `Home` volta ao ângulo padrão | dois dedos para cima ou para baixo |
 | Amanhecer, dia, hora dourada, entardecer e noite | `L` ou botão ☀ | botão ☀ |
+| Clima passageiro: chuva, neve e sol por 30 s, um depois do outro | botão Clima, ou clique no céu (fora do chão) | botão Clima (no ⋯), ou toque no céu |
 | Som: música e efeitos, só efeitos, mudo | botão Som (cada clique alterna) | botão ♫ |
 | Minimapa | `M` abre ou fecha; clique leva a câmera | o mesmo; começa fechado |
 | Ajuda, nova partida, estatísticas | `H`, `N`, `F` | botões no topo |
 | Cor da casa e brasão | menu de temas, seção "Sua casa" | o mesmo |
 | Foto sem a interface | `P` (Espaço pausa, `L` muda a hora, Enter salva, Esc sai) | botão Câmera |
 | Gravar vídeo (até 2 minutos) | `V` começa e para | botão Câmera |
+
+**Clima tocável:** o botão Clima (☂, ❄, ☀) ou um clique no céu, acima do horizonte do tabuleiro, faz passar chuva, neve ou sol por 30 segundos, sempre o próximo da fila. A chuva e a neve fecham o céu e esfriam a luz; o sol limpa as nuvens e esquenta tudo. Entra e sai devagar, com som sintetizado (chiado de chuva, vento suave, acorde curto). É só enfeite: não entra no save e funciona em todos os temas.
 
 **Som de ambiente:** vem da paisagem em volta do foco da câmera: vento nos campos abertos (mais forte de longe), água correndo perto dos rios, pássaros nas florestas de dia, grilos e coruja à noite, sinos da vila e apito de trem. Colocar a peça também soa pelo terreno (respingo, folhas, trilho), e sítios, peças especiais e o desfazer têm som próprio. Fica ligado em "só efeitos".
 
