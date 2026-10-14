@@ -1814,6 +1814,28 @@ html[data-text='l'] .minimap {
 .mode-card strong {
   font-size: 16px;
 }
+.mode-card strong em {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  font: 600 11px/1.5 inherit;
+  font-style: normal;
+  color: var(--soft);
+}
+.more-modes {
+  display: grid;
+  gap: 8px;
+}
+.more-modes summary {
+  cursor: pointer;
+  padding: 4px 2px;
+  font-size: 13px;
+  color: var(--soft);
+}
+.more-modes[open] summary {
+  margin-bottom: 8px;
+}
 .mode-card span {
   font-size: 13px;
   color: var(--soft);

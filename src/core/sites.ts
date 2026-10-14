@@ -44,7 +44,8 @@ function onRing(d: number, k: number, j: number): [number, number] {
   return [aq * d + bq * j, ar * d + br * j];
 }
 
-export function generateSites(seed: number, count: number): Site[] {
+/** `scale` encolhe (ou estica) os anéis: com 0,5 os sítios ficam a metade da distância do Centro. */
+export function generateSites(seed: number, count: number, scale = 1): Site[] {
   if (count <= 0) return [];
   const rng = mulberry32((seed ^ 0x51735173) >>> 0);
   const kinds = KIND_CYCLE.slice(0, Math.min(count, KIND_CYCLE.length));
@@ -56,8 +57,10 @@ export function generateSites(seed: number, count: number): Site[] {
   }
   const out: Site[] = [];
   for (let i = 0; i < count; i++) {
-    const [lo, hi] = RINGS[Math.min(RINGS.length - 1, Math.floor(i / 2))];
-    for (let tries = 0; tries < 60; tries++) {
+    const [lo0, hi0] = RINGS[Math.min(RINGS.length - 1, Math.floor(i / 2))];
+    const lo = Math.max(2, Math.round(lo0 * scale));
+    const hi = Math.max(lo, Math.round(hi0 * scale));
+    for (let tries = 0; tries < 300; tries++) {
       const d = lo + Math.floor(rng() * (hi - lo + 1));
       const [q, r] = onRing(d, Math.floor(rng() * 6), Math.floor(rng() * d));
       if (out.some((s) => hexDistance(s.q, s.r, q, r) < 3)) continue;
