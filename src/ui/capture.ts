@@ -65,6 +65,9 @@ function photoPixels(size: PhotoSize) {
   return { w, h, ratio, pw: Math.floor(w * ratio), ph: Math.floor(h * ratio) };
 }
 
+/** A foto é desenhada 1,5× acima do tamanho final e reduzida (a supersamplagem do Cinema). */
+const PHOTO_SUPERSAMPLE = 1.5;
+
 export const RESOLUTIONS = { 1080: '1080p', 1440: '1440p', 2160: '4K' } as const;
 export const VIDEO_QUALITIES = ['cinema', 'ultra', 'high'] as const;
 const CAMERAS: Record<Smoothing, string> = { off: 'Como gravada', light: 'Suave', cinematic: 'Cinematográfica' };
@@ -213,36 +216,61 @@ export class Capture {
     this.renderPhotoBar();
   }
 
-  /** Desenha a cena parada no tamanho da foto, deixa o TRAA assentar e salva um PNG. */
-  async shootPhoto() {
-    if (this.stage !== 'photo' || this.shooting) return;
-    const { hud, world, canvas } = this.h;
-    this.shooting = true;
-    this.photoBar.classList.add('busy');
-    const p = photoPixels(this.photoSize);
-    hud.toast(`Salvando a foto em ${p.pw}×${p.ph}…`);
+  /**
+   * Desenha a cena parada no tamanho da foto, deixa o TRAA assentar e devolve o PNG. O Cinema só
+   * existe aqui e no vídeo: liga-se o nível para tirar e volta-se ao anterior, e a imagem é
+   * desenhada 1,5× acima do tamanho final e reduzida. Devolve também o que foi usado, para conferir.
+   */
+  async renderPhoto(size?: string) {
+    const { world, canvas } = this.h;
+    const p = photoPixels(size && Object.hasOwn(PHOTO_SIZES, size) ? (size as PhotoSize) : this.photoSize);
+    const prev = this.h.liveQuality();
+    const switched = prev !== 'cinema';
+    const t0 = performance.now();
     world.timeScale = 0;
-    world.setFixedSize({ w: p.w, h: p.h, ratio: p.ratio });
     try {
+      // O Cinema recompila os pipelines (e refaz a vegetação mais densa): fica fora do laço do jogo.
+      if (switched) world.setQuality('cinema');
+      world.setFixedSize({ w: p.w, h: p.h, ratio: p.ratio * PHOTO_SUPERSAMPLE });
       // Com o tamanho novo o antisserrilhado temporal recomeça: alguns quadros parados para ele assentar.
-      const out = document.createElement('canvas');
-      for (let i = 0; i < 24; i++) {
+      // A troca de nível compila shaders novos, então espera mais quadros.
+      for (let i = 0; i < (switched ? 48 : 24); i++) {
         await new Promise((r) => requestAnimationFrame(r));
         world.tick(1 / 60);
       }
       // A cópia sai no mesmo passo do último desenho, antes de o navegador trocar o quadro do canvas.
-      out.width = canvas.width;
-      out.height = canvas.height;
-      out.getContext('2d')!.drawImage(canvas, 0, 0);
+      const out = document.createElement('canvas');
+      out.width = p.pw;
+      out.height = p.ph;
+      const ctx = out.getContext('2d')!;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(canvas, 0, 0, p.pw, p.ph);
+      const drawn = { w: canvas.width, h: canvas.height };
       const blob = await new Promise<Blob | null>((r) => out.toBlob(r, 'image/png'));
       if (!blob) throw new Error('imagem vazia');
-      download(blob, `retalhos-${this.h.theme().id}-${stamp()}.png`);
-      hud.toast(`Foto salva · ${out.width}×${out.height}`, 'good');
+      return { blob, width: p.pw, height: p.ph, drawn, quality: 'cinema' as const, prev, ms: performance.now() - t0 };
+    } finally {
+      world.setFixedSize(null);
+      if (switched) world.setQuality(prev);
+    }
+  }
+
+  async shootPhoto() {
+    if (this.stage !== 'photo' || this.shooting) return;
+    const { hud, world } = this.h;
+    this.shooting = true;
+    this.photoBar.classList.add('busy');
+    const p = photoPixels(this.photoSize);
+    hud.toast(`Salvando a foto em ${p.pw}×${p.ph}…`);
+    try {
+      const r = await this.renderPhoto();
+      download(r.blob, `retalhos-${this.h.theme().id}-${stamp()}.png`);
+      hud.toast(`Foto salva · ${r.width}×${r.height} · Cinema`, 'good');
     } catch (err) {
       console.error(err);
       hud.toast('A foto não pôde ser salva (memória de vídeo?). Tente um tamanho menor.', 'bad');
     } finally {
-      world.setFixedSize(null);
       world.timeScale = this.photoFrozen ? 0 : 1;
       this.shooting = false;
       this.photoBar.classList.remove('busy');
