@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { Fn, convertToTexture, diffuseColor, dot, float, hash, length, max, mix, mrt, normalView, output, packNormalToRGB, pass, perspectiveDepthToViewZ, renderOutput, roughness, sample, screenCoordinate, screenUV, smoothstep, uniform, unpackRGBToNormal, vec2, vec3, vec4, velocity } from 'three/tsl';
+import { Fn, convertToTexture, diffuseColor, dot, float, hash, length, max, mix, mrt, normalView, output, packNormalToRGB, pass, perspectiveDepthToViewZ, renderOutput, rtt, roughness, sample, screenCoordinate, screenUV, smoothstep, uniform, unpackRGBToNormal, vec2, vec3, vec4, velocity } from 'three/tsl';
 import { bilateralBlur } from 'three/addons/tsl/display/BilateralBlurNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
@@ -33,6 +33,8 @@ interface Config {
   rays: boolean;
   bloom: boolean;
   dof: boolean;
+  /** Desfoque de miniatura (tilt-shift): meia resolução, só pela posição vertical na tela. Barato; no lugar do `dof` na Alta e no Ultra. */
+  tilt?: boolean;
   /** Traço de tinta (contorno); precisa ler a profundidade, então não combina com MSAA. */
   ink: boolean;
   aa: 'traa' | 'msaa' | 'fxaa';
@@ -44,8 +46,8 @@ interface Config {
 
 const CONFIG: Record<Exclude<Quality, 'low'>, Config> = {
   cinema: { ao: 0, gi: true, ssr: true, rays: true, bloom: true, dof: true, ink: true, aa: 'traa', film: true },
-  ultra: { ao: 0, gi: true, ssr: true, rays: true, bloom: true, dof: true, ink: true, aa: 'traa', finish: true },
-  high: { ao: 0.5, gi: false, ssr: false, rays: false, bloom: true, dof: true, ink: true, aa: 'traa', finish: true },
+  ultra: { ao: 0, gi: true, ssr: true, rays: true, bloom: true, dof: false, tilt: true, ink: true, aa: 'traa', finish: true },
+  high: { ao: 0.5, gi: false, ssr: false, rays: false, bloom: true, dof: false, tilt: true, ink: true, aa: 'traa', finish: true },
   medium: { ao: 0, gi: false, ssr: false, rays: false, bloom: false, dof: false, ink: false, aa: 'msaa' },
 };
 
@@ -56,6 +58,8 @@ export const P = {
   saturation: uniform(1.06),
   focus: uniform(10),
   focalLength: uniform(4),
+  /** Força do desfoque de miniatura (0 a 1): some de perto, cheia no zoom aberto. */
+  tilt: uniform(1),
   bokeh: uniform(1.2),
   bloomStrength: uniform(0.35),
   giStrength: uniform(0.8),
@@ -131,6 +135,46 @@ const aberration = (tex: any) =>
     const c = tex.sample(screenUV);
     return vec4(tex.sample(screenUV.add(d.mul(k))).r, c.g, tex.sample(screenUV.sub(d.mul(k))).b, c.a);
   })();
+
+/**
+ * Desfoque de miniatura (tilt-shift): a imagem nítida numa faixa horizontal no meio da tela e
+ * borrada para o alto e para o pé, o ar de maquete das referências. Custa uma cópia em meia
+ * resolução (média de 4 amostras) e uma passada de 16 amostras em espiral, só onde a máscara
+ * passa de zero: sem profundidade, então não há halo em volta das peças, e o centro sai idêntico.
+ * A câmera orbital mantém o foco no centro da tela, então a faixa nítida segue o foco sozinha.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const tiltShift = (full: any) => {
+  const texel = vec2(1).div(vec2(full.size(0)));
+  const half = rtt(
+    Fn(() => {
+      const o = texel.mul(0.5);
+      const s = full.sample(screenUV.add(vec2(o.x, o.y))).add(full.sample(screenUV.add(vec2(o.x.negate(), o.y)))).add(full.sample(screenUV.add(vec2(o.x, o.y.negate())))).add(full.sample(screenUV.sub(o)));
+      return s.mul(0.25);
+    })(),
+    null,
+    null,
+    { resolutionScale: 0.5 },
+  );
+  const out = Fn(() => {
+    const dy = screenUV.y.sub(0.5).abs();
+    // Faixa nítida de 22% da altura; daí para as bordas o desfoque cresce com a potência 1,5.
+    const m = dy.sub(0.11).div(0.39).clamp(0, 1).pow(1.5).mul(P.tilt);
+    const sharp = full.sample(screenUV);
+    // Raio em fração da altura da tela, com o x corrigido pela proporção.
+    const aspect = vec2(texel.x.div(texel.y), 1);
+    const radius = m.mul(0.016);
+    let acc: any = vec3(0); // eslint-disable-line @typescript-eslint/no-explicit-any
+    for (let i = 0; i < 16; i++) {
+      // Espiral de girassol: amostras bem espalhadas sem padrão de grade.
+      const a = i * 2.39996323;
+      const r = Math.sqrt((i + 0.5) / 16);
+      acc = acc.add(half.sample(screenUV.add(vec2(Math.cos(a) * r, Math.sin(a) * r).mul(aspect).mul(radius))).rgb);
+    }
+    return vec4(mix(sharp.rgb, acc.div(16), smoothstep(0, 0.1, m)), sharp.a);
+  })();
+  return { out, full, half };
+};
 
 /**
  * Grão de filme em sRGB, mais forte nos meios-tons (some no preto e no branco), com o tamanho
@@ -235,8 +279,8 @@ export interface Post {
   dispose(): void;
 }
 
-/** Efeitos que `?fx=` pode ligar um a um (depuração de custo): ao, gi, ssr, rays, traa, msaa, bloom, dof, ink, finish, film. */
-export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'dof', 'ink', 'finish', 'film'] as const;
+/** Efeitos que `?fx=` pode ligar um a um (depuração de custo): ao, gi, ssr, rays, traa, msaa, bloom, dof (só o Cinema), tilt (miniatura da Alta e do Ultra), ink, finish, film. */
+export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'dof', 'tilt', 'ink', 'finish', 'film'] as const;
 
 /**
  * `rayLight` é a luz cujo mapa de sombra os raios percorrem. Precisa ser uma DirectionalLight
@@ -245,7 +289,7 @@ export const FX_FLAGS = ['ao', 'gi', 'ssr', 'rays', 'traa', 'msaa', 'bloom', 'do
  */
 export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, q: Exclude<Quality, 'low'>, fx?: string[], rayLight?: THREE.DirectionalLight, clouds?: THREE.Scene): Post {
   const cfg: Config = fx
-    ? { ao: fx.includes('ao') ? CONFIG[q].ao || 0.5 : 0, gi: fx.includes('gi'), ssr: fx.includes('ssr'), rays: fx.includes('rays'), bloom: fx.includes('bloom'), dof: fx.includes('dof'), ink: fx.includes('ink') && !fx.includes('msaa'), aa: fx.includes('traa') ? 'traa' : fx.includes('msaa') ? 'msaa' : 'fxaa', finish: fx.includes('finish'), film: fx.includes('film') }
+    ? { ao: fx.includes('ao') ? CONFIG[q].ao || 0.5 : 0, gi: fx.includes('gi'), ssr: fx.includes('ssr'), rays: fx.includes('rays'), bloom: fx.includes('bloom'), dof: fx.includes('dof'), tilt: fx.includes('tilt'), ink: fx.includes('ink') && !fx.includes('msaa'), aa: fx.includes('traa') ? 'traa' : fx.includes('msaa') ? 'msaa' : 'fxaa', finish: fx.includes('finish'), film: fx.includes('film') }
     : { ...CONFIG[q] };
   if (!rayLight) cfg.rays = false;
   const disposables: { dispose(): void }[] = [];
@@ -396,6 +440,12 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
     const d = dof(node, scenePass.getViewZNode(), P.focus, P.focalLength, P.bokeh);
     disposables.push(d);
     node = d;
+  }
+
+  if (cfg.tilt) {
+    const t = tiltShift(convertToTexture(node));
+    disposables.push(t.full, t.half);
+    node = t.out;
   }
 
   // Grão e lente: o Cinema (`film`, junto com as amostras a mais) e também o Ultra e a Alta
