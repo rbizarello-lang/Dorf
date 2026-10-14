@@ -2,58 +2,37 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#8fcbe6" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='14' r='11' fill='%23ffb84a' opacity='.35'/%3E%3Crect x='11' y='8' width='10' height='12' rx='4' fill='%23ffe08a' stroke='%23d9941d' stroke-width='1.5'/%3E%3Crect x='15' y='20' width='2' height='9' fill='%234d3326'/%3E%3C/svg%3E" />
   <title>Ilha das Lanternas</title>
-  <style>
-    :root { --bg:#10151c; --panel:#1b232eee; --ink:#ecebe4; --dim:#9aa5b1; --gold:#f2c14e; --ok:#7bd88f; --line:#2d3946; }
-    * { box-sizing: border-box; }
-    html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:15px/1.35 system-ui, sans-serif; overflow:hidden; }
-    canvas { display:block; position:fixed; inset:0; width:100%; height:100%; }
-    .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 14px; backdrop-filter:blur(4px); }
-    #top { position:fixed; top:10px; left:10px; right:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start; pointer-events:none; }
-    #top > * { pointer-events:auto; }
-    #stats { display:flex; gap:16px; flex-wrap:wrap; align-items:center; }
-    #stats b { color:var(--gold); font-variant-numeric:tabular-nums; }
-    #goals { margin-left:auto; max-width:320px; }
-    #goals h3 { margin:0 0 4px; font-size:13px; color:var(--dim); font-weight:600; text-transform:uppercase; letter-spacing:.06em; }
-    #goals li { list-style:none; margin:3px 0; }
-    #goals ul { margin:0; padding:0; }
-    #goals .done { color:var(--ok); }
-    #goals small { color:var(--dim); }
-    #hand { position:fixed; left:10px; right:10px; bottom:10px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
-    .card { width:min(230px, 30vw); min-width:150px; text-align:left; color:var(--ink); background:var(--panel); border:2px solid var(--line); border-radius:12px; padding:10px 12px; cursor:pointer; font:inherit; }
-    .card:hover { border-color:#5b6b7c; }
-    .card.sel { border-color:var(--gold); box-shadow:0 0 14px #f2c14e55; }
-    .card.off { opacity:.5; }
-    .card h4 { margin:0 0 4px; font-size:17px; }
-    .card p { margin:0; font-size:12.5px; color:var(--dim); }
-    .card kbd { float:right; color:var(--dim); font-size:12px; }
-    button.act { background:#2a3644; color:var(--ink); border:1px solid #3d4d5f; border-radius:8px; padding:7px 12px; font:inherit; cursor:pointer; }
-    button.act:hover:not(:disabled) { border-color:var(--gold); }
-    button.act:disabled { opacity:.4; cursor:default; }
-    #info { position:fixed; left:10px; bottom:150px; font-size:13px; color:var(--dim); pointer-events:none; }
-    #toast { position:fixed; top:84px; left:50%; transform:translateX(-50%); padding:8px 16px; opacity:0; transition:opacity .4s; pointer-events:none; }
-    #toast.on { opacity:1; }
-    #end { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:#0008; }
-    #end.on { display:flex; }
-    #end .panel { text-align:center; padding:24px 34px; }
-    #end h2 { margin:0 0 8px; }
-  </style>
 </head>
 <body>
-  <div id="top">
-    <div id="stats" class="panel"></div>
-    <div id="controls" class="panel" style="display:flex;gap:8px;align-items:center">
-      <button id="discard" class="act" disabled>Descartar (+1 óleo)</button>
-      <button id="new" class="act">Nova ilha</button>
-      <span id="seed" style="color:var(--dim);font-size:12px"></span>
+  <main>
+    <div id="hud-top">
+      <section id="res" class="panel" aria-label="Recursos e moradores"></section>
+      <section id="clock" class="panel" aria-label="Turno e hora do dia">
+        <div class="t"><span id="turnTxt"></span><em id="dayTxt"></em></div>
+        <div style="position:relative"><div id="ruler"></div><div id="sun" aria-hidden="true"></div></div>
+        <div id="marks"></div>
+        <div class="need" id="need"></div>
+      </section>
+      <section id="goals" class="panel" aria-label="Metas"></section>
     </div>
-    <div id="goals" class="panel"></div>
-  </div>
-  <div id="toast" class="panel"></div>
-  <div id="info"></div>
-  <div id="hand"></div>
-  <div id="end"><div class="panel"><h2>Fim da temporada</h2><div id="endText"></div><p><button id="again" class="act">Nova ilha</button></p></div></div>
+    <div id="toast" class="panel" role="status" aria-live="polite"></div>
+    <div id="hand-wrap">
+      <div id="info" aria-live="polite"></div>
+      <div id="hand" role="group" aria-label="Cartas na mão">
+        <button id="discard" class="act" type="button" disabled>Descartar<small>+1 <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5c3.2 4.2 6 7.4 6 11a6 6 0 0 1-12 0c0-3.6 2.8-6.8 6-11z" fill="#e89a2e"/></svg> óleo</small></button>
+      </div>
+    </div>
+    <aside id="end" class="panel" aria-label="Fim da temporada">
+      <h2>Fim da temporada</h2>
+      <p class="lead">A ilha dorme com as luzes que você acendeu.</p>
+      <div id="endBody"></div>
+      <button id="again" class="act primary" type="button">Nova ilha</button>
+    </aside>
+  </main>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

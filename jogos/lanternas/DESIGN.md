@@ -76,4 +76,26 @@ Raio de proteção da noite 1; lanternas queimam óleo à noite; Casa 5 comida (
 - `src/core/hex.ts`, `rng.ts`, `map.ts` (ilha e achados), `game.ts` (regras, metas, `RULES`), `bots.ts` (aleatório, guloso, planejador).
 - Bots decidem numa cópia cega do jogo (`Game.clone(true)`): não espiam achados sob a névoa.
 - `tests/sim.ts`: 300 partidas por bot, critérios de aprovação, invariantes (determinismo, casa <= 4, recursos >= 0); grava o relatório em `docs/simulacao.md`.
-- `src/main.ts` + `index.html`: protótipo three.js com formas simples. `?seed=` (inteiro de até 9 dígitos, validado).
+- `src/main.ts` + `index.html`: entrada do jogo. `?seed=` (inteiro de até 9 dígitos, validado).
+
+## Visual e sensação (etapa 2)
+
+Tudo gerado em código (sem arquivos de arte), WebGLRenderer do three, ACESFilmic + sRGB, uma luz direcional com sombra de 2048.
+
+- **Paleta (6 cores nomeadas, em `src/render/palette.ts`):** Mar de vitrine (turquesa), Areia de maré, Prado de oliva, Telha de barro, Chama de lanterna (âmbar), Noite de breu (azul-marinho).
+- **Diorama:** ilha sobre pedestal de madeira torneada, mar raso recortado dentro de um tampo, fundo liso em degradê que acompanha a hora do dia. Câmera orbital limitada (arrastar gira e inclina, roda ou pinça aproxima, setas e +/- no teclado); nunca passa do chão.
+- **Peças de terra:** hexágonos chanfrados com relevo leve e alturas por terreno (praia < prado < bosque < rocha). A espuma da costa só aparece para a terra já revelada (não entrega o formato da ilha escondida).
+- **Kits (`src/render/kits.ts`, instanciados por `Pool`):** 3 árvores, casas de 3 cores de telhado com chaminé (cada morador acende uma das 4 janelas), campo em fileiras, oliveiral, cais com barquinho, lanterna, Farol velho com casa do faroleiro e feixe, rocha, ruína, pomar, nascente, cardume.
+- **Névoa:** nuvens baixas low-poly que se dissolvem em ~0,85 s quando a área é revelada; a ponta marcada é uma bandeira com estrela acima das nuvens.
+- **Hora do dia:** do turno 1 ao 30 a luz vai de manhã a entardecer. Nas noites (10, 20, 30) há um anoitecer curto: lanternas com halo e poça de luz no chão, janelas acesas, lanternas sem óleo apagadas e "−1 morador" sobre as casas que perderam gente. No fim da partida a ilha fica à noite, com a câmera girando devagar.
+- **Sensação:** peça cai com quique e poeira, "+N moradores" flutuando, hexágonos válidos realçados em âmbar, fantasma da peça sob o cursor (no toque: primeiro toque mostra, segundo confirma). `prefers-reduced-motion` desliga queda, poeira, vento, órbita e acelera a névoa.
+- **HUD (`src/ui/`):** cartas desenhadas com ícone em SVG inline, recursos e moradores em bloco, régua de dia e noite com aviso do óleo que a próxima noite pede, metas com barra e marca, tela de fim ao lado da ilha. Fontes do sistema, sem CDN: o build é um HTML único e funciona offline.
+- **Orçamento medido:** ~40 a 70 draw calls e ~150 a 170 mil triângulos com a ilha cheia (limite: 150 e 300 mil).
+
+### Ganchos de depuração
+
+`?seed=N`, `?auto=N` (o planejador joga N turnos ao abrir, sem animação), `?turn=N` (hora do dia fixa), `?night=1`, `?yaw= ?pitch= ?zoom=`, `?focus=vila`, `?select=0..2`, `?hover=valid`, `?reduzir=1`. `window.__stats` (draw calls e triângulos do último quadro), `window.__ready`, `window.__world`, `window.__game()`.
+
+### Capturas
+
+`npm run build && npm run shot` (ou `node scripts/shot.mjs [nome ...]`) sobe o `dist/` num servidor próprio, abre no Chromium com SwiftShader e grava `docs/screens/*.png` (1280x800; `celular` em 390x780), imprimindo os erros do console e o `__stats` de cada uma.
