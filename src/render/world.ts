@@ -73,8 +73,14 @@ const MAX_SIDE = 8192;
 const BOUNCE = 0.7;
 /** O Ultra não tem o SSGI (ver post.ts): o mapa do chão devolve um pouco mais de luz para compensar. */
 const BOUNCE_ULTRA = 1.3;
+/** À noite o Ultra sobe a luz rebatida até aqui (de dia fica em BOUNCE_ULTRA, para o dia não mudar). */
+const BOUNCE_ULTRA_NIGHT = 2.2;
 /** E as poças dos lampiões: o SSGI espalhava também a luz das janelas acesas. */
-const LAMPS_ULTRA = 7.5;
+const LAMPS_ULTRA = 9;
+/** Halo largo e morno das casas acesas, só no Ultra e só à noite. */
+const HALO_ULTRA = 2;
+/** Ambiente morno que o Ultra soma à noite (na luz rebatida do chão) no lugar do que o SSGI espalhava. */
+const WARM_ULTRA = new THREE.Color(0.45, 0.3, 0.15);
 /** Força das poças dos lampiões com a noite fechada. */
 const LAMPS = 5;
 
@@ -712,8 +718,12 @@ export class World {
     A.mist.value = s.mist;
     // Luz que o chão recebe (o sol pela altura dele e o céu), devolvida na cor do mapa do chão.
     const up = Math.max(0, s.sunDir.y / s.sunDir.length());
-    U.bounce.value.copy(s.sun).multiplyScalar(s.sunI * up).add(tmpColor.copy(s.hemiSky).multiplyScalar(s.hemiI)).multiplyScalar(this.quality === 'ultra' ? BOUNCE_ULTRA : BOUNCE);
-    U.lamps.value = THREE.MathUtils.smoothstep(s.night, 0.25, 0.9) * (this.quality === 'ultra' ? LAMPS_ULTRA : LAMPS);
+    const nightK = THREE.MathUtils.smoothstep(s.night, 0.25, 0.9);
+    const bounceK = this.quality === 'ultra' ? BOUNCE_ULTRA + (BOUNCE_ULTRA_NIGHT - BOUNCE_ULTRA) * nightK : BOUNCE;
+    U.bounce.value.copy(s.sun).multiplyScalar(s.sunI * up).add(tmpColor.copy(s.hemiSky).multiplyScalar(s.hemiI)).multiplyScalar(bounceK);
+    U.lamps.value = nightK * (this.quality === 'ultra' ? LAMPS_ULTRA : LAMPS);
+    U.halo.value = this.quality === 'ultra' ? nightK * HALO_ULTRA : 0;
+    if (this.quality === 'ultra') U.bounce.value.add(tmpColor.copy(WARM_ULTRA).multiplyScalar(nightK));
     // Nuvens: o topo ao sol um pouco mais claro que o fundo do tema, a base na cor do chão.
     CL.sun.value.copy(s.sun).multiplyScalar(s.sunI * 0.42);
     CL.sky.value.copy(s.hemiSky).multiplyScalar(s.hemiI * 0.35);
