@@ -45,6 +45,22 @@ const ZENITH_TINT = new THREE.Color(0.86, 0.93, 1.08);
 // Ultra e Cinema passam de 1: mais árvores, capim e plantações de perto (alvo: GPUs acima da atual).
 const DETAIL: Record<Quality, number> = { cinema: 1.6, ultra: 1.35, high: 1, medium: 0.65, low: 0.4 };
 /** Mapa de sombra por nível. No Ultra e no Cinema, cada uma das cascatas tem esse tamanho. */
+// Conta os draw calls dos passes de sombra (um por cascata redesenhada): é o que mostra, em
+// `stats().shadowDraws`, que num quadro parado o mapa guardado não é refeito.
+const shadowCount = { draws: 0, passes: 0, patched: false };
+function countShadowPasses(renderer: THREE.WebGPURenderer) {
+  if (shadowCount.patched) return;
+  shadowCount.patched = true;
+  const proto = THREE.ShadowNode.prototype as unknown as { renderShadow(frame: unknown): void };
+  const orig = proto.renderShadow;
+  proto.renderShadow = function (this: unknown, frame: unknown) {
+    const before = renderer.info.render.drawCalls;
+    orig.call(this, frame);
+    shadowCount.draws += renderer.info.render.drawCalls - before;
+    shadowCount.passes++;
+  };
+}
+
 const SHADOW_MAP: Record<Quality, number> = { cinema: 4096, ultra: 4096, high: 2048, medium: 1024, low: 1024 };
 /**
  * Cascatas da sombra do sol (0 = sombra única) e onde cada uma termina, em frações de maxFar.
@@ -477,6 +493,11 @@ export class World {
   private shadowAt = new THREE.Vector2(1e9, 0);
   private shadowDist = 0;
   private shadowClock = 0.25;
+  /** Sombra das cascatas guardada: direção do sol e pose da câmera do último redesenho. */
+  private csmSun = new THREE.Vector3();
+  private csmCamPos = new THREE.Vector3(1e9, 0, 0);
+  private csmCamQuat = new THREE.Quaternion();
+  private csmGated = false;
   /** Sombras em cascata do sol (Ultra e Cinema): nítidas perto da câmera, cobrindo até a névoa. */
   private csm: CSMShadowNode | null = null;
   /**
@@ -577,6 +598,7 @@ export class World {
     this.life.onTrade = (x, z) => this.burst(x, z, 'sparkle', 12, 0.12);
 
     this.sun.castShadow = true;
+    countShadowPasses(this.renderer);
     this.sun.shadow.autoUpdate = false;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.0006;
@@ -811,6 +833,7 @@ export class World {
       this.csm.dispose();
       this.csm = null;
     }
+    this.csmGated = false;
     if (splits.length) {
       // A cascata nasce como cópia da sombra do sol (filtro, viés), então vem depois do mapSize.
       this.sun.shadow.camera.near = 1;
@@ -1613,7 +1636,7 @@ export class World {
     for (const c of this.chunks.values()) tris += c.triangles();
     let inst = 0;
     for (const p of this.pools.values()) inst += p.count;
-    return { calls: info.render.drawCalls, triangles: info.render.triangles, chunks: this.chunks.size, pools: this.pools.size, instances: inst, groundTris: tris, life: this.life.counts(), backend: this.backend };
+    return { calls: info.render.drawCalls, triangles: info.render.triangles, chunks: this.chunks.size, pools: this.pools.size, instances: inst, groundTris: tris, life: this.life.counts(), backend: this.backend, shadowDraws: shadowCount.draws, shadowPasses: shadowCount.passes };
   }
 
   setPreview(def: TileDef | null, angle: number, stack: number) {
@@ -1668,6 +1691,7 @@ export class World {
   }
 
   tick(realDt: number) {
+    shadowCount.draws = 0;
     this.renderer.info.reset();
     // A câmera, o fantasma e a troca de hora seguem o tempo real; o resto, o tempo do mundo.
     const dt = realDt * this.timeScale;
@@ -1725,15 +1749,44 @@ export class World {
     const sd = this.sky.sunDir;
     const ext = Math.min(28, this.rig.dist * 0.95 + 2);
     const tx = this.rig.target.x, tz = this.rig.target.z;
-    const shadowDue = !!this.csm
-      || this.shadowClock >= 0.25
-      || Math.hypot(tx - this.shadowAt.x, tz - this.shadowAt.y) > 0.35
-      || Math.abs(this.rig.dist - this.shadowDist) > 0.4;
+    // Com cascatas (Ultra e Cinema) vale a mesma regra, com limiares mais finos: o mapa é de 4096
+    // sobre um recorte pequeno. O sol se mover mais de ~0,4°, a câmera andar ou girar, uma peça
+    // assentar (shadowClock forçado) ou passarem 0,25 s (árvores ao vento, barcos, moinhos) refaz.
+    const cam = this.camera;
+    let csmDue = false;
+    if (this.csm) {
+      const lit = this.csm.lights;
+      if (lit.length && !this.csmGated) {
+        // As cascatas nascem como cópia da sombra do sol (autoUpdate ligado) e desenham no
+        // primeiro quadro; depois disso só quando pedimos.
+        this.csmGated = true;
+        csmDue = true;
+      }
+      if (this.csmGated) {
+        // O mapa próprio do sol não é lido com cascatas: não há motivo para redesenhá-lo.
+        this.sun.shadow.autoUpdate = false;
+        for (const l of lit) l.shadow!.autoUpdate = false;
+      }
+      csmDue ||= this.shadowClock >= 0.25
+        || sd.dot(this.csmSun) < 0.99998
+        || cam.position.distanceToSquared(this.csmCamPos) > 0.0225
+        || cam.quaternion.angleTo(this.csmCamQuat) > 0.006;
+    }
+    const shadowDue = this.csm ? csmDue
+      : this.shadowClock >= 0.25
+        || Math.hypot(tx - this.shadowAt.x, tz - this.shadowAt.y) > 0.35
+        || Math.abs(this.rig.dist - this.shadowDist) > 0.4;
     if (shadowDue) {
       this.shadowAt.set(tx, tz);
       this.shadowDist = this.rig.dist;
       this.shadowClock = 0;
       if (!this.csm) this.sun.shadow.needsUpdate = true;
+      else {
+        for (const l of this.csm.lights) l.shadow!.needsUpdate = true;
+        this.csmSun.copy(sd);
+        this.csmCamPos.copy(cam.position);
+        this.csmCamQuat.copy(cam.quaternion);
+      }
       // Sem cascatas, o centro da sombra anda de texel em texel no plano da luz: as bordas não
       // tremem quando a câmera desliza (as cascatas do Ultra já se prendem à grade sozinhas).
       const t = this.csm ? this.rig.target : snapToTexel(this.rig.target, sd, (2 * ext) / this.sun.shadow.mapSize.x, tmpSnap);
@@ -1748,6 +1801,9 @@ export class World {
         }
       }
       if (this.rayLight.parent) {
+        // O mapa dos raios também fica guardado: o redesenho acompanha o do sol.
+        this.rayLight.shadow.autoUpdate = false;
+        this.rayLight.shadow.needsUpdate = true;
         this.rayLight.target.position.copy(t);
         this.rayLight.position.copy(this.sun.position);
         const rc = this.rayLight.shadow.camera;
@@ -1759,15 +1815,15 @@ export class World {
           rc.updateProjectionMatrix();
         }
       }
-      const cam = this.sun.shadow.camera;
-      if (!this.csm && cam.right !== ext) {
-        cam.left = -ext;
-        cam.right = ext;
-        cam.top = ext;
-        cam.bottom = -ext;
-        cam.near = 1;
-        cam.far = 60;
-        cam.updateProjectionMatrix();
+      const scam = this.sun.shadow.camera;
+      if (!this.csm && scam.right !== ext) {
+        scam.left = -ext;
+        scam.right = ext;
+        scam.top = ext;
+        scam.bottom = -ext;
+        scam.near = 1;
+        scam.far = 60;
+        scam.updateProjectionMatrix();
       }
     }
     if (this.rayLight.parent) {
