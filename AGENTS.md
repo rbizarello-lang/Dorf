@@ -95,7 +95,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?specials=all` / `window.__special(i?, zoom?)` | põe as peças especiais na partida sem liberá-las; centraliza na i-ésima colocada e devolve qual |
 | `window.__wonder(etapa?, zoom?)` | centraliza no canteiro da maravilha; com `etapa` (0 a 6), mostra a obra nessa etapa |
 | `?seed=` `?theme=` `?time=` `?quality=` `?zoom=` `?yaw=` `?pitch=` | ver o `README.md` |
-| `window.__stats` | estatísticas do último quadro |
+| `window.__stats` | estatísticas do último quadro; `shadowDraws` = draw calls dos passes de sombra nesse quadro (0 com a sombra guardada) e `shadowPasses` = passes acumulados |
 | `window.__pools()` | relatório dos InstancedMesh |
 | `window.__ghostBest()` | põe o fantasma na melhor jogada |
 | `window.__ghostSynergy(colocar?)` | põe o fantasma numa jogada com interação e devolve quantas; com `true`, coloca a peça (obra com andaime) |
@@ -221,6 +221,7 @@ Números de 2026-10-02, depois do traço, do pincel, dos aldeões, dos estandart
 
 - **Regra prática:** uma mudança visual não deve subir triângulos ou draw calls em mais de ~10% sem justificativa escrita no commit.
 - **Qualidade:** Cinema (placas de topo, fotos e vídeos: desenha 1,5× acima da tela e reduz, SSGI e reflexos com mais amostras, 4 cascatas de sombra, 60% mais vegetação, grão de filme e aberração de lente), Ultra (pensado para GPUs acima da RX 580: sombras em 3 cascatas de 4096, luz indireta SSGI, reflexos na água em meia resolução, raios de luz no entardecer, TRAA, bloom, profundidade de campo, o mesmo grão e a mesma lente, DPR até 2 e 35% mais vegetação), Alta (GTAO em meia resolução, sombra única de 2048, bloom, profundidade de campo, TRAA, o mesmo grão e a mesma lente), Média (MSAA, sem pós pesado) e Baixa (sem pós e sem sombras). Cada nível tem um teto de pixels desenhados (Cinema 4K × 2,25, Ultra 4K, Alta 1440p, Média e Baixa 1080p; `PIXELS` em `world.ts`): numa tela 4K, descer de nível também reduz a resolução interna. A densidade de decoração é multiplicada por 1,6 (cinema), 1,35 (ultra), 1 (alta), 0,65 (média) ou 0,4 (baixa).
+- **Sombra guardada:** com ou sem cascatas, o mapa de sombra (e o dos raios) só é refeito quando o sol anda ~0,4°, a câmera anda ~0,15 ou gira ~0,35°, uma peça assenta ou passam 0,25 s (árvores ao vento, barcos e moinhos ficam com a sombra a 4 Hz). Num quadro parado `shadowDraws` é 0; ao redesenhar, é o das cascatas.
 - **Modo automático:** começa pelo nome da placa de vídeo (`gpuTier.ts`: Alta na RX 580, Ultra da RTX 3060 e da RX 6600 para cima, Média no Iris Xe e nos celulares); sem um nome conhecido, começa em Ultra no computador e em Média nas telas de toque. Nunca escolhe o Cinema. Se o quadro passar de ~26 ms, primeiro baixa a resolução interna em degraus de 10% até 60% (`dynres.ts`) e só no último degrau desce de nível.
 - **Ainda não foi medido:** o FPS numa GPU de verdade.
 
