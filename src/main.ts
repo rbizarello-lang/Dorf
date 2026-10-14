@@ -107,7 +107,7 @@ const world = await createWorld();
 hud.preview.appendChild(world.preview.canvas);
 
 // Minimapa (proposta 16): o clique leva a câmera; M abre e fecha.
-const minimap = new Minimap(document.getElementById('minimap')!, store, (x, z) => world.rig.goal.set(x, 0, z));
+const minimap = new Minimap(document.getElementById('minimap')!, store, (x, z) => world.rig.goal.set(x, 0, z), store.get('minimal') !== '0');
 
 // Cor da casa e brasão (proposta 15): a cor troca o destaque do tema no HUD e no mundo.
 let house = validHouse(store.get('house'));
@@ -124,6 +124,8 @@ const a11yCalm = store.get('a11y-calm');
 const a11y = {
   text: a11yText === 's' || a11yText === 'l' ? a11yText : 'm',
   safe: store.get('a11y-safe') === '1',
+  /** Interface mínima: ligada por padrão; só o valor '0' guardado a desliga. */
+  minimal: store.get('minimal') !== '0',
   calm: a11yCalm === '1' || (a11yCalm !== '0' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)),
 };
 
@@ -136,6 +138,7 @@ function applyA11y() {
   if (a11y.text === 'm') delete document.documentElement.dataset.text;
   else document.documentElement.dataset.text = a11y.text;
   document.documentElement.classList.toggle('calm', a11y.calm);
+  document.documentElement.classList.toggle('min-ui', a11y.minimal);
   world.reducedMotion = a11y.calm;
   world.rig.snap = a11y.calm;
 }
@@ -151,6 +154,9 @@ function buzz(ms: number) {
   }
 }
 
+/** A faixa de dicas do rodapé some depois de tantas jogadas (na interface mínima, logo na primeira). */
+const hintMoves = () => (a11y.minimal ? 1 : 6);
+
 function showA11y() {
   hud.showModal(`<h2 id="modal-title">Acessibilidade</h2>
     <form class="a11y">
@@ -164,6 +170,8 @@ function showA11y() {
       <p>As bordas passam a amarelo, verde-azulado, laranja, roxo, azul e cinza, no chão e nos ícones.</p>
       <label><input type="checkbox" name="calm"${a11y.calm ? ' checked' : ''}> Menos movimento</label>
       <p>A onda dourada, os voos da câmera, o bando de pássaros e o quique da peça param. O vento e a água continuam.</p>
+      <label><input type="checkbox" name="minimal"${a11y.minimal ? ' checked' : ''}> Interface mínima</label>
+      <p>Esconde o brasão do placar e começa com o minimapa fechado. O Almanaque fica na tecla <kbd>I</kbd> (e no menu ⋯), o brasão no menu de temas, e o minimapa na tecla <kbd>M</kbd>.</p>
       <button type="button" class="secondary">Fechar</button>
     </form>`);
   const form = hud.modalBody.querySelector('form')!;
@@ -175,6 +183,8 @@ function showA11y() {
     store.set('a11y-text', a11y.text);
     store.set('a11y-safe', a11y.safe ? '1' : '0');
     store.set('a11y-calm', a11y.calm ? '1' : '0');
+    a11y.minimal = (form.querySelector('input[name="minimal"]') as HTMLInputElement).checked;
+    store.set('minimal', a11y.minimal ? '1' : '0');
     applyA11y();
     const s = shownTheme();
     world.setTheme(s, game.board);
@@ -287,7 +297,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   loadBest();
   bestAtStart = best;
   recordCheered = false;
-  hud.hint.style.opacity = moves.length >= 6 ? '0' : '';
+  hud.hint.style.opacity = moves.length >= hintMoves() ? '0' : '';
   world.dropGhost();
   world.setTheme(shownTheme(), game.board);
   world.setMonuments(progress.monuments);
@@ -462,6 +472,10 @@ function rotate(dir: 1 | -1) {
   updateGhost();
 }
 
+/** Estandarte de missão: zoom mais fechado que isto e peça a até REACH do centro da câmera. */
+const QUEST_FLAG_DIST = 14;
+const QUEST_FLAG_REACH = 9;
+
 function screenOf(q: number, r: number, y = 0.4) {
   const { x, z } = hexToWorld(q, r);
   return world.project(x, y, z);
@@ -528,7 +542,7 @@ function place(q: number, r: number) {
     world.flushBirds(w.x, w.z);
     hud.toast(`Novo recorde! Passou de ${bestAtStart.toLocaleString('pt-BR')} pontos.`, 'good');
   }
-  if (moves.length >= 6) hud.hint.style.opacity = '0';
+  if (moves.length >= hintMoves()) hud.hint.style.opacity = '0';
   refreshHud();
   hud.say(`${res.points > 0 ? `Mais ${res.points} pontos. ` : ''}Total ${game.board.score.toLocaleString('pt-BR')}. ${game.rules.infinite ? '' : `${game.stack} peças na pilha.`}`);
   persist();
@@ -818,6 +832,7 @@ function showHelp(tab = 'basico') {
         <li>Toque: toque num espaço para ver a peça, toque de novo (ou ✓) para colocar. No celular o topo fica com o tema, o desfazer e o menu ⋯, e as missões cabem num botão.</li>
         <li>O botão Aa (no ⋯, no celular) abre o tamanho do texto, as cores para daltônicos e o menos movimento.</li>
         <li>O botão de som alterna entre música e efeitos, só efeitos e mudo.</li>
+        <li><kbd>I</kbd> abre o Almanaque. A "Interface mínima" (Acessibilidade, Aa) esconde o brasão do placar e começa com o minimapa fechado.</li>
         <li><kbd>M</kbd> abre ou fecha o minimapa. Um clique ou toque nele leva a câmera até ali. No celular ele começa fechado.</li>
         <li>O botão Câmera tira fotos sem a interface (<kbd>P</kbd>) e grava vídeos de até 2 minutos (<kbd>V</kbd>), salvos em MP4 de até 4K.</li>
       </ul>`,
@@ -1120,8 +1135,14 @@ const input = bindInput({
   requestNewGame,
   undo,
   toggleMap: () => minimap.toggle(),
+  showAlmanac: () => showHelp('almanaque'),
   choose: (pick) => !!hud.modalBody.querySelector('.blessings') && chooseBlessing(pick),
 });
+
+hud.onQuestGoto = (q, r) => {
+  const w = hexToWorld(q, r);
+  world.rig.goal.set(w.x, 0, w.z);
+};
 
 document.getElementById('rot-left')!.addEventListener('click', () => {
   sfx.unlock();
@@ -1218,11 +1239,13 @@ document.getElementById('btn-more')!.addEventListener('click', () => {
       { id: 'camera', label: 'Foto e vídeo' },
       { id: 'sound', label: 'Som', note: soundBtn.querySelector('.long')!.textContent ?? '' },
       { id: 'help', label: 'Como jogar' },
+      { id: 'almanac', label: 'Almanaque' },
       { id: 'new', label: 'Nova partida' },
       { id: 'a11y', label: 'Acessibilidade' },
     ],
     (id) => {
       if (id === 'a11y') showA11y();
+      else if (id === 'almanac') showHelp('almanaque');
       else document.getElementById(`btn-${id}`)?.click();
     },
   );
@@ -1255,6 +1278,7 @@ function autoPlace(n: number, infinite: boolean) {
     noteTurn(res);
     while (game.discardIfStuck());
   }
+  if (moves.length >= hintMoves()) hud.hint.style.opacity = '0';
   const logic = performance.now() - t0;
   const t1 = performance.now();
   world.placeInstant(placed, game.board);
@@ -1380,7 +1404,10 @@ function step(now: number) {
     const s = screenOf(q.anchor.q, q.anchor.r, 0.55);
     // O estandarte não tapa a jogada: apaga quando o fantasma passa na peça dele ou numa vizinha.
     const dim = !!hover && hexDistance(hover.q, hover.r, q.anchor.q, q.anchor.r) <= 1;
-    markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: questMarker(q), color: q.kind === 'perfect' ? theme.ui.accent : shownTheme().terrainColors[q.terrain], dim });
+    // Só aparece com a câmera perto (zoom fechado e peça perto do centro) ou com a lista de missões aberta.
+    const w = hexToWorld(q.anchor.q, q.anchor.r);
+    const far = !hud.questsOpen && !(world.rig.dist <= QUEST_FLAG_DIST && Math.hypot(w.x - world.rig.target.x, w.z - world.rig.target.z) <= QUEST_FLAG_REACH);
+    markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: questMarker(q), color: q.kind === 'perfect' ? theme.ui.accent : shownTheme().terrainColors[q.terrain], dim, far });
   }
   // Maravilha em obra: etiqueta com a etapa sobre o canteiro.
   const wd = game.board.wonder;
