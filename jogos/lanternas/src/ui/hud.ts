@@ -95,7 +95,9 @@ export class Hud {
       return `<li class="${done ? 'done' : ''}" title="${goalLabel(id)}"><span class="box">${ICON.check}</span><span class="nm">${GOAL_TITLES[id]}</span><span class="nu">${nu}</span><span class="bar"><i style="width:${prog}%"></i></span></li>`;
     }).join('') + '</ul>';
     this.renderHand(g, selected);
-    ($('discard') as HTMLButtonElement).disabled = selected < 0 || g.over;
+    const disc = $('discard') as HTMLButtonElement;
+    disc.disabled = selected < 0 || g.over;
+    disc.style.display = g.over ? 'none' : ''; // fim da partida: nada a descartar
   }
 
   private renderHand(g: Game, selected: number): void {
