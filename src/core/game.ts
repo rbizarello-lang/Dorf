@@ -143,6 +143,7 @@ export class Game {
     // Uma jogada pode abrir mais de uma era; cada uma traz a sua escolha. Cartas já escolhidas
     // ou ainda na mesa não voltam.
     if (this.rules.blessings) for (let e = era + 1; e <= this.board.era; e++) this.offers.push(blessingOffer(this.seed, e, [...this.board.blessings, ...this.offers.flat()]));
+    if (this.rules.fixedStack) res.tilesGained = 0;
     if (!this.rules.infinite) this.stack += res.tilesGained - 1;
     // Exploradores: achou o último sítio, a partida acaba e cada peça que sobrou vale pontos.
     if (this.rules.endOnSites && this.board.sites.length && this.board.sitesLeft() === 0) {
