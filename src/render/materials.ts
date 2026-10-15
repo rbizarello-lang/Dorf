@@ -458,7 +458,12 @@ export function makeGroundMaterial() {
   const village = vec3(blot.mul(0.2).add(0.88)).mul(mix(vec3(1), vec3(1.16, 1.12, 1.06), pebble.mul(0.6)));
   const rest = float(1).sub(sp.x.add(sp.y).add(sp.z).add(sp.w)).max(0);
   const plain = vec3(texture(noiseTex, p.div(3.5)).g.mul(0.2).add(0.9));
-  const detail = grass.mul(sp.x).add(forest.mul(sp.y)).add(field.mul(sp.z)).add(village.mul(sp.w)).add(plain.mul(rest));
+  // Endurece os pesos com ruído para a fronteira entre terrenos virar lóbulos: o pincel da
+  // plantação e a terra da vila invadem o vizinho aos pedaços, e a soma é preservada.
+  const wn = texture(noiseTex, p.div(1.7).add(vec2(0.13, 0.41))).g.sub(0.5).mul(0.45);
+  const hard = smoothstep(float(0.2), float(0.8), sp.add(wn));
+  const sw = hard.mul(sp.x.add(sp.y).add(sp.z).add(sp.w).div(hard.x.add(hard.y).add(hard.z).add(hard.w).max(0.001)));
+  const detail = grass.mul(sw.x).add(forest.mul(sw.y)).add(field.mul(sw.z)).add(village.mul(sw.w)).add(plain.mul(rest));
   // Topo × lateral (normal plana de cada triângulo).
   const top = smoothstep(0.55, 0.9, normalWorld.y);
   const sideP = positionWorld.x.add(positionWorld.z);
