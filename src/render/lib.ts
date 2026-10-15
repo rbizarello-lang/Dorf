@@ -169,7 +169,16 @@ const BODY: Record<BodyStyle, { w: number; h: number; d: number }> = {
   cube: { w: 0.12, h: 0.1, d: 0.12 },
   tall: { w: 0.1, h: 0.2, d: 0.13 },
   round: { w: 0.14, h: 0.09, d: 0.14 },
+  // Só o corpo principal; o anexo (ANNEX) fica ao lado, no +x.
+  annex: { w: 0.12, h: 0.1, d: 0.12 },
 };
+
+/** Anexo baixo da casa `annex`: o corpo principal desliza `ox` para trás e o anexo encosta na lateral. */
+const ANNEX = { ox: -0.032, cx: 0.062, w: 0.076, h: 0.058, d: 0.088, rh: 0.04 };
+
+function shift(parts: Part[], dx: number) {
+  for (const p of parts) p.geo.translate(dx, 0, 0);
+}
 
 const DOOR = '#4a3326';
 
@@ -233,6 +242,16 @@ function wallGeometry(k: HouseKind, win: Col, plinth: Col) {
   // Soco (base) escuro, na cor da lateral das peças: dá peso à casa e a separa do chão claro
   // (legibilidade de longe, sobretudo onde parede clara encontra chão claro).
   if (k.body !== 'round') parts.push({ geo: box(w + 0.004, 0.022, d + 0.004), color: plinth });
+  if (k.body === 'annex') {
+    shift(parts, ANNEX.ox);
+    const a = ANNEX;
+    parts.push(
+      { geo: box(a.w, a.h, a.d, a.cx, 0, 0), color: k.tone ?? '#ffffff', tint: 1 },
+      { geo: box(a.w + 0.004, 0.018, a.d + 0.004, a.cx, 0, 0), color: plinth },
+      { geo: new THREE.PlaneGeometry(0.018, 0.02).translate(a.cx, a.h * 0.45 + 0.01, a.d / 2 + 0.001), color: win, glow: k.bright ?? 1 },
+      { geo: new THREE.PlaneGeometry(0.018, 0.02).rotateY(Math.PI / 2).translate(a.cx + a.w / 2 + 0.001, a.h * 0.45 + 0.01, 0), color: win, glow: k.bright ?? 1 },
+    );
+  }
   const g = kit(parts);
   return k.scale ? g.scale(k.scale, k.scale, k.scale) : g;
 }
@@ -318,26 +337,47 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
     }
     default: {
       // gable / turf: prisma com cumeeira ao longo de x.
-      const rh = style === 'turf' ? 0.06 : 0.07;
+      // steep: águas bem inclinadas e beiral curto; cross: um segundo telhado cruza o primeiro.
+      const rh = style === 'turf' ? 0.06 : style === 'steep' ? 0.125 : 0.07;
+      const oe = style === 'steep' ? 0.008 : o;
       const g = new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2);
-      g.scale(w + o * 2, rh / 1.5, (d + o * 2) / 1.732).translate(0, h + rh / 3, 0);
+      g.scale(w + oe * 2, rh / 1.5, (d + oe * 2) / 1.732).translate(0, h + rh / 3, 0);
       parts.push({ geo: g, color: '#fff', tint: 1 });
       if (style === 'turf') parts.push({ geo: box(w + o * 2 + 0.004, 0.01, 0.01, 0, h + rh - 0.004), color: '#6a8a3a' });
       // Beiral escuro: o telhado se destaca do chão mesmo quando tem a cor dele (neve).
-      for (const z of [d / 2 + o, -d / 2 - o]) parts.push({ geo: box(w + o * 2 + 0.003, 0.007, 0.008, 0, h - 0.005, z), color: '#3e3530' });
+      for (const z of [d / 2 + oe, -d / 2 - oe]) parts.push({ geo: box(w + oe * 2 + 0.003, 0.007, 0.008, 0, h - 0.005, z), color: '#3e3530' });
       top = h + rh;
+      if (style === 'cross') {
+        const rc = rh * 1.35;
+        const c = new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2);
+        c.scale(d + o * 2 + 0.034, rc / 1.5, (w * 0.56) / 1.732).translate(0, h + rc / 3, 0).rotateY(Math.PI / 2);
+        parts.push({ geo: c, color: '#fff', tint: 1 });
+        top = h + rc;
+      }
+    }
+  }
+  // Anexo: o telhado principal desliza com o corpo e um telhado baixo cobre o volume ao lado.
+  const ox = body === 'annex' ? ANNEX.ox : 0;
+  if (ox) {
+    shift(parts, ox);
+    const a = ANNEX;
+    if (style === 'flat') parts.push({ geo: box(a.w + 0.01, 0.012, a.d + 0.01, a.cx, a.h), color: '#fff', tint: 1 });
+    else {
+      const g = new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2);
+      g.scale(a.w + 0.012, a.rh / 1.5, (a.d + o * 1.4) / 1.732).translate(a.cx, a.h + a.rh / 3, 0);
+      parts.push({ geo: g, color: '#fff', tint: 1 });
     }
   }
   let chim: [number, number, number] | null = null;
   if (chimney && style !== 'dome' && !round) {
-    const cx = w * 0.26;
+    const cx = w * 0.26 + ox;
     const cy = style === 'flat' ? h + 0.02 : h + (top - h) * 0.45;
     parts.push({ geo: box(0.018, top - cy + 0.018, 0.018, cx, cy, -d * 0.12), color: '#7a6a60' });
     chim = [cx, top + 0.03, -d * 0.12];
   }
   if (pennant) {
     // Mastro no alto do telhado e flâmula de rabo de andorinha, parada (a casa é instância estática).
-    const px = 0, mh = 0.06;
+    const px = ox, mh = 0.06;
     parts.push({ geo: cyl(0.0022, 0.0022, mh, 4, px, top - 0.012), color: '#3a3028' });
     const pts = [[0, 0], [0.042, -0.004], [0.03, -0.012], [0, 0], [0.03, -0.012], [0.042, -0.02], [0, 0], [0.042, -0.02], [0, -0.024]].map(([x, y]) => new THREE.Vector3(x, y, 0));
     // As duas faces: a mesma lista na ordem inversa.

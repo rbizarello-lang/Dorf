@@ -1621,18 +1621,23 @@ export class World {
   }
 
   /** Depuração visual: todos os kits do tema lado a lado (?gallery). */
-  showGallery() {
-    const keys = [...this.lib.geos.keys()];
+  showGallery(only?: string) {
+    // `?gallery=casas` mostra só as casas (parede + telhado de cada tipo), maiores.
+    const keys = [...this.lib.geos.keys()].filter((k) => !k.startsWith('roof:') && (only !== 'casas' || k.startsWith('wall:')));
     const cols = Math.ceil(Math.sqrt(keys.length));
     const root = new THREE.Group();
     keys.forEach((k, i) => {
       const geo = this.lib.geo(k)!;
-      const mesh = new THREE.InstancedMesh(instGeometry(geo, 1), this.lib.material(k), 1);
+      // Parede e telhado da mesma casa (`wall:i` e `roof:i`) vão juntos, na posição da parede.
+      const roof = k.startsWith('wall:') ? this.lib.geo(`roof:${k.slice(5)}`) : null;
       const x = (i % cols) * 0.45, z = Math.floor(i / cols) * 0.45;
-      const s = k.startsWith('crop:') || k === 'grass' || k === 'flower' ? 2.2 : 1.4;
-      mesh.setMatrixAt(0, tmpM.makeScale(s, s, s).setPosition(x - (cols * 0.45) / 2, 0, z - (cols * 0.45) / 2));
-      mesh.castShadow = true;
-      root.add(mesh);
+      const s = k.startsWith('crop:') || k === 'grass' || k === 'flower' || only === 'casas' ? 2.2 : 1.4;
+      for (const [kk, gg] of roof ? ([[k, geo], [`roof:${k.slice(5)}`, roof]] as const) : ([[k, geo]] as const)) {
+        const mesh = new THREE.InstancedMesh(instGeometry(gg, 1), this.lib.material(kk), 1);
+        mesh.setMatrixAt(0, tmpM.makeScale(s, s, s).setPosition(x - (cols * 0.45) / 2, 0, z - (cols * 0.45) / 2));
+        mesh.castShadow = true;
+        root.add(mesh);
+      }
     });
     const floorMat = new THREE.MeshStandardNodeMaterial({ roughness: 0.9 });
     floorMat.colorNode = vec3(0.48, 0.58, 0.28);
@@ -1643,7 +1648,7 @@ export class World {
     this.staticRoot.visible = false;
     this.rig.goal.set(0, 0, 0);
     this.rig.target.set(0, 0, 0);
-    this.rig.dist = this.rig.goalDist = cols * 0.62;
+    this.rig.dist = this.rig.goalDist = cols * (only === 'casas' ? 1.0 : 0.62);
     return keys;
   }
 
