@@ -367,6 +367,16 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
       ]);
     case 'round':
       return kit([...(farTree ? [] : [T(0.13)]), { geo: jitter(ico(0.1, 0), 0.018, 1).scale(1, 1.1, 1).translate(0, 0.21, 0), color: '#fff', tint: 1, grad: [0.8, 1.08, 0.1, 0.32] }]);
+    case 'puff':
+      // Copa gorda: mais larga que alta, tronco curto. É a silhueta pesada da mata.
+      return kit([...(farTree ? [] : [T(0.09, 0.022)]), { geo: jitter(ico(0.098, 0), 0.018, 12).scale(1.28, 0.95, 1.28).translate(0, 0.18, 0), color: '#fff', tint: 1, grad: [0.78, 1.08, 0.08, 0.3] }]);
+    case 'spire':
+      // Abeto estreito: dois cones esguios, bem mais altos que largos (o conifer tem 3 saias largas).
+      return kit([
+        ...(farTree ? [] : [T(0.1, 0.016)]),
+        { geo: cone(0.06, 0.22, 5, 0, 0.08), color: '#fff', tint: 1, grad: [0.78, 1.0, 0.08, 0.5] },
+        { geo: cone(0.04, 0.2, 5, 0, 0.24), color: '#fff', tint: 1, grad: [0.88, 1.1, 0.08, 0.5] },
+      ]);
     case 'blossom':
       return kit([
         T(0.14),
@@ -483,6 +493,9 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
   }
 }
 
+/** Suavidade da copa (`softCanopy`): as formas esguias ficam menos lisas, para a quina da copa existir de longe. */
+const SOFT: Partial<Record<TreeGeo, number>> = { cypress: 0.45, spire: 0.5 };
+
 /** Formas com ponta, folha ou cristal: a quina é a forma, então ficam facetadas. */
 const FACETED: ReadonlySet<TreeGeo> = new Set<TreeGeo>(['crystal', 'cactus', 'palm', 'waxpalm', 'bamboo']);
 
@@ -491,7 +504,7 @@ const FACETED: ReadonlySet<TreeGeo> = new Set<TreeGeo>(['crystal', 'cactus', 'pa
  * tamanho dela), com um quarto da normal da face. A luz corre num gradiente, como a copa
  * pintada do Dorfromantik, em vez de acender faceta por faceta. O tronco continua plano.
  */
-function softCanopy(g: THREE.BufferGeometry): THREE.BufferGeometry {
+function softCanopy(g: THREE.BufferGeometry, soft = 0.75): THREE.BufferGeometry {
   const pos = g.attributes.position as THREE.BufferAttribute;
   const nrm = g.attributes.normal as THREE.BufferAttribute;
   const tint = g.attributes.tint as THREE.BufferAttribute;
@@ -508,7 +521,7 @@ function softCanopy(g: THREE.BufferGeometry): THREE.BufferGeometry {
     if (tint.getX(i) <= 0.5) continue;
     v.fromBufferAttribute(pos, i).sub(c).divide(ext).divide(ext).normalize();
     f.fromBufferAttribute(nrm, i);
-    v.multiplyScalar(0.75).addScaledVector(f, 0.25).normalize();
+    v.multiplyScalar(soft).addScaledVector(f, 1 - soft).normalize();
     nrm.setXYZ(i, v.x, v.y, v.z);
   }
   return g;
@@ -2087,7 +2100,7 @@ export class Lib {
         treeBuild = true;
         try {
           const g = treeGeometry(f.geo, theme.trunk);
-          return FACETED.has(f.geo) ? g : softCanopy(g);
+          return FACETED.has(f.geo) ? g : softCanopy(g, SOFT[f.geo]);
         } finally {
           farTree = false;
           treeBuild = false;

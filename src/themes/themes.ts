@@ -38,10 +38,12 @@ export const BASE_THEMES: Theme[] = [
     vehicleColors: ['#c8553a', '#3b2a24'],
     forest: [
       // Mata de valor baixo e frio (verde-azulado escuro e saturado) contra o prado claro; ~7% de acentos vivos.
-      { geo: 'conifer', weight: 0.38, colors: ['#1f5a48', '#26664d', '#1b4f41', '#2a6e50'] },
-      { geo: 'oak', weight: 0.3, colors: ['#2a6f4c', '#2f7a52', '#256448'] },
-      { geo: 'round', weight: 0.25, colors: ['#3b8a4e', '#4c9a50', '#33805a'] },
-      { geo: 'round', weight: 0.07, colors: ['#d95a3d', '#e0873a', '#8a86b8'] },
+      // Três silhuetas (pesos 0,5 / 0,25 / 0,25 em torno do acento): copa gorda, cipreste esguio e abeto de ponta.
+      { geo: 'puff', weight: 0.27, colors: ['#2a6f4c', '#2f7a52', '#256448'] },
+      { geo: 'puff', weight: 0.2, colors: ['#3b8a4e', '#4c9a50', '#33805a'] },
+      { geo: 'cypress', weight: 0.23, colors: ['#1f5a48', '#26664d', '#2a6e50'] },
+      { geo: 'spire', weight: 0.23, colors: ['#1f5a48', '#26664d', '#1b4f41', '#2a6e50'] },
+      { geo: 'puff', weight: 0.04, colors: ['#d95a3d', '#e0873a', '#8a86b8'] },
     ],
     trunk: '#6b4a32',
     treesPerSector: [5, 8],
@@ -111,10 +113,13 @@ export const BASE_THEMES: Theme[] = [
     vehicleColors: ['#6a4a34', '#c9a24a'],
     forest: [
       // Bosque de valor baixo contra o pólder claro; a bétula fica mais clara e os acentos são raros.
-      { geo: 'oak', weight: 0.42, colors: ['#245a4a', '#2d6a50', '#2a5f46'] },
-      { geo: 'round', weight: 0.3, colors: ['#2f7a52', '#3a8454', '#2b6e4e'] },
-      { geo: 'birch', weight: 0.21, colors: ['#5f8f52', '#6c9d5a'] },
-      { geo: 'round', weight: 0.07, colors: ['#c9803a', '#b8553a', '#8a86b8'] },
+      // Copa gorda no pólder, álamo esguio nas alamedas e abeto de ponta nas dunas; a bétula (clara) fica como caráter do tema.
+      { geo: 'puff', weight: 0.3, colors: ['#245a4a', '#2d6a50', '#2a5f46'] },
+      { geo: 'oak', weight: 0.2, colors: ['#2f7a52', '#3a8454', '#2b6e4e'] },
+      { geo: 'cypress', weight: 0.2, colors: ['#2d6a50', '#2a5f46'] },
+      { geo: 'spire', weight: 0.15, colors: ['#245a4a', '#1f5240'] },
+      { geo: 'birch', weight: 0.08, colors: ['#5f8f52', '#6c9d5a'] },
+      { geo: 'puff', weight: 0.04, colors: ['#c9803a', '#b8553a', '#8a86b8'] },
     ],
     trunk: '#5a4232',
     treesPerSector: [4, 7],
