@@ -166,7 +166,7 @@ button.act.primary { background: linear-gradient(180deg, #ffc454, var(--amber));
   #clock { order: 3; padding: 5px 10px; } #clock .need { display: none; } #ruler { margin: 6px 0 2px; } #marks { height: 14px; }
   #toast { top: 150px; }
   #hand-wrap { bottom: 8px; gap: 6px; } #info { font-size: 12.5px; padding: 4px 10px; min-height: 0; }
-  #info { align-self: flex-start; margin-left: 8px; max-width: calc(100vw - 132px); text-align: left; }
+  #info { align-self: flex-start; margin-left: 8px; max-width: calc(100vw - 188px); text-align: left; }
   #hand { gap: 6px; position: relative; padding: 0 8px; width: 100%; justify-content: center; }
   .card { width: calc((100vw - 16px - 12px) / 3); max-width: 150px; border-radius: 12px; }
   .card .art { height: 48px; } .card .art svg { width: 40px; height: 40px; } .card .key { display: none; }

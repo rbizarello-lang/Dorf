@@ -321,10 +321,15 @@ export const springStones = (): THREE.BufferGeometry => {
 };
 export const springWater = (): THREE.BufferGeometry => new Geo(1).cyl(0.34, 0.34, 0.05, 0x7fe9f2, 12, { y: 0.06, grad: [1, 1] }).build();
 
+/** Peixe do cardume (cabeça para +x): corpo prateado, cauda e nadadeira laranja para destacar do mar turquesa. */
 export const fish = (): THREE.BufferGeometry => new Geo(67)
-  .cone(0.035, 0.15, 0xeaf6ff, 5, { rz: -PI / 2, sy: 1 })
-  .cone(0.035, 0.07, 0xbfe6ff, 4, { rz: PI / 2, x: -0.1 })
+  .ico(0.085, 0xf6fcff, 0, { sx: 2.1, sy: 0.75, sz: 0.8, grad: [0.78, 1] })
+  .cone(0.07, 0.13, 0xff8f3f, 3, { rz: PI / 2, x: -0.2, sz: 0.25, sy: 1.1 })
+  .cone(0.045, 0.1, 0xff8f3f, 3, { y: 0.06, x: -0.02, sz: 0.25 })
   .build();
+
+/** Mancha escura sob o cardume, vista de cima: ajuda a achá-lo no mar. */
+export const schoolPatch = (): THREE.BufferGeometry => new Geo(3).cyl(0.95, 0.95, 0.012, 0x15607e, 14, { y: 0.03, grad: [1, 1] }).build();
 
 export const gull = (): THREE.BufferGeometry => {
   const g = new THREE.BufferGeometry();

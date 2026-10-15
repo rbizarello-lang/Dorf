@@ -46,7 +46,9 @@ const forcedTurn = intParam('turn', 1, 30);
 const wideScreen = (): boolean => innerWidth > 900;
 function newSeed(): number { return Math.floor(Math.random() * 1_000_000_000); }
 
-const CAM_DEFAULT = { yaw: -0.42, pol: 1.0, dist: 44 };
+// Celular em pé: câmera mais alta, para a ilha ocupar a largura e a altura úteis.
+const portrait = innerWidth / innerHeight < 0.8;
+const CAM_DEFAULT = { yaw: -0.42, pol: portrait ? 0.8 : 1.0, dist: 44 };
 
 function startGame(seed: number, auto = 0, first = false): void {
   clearTimeout(nightTimer);
@@ -286,10 +288,13 @@ addEventListener('keydown', (e) => {
 // A ilha fica centrada no espaço livre entre o topo e a mão de cartas.
 function fitView(): void {
   const top = document.getElementById('hud-top')!.getBoundingClientRect().height + 12;
-  const hand = document.getElementById('hand-wrap')!.getBoundingClientRect().height + 10;
+  // No fim, em tela estreita, o painel do resultado cobre o rodapé: a ilha sobe para o espaço livre acima dele.
+  const endPanel = document.getElementById('end')!;
+  const hand = (game.over && !wideScreen() ? endPanel.getBoundingClientRect().height : document.getElementById('hand-wrap')!.getBoundingClientRect().height) + 10;
   world.setViewShift((hand - top) / (2 * innerHeight));
 }
 new ResizeObserver(fitView).observe(document.getElementById('hand-wrap')!);
+new ResizeObserver(fitView).observe(document.getElementById('end')!);
 new ResizeObserver(fitView).observe(document.getElementById('hud-top')!);
 
 // ---------- partida inicial e ganchos de depuração ----------

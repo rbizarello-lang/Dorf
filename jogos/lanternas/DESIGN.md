@@ -98,6 +98,8 @@ Tudo gerado em código (sem arquivos de arte), WebGLRenderer do three, ACESFilmi
 - **Névoa:** nuvens baixas low-poly que se dissolvem em ~0,85 s quando a área é revelada; a ponta marcada é uma bandeira com estrela acima das nuvens.
 - **Hora do dia:** do turno 1 ao 30 a luz vai de manhã a entardecer. Nas noites (10, 20, 30) há um anoitecer curto: lanternas com halo e poça de luz no chão, janelas acesas, lanternas sem óleo apagadas e "−1 morador" sobre as casas que perderam gente. No fim da partida a ilha fica à noite, com a câmera girando devagar.
 - **Vento e chuva (`world.ts`, `materials.ts`):** `U.gustPos/gustDir/gustAmp` curvam copas e trigo perto da rajada (no vertex shader dos materiais com vento); `U.rain` agita o mar; a névoa soprada voa na direção da rajada em vez de subir; um véu azulado cobre a terra à vista sem luz; fiapos de vento e riscos de chuva são `InstancedMesh` próprios (+4 draw calls no pior caso).
+- **Cardume:** peixes maiores, prateados com nadadeira laranja, 14 por cardume, uma mancha escura sob o cardume (vista de cima), saltos com respingo de vez em quando e, à noite, um brilho azulado fraco.
+- **Celular em pé:** a câmera sobe (inclinação 0,8 em vez de 1,0) e o enquadramento fecha para a ilha ocupar a largura útil; no fim da partida a ilha sobe para o espaço livre acima do painel de resultado; o botão de vento vira um ícone no canto do painel de recursos.
 - **Sensação:** peça cai com quique e poeira, "+N moradores" flutuando, hexágonos válidos realçados em âmbar, fantasma da peça sob o cursor (no toque: primeiro toque mostra, segundo confirma). `prefers-reduced-motion` desliga queda, poeira, vento, órbita e acelera a névoa.
 - **HUD (`src/ui/`):** cartas desenhadas com ícone em SVG inline, recursos e moradores em bloco, régua de dia e noite com aviso do óleo que a próxima noite pede, metas com barra e marca, tela de fim ao lado da ilha. Fontes do sistema, sem CDN: o build é um HTML único e funciona offline.
 - **Orçamento medido:** 37 a 65 draw calls e 147 a 178 mil triângulos nas capturas, com a ilha cheia e as camadas do vento e da chuva (limite: 150 e 300 mil).
@@ -108,6 +110,6 @@ Tudo gerado em código (sem arquivos de arte), WebGLRenderer do three, ACESFilmi
 
 ### Capturas
 
-`npm run build && npm run shot` (ou `node scripts/shot.mjs [nome ...]`) sobe o `dist/` num servidor próprio, abre no Chromium com SwiftShader e grava `docs/screens/*.png` (1280x800; `celular` em 390x780), imprimindo os erros do console e o `__stats` de cada uma.
+`npm run build && npm run shot` (ou `node scripts/shot.mjs [nome ...]`) sobe o `dist/` num servidor próprio, abre no Chromium com SwiftShader e grava `docs/screens/*.png` (1280x800; `celular` e `celularfim` em 390x780), imprimindo os erros do console e o `__stats` de cada uma.
 
-Capturas do vento e da chuva: `vento` (rajada no meio, mundo congelado por `?blow=1`), `ventoveu` (3 s depois, com o véu sobre a terra à vista), `chuva` (`?rain=1`). O `shot.mjs` espera `window.__held` nelas, em vez da intro assentar.
+Capturas do vento, da chuva e do cardume: `vento` (rajada no meio, mundo congelado por `?blow=1`), `ventoveu` (3 s depois, com o véu sobre a terra à vista), `chuva` (`?rain=1`), `cardume` e `cardumenoite`. O `shot.mjs` espera `window.__held` nelas, em vez da intro assentar.

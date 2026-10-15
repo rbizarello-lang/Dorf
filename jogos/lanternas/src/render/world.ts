@@ -10,6 +10,7 @@ import { PAL } from './palette';
 import { Item, Pool } from './pool';
 
 const S3 = Math.sqrt(3);
+const SPLASH = new THREE.Color(1.5, 1.7, 1.8);
 const PI = Math.PI;
 export const cellX = (i: number): number => 1.5 * CELLS[i].q;
 export const cellZ = (i: number): number => S3 * (CELLS[i].r + CELLS[i].q / 2);
@@ -115,7 +116,7 @@ export class World {
   private hover!: THREE.Mesh;
   private ghost: THREE.Group | null = null; private ghostCell = -1;
   private ghostMat!: THREE.MeshStandardMaterial; private ghostBasic!: THREE.MeshBasicMaterial;
-  private fishData: Array<{ it: Item; cell: number; a: number; r: number; sp: number; ph: number }> = [];
+  private fishData: Array<{ it: Item; cell: number; a: number; r: number; sp: number; ph: number; per: number; hop: number }> = [];
   private gulls!: THREE.InstancedMesh;
   private dust!: THREE.InstancedMesh;
   private parts: Array<{ x: number; y: number; z: number; vx: number; vy: number; vz: number; t: number; life: number; s0: number; s1: number; g: number }> = [];
@@ -315,6 +316,7 @@ export class World {
     this.P.springWater = this.addPool(K.springWater(), litMat({ emissive: new THREE.Color(0x4cc8d6), emissiveIntensity: 0.5, roughness: 0.2 }), 8, { cast: false });
     this.P.fish = this.addPool(K.fish(), basicMat(), 40, { cast: false, receive: false });
     this.P.fish.always = true;
+    this.P.school = this.addPool(K.schoolPatch(), basicMat({ transparent: true, opacity: 0.34, depthWrite: false }), 4, { cast: false, receive: false });
     for (const p of this.pools) p.reduced = this.reduced;
     // parts do farol (sempre lá desde o início)
   }
@@ -471,7 +473,8 @@ export class World {
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     // Retrato: a ilha enche a largura útil (meia largura visível ~8,5 unidades); em tela larga, o enquadramento de sempre.
-    const aspectK = Math.min(1.6, Math.max(1, 1.45 / this.camera.aspect));
+    const asp = this.camera.aspect;
+    const aspectK = asp < 0.8 ? 1.3 + 0.3 * Math.max(0, (asp - 0.5) / 0.3) : Math.min(1.6, Math.max(1, 1.45 / asp));
     this.fit = aspectK;
     this.camera.setViewOffset(w, h, Math.round(w * this.viewX), Math.round(h * this.viewShift), w, h);
     this.camera.updateProjectionMatrix();
@@ -606,9 +609,10 @@ export class World {
       this.P.springStone.make(i, 'find', cx, y, cz, yaw, 1, t0, 'pop');
       this.P.springWater.make(i, 'find', cx, y, cz, yaw, 1, t0, 'pop');
     } else if (f === Find.Fish) {
-      for (let k = 0; k < 9; k++) {
-        const it = this.P.fish.make(i, 'find', cx, 0.0, cz, 0, 1, t0 + k * 0.05, 'pop');
-        this.fishData.push({ it, cell: i, a: hashN(i, 600 + k) * 6.28, r: 0.25 + hashN(i, 620 + k) * 0.45, sp: (0.5 + hashN(i, 640 + k) * 0.6) * (k % 2 ? 1 : -1), ph: hashN(i, 660 + k) * 6.28 });
+      this.P.school.make(i, 'find', cx, 0, cz, 0, 1, t0, 'pop');
+      for (let k = 0; k < 14; k++) {
+        const it = this.P.fish.make(i, 'find', cx, 0.0, cz, 0, 1, t0 + k * 0.04, 'pop');
+        this.fishData.push({ it, cell: i, a: hashN(i, 600 + k) * 6.28, r: 0.3 + hashN(i, 620 + k) * 0.5, sp: (0.5 + hashN(i, 640 + k) * 0.6) * (k % 2 ? 1 : -1), ph: hashN(i, 660 + k) * 6.28, per: 4 + hashN(i, 680 + k) * 5, hop: 0 });
       }
     }
     if (!this.reduced) this.later.push({ t: t0 + 0.2, fn: () => this.burst(cx, y + 0.5, cz, 14, 0xffe08a, 1.4, true) });
@@ -800,13 +804,13 @@ export class World {
   }
 
   /** Poeira, fumaça ou faíscas num ponto. */
-  burst(x: number, y: number, z: number, n: number, color: number, power = 1, spark = false): void {
+  burst(x: number, y: number, z: number, n: number, color: number, power = 1, spark = false, sparkCol?: THREE.Color): void {
     if (this.reduced) return;
     const c = new THREE.Color(color);
     for (let k = 0; k < n && this.parts.length < 250; k++) {
       const a = Math.random() * PI * 2, sp = (0.5 + Math.random() * 0.8) * power;
       this.parts.push({ x, y, z, vx: Math.cos(a) * sp, vz: Math.sin(a) * sp, vy: spark ? 0.8 + Math.random() * 1.4 : 0.3 + Math.random() * 0.6, t: 0, life: spark ? 0.9 + Math.random() * 0.5 : 0.6 + Math.random() * 0.3, s0: spark ? 0.045 : 0.07, s1: spark ? 0.0 : 0.17, g: spark ? -1.6 : -0.4 });
-      this.dust.setColorAt(this.parts.length - 1, spark ? new THREE.Color(1.8, 1.4, 0.6) : c);
+      this.dust.setColorAt(this.parts.length - 1, spark ? (sparkCol ?? new THREE.Color(1.8, 1.4, 0.6)) : c);
     }
     if (this.dust.instanceColor) this.dust.instanceColor.needsUpdate = true;
   }
@@ -1006,9 +1010,17 @@ export class World {
       const a = f.a + t * f.sp;
       f.it.x = cellX(f.cell) + Math.cos(a) * f.r;
       f.it.z = cellZ(f.cell) + Math.sin(a) * f.r;
-      f.it.y = -0.02 + Math.sin(t * 2 + f.ph) * 0.01;
+      f.it.y = 0.03 + Math.sin(t * 2 + f.ph) * 0.012;
       f.it.yaw = -a + (f.sp > 0 ? -PI / 2 : PI / 2);
-      f.it.s = 1.5 + 1.1 * Math.max(0, Math.sin(t * 3.1 + f.ph * 3));
+      f.it.s = 1.15 + 0.45 * Math.max(0, Math.sin(t * 3.1 + f.ph * 3));
+      // de vez em quando um peixe salta e respinga (sem movimento reduzido)
+      if (!this.reduced && f.it.t0 < t) {
+        const c = (t + f.ph * 2) % f.per;
+        if (c < 0.7) {
+          f.it.y += Math.sin(Math.PI * c / 0.7) * 0.5;
+          if (!f.hop) { f.hop = 1; this.burst(f.it.x, 0.06, f.it.z, 5, 0xffffff, 0.45, true, SPLASH); }
+        } else if (f.hop) { f.hop = 0; this.burst(f.it.x, 0.06, f.it.z, 7, 0xffffff, 0.55, true, SPLASH); }
+      }
     }
   }
 
@@ -1038,6 +1050,7 @@ export class World {
       gm.compose(gp, gq.identity(), gs);
       this.glow.setMatrixAt(gn++, gm);
     }
+    if (this.night > 0.1) for (const f of this.fishData) if (t >= f.it.t0) halo(f.it.x, f.it.y + 0.1, f.it.z, 0.34, this.night * 0.22, 0.4, 0.9, 1);
     if (this.star.visible) halo(this.star.position.x, this.star.position.y, this.star.position.z, 1.5, 0.5 * this.night, 1, 0.85, 0.4);
     this.glow.count = gn; this.glow.instanceMatrix.needsUpdate = true;
     this.halo.count = hn; this.halo.instanceMatrix.needsUpdate = true;
