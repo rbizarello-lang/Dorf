@@ -107,17 +107,19 @@ export class PreviewView {
     tile.group.position.y = this.drop * this.drop * 2.5 + Math.sin(this.time * 1.6) * 0.02;
     tile.inner.rotation.y += (-this.angle - tile.inner.rotation.y) * (1 - Math.exp(-dt * 16));
     // A pilha usa sempre luz de dia, para a peça da vez ficar legível.
-    // Sem o mapa do chão: ele é do tabuleiro, não da pilha.
-    const night = U.night.value, clouds = U.clouds.value, lamps = U.lamps.value;
+    // Sem o mapa do chão (luz rebatida, lampiões e costura de cor): ele é do tabuleiro, não da pilha.
+    const night = U.night.value, seam = U.seam.value, clouds = U.clouds.value, lamps = U.lamps.value;
     const bounce = tmpBounce.copy(U.bounce.value);
     U.night.value = 0;
     U.clouds.value = 0;
     U.lamps.value = 0;
+    U.seam.value = 0;
     U.bounce.value.setRGB(0, 0, 0);
     this.renderer.render(this.scene, this.cam);
     U.night.value = night;
     U.clouds.value = clouds;
     U.lamps.value = lamps;
+    U.seam.value = seam;
     U.bounce.value.copy(bounce);
   }
 }
