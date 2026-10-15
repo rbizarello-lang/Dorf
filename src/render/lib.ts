@@ -20,14 +20,74 @@ interface Part {
   glow?: number;
   /** Gradiente vertical: fator de cor na base e no topo, entre y0 e y1. */
   grad?: [number, number, number, number];
+  /** Faixas de valor: a peça é fatiada nos planos horizontais `ys` e cada faixa (de baixo para cima) leva o fator `f` (telhas, base de pedra). */
+  bands?: { ys: number[]; f: number[] };
 }
+
+/**
+ * Fatia os triângulos nos planos y = `ys` (crescentes) e devolve a malha nova com a faixa de cada vértice.
+ * Recorte de polígono convexo: a forma não muda, só ganha vértices onde a cor pode saltar.
+ */
+function sliceBands(g: THREE.BufferGeometry, ys: number[]): { geo: THREE.BufferGeometry; band: number[] } {
+  type V = [number, number, number];
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  const out: number[] = [];
+  const band: number[] = [];
+  const clip = (poly: V[], c: number, above: boolean): V[] => {
+    const r: V[] = [];
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      const da = a[1] - c, db = b[1] - c;
+      if (above ? da >= 0 : da <= 0) r.push(a);
+      if (da * db < 0) {
+        const t = da / (da - db);
+        r.push([a[0] + (b[0] - a[0]) * t, c, a[2] + (b[2] - a[2]) * t]);
+      }
+    }
+    return r;
+  };
+  for (let i = 0; i < pos.count; i += 3) {
+    let polys: V[][] = [[0, 1, 2].map((k) => [pos.getX(i + k), pos.getY(i + k), pos.getZ(i + k)] as V)];
+    for (const c of ys) {
+      const next: V[][] = [];
+      for (const p of polys) for (const q of [clip(p, c, false), clip(p, c, true)]) if (q.length >= 3) next.push(q);
+      polys = next;
+    }
+    for (const p of polys) {
+      const cy = p.reduce((a, v) => a + v[1], 0) / p.length;
+      const bi = ys.filter((c) => cy > c).length;
+      for (let k = 1; k < p.length - 1; k++) {
+        const a = p[0], b = p[k], c = p[k + 1];
+        const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        if (nx * nx + ny * ny + nz * nz < 1e-12) continue;
+        out.push(...a, ...b, ...c);
+        band.push(bi, bi, bi);
+      }
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(out), 3));
+  return { geo, band };
+}
+
+/** Fio de cumeeira: prisma de 3 faces (6 triângulos) ao longo de x, ou de z com `alongZ`, com o topo em `y`. */
+const ridge = (len: number, y: number, cx = 0, alongZ = false) => {
+  const g = new THREE.CylinderGeometry(0.0055, 0.0055, len, 3, 1, true).rotateZ(Math.PI / 2);
+  return (alongZ ? g.rotateY(Math.PI / 2) : g).translate(cx, y - 0.004, 0);
+};
+
+/** Faixas de valor de um telhado de `y0` a `y1`: 0,92 / 1 / 1,06 de baixo para cima. */
+const roofBands = (y0: number, y1: number): Part['bands'] => ({ ys: [y0 + (y1 - y0) / 3, y0 + ((y1 - y0) * 2) / 3], f: [0.92, 1, 1.06] });
 
 const tmpC = new THREE.Color();
 
 function kit(parts: Part[]): THREE.BufferGeometry {
   const geos = parts.map((p) => {
-    const g = p.geo.index ? p.geo.toNonIndexed() : p.geo.clone();
+    let g = p.geo.index ? p.geo.toNonIndexed() : p.geo.clone();
     for (const k of Object.keys(g.attributes)) if (k !== 'position') g.deleteAttribute(k);
+    let band: number[] | null = null;
+    if (p.bands) ({ geo: g, band } = sliceBands(g, p.bands.ys));
     const n = g.attributes.position.count;
     const col = new Float32Array(n * 3);
     const tint = new Float32Array(n).fill(p.tint ?? 0);
@@ -35,11 +95,11 @@ function kit(parts: Part[]): THREE.BufferGeometry {
     tmpC.set(p.color);
     const pos = g.attributes.position;
     for (let i = 0; i < n; i++) {
-      let f = 1;
+      let f = band ? p.bands!.f[band[i]] : 1;
       if (p.grad) {
         const [a, b, y0, y1] = p.grad;
         const t = THREE.MathUtils.clamp((pos.getY(i) - y0) / (y1 - y0 || 1), 0, 1);
-        f = a + (b - a) * t;
+        f *= a + (b - a) * t;
       }
       col[i * 3] = tmpC.r * f;
       col[i * 3 + 1] = tmpC.g * f;
@@ -182,74 +242,111 @@ function shift(parts: Part[], dx: number) {
 
 const DOOR = '#4a3326';
 
-function windowsFor(style: BodyStyle, win: Col, w: number, h: number, d: number, bright = 1): Part[] {
+/** Cor da porta: a do tema (`door`) ou, onde há madeira aparente, a madeira escurecida; senão o marrom padrão. */
+const doorColor = (k: HouseKind): Col => k.door ?? (k.trim ? new THREE.Color(k.trim).multiplyScalar(0.6) : DOOR);
+
+// Janelas e porta são planos a poucos milésimos da parede; cada camada fica uma casa acima da outra
+// para não brigar na profundidade: enxaimel 0,002, moldura 0,0025, vidro e porta 0,0035.
+const Z_BEAM = 0.002, Z_FRAME = 0.0025, Z_GLASS = 0.0035;
+
+function windowsFor(style: BodyStyle, win: Col, w: number, h: number, d: number, bright = 1, trim?: Col, door: Col = DOOR): Part[] {
   const parts: Part[] = [];
+  const M = 0.005; // largura da moldura além do vidro
+  // Moldura só onde o tema tem `trim` (poupa 2 triângulos por janela nos outros).
+  const frame = (geo: THREE.BufferGeometry): Part => ({ geo, color: trim ?? '#fff' });
   // Janelas são planos (2 triângulos) voltados para fora da parede.
   const pane = (gw: number, gh: number, x: number, y: number, z: number, rotY: number) => new THREE.PlaneGeometry(gw, gh).rotateY(rotY).translate(x, y + gh / 2, z);
+  // Vidro com moldura um pouco atrás; `lx`/`lz` é a posição na parede, sem o recuo.
   const glass = (gw: number, gh: number, x: number, y: number, z: number, face: 'x' | 'z') => {
+    const sgn = face === 'z' ? Math.sign(z) : Math.sign(x);
+    const at = (off: number) => (face === 'z' ? [x, z + sgn * off] : [x + sgn * off, z]);
     const rot = face === 'z' ? (z > 0 ? 0 : Math.PI) : x > 0 ? Math.PI / 2 : -Math.PI / 2;
-    parts.push({ geo: pane(gw, gh, x, y, z, rot), color: win, glow: bright });
+    const [fx, fz2] = at(Z_FRAME);
+    if (trim) parts.push(frame(pane(gw + 2 * M, gh + 2 * M, fx, y - M, fz2, rot)));
+    const [gx, gz] = at(Z_GLASS);
+    parts.push({ geo: pane(gw, gh, gx, y, gz, rot), color: win, glow: bright });
   };
-  const fz = d / 2 + 0.001, bz = -d / 2 - 0.001, sx = w / 2 + 0.001;
+  const fz = d / 2, bz = -d / 2;
+  const sx = w / 2;
+  // Porta (e a moldura dela) na fachada +z.
+  const doorPart = (dw: number, dh: number, z: number, x = 0, rot = 0) => {
+    if (trim) parts.push(frame(pane(dw + 2 * M, dh + M, x, 0, z + Z_FRAME, rot)));
+    parts.push({ geo: pane(dw, dh, x, 0, z + Z_GLASS, rot), color: door });
+  };
   if (style === 'round') {
     for (const a of [0.9, -0.9, Math.PI - 0.6, Math.PI + 0.6]) {
-      const g = new THREE.PlaneGeometry(0.018, 0.02).rotateY(a).translate(Math.sin(a) * (w / 2 + 0.001), h * 0.5, Math.cos(a) * (w / 2 + 0.001));
-      parts.push({ geo: g, color: win, glow: bright });
+      const r = w / 2 + Z_GLASS;
+      if (trim) parts.push(frame(new THREE.PlaneGeometry(0.026 + 2 * M, 0.032 + 2 * M).rotateY(a).translate(Math.sin(a) * (w / 2 + Z_FRAME), h * 0.5, Math.cos(a) * (w / 2 + Z_FRAME))));
+      parts.push({ geo: new THREE.PlaneGeometry(0.026, 0.032).rotateY(a).translate(Math.sin(a) * r, h * 0.5, Math.cos(a) * r), color: win, glow: bright });
     }
-    parts.push({ geo: pane(0.026, 0.05, 0, 0, w / 2 + 0.001, 0), color: DOOR });
+    doorPart(0.04, 0.058, w / 2);
     return parts;
   }
   const floors = style === 'tall' ? 3 : 1;
-  const cols = style === 'long' ? [-0.075, -0.03, 0.03, 0.075] : style === 'tall' ? [-0.024, 0.024] : [-0.042, 0.042];
-  const ws = style === 'cube' ? 0.016 : 0.02;
+  const cols = style === 'long' ? [-0.09, -0.05, 0.05, 0.09] : style === 'tall' ? [-0.024, 0.024] : [-0.042, 0.042];
+  const ws = style === 'cube' ? 0.026 : 0.03;
+  const wh = ws * 1.2;
   for (let f = 0; f < floors; f++) {
     const y = floors > 1 ? 0.035 + f * 0.058 : h * 0.42;
     for (const x of cols) {
       if (f === 0 && Math.abs(x) < 0.03 && style !== 'long') continue;
-      glass(ws, ws * 1.15, x, y, fz, 'z');
-      glass(ws, ws * 1.15, x, y, bz, 'z');
+      glass(ws, wh, x, y, fz, 'z');
+      glass(ws, wh, x, y, bz, 'z');
     }
   }
   if (style !== 'tall') {
-    glass(ws, ws * 1.15, sx, h * 0.42, 0, 'x');
-    glass(ws, ws * 1.15, -sx, h * 0.42, 0, 'x');
+    glass(ws, wh, sx, h * 0.42, 0, 'x');
+    glass(ws, wh, -sx, h * 0.42, 0, 'x');
   }
-  const doorX = style === 'long' ? 0 : 0;
-  parts.push({ geo: pane(0.026, style === 'tall' ? 0.055 : 0.05, doorX, 0, fz + 0.001, 0), color: DOOR });
+  doorPart(0.04, style === 'tall' ? 0.062 : 0.056, fz);
   return parts;
 }
 
 function trimFor(style: BodyStyle, trim: Col, w: number, h: number, d: number): Part[] {
   if (style === 'round') return [{ geo: cyl(w / 2 + 0.004, w / 2 + 0.004, 0.012, 12, 0, h - 0.012), color: trim }];
-  const t = 0.007;
+  const t = 0.012;
   const parts: Part[] = [];
   for (const x of [-w / 2, w / 2]) for (const z of [-d / 2, d / 2]) parts.push({ geo: box(t, h, t, x, 0, z), color: trim });
   const beams = style === 'tall' ? [0.066, 0.124] : [h * 0.62];
-  for (const y of beams) {
-    parts.push({ geo: new THREE.PlaneGeometry(w + t, t).translate(0, y + t / 2, d / 2 + 0.002), color: trim });
-    parts.push({ geo: new THREE.PlaneGeometry(w + t, t).rotateY(Math.PI).translate(0, y + t / 2, -d / 2 - 0.002), color: trim });
-    parts.push({ geo: new THREE.PlaneGeometry(d + t, t).rotateY(Math.PI / 2).translate(w / 2 + 0.002, y + t / 2, 0), color: trim });
-    parts.push({ geo: new THREE.PlaneGeometry(d + t, t).rotateY(-Math.PI / 2).translate(-w / 2 - 0.002, y + t / 2, 0), color: trim });
+  // Cada fachada: [comprimento, giro em y, deslocamento (x, z) do plano].
+  const faces: [number, number, number, number][] = [
+    [w, 0, 0, d / 2 + Z_BEAM],
+    [w, Math.PI, 0, -d / 2 - Z_BEAM],
+    [d, Math.PI / 2, w / 2 + Z_BEAM, 0],
+    [d, -Math.PI / 2, -w / 2 - Z_BEAM, 0],
+  ];
+  for (const [len, rot, ox, oz] of faces) {
+    for (const y of beams) parts.push({ geo: new THREE.PlaneGeometry(len + t, t).rotateY(rot).translate(ox, y + t / 2, oz), color: trim });
+    // Diagonais (escoras) nos cantos de cada painel acima de uma viga, inclinadas para dentro.
+    const tops = [...beams.slice(1), h];
+    beams.forEach((y0, i) => {
+      const y1 = tops[i] - 0.004, run = Math.min(0.045, len * 0.3);
+      for (const sgn of [-1, 1]) {
+        const x0 = sgn * (len / 2 - t / 2), x1 = sgn * (len / 2 - t / 2 - run), yy0 = y0 + t;
+        const L = Math.hypot(x1 - x0, y1 - yy0);
+        const g = new THREE.PlaneGeometry(L, t * 0.8).rotateZ(Math.atan2(y1 - yy0, x1 - x0)).translate((x0 + x1) / 2, (yy0 + y1) / 2, 0).rotateY(rot).translate(ox, 0, oz);
+        parts.push({ geo: g, color: trim });
+      }
+    });
   }
   return parts;
 }
 
-function wallGeometry(k: HouseKind, win: Col, plinth: Col) {
+// A base escura (faixa de baixo, 35% mais escura) faz o papel do antigo soco: separa a casa do chão claro.
+function wallGeometry(k: HouseKind, win: Col) {
   const { w, h, d } = BODY[k.body];
   const body = k.body === 'round' ? cyl(w / 2, w / 2, h, 12) : box(w, h, d);
-  const parts: Part[] = [{ geo: body, color: k.tone ?? '#ffffff', tint: 1 }, ...windowsFor(k.body, win, w, h, d, k.bright)];
+  // Duas faixas de valor: base de pedra 35% mais escura (30% da altura) e reboco em cima.
+  const base = (hh: number) => ({ ys: [hh * 0.3], f: [0.65, 1] });
+  const parts: Part[] = [{ geo: body, color: k.tone ?? '#ffffff', tint: 1, bands: base(h) }, ...windowsFor(k.body, win, w, h, d, k.bright, k.trim, doorColor(k))];
   if (k.trim) parts.push(...trimFor(k.body, k.trim, w, h, d));
-  // Soco (base) escuro, na cor da lateral das peças: dá peso à casa e a separa do chão claro
-  // (legibilidade de longe, sobretudo onde parede clara encontra chão claro).
-  if (k.body !== 'round') parts.push({ geo: box(w + 0.004, 0.022, d + 0.004), color: plinth });
   if (k.body === 'annex') {
     shift(parts, ANNEX.ox);
     const a = ANNEX;
     parts.push(
-      { geo: box(a.w, a.h, a.d, a.cx, 0, 0), color: k.tone ?? '#ffffff', tint: 1 },
-      { geo: box(a.w + 0.004, 0.018, a.d + 0.004, a.cx, 0, 0), color: plinth },
-      { geo: new THREE.PlaneGeometry(0.018, 0.02).translate(a.cx, a.h * 0.45 + 0.01, a.d / 2 + 0.001), color: win, glow: k.bright ?? 1 },
-      { geo: new THREE.PlaneGeometry(0.018, 0.02).rotateY(Math.PI / 2).translate(a.cx + a.w / 2 + 0.001, a.h * 0.45 + 0.01, 0), color: win, glow: k.bright ?? 1 },
+      { geo: box(a.w, a.h, a.d, a.cx, 0, 0), color: k.tone ?? '#ffffff', tint: 1, bands: base(a.h) },
+      { geo: new THREE.PlaneGeometry(0.026, 0.03).translate(a.cx, a.h * 0.65, a.d / 2 + Z_GLASS), color: win, glow: k.bright ?? 1 },
+      { geo: new THREE.PlaneGeometry(0.026, 0.03).rotateY(Math.PI / 2).translate(a.cx + a.w / 2 + Z_GLASS, a.h * 0.65, 0), color: win, glow: k.bright ?? 1 },
     );
   }
   const g = kit(parts);
@@ -291,7 +388,7 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
     case 'cone': {
       const r = (round ? w / 2 : Math.max(w, d) / 2) + o;
       const rh = 0.09;
-      parts.push({ geo: cone(r, rh, round ? 12 : 4, 0, h, 0).rotateY(round ? 0 : Math.PI / 4), color: '#fff', tint: 1 });
+      parts.push({ geo: cone(r, rh, round ? 12 : 4, 0, h, 0).rotateY(round ? 0 : Math.PI / 4), color: '#fff', tint: 1, bands: roofBands(h, h + rh) });
       top = h + rh;
       break;
     }
@@ -299,14 +396,14 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
       const rh = 0.07;
       const g = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4).rotateY(Math.PI / 4);
       g.scale(w + o * 2, rh, d + o * 2).translate(0, h + rh / 2, 0);
-      parts.push({ geo: g, color: '#fff', tint: 1 });
+      parts.push({ geo: g, color: '#fff', tint: 1, bands: roofBands(h, h + rh) });
       top = h + rh;
       break;
     }
     case 'pagoda': {
       const a = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4).rotateY(Math.PI / 4).scale(w + 0.05, 0.05, d + 0.05).translate(0, h + 0.025, 0);
       const b = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4).rotateY(Math.PI / 4).scale(w * 0.62, 0.06, d * 0.62).translate(0, h + 0.06, 0);
-      parts.push({ geo: a, color: '#fff', tint: 1 }, { geo: b, color: '#fff', tint: 1 });
+      parts.push({ geo: a, color: '#fff', tint: 1, bands: roofBands(h, h + 0.05) }, { geo: b, color: '#fff', tint: 1, bands: roofBands(h + 0.03, h + 0.09) });
       parts.push({ geo: box(w * 0.5, 0.02, d * 0.5, 0, h + 0.02), color: '#fff', tint: 1 });
       top = h + 0.09;
       break;
@@ -316,7 +413,7 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
       // Meio cilindro deitado: o arco fica para cima depois do rotateZ.
       const g = new THREE.CylinderGeometry(r, r, w + o * 1.5, 10, 1, false, 0, Math.PI).rotateZ(Math.PI / 2);
       g.scale(1, 0.8, 1).translate(0, h, 0);
-      parts.push({ geo: g, color: '#fff', tint: 1, grad: [0.85, 1.08, h, h + r] });
+      parts.push({ geo: g, color: '#fff', tint: 1, bands: roofBands(h, h + r * 0.8) });
       top = h + r * 0.8;
       break;
     }
@@ -324,7 +421,7 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
       const rh = 0.085;
       const g = new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2);
       g.scale(d + 0.01, rh / 1.5, (w + 0.01) / 1.732).translate(0, h + rh / 3, 0).rotateY(Math.PI / 2);
-      parts.push({ geo: g, color: '#fff', tint: 1 });
+      parts.push({ geo: g, color: '#fff', tint: 1, bands: roofBands(h, h + rh) });
       // Empena escalonada na fachada: degraus da cor da parede (tijolo).
       for (const z of [d / 2 + 0.004, -d / 2 - 0.004]) {
         for (let s = 0; s < 3; s++) {
@@ -342,8 +439,10 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
       const oe = style === 'steep' ? 0.008 : o;
       const g = new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2);
       g.scale(w + oe * 2, rh / 1.5, (d + oe * 2) / 1.732).translate(0, h + rh / 3, 0);
-      parts.push({ geo: g, color: '#fff', tint: 1 });
+      parts.push({ geo: g, color: '#fff', tint: 1, bands: roofBands(h, h + rh) });
       if (style === 'turf') parts.push({ geo: box(w + o * 2 + 0.004, 0.01, 0.01, 0, h + rh - 0.004), color: '#6a8a3a' });
+      // Fio de cumeeira: a cor do próprio telhado bem mais escura.
+      else parts.push({ geo: ridge(w + oe * 2 + 0.004, h + rh), color: '#8c8c8c', tint: 1 });
       // Beiral escuro: o telhado se destaca do chão mesmo quando tem a cor dele (neve).
       for (const z of [d / 2 + oe, -d / 2 - oe]) parts.push({ geo: box(w + oe * 2 + 0.003, 0.007, 0.008, 0, h - 0.005, z), color: '#3e3530' });
       top = h + rh;
@@ -351,7 +450,8 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
         const rc = rh * 1.35;
         const c = new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2);
         c.scale(d + o * 2 + 0.034, rc / 1.5, (w * 0.56) / 1.732).translate(0, h + rc / 3, 0).rotateY(Math.PI / 2);
-        parts.push({ geo: c, color: '#fff', tint: 1 });
+        parts.push({ geo: c, color: '#fff', tint: 1, bands: roofBands(h, h + rc) });
+        parts.push({ geo: ridge(d + o * 2 + 0.038, h + rc, 0, true), color: '#8c8c8c', tint: 1 });
         top = h + rc;
       }
     }
@@ -365,7 +465,8 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
     else {
       const g = new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2);
       g.scale(a.w + 0.012, a.rh / 1.5, (a.d + o * 1.4) / 1.732).translate(a.cx, a.h + a.rh / 3, 0);
-      parts.push({ geo: g, color: '#fff', tint: 1 });
+      parts.push({ geo: g, color: '#fff', tint: 1, bands: roofBands(a.h, a.h + a.rh) });
+      parts.push({ geo: ridge(a.w + 0.016, a.h + a.rh, a.cx), color: '#8c8c8c', tint: 1 });
     }
   }
   let chim: [number, number, number] | null = null;
@@ -2126,7 +2227,7 @@ export class Lib {
     this.eraGeos = [0, 1, 2, 3].map((e) =>
       housesAtEra(theme, e).map((k) => {
         const r = houseRoof(k);
-        return { wall: wallGeometry(k, theme.window, theme.sideDark), roof: r.geo, chimY: r.chim?.[1] ?? 0 };
+        return { wall: wallGeometry(k, theme.window), roof: r.geo, chimY: r.chim?.[1] ?? 0 };
       }),
     );
     this.setEra(this.era);

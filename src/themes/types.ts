@@ -57,6 +57,8 @@ export interface HouseKind {
   roofs: string[];
   /** Madeira aparente/enxaimel, molduras ou faixas. Omitir = sem detalhe. */
   trim?: string;
+  /** Cor da porta. Omitir = a madeira do `trim` escurecida (ou marrom, sem `trim`). */
+  door?: string;
   /** Chaminé com fumaça. */
   chimney?: boolean;
   /** Variante rara de silhueta: fica de fora da escolha do sobrado da terceira era (`risingKind`). */
