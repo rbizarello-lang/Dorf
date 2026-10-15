@@ -1648,6 +1648,25 @@ function start(data: unknown) {
   world.placeInstant(placed, game.board);
   return true;
 };
+// Rio reto de 7 peças e três lagos, fora do mapa, para conferir meandros, emendas, enseadas e ilhotas.
+(window as unknown as { __river: (zoom?: number, lake?: number) => boolean }).__river = (zoom, lake = -1) => {
+  const W = T.Water, G = T.Grass;
+  const row = [0, 1, 2, 3, 4, 5, 6].map((i) => ({ q: 12 + i, r: 0, edges: [W, G, G, W, G, G] }));
+  const lakes = [
+    { q: 12, r: 4, edges: [W, W, G, G, G, G] }, { q: 13, r: 4, edges: [G, G, W, W, G, G] }, { q: 12, r: 5, edges: [G, G, G, G, W, W] },
+    { q: 17, r: 4, edges: [G, G, G, W, G, G] },
+    { q: 21, r: 4, edges: [W, W, W, W, G, G] },
+  ];
+  for (const t of [...row, ...lakes]) if (game.board.tiles.has(hkey(t.q, t.r))) return false;
+  const placed = [...row, ...lakes].map((t, i) => game.board.placeRaw(t.q, t.r, { edges: [...t.edges], seed: 9100 + i * 37, quest: null }, 0));
+  world.placeInstant(placed, game.board);
+  const c = lake < 0 ? row[3] : lakes[lake];
+  const w = hexToWorld(c.q, c.r);
+  world.rig.goal.set(w.x, 0, w.z);
+  world.rig.target.set(w.x, 0, w.z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
 // Segura o trem na parada e centraliza (captura da carga e da moeda).
 (window as unknown as { __holdTrade: (zoom?: number) => boolean }).__holdTrade = (zoom) => {
   if (!world.life.holdTrade()) return false;

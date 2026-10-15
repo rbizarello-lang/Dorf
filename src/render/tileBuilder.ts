@@ -423,13 +423,37 @@ export function waterShape(edges: readonly T[], seed: number): WaterShape {
   return { idx, widths, lake };
 }
 
+/**
+ * Meandro: desloca o rio de lado por um ruído de baixa frequência (gerador à parte, derivado da
+ * semente). O envelope sin² zera o deslocamento e a inclinação nas duas pontas, então a posição
+ * do rio na borda não muda e a emenda com a peça vizinha continua casando. A amplitude é limitada
+ * para o raio da curva ficar maior que a largura do rio (sem dobra nem estrangulamento).
+ */
+function meander(pts: V2[], seed: number): V2[] {
+  const r = mulberry32(seed ^ 0x3ea4d);
+  const n = pts.length - 1;
+  const f1 = 0.9 + r() * 0.5, f2 = 1.8 + r() * 0.8;
+  const p1 = r() * 6.3, p2 = r() * 6.3;
+  const a1 = (0.15 + r() * 0.1) * (r() < 0.5 ? 1 : -1), a2 = 0.05 + r() * 0.04;
+  const off = pts.map((_, k) => {
+    const t = k / n;
+    const env = Math.sin(Math.PI * t) ** 2;
+    return env * (a1 * Math.sin(2 * Math.PI * f1 * t + p1) + a2 * Math.sin(2 * Math.PI * f2 * t + p2));
+  });
+  return pts.map(([x, z], k) => {
+    const [ax, az] = pts[Math.max(0, k - 1)], [bx, bz] = pts[Math.min(n, k + 1)];
+    const l = Math.hypot(bx - ax, bz - az) || 1;
+    return [x - ((bz - az) / l) * off[k], z + ((bx - ax) / l) * off[k]] as V2;
+  });
+}
+
 /** Caminhos da água: rio de 2 bordas em curva; lago, nascente e junção com raios até o meio. */
 function waterPaths(shape: WaterShape, widths: readonly number[], seed: number): Path[] {
   const { idx, lake } = shape;
   const r = mulberry32(seed ^ 0x77a1);
   if (idx.length === 2 && !lake) {
     const [a, b] = idx;
-    const pts = bezier(edgeMid(a), [0, 0], edgeMid(b), 16);
+    const pts = meander(bezier(edgeMid(a), [0, 0], edgeMid(b), 24), seed);
     // Remanso ou estreito no meio da peça: a largura das bordas fica igual à da vizinha.
     const bulge = -0.25 + r() * 0.7;
     const hws = pts.map((_, k) => {
@@ -462,6 +486,19 @@ function waterField(shape: WaterShape, paths: Path[], widths: readonly number[],
   // Margem orgânica: ondula no interior da peça; lagos ganham lóbulos.
   const r = mulberry32(seed ^ 0x51ed);
   const o = [r() * 6.3, r() * 6.3, r() * 6.3, r() * 6.3, r() * 6.3, r() * 6.3];
+  // Enseadas e ilhota do lago: gerador à parte, que não mexe nas demais ondulações.
+  const rl = mulberry32(seed ^ 0x6c4b7);
+  const inlets: { a: number; w: number; k: number }[] = [];
+  let islet: { x: number; z: number; r: number } | null = null;
+  if (lake) {
+    const nb = lake.r > 0.33 ? 1 + (rl() < 0.5 ? 1 : 0) : rl() < 0.6 ? 1 : 0;
+    for (let k = 0; k < nb; k++) inlets.push({ a: rl() * 6.283, w: 0.3 + rl() * 0.2, k: 0.3 + rl() * 0.25 });
+    // Só em lago grande, longe das bocas (que emendam com os vizinhos), e em 1 de cada 3.
+    if (lake.r >= 0.38 && n >= 2 && rl() < 0.34) {
+      const ia = rl() * 6.283, off = lake.r * (0.1 + rl() * 0.2);
+      islet = { x: lake.x + Math.cos(ia) * off, z: lake.z + Math.sin(ia) * off, r: 0.13 + rl() * 0.05 };
+    }
+  }
   const wiggle = (x: number, z: number) => {
     const w = Math.sin(x * 9.1 + o[0]) * Math.sin(z * 8.3 + o[1]) + Math.sin((x - z) * 15.7 + o[2]) * 0.45 + Math.sin((x + z) * 23 + o[3]) * 0.2;
     return w * 0.026;
@@ -472,7 +509,15 @@ function waterField(shape: WaterShape, paths: Path[], widths: readonly number[],
     if (lake) {
       const a = Math.atan2(z - lake.z, x - lake.x);
       const lobes = 1 + 0.1 * Math.sin(3 * a + o[4]) + 0.06 * Math.sin(5 * a + o[5]);
-      d = Math.min(d, Math.hypot(x - lake.x, z - lake.z) - lake.r * lobes);
+      // Enseadas: uma ou duas línguas de água que avançam além do lóbulo, com a ponta arredondada.
+      let bays = 0;
+      for (const b of inlets) bays += b.k * Math.exp(-((Math.atan2(Math.sin(a - b.a), Math.cos(a - b.a)) / b.w) ** 2));
+      d = Math.min(d, Math.hypot(x - lake.x, z - lake.z) - Math.min(lake.r * (lobes + bays), INR - 0.1));
+      // Ilhota: terra firme dentro do lago, de contorno irregular.
+      if (islet) {
+        const ia = Math.atan2(z - islet.z, x - islet.x);
+        d = Math.max(d, islet.r * (1 + 0.18 * Math.sin(3 * ia + o[2]) + 0.1 * Math.sin(2 * ia + o[3])) - Math.hypot(x - islet.x, z - islet.z));
+      }
     }
     if (junction) d = Math.min(d, Math.hypot(x, z) - junction);
     return d + wiggle(x, z);
@@ -1118,7 +1163,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // --- Ponte: rio de duas bordas com vila numa margem e terra na outra. Sem sorteio,
   // para não mudar o resto da peça.
   // Rio largo demais para o vão da ponte (ou que vira lago) fica sem ela.
-  if (theme.bridge && water.idx.length === 2 && !shape.lake && (water.paths[0].hws?.[8] ?? RIVER_HW) <= 0.215) {
+  if (theme.bridge && water.idx.length === 2 && !shape.lake && (water.paths[0].hws?.[water.paths[0].pts.length >> 1] ?? RIVER_HW) <= 0.215) {
     const [a, b] = water.idx;
     const sideA = edges.slice(a + 1, b), sideB = [...edges.slice(b + 1), ...edges.slice(0, a)];
     if (sideA.length && sideB.length && (sideA.includes(T.Village) || sideB.includes(T.Village))) {
