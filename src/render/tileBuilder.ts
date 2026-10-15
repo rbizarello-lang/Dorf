@@ -760,14 +760,26 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const side = tc(theme.side);
     const sideDark = tc(theme.sideDark);
     const midC = side.clone().lerp(sideDark, 0.35);
+    // Camadas de baixo (solo e rocha): cores e fronteira sorteadas por um gerador derivado da semente
+    // (não mexe no `rng` da peça). Onde o entorno é mar, a rocha é bem escura, como falésia na água.
+    const rs = mulberry32(((seed ^ 0x51de7a1) + i * 977) >>> 0);
+    const jit = (a: number) => 1 + (rs() - 0.5) * 2 * a;
+    const soilC = midC.clone().lerp(sideDark, 0.55).multiplyScalar(jit(0.14));
+    const rockBase = new THREE.Color(0.16, 0.15, 0.15).lerp(sideDark, theme.surround === 'mar' ? 0.15 : 0.35);
+    const rockTop = rockBase.clone().multiplyScalar(jit(0.2));
+    const rockBot = rockTop.clone().multiplyScalar(0.7);
+    const rockY: number[] = [];
+    for (let k = 0; k <= N; k++) rockY.push(-0.16 - rs() * 0.05);
     for (let k = 0; k < N; k++) {
       const v0 = V(N - k, k), v1 = V(N - k - 1, k + 1);
       const [x0, y0, z0] = v0.p, [x1, y1, z1] = v1.p;
       const l0 = shade(v0.c, 0.72), l1 = shade(v1.c, 0.72);
       const b0 = Math.min(y0 - 0.05, -0.05), b1 = Math.min(y1 - 0.05, -0.05);
       g.quad([x0, y0, z0], [x1, y1, z1], [x1, b1, z1], [x0, b0, z0], l0, l1, l1, l0, nrm);
-      g.quad([x0, b0, z0], [x1, b1, z1], [x1, -0.15, z1], [x0, -0.15, z0], side, side, midC, midC, nrm);
-      g.quad([x0, -0.15, z0], [x1, -0.15, z1], [x1, -TILE_T, z1], [x0, -TILE_T, z0], midC, midC, sideDark, sideDark, nrm);
+      g.quad([x0, b0, z0], [x1, b1, z1], [x1, -0.11, z1], [x0, -0.11, z0], side, side, midC, midC, nrm);
+      const r0 = rockY[k], r1 = rockY[k + 1];
+      g.quad([x0, -0.11, z0], [x1, -0.11, z1], [x1, r1, z1], [x0, r0, z0], midC, midC, soilC, soilC, nrm);
+      g.quad([x0, r0, z0], [x1, r1, z1], [x1, -TILE_T, z1], [x0, -TILE_T, z0], rockTop, rockTop, rockBot, rockBot, nrm);
       // Corte da água na lateral (só aparece na beira aberta do mapa, como num aquário).
       if (y0 < WATER_Y - 0.001 || y1 < WATER_Y - 0.001) {
         const c0 = Math.min(y0, WATER_Y), c1 = Math.min(y1, WATER_Y);
