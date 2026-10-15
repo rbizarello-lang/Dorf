@@ -29,6 +29,8 @@ await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}/`;
 
 const cases = [
+  // ?bench: só confere que abre, monta o tabuleiro e mostra o painel (a tabela inteira leva minutos no SwiftShader).
+  { name: 'bench', q: 'bench&quality=low', backend: 'webgpu', bench: true },
   { name: 'webgpu', q: 'theme=vale&seed=3&auto=12&quality=low', backend: 'webgpu' },
   { name: 'webgl', q: 'theme=egito&seed=3&auto=12&quality=low&webgl', backend: 'webgl2' },
 ];
@@ -46,15 +48,17 @@ for (const c of cases) {
   let stats = null;
   while (Date.now() - t0 < TIMEOUT && !errors.length) {
     stats = await page.evaluate(() => window.__stats ?? null);
-    if (stats?.tiles >= TILES) break;
+    if (stats?.tiles >= (c.bench ? 61 : TILES)) break;
     await page.waitForTimeout(1000);
   }
   // Mais alguns quadros: pipelines de materiais novos compilam no primeiro desenho e podem falhar depois.
-  if (stats?.tiles >= TILES && !errors.length) await page.waitForTimeout(5000);
+  if (stats?.tiles >= (c.bench ? 61 : TILES) && !errors.length) await page.waitForTimeout(5000);
   const problems = [...errors];
   if (!stats) problems.push('o jogo não desenhou nenhum quadro (window.__stats vazio)');
   else {
-    if (stats.tiles < TILES) problems.push(`tabuleiro com ${stats.tiles} peças, esperado ${TILES}`);
+    const want = c.bench ? 61 : TILES;
+    if (stats.tiles < want) problems.push(`tabuleiro com ${stats.tiles} peças, esperado ${want}`);
+    if (c.bench && !(await page.evaluate(() => !!window.__bench && !!document.querySelector('.bench table')))) problems.push('o painel do ?bench não apareceu');
     if (stats.backend !== c.backend) problems.push(`backend ${stats.backend}, esperado ${c.backend}`);
   }
   const s = ((Date.now() - t0) / 1000).toFixed(1);

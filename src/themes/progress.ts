@@ -9,7 +9,7 @@ import type { HouseKind, RoofStyle, Theme } from './types';
 /** Telhados trabalhados que, na primeira era, ainda são de palha. Os outros já são do lugar. */
 const EARLY_THATCH = new Set<RoofStyle>(['gable', 'hip', 'stepgable']);
 /** Telhados que cabem num sobrado (palha, grama, cone e cúpula não). */
-const TALL_ROOFS = new Set<RoofStyle>(['gable', 'hip', 'flat', 'stepgable', 'pagoda']);
+const TALL_ROOFS = new Set<RoofStyle>(['gable', 'hip', 'flat', 'stepgable', 'pagoda', 'steep', 'cross']);
 /** Parede de taipa: o tom multiplica a cor sorteada da parede. */
 const ADOBE = '#e6d6b6';
 
@@ -17,7 +17,7 @@ const ADOBE = '#e6d6b6';
 function risingKind(houses: HouseKind[]) {
   let best = -1;
   houses.forEach((k, i) => {
-    if (k.weight > 0.35 || k.body === 'tall' || k.body === 'round' || !TALL_ROOFS.has(k.roof)) return;
+    if (k.minor || k.weight > 0.35 || k.body === 'tall' || k.body === 'round' || !TALL_ROOFS.has(k.roof)) return;
     if (best < 0 || k.weight < houses[best].weight) best = i;
   });
   return best;

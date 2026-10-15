@@ -73,13 +73,14 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | Gancho | O que faz |
 |---|---|
 | `?debug` | mostra FPS, draw calls, triângulos e instâncias |
+| `?bench` | monta `seed=7` com 60 peças e passa por Baixa, Média, Alta e Ultra (15 s cada, câmera girando devagar); mostra placa, nível, FPS mediano, p95, draw calls e triângulos num painel com botão "Copiar" (markdown); `window.__bench` guarda `{ done, rows }` |
 | `?perf` | mede 5 s e mostra o FPS mediano e o p95; `window.__perf(segundos)` devolve o mesmo, com as estatísticas do último quadro |
-| `?gallery&theme=<id>` | mostra todos os kits do tema lado a lado; `window.__gallery` lista as chaves |
+| `?gallery&theme=<id>` | mostra todos os kits do tema lado a lado; `window.__gallery` lista as chaves. `?gallery=casas` mostra só as casas (parede e telhado juntos, na era atual) |
 | `?auto=40` | a IA gulosa coloca 40 peças |
 | `?stress=1000` | teste de carga; o resultado fica em `window.__load` |
 | `?focus=4` | centraliza a câmera na peça com mais bordas do terreno (4 = rio); `window.__focus(t, zoom)` |
 | `?webgl` | força o backend WebGL2 (o padrão é WebGPU quando o navegador oferece) |
-| `?fx=ao.gi.ssr.rays.traa.bloom.dof.ink.finish.film` | liga os efeitos de pós um a um (medir custo; `finish` é só o grão e a lente, `film` soma as amostras a mais do Cinema); `?fx=` desliga todos |
+| `?fx=ao.gi.ssr.rays.traa.bloom.dof.tilt.ink.finish.film` | liga os efeitos de pós um a um (medir custo; `dof` é a profundidade de campo, só do Cinema; `tilt` é o desfoque de miniatura da Alta e do Ultra; `finish` é só o grão e a lente, `film` soma as amostras a mais do Cinema); `?fx=` desliga todos |
 | `?timescale=0.05` | desacelera o mundo (animações nas capturas por software) |
 | `?silhueta` | decorações pretas sobre chão branco: confere se vilas, construções e marcos leem de longe |
 | `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
@@ -88,6 +89,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__era(era, idade?, zoom?)` | centraliza no Centro da vila e o mostra na era (0 a 3); com `idade`, a onda dourada já com essa idade em segundos |
 | `window.__plaza(zoom?)` | mostra os três monumentos na praça do Centro (só a imagem) |
 | `window.__mark(zoom?)` | centraliza a câmera no último marco de era erguido |
+| `window.__river(zoom?, lago?)` | põe fora do mapa um rio reto de 7 peças e cinco peças de lago e centraliza no rio (ou na peça de lago `lago`, 0 a 4): confere meandros, emendas, enseadas e ilhotas |
 | `window.__boat(zoom?)` | centraliza a câmera num barco andando (esteiras na água) |
 | `window.__fishing(i?, cais?, zoom?)` | centraliza no i-ésimo cardume de peixes; com `cais = true`, no i-ésimo cais de pescador |
 | `window.__folk(i?, zoom?)` | centraliza a câmera no i-ésimo aldeão de construção |
@@ -125,14 +127,16 @@ src/render/
   materials.ts   materiais em TSL: chão, água, kits instanciados (vento, plantações, janelas), pergaminho do vazio (terra incógnita); uniformes U
   noise.ts       texturas de ruído periódicas geradas em código (nuvens, chão, ondulação da água)
   atmosphere.ts  névoa da cena (scene.fogNode): bruma e névoa rasteira por altura, e a névoa de alcance
-  groundMap.ts   mapa do chão visto de cima: cor do terreno (luz rebatida) e poças dos lampiões
+  groundMap.ts   mapa do chão visto de cima: cor do terreno (luz rebatida) e poças dos lampiões; cobertura (R8) para a costura de cor entre peças
+  seaMap.ts      distância de cada ponto até a peça mais próxima (1 canal, só cresce): o mar, a espuma e a areia em volta do tabuleiro
   clouds.ts      nuvens volumétricas do zoom aberto, marchadas numa laje acima do tabuleiro
   post.ts        pós-processamento por perfil: SSGI ou GTAO, reflexos (SSR), raios de luz, TRAA, bloom,
-                 profundidade de campo, vinheta, ombro de tons
+                 profundidade de campo (Cinema) ou desfoque de miniatura (Alta e Ultra), vinheta, ombro de tons
   lib.ts         geometria dos kits (casas, árvores, plantações, animais, barcos, veículos, marcos), classe Lib,
                  instGeometry (atributo de cor por instância)
   tileBuilder.ts buildTile: monta UMA peça (chão com leito de rio, água com correnteza, estradas, decoração)
-                 a partir de bordas + semente + tema
+                 a partir de bordas + semente + tema. Vilas em quarteirões: uma rua clara do meio de cada borda de vila ao centro,
+                 casas (1 por setor, 2 em ~30%) de cumeeira paralela à rua, e pracinha com poço com vila em 3+ bordas
   world.ts       World: cena, luz, céu e hora do dia, blocos estáticos, pools instanciados, fantasma, animações
                  de queda, sentido da correnteza por peça
   liveTile.ts    LiveTile: peça avulsa (fantasma, queda, pilha)
@@ -194,12 +198,14 @@ scripts/         capturas, teste de carga, conversão para página publicável
    - No r186 a instância é aplicada **antes** do `positionNode`: ali `positionLocal` já está no espaço do mundo (pools) e `positionGeometry` é o vértice original. Quem desloca vértices (vento) também ajusta `positionPrevious`, senão o antisserrilhado temporal deixa rastro.
    - A água usa os atributos `wflow` (correnteza) e `wbed` (cor do leito e profundidade da coluna): a malha da água repete os triângulos do leito abaixo da linha d'água, então a beira fica exatamente onde a profundidade zera. A correnteza de cada peça herda das vizinhas (`World.flowAt` + `resolveFlow`) e gira junto com a peça no bloco. A largura do rio em cada borda segue a mesma regra (`World.widthsAt`, `BuildOpts.widths`): a peça nova adota a da vizinha já colocada, e perto da borda o campo da água vira o perfil da própria borda, então a emenda casa. Lago ou rio sai de `waterShape` (semente, gerador à parte).
    - Os materiais iluminados do jogo (kits, chão, água) são `LitMaterial`: gravam a parte da cor que veio do céu, e a oclusão de ambiente do pós só escurece essa parte (o sol direto e as janelas acesas ficam de fora). Um material iluminado novo que não seja `LitMaterial` recebe a oclusão inteira, como o vazio.
+   - **Costura de cor entre peças** (`seamAt` em `makeGroundMaterial`): a menos de 0,35 da borda do hexágono, o chão mistura a cor de vértice com a cor média do mapa do chão num mip borrado (RGB dividido pela cobertura, `coverTexture`), só onde há peça do outro lado da borda; os dois lados da emenda leem o mesmo valor e a divisa some. A geometria não muda (a invariante 3 vale para ela); a aparência depende do mapa, então a pilha zera `U.seam`, como zera `U.bounce`.
    - O `LitMaterial` também soma na luz indireta o que vem do mapa do chão (`groundMap.ts`): a cor do terreno rebatida nas faces viradas para os lados e para baixo (`U.bounce`) e as poças dos lampiões à noite (`U.lamps`). A pilha (`preview.ts`) zera os dois, porque o mapa é do tabuleiro.
    - A névoa é um nó (`scene.fogNode`, `atmosphere.ts`), não `THREE.Fog`: bruma e névoa rasteira com densidade que cai com a altura (integral exata ao longo do raio), mais a névoa de alcance para a cor do fundo. Densidades e cores vêm da hora do dia (`skyFor` em `world.ts`).
    - As nuvens do céu (`clouds.ts`) e a sombra delas no chão (`cloudLight`) leem o mesmo ruído (`cloudField`, `cloudPuff`); a sombra é lida no ponto em que o raio até o sol cruza a camada das nuvens. As nuvens ficam numa cena própria, que o pós compõe antes do TRAA (`buildPost(..., clouds)`): no passe da cena, um transparente não grava profundidade nem normal, e a oclusão e a luz rebatida do chão de baixo vazariam nele.
    - Sem tone mapping do renderizador: o pós-processamento aplica um ombro suave que preserva as paletas dos temas.
+   - O entorno do tabuleiro é `Theme.surround` (`'mar' | 'areia' | 'pergaminho'`, padrão pergaminho): o próprio `makeVoidMaterial` vira mar (água funda que ganha cor do tema, espuma e faixa de areia lidas do `seaMap`, brilho do céu) ou dunas de areia, sem malha nem draw call a mais, e desbota para a cor do fundo além do raio explorado.
    - Se um nó falhar ao compilar, o erro aparece no console das capturas.
-10. **Blocos estáticos só crescem** (append-only), e o mapa do chão (`groundMap.ts`) também: cada peça pinta a sua parte quando assenta. Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim (nível de detalhe): entre `rig.dist` 11,5 e 14,5 cada planta dessa metade afunda no chão na sua vez (`U.fine`, material `cropFine`), e mais longe o pool fica escondido. No Ultra e no Cinema a faixa vai 1,35× e 1,6× mais longe. Quem consulta geometria pela chave precisa tirar o `~`.
+10. **Blocos estáticos só crescem** (append-only), e o mapa do chão (`groundMap.ts`) também: cada peça pinta a sua parte quando assenta. Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim (nível de detalhe): entre `rig.dist` 11,5 e 14,5 cada planta dessa metade afunda no chão na sua vez (`U.fine`, material `cropFine`), e mais longe o pool fica escondido. No Ultra e no Cinema a faixa vai 1,35× e 1,6× mais longe. Quem consulta geometria pela chave precisa tirar o `~`. Árvores, arbustos e pedras têm também uma **versão leve** (`Lib.farGeo`, octaedros e cones de 3 lados, mesmas cores por instância): além de `rig.dist` 18 (×1,35 no Ultra, ×1,6 no Cinema, ×1,35 na primavera), `World.setFarTrees` troca a geometria dos lotes com `Pool.retarget` (mesmas instâncias, sem lote novo, as chamadas não sobem; histerese de ±0,4). `Lib.geo` devolve sempre a versão cheia, e `pool()` já cria o lote na versão da hora.
 11. **Construções internas não pontuam.** A roda d'água (vila na beira do rio), a irrigação, a estação e o silo (junto à ferrovia) são só visuais. Pontos de interação vêm apenas de `synergy.ts` × `Rules.synergyPoints`.
 12. **Parâmetros de URL e valores salvos são validados** contra listas fixas (ver `pickQ` e o uso de `Object.hasOwn` para `time`). Mantenha esse padrão ao criar um parâmetro novo.
 13. **O mundo anda pelo `dt` do `World.tick`.** O vídeo é desenhado depois da gravação, quadro a quadro, cada um com `world.tick(1/60)`, e o modo foto congela o mundo com `world.timeScale = 0`.
@@ -219,8 +225,9 @@ Medido com `RUNS=300:high node scripts/stress.mjs`, renderização por software:
 
 Números de 2026-10-02, depois do traço, do pincel, dos aldeões, dos estandartes e da maravilha (a Alta tinha ~94 draw calls na v4 e ~111 no PR #5). No WebGPU por software, a CPU por quadro inclui a espera pelo SwiftShader e não serve de medida.
 
+- **Árvores leves de longe (D19):** com a câmera aberta (`?zoom=30`, Alta, 300 peças, 25 s de espera para a câmera assentar) os triângulos caem de ~965 mil para ~771 mil (-20%); no Ultra, de ~2,36 milhões para ~1,41 milhão (-40%, as cascatas de sombra repetem as árvores). O `stress.mjs` com o enquadramento padrão passou de 1284 mil para 770 mil (Alta) e de 2356 mil para 1409 mil (Ultra), mas ali o número oscila com o quadro da sombra: confie na medida com `zoom=` fixo.
 - **Regra prática:** uma mudança visual não deve subir triângulos ou draw calls em mais de ~10% sem justificativa escrita no commit.
-- **Qualidade:** Cinema (placas de topo, fotos e vídeos: desenha 1,5× acima da tela e reduz, SSGI e reflexos com mais amostras, 4 cascatas de sombra, 60% mais vegetação, grão de filme e aberração de lente), Ultra (pensado para GPUs acima da RX 580: sombras em 3 cascatas de 4096, luz indireta SSGI, reflexos na água em meia resolução, raios de luz no entardecer, TRAA, bloom, profundidade de campo, o mesmo grão e a mesma lente, DPR até 2 e 35% mais vegetação), Alta (GTAO em meia resolução, sombra única de 2048, bloom, profundidade de campo, TRAA, o mesmo grão e a mesma lente), Média (MSAA, sem pós pesado) e Baixa (sem pós e sem sombras). Cada nível tem um teto de pixels desenhados (Cinema 4K × 2,25, Ultra 4K, Alta 1440p, Média e Baixa 1080p; `PIXELS` em `world.ts`): numa tela 4K, descer de nível também reduz a resolução interna. A densidade de decoração é multiplicada por 1,6 (cinema), 1,35 (ultra), 1 (alta), 0,65 (média) ou 0,4 (baixa).
+- **Qualidade:** Cinema (placas de topo, fotos e vídeos: desenha 1,5× acima da tela e reduz, SSGI e reflexos com mais amostras, 4 cascatas de sombra, 60% mais vegetação, grão de filme e aberração de lente), Ultra (pensado para GPUs acima da RX 580: sombras em 3 cascatas de 4096, luz indireta SSGI, reflexos na água em meia resolução, raios de luz no entardecer, TRAA, bloom, desfoque de miniatura (tilt-shift em meia resolução, nítido na faixa central da tela e mais forte com o zoom aberto, `P.tilt`; a profundidade de campo fica só no Cinema), o mesmo grão e a mesma lente, DPR até 2 e 35% mais vegetação), Alta (GTAO em meia resolução, sombra única de 2048, bloom, o mesmo desfoque de miniatura, TRAA, o mesmo grão e a mesma lente), Média (MSAA, sem pós pesado) e Baixa (sem pós e sem sombras). Cada nível tem um teto de pixels desenhados (Cinema 4K × 2,25, Ultra 4K, Alta 1440p, Média e Baixa 1080p; `PIXELS` em `world.ts`): numa tela 4K, descer de nível também reduz a resolução interna. A densidade de decoração é multiplicada por 1,6 (cinema), 1,35 (ultra), 1 (alta), 0,65 (média) ou 0,4 (baixa).
 - **Modo automático:** começa pelo nome da placa de vídeo (`gpuTier.ts`: Alta na RX 580, Ultra da RTX 3060 e da RX 6600 para cima, Média no Iris Xe e nos celulares); sem um nome conhecido, começa em Ultra no computador e em Média nas telas de toque. Nunca escolhe o Cinema. Se o quadro passar de ~26 ms, primeiro baixa a resolução interna em degraus de 10% até 60% (`dynres.ts`) e só no último degrau desce de nível.
 - **Ainda não foi medido:** o FPS numa GPU de verdade.
 
@@ -234,6 +241,10 @@ Números de 2026-10-02, depois do traço, do pincel, dos aldeões, dos estandart
 4. Adicione o tema em `scripts/screenshots.mjs` e gere a captura.
 
 O menu agrupa os temas pelo campo `period` sem nenhuma outra mudança. Os testes já rodam as regras de todos os temas (`THEMES`). Se o tema tiver `rules` próprias, rode `npm test`.
+
+### Variantes de casa
+
+Cada tema tem 3 a 6 tipos de casa (`houses`); as variantes de silhueta (`steep`, `cross` e o corpo `annex`) entram com peso baixo (0,06 a 0,14) e `minor: true`, que as deixa de fora do sobrado da terceira era (`risingKind`). Parede e telhado de cada tipo são os pools `wall:i` e `roof:i`, então um tipo novo custa 2 draw calls só onde aparece. A proporção de cada casa (largura e profundidade, 0,8 a 1,3) sai de um gerador à parte em `addHouse`, com a mesma tripla de escala na parede e no telhado.
 
 ### Novo kit (árvore, casa, telhado, marco, plantação, animal, barco, veículo, estilo de estrada)
 
@@ -273,5 +284,5 @@ São opcionais no tema (`gate`, `bridge`) e não pontuam. O `buildTile` decide o
   - medir o FPS numa GPU real (`?stress=1000&quality=high&perf`, ou `window.__perf(5)` com a tecla `F`) no PC e no celular;
   - kits de fidelidade histórica que ainda faltam (`docs/TEMAS.md`, fim): roda-d'água como `MillStyle`, cipreste em alameda, estação de fim de linha por tema;
   - funções de jogo: bandeiras (`docs/VIABILIDADE.md` §12); as peças especiais já existem (`specials.ts`). Desfazer e as 3 próximas peças já existem na v4: as próximas peças aparecem como recompensa do mirante;
-  - otimizações com folga conhecida: LOD de árvores distantes, sombra em cache no Ultra e no Cinema, renderizar sob demanda no computador (`docs/VIABILIDADE.md` §5). O corte por super-bloco de 32×32 e a sombra única a 4 Hz já existem.
+  - otimizações com folga conhecida: sombra em cache no Ultra e no Cinema, renderizar sob demanda no computador (`docs/VIABILIDADE.md` §5). O corte por super-bloco de 32×32 e a sombra única a 4 Hz já existem.
 - **Publicação:** o GitHub Pages (`.github/workflows/pages.yml`) publica o `dist/` da `main` em `https://rbizarello-lang.github.io/Dorf/`. O ambiente `github-pages` precisa incluir a branch `main` nas regras de deploy. O `base` do Vite fica em `'./'` de propósito, para o arquivo único funcionar nesse caminho. `scripts/artifact.mjs` continua gerando a página sem as tags de documento, para outro formato.

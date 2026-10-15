@@ -61,6 +61,7 @@ import {
   vertexColor,
 } from 'three/tsl';
 import { GROUND_EXTENT, GROUND_SIZE, groundMap } from './groundMap';
+import { SEA_DMAX, seaMap } from './seaMap';
 import { CAUSTIC_FRAMES, CAUSTIC_SIZE, makeBrushTexture, makeCausticTexture, makeNoiseTexture, makeWaterTexture } from './noise';
 
 // Materiais do jogo em TSL (nós do three.js), que compilam tanto para WebGPU
@@ -93,6 +94,8 @@ export const U = {
   fine: uniform(1),
   /** Luz que chega ao chão (sol + céu) vezes o ganho do rebatimento: o chão devolve na cor dele. */
   bounce: uniform(new THREE.Color(0, 0, 0)),
+  /** Costura de cor entre peças (0 a 1): 0 na pilha, que não tem mapa do chão. */
+  seam: uniform(1),
   /** Força dos lampiões (0 de dia): poças de luz na cor das janelas em volta das casas. */
   lamps: uniform(0),
   /** Estação da partida: 0 primavera, 1 verão, 2 outono, 3 inverno. */
@@ -318,8 +321,10 @@ const seasonFoliage = (base: N3): N3 => {
   const spring = float(1).sub(smoothstep(0.05, 0.5, abs(U.season)));
   const autumn = float(1).sub(smoothstep(0.05, 0.5, abs(U.season.sub(2))));
   const fall = mix(vec3(0.851, 0.51, 0.169), vec3(0.722, 0.263, 0.165), step(0.5, hash(instanceIndex)));
+  // Só parte das árvores vira (hash por instância): o resto da mata segue verde e o contraste de valor fica.
+  const turns = step(hash(instanceIndex.add(13)), 0.3);
   const blossomed = mix(base, mix(base, vec3(1, 0.93, 0.96), 0.35), spring);
-  return snowOn(mix(blossomed, mix(blossomed, fall, 0.4), autumn), 0.62);
+  return snowOn(mix(blossomed, mix(blossomed, fall, turns.mul(0.3)), autumn), 0.62);
 };
 
 /** Fogueira: dois cones na cor do vértice, cintilando, só com a noite. */
@@ -366,7 +371,7 @@ function decoMaterial(o: DecoOpts) {
     if (o.paint === 'canopy') {
       const b = texture(brushTex, vec2(pg.x.add(pg.z.mul(0.6)), pg.y.add(pg.z.mul(0.3))).mul(3).add(off));
       // Toque claro ou escuro, e um tom mais quente ou mais frio de um toque para outro.
-      const dab = vec3(b.g.mul(0.28).add(0.86)).mul(mix(vec3(0.95, 1.0, 1.05), vec3(1.06, 1.0, 0.88), b.b));
+      const dab = vec3(b.g.mul(0.4).add(0.8)).mul(mix(vec3(0.95, 1.0, 1.05), vec3(1.06, 1.0, 0.88), b.b));
       base = base.mul(mix(vec3(1), dab, tint));
     } else {
       const wall = tint.mul(smoothstep(0.5, 0.3, abs(normalWorld.y)));
@@ -429,6 +434,48 @@ export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
  * O topo ganha uma leve ondulação de normal (a luz rasante revela o relevo); as laterais,
  * estratos e pedras. Tudo em coordenadas de mundo, sem costura entre peças.
  */
+
+/** Faixa (do mundo) em que a cor de uma peça se mistura com a da vizinha, e o nível do mip que a borra. */
+const SEAM_WIDTH = 0.35;
+const SEAM_LOD = 2.2;
+
+/**
+ * Peso da costura de cor (1 na borda do hexágono, 0 a SEAM_WIDTH para dentro) e a cor média do
+ * mapa do chão em volta do ponto, só das peças já postas. O mip borrado é o mesmo dos dois lados
+ * da emenda, então as duas peças calculam a mesma cor ali e a divisa some.
+ */
+const seamAt = Fn(() => {
+  const p = positionWorld;
+  // Centro do hexágono (flat-top, HEX_R = 1) por arredondamento cúbico.
+  const fx = p.x.mul(2 / 3);
+  const fz = p.z.mul(Math.sqrt(3) / 3).sub(p.x.div(3));
+  const fy = fx.add(fz).negate();
+  const rx = floor(fx.add(0.5)), ry = floor(fy.add(0.5)), rz = floor(fz.add(0.5));
+  const dx = abs(rx.sub(fx)), dy = abs(ry.sub(fy)), dz = abs(rz.sub(fz));
+  const fixX = dx.greaterThan(dy).and(dx.greaterThan(dz));
+  const fixZ = fixX.not().and(dy.lessThanEqual(dz));
+  const q = select(fixX, ry.add(rz).negate(), rx);
+  const r = select(fixZ, rx.add(ry).negate(), rz);
+  const l = vec2(p.x.sub(q.mul(1.5)), p.z.sub(r.add(q.mul(0.5)).mul(Math.sqrt(3))));
+  // Distância à borda: o apótema menos a maior projeção nas três normais das bordas (30, 90 e 150 graus).
+  const proj = max(abs(l.x.mul(0.8660254).add(l.y.mul(0.5))), max(abs(l.y), abs(l.x.mul(-0.8660254).add(l.y.mul(0.5)))));
+  const edge = float(0.8660254).sub(proj);
+  const uv = p.xz.div(GROUND_EXTENT * 2).add(0.5);
+  const inMap = step(max(abs(p.x), abs(p.z)), GROUND_EXTENT - 1);
+  const cov = texture(groundMap.coverTexture, uv).level(float(SEAM_LOD)).r;
+  const col = texture(groundMap.texture, uv).level(float(SEAM_LOD)).rgb.div(max(cov, 0.02));
+  // Só onde há peça do outro lado da borda: o ponto espelhado pela borda mais próxima cai na vizinha.
+  // Sem vizinha, a peça fica com a cor dela (uma peça isolada sai igual à de sempre).
+  const s1 = l.x.mul(0.8660254).add(l.y.mul(0.5)), s3 = l.x.mul(-0.8660254).add(l.y.mul(0.5));
+  const w1 = abs(s1).greaterThanEqual(abs(l.y)).and(abs(s1).greaterThanEqual(abs(s3)));
+  const w2 = w1.not().and(abs(l.y).greaterThanEqual(abs(s3)));
+  const out = select(w1, vec2(0.8660254, 0.5).mul(sign(s1)), select(w2, vec2(0, 1).mul(sign(l.y)), vec2(-0.8660254, 0.5).mul(sign(s3))));
+  const across = p.xz.add(out.mul(edge.mul(2).add(0.03)));
+  const nb = texture(groundMap.coverTexture, across.div(GROUND_EXTENT * 2).add(0.5)).level(float(1)).r;
+  const k = float(1).sub(smoothstep(0, SEAM_WIDTH, edge)).mul(U.seam).mul(inMap).mul(step(0.02, cov)).mul(smoothstep(0.25, 0.6, nb));
+  return vec4(col, k);
+});
+
 export function makeGroundMaterial() {
   const m = new LitMaterial({ roughness: 0.95, metalness: 0, flatShading: true });
   m.positionNode = displaced();
@@ -441,7 +488,10 @@ export function makeGroundMaterial() {
   // Fatores multiplicativos por terreno (preservam a cor do tema).
   const warm = vec3(1.07, 1.03, 0.86);
   const cool = vec3(0.9, 0.97, 1.04);
-  const grass = mix(cool, warm, blot).mul(blot2.mul(0.18).add(0.86)).mul(fine.sub(0.5).mul(0.14).add(1));
+  // Manchas de escala grande (~12 unidades): oliva e limão atravessando várias peças.
+  const big = texture(noiseTex, p.div(12).add(vec2(0.13, 0.41))).g;
+  const patch = mix(vec3(0.9, 0.93, 0.84), vec3(1.1, 1.08, 0.94), big).mul(big.sub(0.5).mul(0.5).add(1));
+  const grass = mix(cool, warm, blot).mul(patch).mul(blot2.mul(0.18).add(0.86)).mul(fine.sub(0.5).mul(0.14).add(1));
   const litter = smoothstep(0.62, 0.8, grain);
   const forest = mix(vec3(0.74, 0.8, 0.74), vec3(0.98, 0.96, 0.9), blot.mul(0.7).add(blot2.mul(0.3))).mul(mix(vec3(1), vec3(1.25, 1.02, 0.7), litter.mul(0.55)));
   // Plantação pintada: traços longos de pincel cuja direção gira devagar pelo mapa, e o tom
@@ -455,14 +505,22 @@ export function makeGroundMaterial() {
   const village = vec3(blot.mul(0.2).add(0.88)).mul(mix(vec3(1), vec3(1.16, 1.12, 1.06), pebble.mul(0.6)));
   const rest = float(1).sub(sp.x.add(sp.y).add(sp.z).add(sp.w)).max(0);
   const plain = vec3(texture(noiseTex, p.div(3.5)).g.mul(0.2).add(0.9));
-  const detail = grass.mul(sp.x).add(forest.mul(sp.y)).add(field.mul(sp.z)).add(village.mul(sp.w)).add(plain.mul(rest));
+  // Endurece os pesos com ruído para a fronteira entre terrenos virar lóbulos: o pincel da
+  // plantação e a terra da vila invadem o vizinho aos pedaços, e a soma é preservada.
+  const wn = texture(noiseTex, p.div(1.7).add(vec2(0.13, 0.41))).g.sub(0.5).mul(0.45);
+  const hard = smoothstep(float(0.2), float(0.8), sp.add(wn));
+  const sw = hard.mul(sp.x.add(sp.y).add(sp.z).add(sp.w).div(hard.x.add(hard.y).add(hard.z).add(hard.w).max(0.001)));
+  const detail = grass.mul(sw.x).add(forest.mul(sw.y)).add(field.mul(sw.z)).add(village.mul(sw.w)).add(plain.mul(rest));
   // Topo × lateral (normal plana de cada triângulo).
   const top = smoothstep(0.55, 0.9, normalWorld.y);
   const sideP = positionWorld.x.add(positionWorld.z);
   const strata = texture(noiseTex, vec2(sideP.mul(0.9), positionWorld.y.mul(7))).g;
   const stones = smoothstep(0.66, 0.8, texture(noiseTex, vec2(sideP.mul(3.1), positionWorld.y.mul(9))).b);
   const sideF = vec3(strata.mul(0.32).add(0.8)).mul(mix(vec3(1), vec3(1.22, 1.18, 1.1), stones.mul(0.8)));
-  const ground = snowOn(vertexColor().rgb.mul(mix(sideF, detail, top)), 0.85);
+  // Costura de cor com a peça vizinha, só no topo (a lateral fica com a cor do vértice).
+  const seam = seamAt();
+  const base = mix(vertexColor().rgb, seam.rgb, seam.a.mul(top));
+  const ground = snowOn(base.mul(mix(sideF, detail, top)), 0.85);
   m.colorNode = mix(ground, vec3(1), U.silhouette);
   // Relevo fino do prado e da mata: inclina a normal com o mapa de declive da água.
   const slope = texture(waterTex, p.mul(0.45)).rg.sub(0.5).mul(sp.x.add(sp.y).mul(0.5).add(0.12));
@@ -760,6 +818,14 @@ export function makeVoidMaterial() {
     center: uniform(new THREE.Vector2()),
     /** Raio explorado R (o World persegue o alvo com amortecimento). */
     radius: uniform(6),
+    /** Entorno do tema (aos poucos): mar e areia, de 0 a 1; o resto é pergaminho. */
+    sea: uniform(0),
+    sand: uniform(0),
+    /** Cores do mar (raso e fundo), da areia e do céu refletido na água. */
+    shallow: uniform(new THREE.Color('#5fd0c8')),
+    deep: uniform(new THREE.Color('#1c5a9c')),
+    sandCol: uniform(new THREE.Color('#e6d4a6')),
+    sky: uniform(new THREE.Color('#9cc8ee')),
   };
   // Parte iluminada (recebe a sombra do tabuleiro e a oclusão) e parte emissiva (a cor
   // do tema se mantém igual ao fundo e à névoa, que não são iluminados).
@@ -796,16 +862,84 @@ export function makeVoidMaterial() {
     const sepia = mix(vec3(1), vec3(1.17, 1.02, 0.74), band.mul(0.35));
     const col = mix(u.bg, u.fill, inner.mul(fade).mul(0.9)).mul(sepia).mul(paper).toVar();
     col.assign(mix(col, u.line, lineW.mul(fade).mul(float(0.85).add(grain.mul(4)))));
-    // Névoa do desconhecido: duas oitavas de ruído rolando devagar, um véu claro de 20%.
+    // Névoa do desconhecido: duas oitavas de ruído rolando devagar, um véu de 25% na cor do fundo clareada
+    // (não branco: o vazio precisa de valor próprio contra o prado).
     const drift = vec2(U.time.mul(0.01), U.time.mul(0.006));
     const mist = texture(noiseTex, p.div(9).add(drift)).r.mul(0.65).add(texture(noiseTex, p.div(3.7).sub(drift.mul(1.7))).g.mul(0.35));
     const veil = smoothstep(u.radius.add(4), u.radius.add(7), dist).mul(smoothstep(0.3, 0.7, mist).mul(0.6).add(0.4));
-    const white = mix(vec3(1), u.fill, U.night.mul(0.8));
-    return mix(col, white, veil.mul(0.2));
+    const haze = mix(mix(u.bg, vec3(1), 0.3), u.fill, U.night.mul(0.8));
+    return mix(col, haze, veil.mul(0.25));
   })();
-  const LIT = 0.4;
-  m.colorNode = grid.mul(LIT);
-  m.emissiveNode = grid.mul(1 - LIT * 0.95);
+
+  // Mar e areia em volta das peças: a distância até a peça mais próxima vem do `seaMap`
+  // (0 em cima da peça, DMAX ou mais longe). Do tabuleiro para fora: faixa de areia, espuma
+  // que lambe a areia, água rasa e turquesa que vai ficando funda; mais longe que o raio
+  // explorado, tudo desbota para a cor do fundo, para o mar não parecer infinito.
+  const p = positionWorld.xz;
+  const d = texture(seaMap.texture, p.div(GROUND_EXTENT * 2).add(0.5)).r.mul(SEA_DMAX).toVar();
+  const t = U.time;
+  const far = smoothstep(u.radius.add(3), u.radius.add(11), length(p.sub(u.center)));
+  const big = texture(waterTex, p.mul(0.23).add(vec2(t.mul(-0.004), t.mul(0.006))));
+  const wA = texture(waterTex, p.div(1.35).add(vec2(t.mul(0.011), t.mul(-0.007))));
+  const wB = texture(waterTex, p.div(1.1).add(vec2(t.mul(-0.009).add(0.37), t.mul(0.008).add(0.61))));
+  const wave = wA.rg.add(wB.rg).sub(1).mul(0.5);
+  const slope = wave.mul(0.5).add(big.rg.sub(0.5).mul(0.35)).mul(u.sea).mul(float(1).sub(far.mul(0.6)));
+  const nW = vec3(slope.x.negate(), 1, slope.y.negate()).normalize();
+  m.normalNode = cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize();
+  m.roughnessNode = mix(float(1), mix(float(0.16), float(0.6), far), u.sea);
+
+  const seaLook = Fn(() => {
+    const wobble = big.b.sub(0.5).mul(0.2).add(wA.b.sub(0.5).mul(0.08));
+    const dd = d.add(wobble);
+    // Água: do raso turquesa ao fundo, acompanhando a distância; ondas escuras e claras.
+    const depth = smoothstep(0.1, 2.6, dd);
+    let water: N = mix(u.shallow, u.deep, depth.pow(0.7));
+    water = water.mul(float(0.9).add(wA.b.mul(0.2)).add(wB.b.mul(0.1)).sub(0.1));
+    // Brilho do céu pela inclinação da onda (Fresnel simples): mais forte rente ao horizonte.
+    const view = cameraPosition.sub(positionWorld).normalize();
+    const fres = float(1).sub(dot(view, nW).max(0)).pow(4).mul(0.85).add(0.04);
+    water = mix(water, u.sky, fres.mul(float(1).sub(far)).mul(0.45));
+    // Espuma: a faixa que avança e recua sobre a areia, mais a renda de dois ruídos.
+    const lap = sin(t.mul(1.05).add(big.b.mul(10))).mul(0.06).add(0.3);
+    const foamEdge = smoothstep(lap.sub(0.15), lap.sub(0.03), dd).mul(float(1).sub(smoothstep(lap, lap.add(0.17), dd)));
+    const n1 = texture(waterTex, p.mul(2.1).add(vec2(t.mul(0.021), t.mul(-0.013)))).b;
+    const n2 = texture(waterTex, p.mul(2.9).add(vec2(t.mul(-0.017), t.mul(0.019))).add(0.5)).b;
+    const lace = smoothstep(0.09, 0, abs(n1.sub(n2))).mul(float(1).sub(smoothstep(0.35, 0.95, dd))).mul(smoothstep(0.1, 0.25, dd));
+    const foam = max(foamEdge, lace.mul(0.8)).clamp(0, 1).mul(float(1).sub(far));
+    const foamCol = vec3(0.97, 0.98, 1).mul(float(1).sub(U.night.mul(0.45)));
+    // Areia molhada logo abaixo da espuma, seca mais perto da peça.
+    const wet = smoothstep(0.0, 0.3, dd);
+    const sandNear = mix(u.sandCol, u.sandCol.mul(0.78), wet);
+    const shore = smoothstep(0.34, 0.2, dd);
+    let col: N = mix(water, sandNear, shore);
+    col = mix(col, foamCol, foam);
+    // Longe: a cor do fundo (a mesma da névoa).
+    return mix(col, u.bg.mul(0.9), far.mul(0.85));
+  })();
+
+  const sandLook = Fn(() => {
+    // Dunas: cristas largas e rugas finas, ±7%; a areia escurece e desbota longe do tabuleiro.
+    const ridge = sin(p.x.mul(0.7).add(p.y.mul(0.35)).add(big.b.mul(7)).mul(2.2)).mul(0.5).add(0.5);
+    const fine = texture(noiseTex, p.mul(1.7)).b.sub(0.5);
+    const shade = float(0.94).add(ridge.mul(0.09)).add(fine.mul(0.08));
+    const dust = smoothstep(0.0, 0.45, d).mul(0.08);
+    const farS = smoothstep(u.radius.add(6), u.radius.add(16), length(p.sub(u.center)));
+    const col = mix(u.sandCol.mul(shade), u.sandCol.mul(0.8), dust);
+    return mix(col, u.bg.mul(0.95), farS.mul(0.8));
+  })();
+
+  const surround = mix(mix(grid, seaLook, u.sea), sandLook, u.sand);
+  // Mar e areia usam a luz da cena (sol, sombra do tabuleiro). A areia guarda mais emissão que o mar:
+  // sob o céu colorido de um tema (Marte) a parte iluminada sozinha tingiria demais a cor dela.
+  const dim = float(1).sub(U.night.mul(0.7));
+  const LIT = float(0.4).add(u.sea.mul(0.32)).add(u.sand.mul(0.1));
+  const emitK = mix(mix(float(1 - 0.4 * 0.95), float(0.2).mul(dim), u.sea), float(0.45).mul(dim), u.sand);
+  // Sombra de contato: o entorno escurece suave ao pé das laterais (distância do `seaMap`, que cada
+  // peça pinta ao assentar), no lugar da faixa clara sem sombra sob as bordas.
+  const contact = float(1).sub(float(1).sub(smoothstep(0.0, 1.2, d)).pow(1.5).mul(0.6));
+  const lit = surround.mul(contact);
+  m.colorNode = lit.mul(LIT);
+  m.emissiveNode = lit.mul(emitK);
   m.fog = true;
   return { material: m, u };
 }

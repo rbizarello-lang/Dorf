@@ -4,6 +4,9 @@ import type { TileBuild } from './tileBuilder';
 // Mapa do chão visto de cima, para a luz que não vem do sol nem do céu:
 //   RGB = cor do chão (terreno e água), que o chão iluminado rebate nas paredes e nas copas;
 //   A = luz dos lampiões em volta das casas com janela, que acende à noite.
+// Ao lado vai a cobertura (R8): 255 onde alguma peça já pintou. Os mipmaps do RGB, que tem 0 no
+// vazio, saem multiplicados pela cobertura; dividir um pelo outro dá a cor média só das peças
+// (a costura de cor entre peças, em makeGroundMaterial).
 // Uma textura só, alinhada ao mundo, cobre o tabuleiro inteiro. Como os blocos estáticos, só
 // cresce: cada peça que assenta pinta a sua parte, rasterizada na CPU a partir da geometria.
 
@@ -19,6 +22,8 @@ const to8 = (v: number) => (v <= 0 ? 0 : v >= 1 ? 255 : Math.round(v * 255));
 export class GroundMap {
   readonly data = new Uint8Array(GROUND_SIZE * GROUND_SIZE * 4);
   readonly texture: THREE.DataTexture;
+  readonly cover = new Uint8Array(GROUND_SIZE * GROUND_SIZE);
+  readonly coverTexture: THREE.DataTexture;
   private dirty = false;
 
   constructor() {
@@ -31,10 +36,19 @@ export class GroundMap {
     t.colorSpace = THREE.NoColorSpace;
     t.needsUpdate = true;
     this.texture = t;
+    const c = new THREE.DataTexture(this.cover, GROUND_SIZE, GROUND_SIZE, THREE.RedFormat, THREE.UnsignedByteType);
+    c.wrapS = c.wrapT = THREE.ClampToEdgeWrapping;
+    c.magFilter = THREE.LinearFilter;
+    c.minFilter = THREE.LinearMipmapLinearFilter;
+    c.generateMipmaps = true;
+    c.colorSpace = THREE.NoColorSpace;
+    c.needsUpdate = true;
+    this.coverTexture = c;
   }
 
   clear() {
     this.data.fill(0);
+    this.cover.fill(0);
     this.dirty = true;
   }
 
@@ -69,6 +83,7 @@ export class GroundMap {
     if (!this.dirty) return;
     this.dirty = false;
     this.texture.needsUpdate = true;
+    this.coverTexture.needsUpdate = true;
   }
 
   /**
@@ -111,6 +126,7 @@ export class GroundMap {
           this.data[i] = to8(c0.r * w0 + c1.r * w1 + c2.r * w2);
           this.data[i + 1] = to8(c0.g * w0 + c1.g * w1 + c2.g * w2);
           this.data[i + 2] = to8(c0.b * w0 + c1.b * w1 + c2.b * w2);
+          this.cover[py * GROUND_SIZE + px] = 255;
         }
       }
     }
