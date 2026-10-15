@@ -1723,8 +1723,14 @@ export class World {
 
     // Distâncias de verdade até a câmera (rig.eye), não o enquadramento (rig.dist).
     const eye = this.rig.eye;
-    A.near.value = eye * 1.5;
-    A.far.value = eye * 4.2;
+    // Com o zoom aberto o tabuleiro inteiro cabe na névoa de alcance (que só media a distância do
+    // olho): ela começa depois da borda da região explorada, e só o entorno distante desbota.
+    // A faixa mantém a largura de antes (2,7×eye); perto (rig.dist <= 14) nada muda.
+    const open = THREE.MathUtils.smoothstep(this.rig.dist, 14, 24);
+    const near0 = eye * 1.5;
+    const near = THREE.MathUtils.lerp(near0, Math.max(near0, eye + this.voidU.radius.value * 2.2), open);
+    A.near.value = near;
+    A.far.value = near + eye * 2.7;
     groundMap.flush();
     seaMap.flush();
     // As nuvens aparecem quando a câmera sobe bem acima delas (não no nível Baixo).
@@ -1750,7 +1756,8 @@ export class World {
     const g = this.theme.grade, gk = 0.55 + 0.45 * day;
     P.shade.value.multiply(tintOf(tmpColor.set(g.shadow), 0.16 * gk, tmpGrade));
     P.light.value.multiply(tintOf(tmpColor.set(g.light), 0.09 * gk, tmpGrade));
-    P.saturation.value = 1.06 * g.saturation;
+    // De longe as cores perdem força na distância: um pouco mais de saturação devolve a leitura.
+    P.saturation.value = THREE.MathUtils.lerp(1.06, 1.12, open) * g.saturation;
     const filt = this.theme.atmos?.filter;
     P.filter.value.set(filt?.[0] ?? 1, filt?.[1] ?? 1, filt?.[2] ?? 1);
 
