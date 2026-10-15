@@ -596,7 +596,7 @@ export class World {
     this.voidU = voidM.u;
     this.voidMat = voidM.material;
     const voidMesh = new THREE.Mesh(new THREE.PlaneGeometry(600, 600).rotateX(-Math.PI / 2), voidM.material);
-    voidMesh.position.y = -TILE_T - 0.03;
+    voidMesh.position.y = -TILE_T - 0.1; // um palmo abaixo do fundo das peças: elas pousam no entorno, não flutuam
     voidMesh.renderOrder = -1;
     voidMesh.receiveShadow = true;
     this.scene.add(voidMesh);
