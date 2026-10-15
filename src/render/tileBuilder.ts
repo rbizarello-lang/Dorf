@@ -732,7 +732,17 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const g = new Buf(true);
     const decos: Deco[] = [];
   const chimneys: number[] = [];
-  const groundCols = edges.map((t) => tc(theme.ground[t]));
+  // Cada peça desloca valor e matiz do prado pela semente (gerador à parte, para não mexer no resto da
+  // peça): o prado grande ganha degraus de tom entre as peças, como no original.
+  const tone = mulberry32((seed ^ 0x5bd1e995) >>> 0);
+  const dL = (tone() - 0.5) * 0.12, dH = ((tone() - 0.5) * 16) / 360;
+  const groundCols = edges.map((t) => {
+    const c = tc(theme.ground[t]);
+    if (t !== T.Grass) return c;
+    const hsl = { h: 0, s: 0, l: 0 };
+    c.getHSL(hsl);
+    return new THREE.Color().setHSL((hsl.h + dH + 1) % 1, hsl.s, Math.min(0.95, Math.max(0.05, hsl.l + dL)));
+  });
   // y = 0 quer dizer "no chão": acompanha o leito e as margens dos rios.
   const D = (key: string, x: number, y: number, z: number, ry: number, s: number | V3, color: THREE.Color, anim?: Anim) => {
     const [sx, sy, sz] = typeof s === 'number' ? [s, s, s] : s;
@@ -1432,7 +1442,11 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         const p = samplePoint(rng, i, 0.15, 0.12);
         if (p && clear(p[0], p[1]) > 0.06 && free(p[0], p[1], 0.05)) {
           const c = tc(pick(rng, theme.flowers));
-          for (let f = randInt(rng, 3, 6); f > 0; f--) D('flower', p[0] + (rng() - 0.5) * 0.14, 0, p[1] + (rng() - 0.5) * 0.14, 0, randRange(rng, 0.8, 1.2), c);
+          // Manchas maiores (10 a 14): leem de longe como canteiro, não como pontinhos.
+          for (let f = randInt(rng, 10, 14); f > 0; f--) {
+            const fx = p[0] + (rng() - 0.5) * 0.3, fz = p[1] + (rng() - 0.5) * 0.3;
+            if (clear(fx, fz) > 0.03) D('flower', fx, 0, fz, 0, randRange(rng, 0.8, 1.2), c);
+          }
         }
       }
       if (rng() < 0.18) {
@@ -1445,6 +1459,55 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           for (let a = randInt(rng, 1, 2); a > 0; a--) D('animal', p[0] + (rng() - 0.5) * 0.06, 0, p[1] + (rng() - 0.5) * 0.06, rng() * 6, randRange(rng, 0.9, 1.1), vary(rng, tc(pick(rng, theme.animals.colors)), 0.05), 'wander');
         }
       }
+    }
+  }
+
+  // Âncora do prado: um elemento de escala média por peça (p ~ 0,35), entre o tufo e a peça inteira.
+  // Gerador à parte (semente da peça), kits que já existem; respeita free(), clear() e reserved.
+  const grassSectors = [0, 1, 2, 3, 4, 5].filter((i) => edges[i] === T.Grass);
+  const arng = mulberry32((seed ^ 0x2c1b3c6d) >>> 0);
+  if (grassSectors.length && arng() < 0.35) {
+    const i = grassSectors[Math.floor(arng() * grassSectors.length)];
+    const p = samplePoint(arng, i, 0.25, 0.2);
+    const ok = (x: number, z: number, r: number) => free(x, z, r) && clear(x, z) > r + 0.03;
+    if (p && ok(p[0], p[1], 0.14)) {
+      const [x, z] = p;
+      const kind = Math.floor(arng() * 5);
+      if (kind === 0) {
+        // árvore solitária, com copa cheia
+        const k = weighted(arng, forestKinds);
+        const s = randRange(arng, 1.1, 1.5) * TREE_SCALE;
+        D(`tree:${k.geo}`, x, 0, z, arng() * 6.28, [s, s * randRange(arng, 0.95, 1.15), s], vary(arng, tc(pick(arng, k.colors))));
+        trees.push([x, z, s]);
+      } else if (kind === 1) {
+        // sebe curta: fileira de moitas
+        const a = arng() * Math.PI, n = randInt(arng, 4, 5);
+        for (let k = 0; k < n; k++) {
+          const t = (k - (n - 1) / 2) * 0.1;
+          const hx = x + Math.cos(a) * t, hz = z + Math.sin(a) * t;
+          if (ok(hx, hz, 0.04)) D('bush', hx, 0, hz, arng() * 6, randRange(arng, 1.5, 1.9), vary(arng, tc(pick(arng, theme.bush))));
+        }
+      } else if (kind === 2) {
+        // pedra grande com duas companheiras
+        D('rock', x, 0, z, arng() * 6, randRange(arng, 2, 2.6), vary(arng, tc(theme.rock)));
+        for (let k = 0; k < 2; k++) {
+          const a = arng() * 6.28, hx = x + Math.cos(a) * 0.1, hz = z + Math.sin(a) * 0.1;
+          if (ok(hx, hz, 0.03)) D('rock', hx, 0, hz, arng() * 6, randRange(arng, 0.9, 1.4), vary(arng, tc(theme.rock)));
+        }
+      } else if (kind === 3) {
+        // canteiro de flores
+        const c = tc(pick(arng, theme.flowers));
+        for (let f = randInt(arng, 12, 16); f > 0; f--) {
+          const a = arng() * 6.28, r = Math.sqrt(arng()) * 0.13, fx = x + Math.cos(a) * r, fz = z + Math.sin(a) * r;
+          if (clear(fx, fz) > 0.03) D('flower', fx, 0, fz, 0, randRange(arng, 0.9, 1.3), c);
+        }
+      } else {
+        // moita grande com broto ao lado
+        D('bush', x, 0, z, arng() * 6, randRange(arng, 2.1, 2.6), vary(arng, tc(pick(arng, theme.bush))));
+        const hx = x + 0.12, hz = z + 0.05;
+        if (ok(hx, hz, 0.04)) D('bush', hx, 0, hz, arng() * 6, randRange(arng, 1.2, 1.5), vary(arng, tc(pick(arng, theme.bush))));
+      }
+      taken.push([x, z]);
     }
   }
 
