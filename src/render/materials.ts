@@ -862,12 +862,13 @@ export function makeVoidMaterial() {
     const sepia = mix(vec3(1), vec3(1.17, 1.02, 0.74), band.mul(0.35));
     const col = mix(u.bg, u.fill, inner.mul(fade).mul(0.9)).mul(sepia).mul(paper).toVar();
     col.assign(mix(col, u.line, lineW.mul(fade).mul(float(0.85).add(grain.mul(4)))));
-    // Névoa do desconhecido: duas oitavas de ruído rolando devagar, um véu claro de 20%.
+    // Névoa do desconhecido: duas oitavas de ruído rolando devagar, um véu de 25% na cor do fundo clareada
+    // (não branco: o vazio precisa de valor próprio contra o prado).
     const drift = vec2(U.time.mul(0.01), U.time.mul(0.006));
     const mist = texture(noiseTex, p.div(9).add(drift)).r.mul(0.65).add(texture(noiseTex, p.div(3.7).sub(drift.mul(1.7))).g.mul(0.35));
     const veil = smoothstep(u.radius.add(4), u.radius.add(7), dist).mul(smoothstep(0.3, 0.7, mist).mul(0.6).add(0.4));
-    const white = mix(vec3(1), u.fill, U.night.mul(0.8));
-    return mix(col, white, veil.mul(0.2));
+    const haze = mix(mix(u.bg, vec3(1), 0.3), u.fill, U.night.mul(0.8));
+    return mix(col, haze, veil.mul(0.25));
   })();
 
   // Mar e areia em volta das peças: a distância até a peça mais próxima vem do `seaMap`
