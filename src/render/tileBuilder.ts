@@ -1201,26 +1201,41 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // Cor do telhado por peça (uma por tipo de casa), com uma ou outra exceção: de longe a vila lê
   // como um bloco de cor, não como confete de telhados vermelhos, azuis e amarelos misturados.
   const tileRoof = new Map<number, string>();
-  const addHouse = (x: number, z: number, baseAng: number, sector = -1, door?: V2) => {
-    const i = weighted(rng, houseKinds);
+  // D29: sorteios novos (giro das casas, lotes extras, anexos) saem de geradores à parte, para o
+  // resto da peça sair igual ao que já era.
+  const rv = mulberry32((seed ^ 0xd29d29) >>> 0);
+  const r4 = mulberry32((seed ^ 0x0d29a77) >>> 0);
+  // Raio aproximado da casa no chão, para os lotes não se tocarem.
+  const houseR = (s: number) => 0.085 * s;
+  const addHouse = (x: number, z: number, baseAng: number, sector = -1, door?: V2, small?: [number, number]) => {
+    const R = small ? r4 : rng;
+    const i = small ? weighted(R, houseKinds.filter(([k]) => theme.houses[k].body !== 'tall').length ? houseKinds.filter(([k]) => theme.houses[k].body !== 'tall') : houseKinds) : weighted(R, houseKinds);
     const kind = theme.houses[i];
     const meta = opts.houses[i];
-    // Poucas casas grandes, de cumeeira paralela à rua: de longe cada uma se lê sozinha.
-    const s = randRange(rng, 1.65, 1.95) * (kind.body === 'long' ? 0.9 : 1);
-    const sy = randRange(rng, 0.92, 1.12);
-    const ry = sector >= 0 ? baseAng + (rng() - 0.5) * 0.08 : baseAng + (rng() < 0.5 ? 0 : Math.PI / 2) + (rng() - 0.5) * 0.12;
-    D(`wall:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(pick(rng, kind.walls)), 0.04));
+    // Uma casa dominante grande de cumeeira paralela à rua (de longe ela se lê sozinha) e, ao redor,
+    // casas médias e pequenas nos lotes extras.
+    const s = small ? randRange(R, small[0], small[1]) * (kind.body === 'long' ? 0.85 : 1) : randRange(R, 1.65, 1.95) * (kind.body === 'long' ? 0.9 : 1);
+    const sy = randRange(R, 0.92, 1.12);
+    let ry = sector >= 0 ? baseAng + (R() - 0.5) * 0.08 : baseAng + (R() < 0.5 ? 0 : Math.PI / 2) + (R() - 0.5) * 0.12;
+    // 25% das casas de vila giram (um quarto delas 90°, o resto ±20°) para quebrar a grade de cumeeiras.
+    if (sector >= 0) {
+      const q = rv(), sg = rv() < 0.5 ? -1 : 1;
+      if (q < 0.1) ry += Math.PI / 2;
+      else if (q < 0.25) ry += sg * 0.35;
+    }
+    D(`wall:${i}`, x, 0, z, ry, [s, s * sy, s], vary(R, tc(pick(R, kind.walls)), 0.04));
     let roof = tileRoof.get(i);
-    if (roof === undefined) tileRoof.set(i, (roof = pick(rng, kind.roofs)));
-    else if (rng() < 0.2) roof = pick(rng, kind.roofs);
-    D(`roof:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(roof), 0.05));
-    if (meta?.chimney && rng() < 0.85) {
+    if (roof === undefined) tileRoof.set(i, (roof = pick(R, kind.roofs)));
+    else if (R() < 0.2) roof = pick(R, kind.roofs);
+    D(`roof:${i}`, x, 0, z, ry, [s, s * sy, s], vary(R, tc(roof), 0.05));
+    if (meta?.chimney && R() < 0.85) {
       const [cx, cy, cz] = meta.chimney;
       const c = Math.cos(ry), sn = Math.sin(ry);
       chimneys.push(x + (cx * c + cz * sn) * s, cy * s * sy, z + (-cx * sn + cz * c) * s, i);
     }
     taken.push([x, z]);
     houses.push({ x, z, s, sector, door });
+    return i;
   };
 
   const grassN = Math.round(randInt(rng, 9, 15) * detail);
@@ -1290,6 +1305,59 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         if (p && free(p[0], p[1], 0.1) && clear(p[0], p[1]) > 0.08) {
           for (let a = randInt(rng, 1, 2); a > 0; a--) D('animal', p[0] + (rng() - 0.5) * 0.06, 0, p[1] + (rng() - 0.5) * 0.06, rng() * 6, randRange(rng, 0.9, 1.1), vary(rng, tc(pick(rng, theme.animals.colors)), 0.05), 'wander');
         }
+      }
+    }
+  }
+
+  // D29: lotes extras. Depois de tudo o mais, cada setor de vila com a casa dominante ganha uma
+  // casa média e uma pequena ao longo da mesma rua (de um lado e do outro), mais anexos com os
+  // kits que já existem: galpão (uma casa pequena e escura), poço e horta de arbustos.
+  for (const dom of houses.filter((h) => h.sector >= 0)) {
+    const i = dom.sector;
+    const [mx, mz] = edgeMid(i);
+    const ux = mx / INR, uz = mz / INR;
+    const sectorAng = -(Math.PI / 6 + (Math.PI / 3) * i);
+    const lotsAt = (count: number, range: [number, number]) => {
+      for (let k = 0, tries = 0; k < count && tries < 10; tries++) {
+        const along = 0.3 + r4() * 0.46;
+        const sd = r4() < 0.5 ? -1 : 1;
+        const sc = (range[0] + range[1]) / 2;
+        const off = sd * (0.17 + r4() * 0.08 + houseR(sc) * 0.6);
+        const hx = ux * INR * along - uz * off, hz = uz * INR * along + ux * off;
+        if (!free(hx, hz, 0.06) || clear(hx, hz) < 0.1 || Math.hypot(hx, hz) > INR - 0.1) continue;
+        if (houses.some((h) => Math.hypot(h.x - hx, h.z - hz) < houseR(h.s) + houseR(sc) + 0.03)) continue;
+        if (trees.some(([tx, tz, ts]) => Math.hypot(tx - hx, tz - hz) < 0.05 * ts + houseR(sc))) continue;
+        addHouse(hx, hz, sectorAng, i, [ux * INR * along - uz * 0.03 * Math.sign(off), uz * INR * along + ux * 0.03 * Math.sign(off)], range);
+        k++;
+      }
+    };
+    lotsAt(1, [1.35, 1.55]);
+    lotsAt(r4() < 0.7 ? 1 : 0, [1.05, 1.25]);
+    // Anexos atrás da casa dominante (do lado de dentro da vila, longe da rua).
+    const back = (d: number, w: number): V2 => [dom.x - ux * d - uz * w, dom.z - uz * d + ux * w];
+    for (let a = 0; a < 2; a++) {
+      const [bx, bz] = back(0.16 * dom.s * 0.75 + 0.08, (a === 0 ? 1 : -1) * (0.08 + r4() * 0.08));
+      const roll = r4(), pick1 = r4();
+      if (roll > 0.6 || !free(bx, bz, 0.07) || clear(bx, bz) < 0.06 || Math.hypot(bx, bz) > INR - 0.1) continue;
+      if (houses.some((h) => Math.hypot(h.x - bx, h.z - bz) < houseR(h.s) + 0.06)) continue;
+      if (pick1 < 0.45) {
+        // Galpão: casa pequena de paredes e telhado escuros, sem fumaça.
+        const gi = houseKinds.find(([k]) => theme.houses[k].body !== 'tall' && theme.houses[k].body !== 'long')?.[0] ?? 0;
+        const ry = sectorAng + (r4() < 0.5 ? 0 : Math.PI / 2);
+        const gs = 0.75 + r4() * 0.15;
+        D(`wall:${gi}`, bx, 0, bz, ry, [gs, gs, gs], shade(vary(r4, tc(pick(r4, theme.houses[gi].walls)), 0.04), 0.78));
+        D(`roof:${gi}`, bx, 0, bz, ry, [gs, gs, gs], shade(tc(pick(r4, theme.houses[gi].roofs)), 0.72));
+        taken.push([bx, bz]);
+      } else if (pick1 < 0.7) {
+        // Poço.
+        D('well', bx, 0, bz, r4() * 6, 0.9, WHITE);
+        taken.push([bx, bz]);
+      } else {
+        // Horta: dois ou três arbustos e um tufo de flores.
+        for (let b = 0; b < 3; b++) D('bush', bx + (r4() - 0.5) * 0.08, 0, bz + (r4() - 0.5) * 0.08, r4() * 6, 0.7 + r4() * 0.5, vary(r4, tc(pick(r4, theme.bush))));
+        const c = tc(pick(r4, theme.flowers));
+        for (let f = 0; f < 3; f++) D('flower', bx + (r4() - 0.5) * 0.12, 0, bz + (r4() - 0.5) * 0.12, 0, 1, c);
+        taken.push([bx, bz]);
       }
     }
   }
