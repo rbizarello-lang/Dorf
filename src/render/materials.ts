@@ -441,7 +441,10 @@ export function makeGroundMaterial() {
   // Fatores multiplicativos por terreno (preservam a cor do tema).
   const warm = vec3(1.07, 1.03, 0.86);
   const cool = vec3(0.9, 0.97, 1.04);
-  const grass = mix(cool, warm, blot).mul(blot2.mul(0.18).add(0.86)).mul(fine.sub(0.5).mul(0.14).add(1));
+  // Manchas de escala grande (~12 unidades): oliva e limão atravessando várias peças.
+  const big = texture(noiseTex, p.div(12).add(vec2(0.13, 0.41))).g;
+  const patch = mix(vec3(0.9, 0.93, 0.84), vec3(1.1, 1.08, 0.94), big).mul(big.sub(0.5).mul(0.5).add(1));
+  const grass = mix(cool, warm, blot).mul(patch).mul(blot2.mul(0.18).add(0.86)).mul(fine.sub(0.5).mul(0.14).add(1));
   const litter = smoothstep(0.62, 0.8, grain);
   const forest = mix(vec3(0.74, 0.8, 0.74), vec3(0.98, 0.96, 0.9), blot.mul(0.7).add(blot2.mul(0.3))).mul(mix(vec3(1), vec3(1.25, 1.02, 0.7), litter.mul(0.55)));
   // Plantação pintada: traços longos de pincel cuja direção gira devagar pelo mapa, e o tom
