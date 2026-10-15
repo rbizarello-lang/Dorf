@@ -876,8 +876,12 @@ export function makeVoidMaterial() {
   const dim = float(1).sub(U.night.mul(0.7));
   const LIT = float(0.4).add(u.sea.mul(0.32)).add(u.sand.mul(0.1));
   const emitK = mix(mix(float(1 - 0.4 * 0.95), float(0.2).mul(dim), u.sea), float(0.45).mul(dim), u.sand);
-  m.colorNode = surround.mul(LIT);
-  m.emissiveNode = surround.mul(emitK);
+  // Sombra de contato: o entorno escurece suave ao pé das laterais (distância do `seaMap`, que cada
+  // peça pinta ao assentar), no lugar da faixa clara sem sombra sob as bordas.
+  const contact = float(1).sub(float(1).sub(smoothstep(0.0, 1.2, d)).pow(1.5).mul(0.6));
+  const lit = surround.mul(contact);
+  m.colorNode = lit.mul(LIT);
+  m.emissiveNode = lit.mul(emitK);
   m.fog = true;
   return { material: m, u };
 }
