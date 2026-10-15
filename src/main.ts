@@ -100,7 +100,7 @@ async function createWorld(): Promise<World> {
 }
 const world = await createWorld();
 {
-  // ?fx=ao.traa.bloom.dof.ink liga os efeitos um a um (medir custo); só nomes conhecidos.
+  // ?fx=ao.traa.bloom.dof.tilt.ink liga os efeitos um a um (medir custo); só nomes conhecidos.
   const fx = params.get('fx');
   if (fx !== null) world.fx = fx.split('.').filter((f) => (FX_FLAGS as readonly string[]).includes(f));
 }
@@ -215,6 +215,11 @@ function loadBest() {
     // valor salvo corrompido: começa sem recorde
   }
 }
+/** `?bench`: tabuleiro fixo (semente e peças) e tempo por nível, para as medições serem comparáveis. */
+const BENCH_SEED = 7;
+const BENCH_TILES = 60;
+const BENCH_SECONDS = 15;
+const BENCH_LEVELS: Quality[] = ['low', 'medium', 'high', 'ultra'];
 const QUALITIES: QualityMode[] = ['auto', 'cinema', 'ultra', 'high', 'medium', 'low'];
 const pickQ = (v: string | null) => (v && (QUALITIES as string[]).includes(v) ? (v as QualityMode) : null);
 let qualityMode: QualityMode = pickQ(params.get('quality')) ?? pickQ(store.get('quality')) ?? 'auto';
@@ -222,7 +227,7 @@ let gameOverShown = false;
 let overTimer = 0;
 let bestAtStart = 0;
 let recordCheered = false;
-const special = params.has('stress') || params.has('auto') || params.has('demo');
+const special = params.has('stress') || params.has('auto') || params.has('demo') || params.has('bench');
 const tutorial = new Tutorial(store);
 tutorial.enabled = !special;
 const progress = new Progress(store, THEMES.map((t) => t.id));
@@ -1024,8 +1029,8 @@ function pickTheme(t: Theme) {
 const qualityLabel: Record<QualityMode, string> = { auto: 'Auto', cinema: 'Cinema', ultra: 'Ultra', high: 'Alta', medium: 'Média', low: 'Baixa' };
 const QUALITY_NOTE: Record<Quality, string> = {
   cinema: 'Desenha 1,5× acima da tela, com mais luz, sombra e vegetação, grão e lente. Para placas de topo (classe RTX 4080)',
-  ultra: 'Luz indireta, reflexos, raios de sol, grão de filme e lente. Para placas acima da RX 580',
-  high: 'Oclusão, bloom, profundidade de campo, grão de filme e lente',
+  ultra: 'Luz indireta, reflexos, raios de sol, desfoque de miniatura, grão de filme e lente. Para placas acima da RX 580',
+  high: 'Oclusão, bloom, desfoque de miniatura, grão de filme e lente',
   medium: 'Leve, para notebooks e celulares',
   low: 'Sem sombras nem pós-processamento',
 };
@@ -1292,6 +1297,67 @@ let cpuAcc = 0;
 let last = performance.now();
 let ambienceAt = 0;
 
+interface BenchRow { gpu: string; quality: string; fps: number; p95Ms: number; calls: number; triangles: number }
+
+/**
+ * `?bench`: passa por Baixa, Média, Alta e Ultra no mesmo tabuleiro (semente 7, 60 peças), com a
+ * câmera girando devagar, e mostra a tabela num painel com botão de copiar. O resultado também
+ * fica em `window.__bench` (`rows` e `done`). O nível é fixo (sem o Auto), para medir o nível puro.
+ */
+async function runBench() {
+  const rows: BenchRow[] = [];
+  const out = { done: false, seconds: BENCH_SECONDS, rows };
+  (window as unknown as { __bench: unknown }).__bench = out;
+  const panel = document.createElement('div');
+  panel.className = 'bench';
+  document.body.appendChild(panel);
+  const render = (status: string) => {
+    const head = ['Placa', 'Nível', 'FPS (mediana)', 'p95 (ms)', 'Draw calls', 'Triângulos (mil)'];
+    const body = rows.map((r) => [r.gpu || '?', r.quality, String(r.fps), String(r.p95Ms), String(r.calls), String(Math.round(r.triangles / 1000))]);
+    panel.innerHTML = `<h3>Medição (?bench)</h3><p></p><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map((r) => `<tr>${r.map(() => '<td></td>').join('')}</tr>`).join('')}</tbody></table><button type="button" disabled>Copiar</button>`;
+    panel.querySelector('p')!.textContent = status;
+    panel.querySelectorAll('tbody tr').forEach((tr, i) => tr.querySelectorAll('td').forEach((td, j) => (td.textContent = body[i][j])));
+    const btn = panel.querySelector('button')!;
+    btn.disabled = !rows.length;
+    btn.onclick = () => {
+      const md = [`| ${head.join(' | ')} |`, `|${head.map(() => '---').join('|')}|`, ...body.map((r) => `| ${r.join(' | ')} |`)].join('\n');
+      void navigator.clipboard?.writeText(md).then(() => hud.toast('Tabela copiada.', 'good'), () => hud.toast('Não foi possível copiar.', 'bad'));
+    };
+  };
+  render('Preparando…');
+  const rig = world.rig;
+  const yaw0 = rig.goalYaw;
+  for (const level of BENCH_LEVELS) {
+    applyQuality(level);
+    render(`Medindo ${qualityLabel[level]}… (${BENCH_SECONDS} s)`);
+    // Um instante para os pipelines do nível compilarem fora da medição.
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+    await new Promise((r) => setTimeout(r, 1500));
+    const samples: number[] = [];
+    const t0 = performance.now();
+    let prev = t0;
+    await new Promise<void>((resolve) => {
+      const step = (now: number) => {
+        samples.push(now - prev);
+        prev = now;
+        rig.goalYaw = yaw0 + ((now - t0) / 1000) * 0.2;
+        if (now - t0 < BENCH_SECONDS * 1000) requestAnimationFrame(step);
+        else resolve();
+      };
+      requestAnimationFrame(step);
+    });
+    samples.shift();
+    samples.sort((a, b) => a - b);
+    const mid = samples[Math.floor(samples.length / 2)] ?? 0;
+    const p95 = samples[Math.min(samples.length - 1, Math.floor(samples.length * 0.95))] ?? 0;
+    const s = world.stats();
+    rows.push({ gpu: gpuLabel, quality: qualityLabel[level], fps: mid > 0 ? Math.round(10000 / mid) / 10 : 0, p95Ms: Math.round(p95 * 10) / 10, calls: s.calls, triangles: s.triangles });
+  }
+  rig.goalYaw = yaw0;
+  out.done = true;
+  render('Pronto. A câmera girou devagar sobre o mesmo tabuleiro em cada nível.');
+}
+
 /**
  * Som de ambiente: a paisagem num raio de 3 casas em volta do foco da câmera. Cada terreno
  * pesa pela fração das bordas, vezes o quanto do raio já tem peça (o vazio é só vento).
@@ -1452,7 +1518,7 @@ function start(data: unknown) {
   applyQuality(qualityMode);
   let saved = special ? null : (validSave(hotData) ?? readSave());
   // Um link com ?seed= (desafio) vence a partida salva de outra semente.
-  const wantSeed = Math.floor(Number(params.get('seed'))) || 0;
+  const wantSeed = params.has('bench') ? BENCH_SEED : Math.floor(Number(params.get('seed'))) || 0;
   if (saved && wantSeed > 0 && saved.seed !== wantSeed) saved = null;
   let resumed = false;
   if (saved) {
@@ -1471,7 +1537,8 @@ function start(data: unknown) {
     hud.stats.hidden = false;
     hud.toast(`Teste de carga: ${r.tiles} peças · lógica ${r.logic.toFixed(0)} ms · montagem ${r.bake.toFixed(0)} ms`);
     (window as unknown as { __load: unknown }).__load = r;
-  } else if (params.has('auto')) autoPlace(Number(params.get('auto')) || 40, false);
+  } else if (params.has('bench')) autoPlace(BENCH_TILES, true);
+  else if (params.has('auto')) autoPlace(Number(params.get('auto')) || 40, false);
   if (params.has('debug')) hud.stats.hidden = false;
   applyA11y();
   // Legibilidade: decorações pretas sobre chão branco (vilas, construções e marcos precisam ler de longe).
@@ -1507,6 +1574,7 @@ function start(data: unknown) {
       };
       requestAnimationFrame(sample);
     });
+  if (params.has('bench')) void runBench();
   if (params.has('perf')) void (window as unknown as { __perf: (s?: number) => Promise<unknown> }).__perf(5);
   if (params.has('gallery')) (window as unknown as { __gallery: string[] }).__gallery = world.showGallery(params.get('gallery') ?? undefined);
   if (params.has('yaw')) world.rig.yaw = world.rig.goalYaw = Number(params.get('yaw'));

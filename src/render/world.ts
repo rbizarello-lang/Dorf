@@ -1744,6 +1744,10 @@ export class World {
     P.focus.value = eye;
     // De longe a faixa nítida estreita: o mapa inteiro vira maquete (tilt-shift).
     P.focalLength.value = eye * THREE.MathUtils.lerp(0.42, 0.16, THREE.MathUtils.smoothstep(this.rig.dist, 10, 30));
+    // Desfoque de miniatura (Alta e Ultra): quase some de perto, é pleno no zoom médio e recua no aberto.
+    // Sobe do perto ao zoom médio (pico em rig.dist ~14) e cai de novo no zoom aberto (0,25 a partir de 26):
+    // de longe o tabuleiro inteiro tem de continuar legível.
+    P.tilt.value = THREE.MathUtils.lerp(0.12, 1, THREE.MathUtils.smoothstep(this.rig.dist, 6, 14)) * THREE.MathUtils.lerp(1, 0.25, THREE.MathUtils.smoothstep(this.rig.dist, 16, 26));
     // O traço é pleno em volta do foco e some antes da névoa, senão o fundo vira hachura.
     // Com a câmera baixa o fundo fica longe: o traço vai até perto de onde a névoa fecha (4,2×).
     P.inkNear.value = eye * 2;
