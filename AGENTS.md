@@ -135,7 +135,8 @@ src/render/
   lib.ts         geometria dos kits (casas, árvores, plantações, animais, barcos, veículos, marcos), classe Lib,
                  instGeometry (atributo de cor por instância)
   tileBuilder.ts buildTile: monta UMA peça (chão com leito de rio, água com correnteza, estradas, decoração)
-                 a partir de bordas + semente + tema
+                 a partir de bordas + semente + tema. Vilas em quarteirões: uma rua clara do meio de cada borda de vila ao centro,
+                 casas (1 por setor, 2 em ~30%) de cumeeira paralela à rua, e pracinha com poço com vila em 3+ bordas
   world.ts       World: cena, luz, céu e hora do dia, blocos estáticos, pools instanciados, fantasma, animações
                  de queda, sentido da correnteza por peça
   liveTile.ts    LiveTile: peça avulsa (fantasma, queda, pilha)
