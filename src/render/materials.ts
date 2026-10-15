@@ -94,6 +94,8 @@ export const U = {
   fine: uniform(1),
   /** Luz que chega ao chão (sol + céu) vezes o ganho do rebatimento: o chão devolve na cor dele. */
   bounce: uniform(new THREE.Color(0, 0, 0)),
+  /** Costura de cor entre peças (0 a 1): 0 na pilha, que não tem mapa do chão. */
+  seam: uniform(1),
   /** Força dos lampiões (0 de dia): poças de luz na cor das janelas em volta das casas. */
   lamps: uniform(0),
   /** Estação da partida: 0 primavera, 1 verão, 2 outono, 3 inverno. */
@@ -432,6 +434,48 @@ export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
  * O topo ganha uma leve ondulação de normal (a luz rasante revela o relevo); as laterais,
  * estratos e pedras. Tudo em coordenadas de mundo, sem costura entre peças.
  */
+
+/** Faixa (do mundo) em que a cor de uma peça se mistura com a da vizinha, e o nível do mip que a borra. */
+const SEAM_WIDTH = 0.35;
+const SEAM_LOD = 2.2;
+
+/**
+ * Peso da costura de cor (1 na borda do hexágono, 0 a SEAM_WIDTH para dentro) e a cor média do
+ * mapa do chão em volta do ponto, só das peças já postas. O mip borrado é o mesmo dos dois lados
+ * da emenda, então as duas peças calculam a mesma cor ali e a divisa some.
+ */
+const seamAt = Fn(() => {
+  const p = positionWorld;
+  // Centro do hexágono (flat-top, HEX_R = 1) por arredondamento cúbico.
+  const fx = p.x.mul(2 / 3);
+  const fz = p.z.mul(Math.sqrt(3) / 3).sub(p.x.div(3));
+  const fy = fx.add(fz).negate();
+  const rx = floor(fx.add(0.5)), ry = floor(fy.add(0.5)), rz = floor(fz.add(0.5));
+  const dx = abs(rx.sub(fx)), dy = abs(ry.sub(fy)), dz = abs(rz.sub(fz));
+  const fixX = dx.greaterThan(dy).and(dx.greaterThan(dz));
+  const fixZ = fixX.not().and(dy.lessThanEqual(dz));
+  const q = select(fixX, ry.add(rz).negate(), rx);
+  const r = select(fixZ, rx.add(ry).negate(), rz);
+  const l = vec2(p.x.sub(q.mul(1.5)), p.z.sub(r.add(q.mul(0.5)).mul(Math.sqrt(3))));
+  // Distância à borda: o apótema menos a maior projeção nas três normais das bordas (30, 90 e 150 graus).
+  const proj = max(abs(l.x.mul(0.8660254).add(l.y.mul(0.5))), max(abs(l.y), abs(l.x.mul(-0.8660254).add(l.y.mul(0.5)))));
+  const edge = float(0.8660254).sub(proj);
+  const uv = p.xz.div(GROUND_EXTENT * 2).add(0.5);
+  const inMap = step(max(abs(p.x), abs(p.z)), GROUND_EXTENT - 1);
+  const cov = texture(groundMap.coverTexture, uv).level(float(SEAM_LOD)).r;
+  const col = texture(groundMap.texture, uv).level(float(SEAM_LOD)).rgb.div(max(cov, 0.02));
+  // Só onde há peça do outro lado da borda: o ponto espelhado pela borda mais próxima cai na vizinha.
+  // Sem vizinha, a peça fica com a cor dela (uma peça isolada sai igual à de sempre).
+  const s1 = l.x.mul(0.8660254).add(l.y.mul(0.5)), s3 = l.x.mul(-0.8660254).add(l.y.mul(0.5));
+  const w1 = abs(s1).greaterThanEqual(abs(l.y)).and(abs(s1).greaterThanEqual(abs(s3)));
+  const w2 = w1.not().and(abs(l.y).greaterThanEqual(abs(s3)));
+  const out = select(w1, vec2(0.8660254, 0.5).mul(sign(s1)), select(w2, vec2(0, 1).mul(sign(l.y)), vec2(-0.8660254, 0.5).mul(sign(s3))));
+  const across = p.xz.add(out.mul(edge.mul(2).add(0.03)));
+  const nb = texture(groundMap.coverTexture, across.div(GROUND_EXTENT * 2).add(0.5)).level(float(1)).r;
+  const k = float(1).sub(smoothstep(0, SEAM_WIDTH, edge)).mul(U.seam).mul(inMap).mul(step(0.02, cov)).mul(smoothstep(0.25, 0.6, nb));
+  return vec4(col, k);
+});
+
 export function makeGroundMaterial() {
   const m = new LitMaterial({ roughness: 0.95, metalness: 0, flatShading: true });
   m.positionNode = displaced();
@@ -470,7 +514,10 @@ export function makeGroundMaterial() {
   const strata = texture(noiseTex, vec2(sideP.mul(0.9), positionWorld.y.mul(7))).g;
   const stones = smoothstep(0.66, 0.8, texture(noiseTex, vec2(sideP.mul(3.1), positionWorld.y.mul(9))).b);
   const sideF = vec3(strata.mul(0.32).add(0.8)).mul(mix(vec3(1), vec3(1.22, 1.18, 1.1), stones.mul(0.8)));
-  const ground = snowOn(vertexColor().rgb.mul(mix(sideF, detail, top)), 0.85);
+  // Costura de cor com a peça vizinha, só no topo (a lateral fica com a cor do vértice).
+  const seam = seamAt();
+  const base = mix(vertexColor().rgb, seam.rgb, seam.a.mul(top));
+  const ground = snowOn(base.mul(mix(sideF, detail, top)), 0.85);
   m.colorNode = mix(ground, vec3(1), U.silhouette);
   // Relevo fino do prado e da mata: inclina a normal com o mapa de declive da água.
   const slope = texture(waterTex, p.mul(0.45)).rg.sub(0.5).mul(sp.x.add(sp.y).mul(0.5).add(0.12));
