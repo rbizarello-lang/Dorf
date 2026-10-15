@@ -1133,9 +1133,13 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
 
   // --- Plantações: parcelas de terra com fileiras de plantas.
   const cropKinds = theme.crops.map((c) => [c, c.weight] as const);
+  // Cultura e parcelas de cada borda de plantação, para a aba da emenda (mais abaixo).
+  const abaCrops: (CropKind | null)[] = [null, null, null, null, null, null];
+  const abaPlots: V2[][][] = [[], [], [], [], [], []];
   for (let i = 0; i < 6; i++) {
     if (edges[i] !== T.Field) continue;
     const crop: CropKind = weighted(rng, cropKinds);
+    abaCrops[i] = crop;
     const L = CROP_LAYOUT[crop.style];
     const soil = tc(crop.soil);
     const isLush = lush.has(i);
@@ -1190,6 +1194,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         }
         return [x, z];
       };
+      abaPlots[i].push(pts);
       const outer = pts.map(([x, z]) => clampIn(cx + (x - cx) * 1.2, cz + (z - cz) * 1.2));
       const spIn: Splat = [0, 0, 0.6, 0], spOut: Splat = [0, 0, 0.25, 0];
       for (let j = 0; j < sides; j++) {
@@ -1341,6 +1346,70 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         if (p && free(p[0], p[1], 0.1) && clear(p[0], p[1]) > 0.08) {
           for (let a = randInt(rng, 1, 2); a > 0; a--) D('animal', p[0] + (rng() - 0.5) * 0.06, 0, p[1] + (rng() - 0.5) * 0.06, rng() * 6, randRange(rng, 0.9, 1.1), vary(rng, tc(pick(rng, theme.animals.colors)), 0.05), 'wander');
         }
+      }
+    }
+  }
+
+  // --- Aba de campo na emenda: meia parcela simétrica no meio de cada borda de plantação, até o
+  // plano da borda. Forma, altura e cor dependem só de (i, tema), nunca da semente: a peça vizinha
+  // também de plantação gera a metade espelhada e as duas formam uma parcela só sobre a emenda.
+  // Fica depois de árvores e casas (free) para não sobrepor nada e não mexer nos sorteios delas.
+  const ABA_A = 0.25, ABA_D = 0.18, ABA_N = 6, ABA_H = 0.005;
+  // Espaçamento das plantas da aba em relação ao das parcelas: mais ralo, para a aba não pesar
+  // nas instâncias (a terra costura a emenda; as plantas só sugerem a continuidade).
+  const ABA_SPARSE = 2.5;
+  for (let i = 0; i < 6; i++) {
+    const crop = abaCrops[i];
+    if (!crop) continue;
+    const ang = Math.PI / 6 + (Math.PI / 3) * i;
+    const nx = Math.cos(ang), nz = Math.sin(ang), tx = -nz, tz = nx;
+    const at = (t: number, d: number): V2 => [nx * d + tx * t, nz * d + tz * t];
+    // Contorno da meia elipse (t de +A a -A, no sentido dos ângulos crescentes) e o anel externo do bisel.
+    const ring = (ka: number, kd: number): V2[] => {
+      const out: V2[] = [];
+      for (let j = 0; j <= ABA_N; j++) {
+        const th = (j / ABA_N) * Math.PI;
+        out.push(at((ABA_A + ka) * Math.cos(th), INR - (ABA_D + kd) * Math.sin(th)));
+      }
+      return out;
+    };
+    const inner = ring(0, 0), outer = ring(0.04, 0.04);
+    const c0 = theme.crops[0];
+    const sc = tc(c0.soil).clone().lerp(tc(c0.colors[0]), c0.style === 'rice' ? 0.2 : c0.style === 'tulip' ? 0.1 : 0.42);
+    const edge = sc.clone().lerp(groundCols[i], 0.6);
+    const spIn: Splat = [0, 0, 0.6, 0], spOut: Splat = [0, 0, 0.25, 0];
+    const [cx, cz] = at(0, INR - ABA_D * 0.4);
+    for (let j = 0; j < ABA_N; j++) {
+      const a = inner[j], b = inner[j + 1], ao = outer[j], bo = outer[j + 1];
+      g.tri([cx, ABA_H, cz], [a[0], ABA_H, a[1]], [b[0], ABA_H, b[1]], sc, sc, sc, UP, spIn);
+      g.tri([a[0], ABA_H, a[1]], [ao[0], 0.001, ao[1]], [bo[0], 0.001, bo[1]], sc, edge, edge, UP, spIn, spOut, spOut);
+      g.tri([a[0], ABA_H, a[1]], [bo[0], 0.001, bo[1]], [b[0], ABA_H, b[1]], sc, edge, sc, UP, spIn, spOut, spIn);
+    }
+    // Plantas: fileiras paralelas à borda, a meia distância de linha da emenda, para o espaçamento
+    // continuar o mesmo do outro lado (a vizinha escalona as fileiras ao contrário).
+    const L = CROP_LAYOUT[crop.style];
+    const dens = 1 / Math.sqrt(Math.max(0.3, detail));
+    const gap = L.rowGap * dens * ABA_SPARSE, step = L.step * dens * ABA_SPARSE;
+    const ar = mulberry32((seed ^ 0xab4c0f) + i * 131);
+    const poly = inner.concat([at(-ABA_A, INR), at(ABA_A, INR)]);
+    const hedge = crop.style === 'tea' || crop.style === 'vineyard' || crop.style === 'lavender';
+    const yawRow = yawTo(tx, tz);
+    for (let r = 0; (r + 0.5) * gap < ABA_D; r++) {
+      const d = INR - (r + 0.5) * gap;
+      const rowCol = L.rowColor ? tc(crop.colors[r % crop.colors.length]) : null;
+      const off = ((r + (i >= 3 ? 1 : 0)) % 2) * step * 0.5;
+      for (let t = -ABA_A + off + step * 0.25; t <= ABA_A; t += step) {
+        const [x, z] = at(t, d);
+        if (!insidePoly(x, z, poly) || !free(x, z, 0.03) || clear(x, z) < 0.03) continue;
+        if (abaPlots[i].some((pp) => insidePoly(x, z, pp))) continue; // a parcela sorteada já planta ali
+        // Degradê só no arco: ρ é a distância normalizada ao centro da meia elipse.
+        const rho = Math.hypot(t / ABA_A, (INR - d) / ABA_D);
+        const edgeT = smooth(1, 0.75, rho);
+        if (ar() < (1 - edgeT) * 0.55) continue;
+        let c = rowCol ?? tc(crop.colors[Math.floor(ar() * crop.colors.length)]);
+        c = vary(ar, c, 0.06);
+        const s = randRange(ar, L.scale[0], L.scale[1]) * 1.2 * (lush.has(i) ? 1.12 : 1) * (0.45 + 0.55 * edgeT);
+        D(`crop:${crop.style}`, x, ABA_H, z, hedge ? yawRow : ar() * Math.PI * 2, s, lush.has(i) && !rowCol ? c.lerp(LUSH, 0.22) : c);
       }
     }
   }
