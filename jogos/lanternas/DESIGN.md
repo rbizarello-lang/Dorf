@@ -52,7 +52,7 @@ Baralho: 58 cartas, embaralhado pela semente: Casa 16, Campo 10, Oliveiral 10, L
 ## Noite (turnos 10, 20 e 30)
 
 - Cada lanterna, exceto o Farol, queima 2 óleo, na ordem em que foi acesa. Sem óleo, apaga naquela noite.
-- **Festa:** depois das lanternas, a comida guardada vira moradores: cada 3 comida = +1 morador, no máximo 6 por noite, em casas com lanterna acesa encostada e com vaga (casa nunca passa de 4). **O estoque de comida zera**, sobre ou não. Por isso vale gastar a comida em casas antes da noite e só guardar o que a festa aproveita.
+- **Festa:** depois das lanternas, a comida guardada vira moradores: cada 5 comida = +1 morador, no máximo 12 por noite, em casas com lanterna acesa encostada e com vaga (cada casa recebe até 4 convidados além dos 4 da variedade, em rodízio). **O estoque de comida zera**, sobre ou não. Por isso vale gastar a comida em casas antes da noite e só guardar o que a festa aproveita.
 - **Casa que não tem lanterna acesa encostada** (distância 1; o Farol vale) perde 1 morador, permanentemente (mínimo 0).
 - A luz que revela a névoa (raio 2) é maior que a que protege à noite (raio 1): é por isso que as casas devem ficar junto de lanternas.
 
@@ -61,7 +61,7 @@ Baralho: 58 cartas, embaralhado pela semente: Casa 16, Campo 10, Oliveiral 10, L
 | Meta | Condição |
 |---|---|
 | Ponta marcada | uma lanterna no hexágono da ponta |
-| Moradores | 52 moradores |
+| Moradores | 66 moradores |
 | Achados | 5 achados revelados (de 6) |
 | Fileira | 4 casas encostadas em linha reta |
 | Ilha iluminada | 80% dos hexágonos de terra revelados |
@@ -70,13 +70,13 @@ Baralho: 58 cartas, embaralhado pela semente: Casa 16, Campo 10, Oliveiral 10, L
 
 ## Mudanças em relação ao enunciado inicial
 
-Raio de proteção da noite 1; lanternas queimam 2 óleo à noite; festa da noite (comida vira moradores e o estoque zera); Casa 5 comida (era 1); Lanterna 4 óleo (era 2); baralho de 58 cartas; regra de socorro da Lanterna; mão garantida; achados longe do centro e sempre 6; metas: 52 moradores, 5 achados (era 4), fileira de 4 (era 3), ilha 80% (era 60%). Detalhes e motivos em `docs/simulacao.md`.
+Raio de proteção da noite 1; lanternas queimam 2 óleo à noite; festa da noite (5 comida = +1 morador, até 12 por noite, 4 convidados por casa além dos 4 da variedade; o estoque zera); Casa 5 comida (era 1); Lanterna 4 óleo (era 2); baralho de 58 cartas; regra de socorro da Lanterna; mão garantida; achados longe do centro e sempre 6; metas: 66 moradores, 5 achados (era 4), fileira de 4 (era 3), ilha 80% (era 60%). Detalhes e motivos em `docs/simulacao.md`.
 
 ## Código
 
 - `src/core/hex.ts`, `rng.ts`, `map.ts` (ilha e achados), `game.ts` (regras, metas, `RULES`), `bots.ts` (aleatório, guloso, planejador).
 - Bots decidem numa cópia cega do jogo (`Game.clone(true)`): não espiam achados sob a névoa.
-- `tests/sim.ts`: 300 partidas por bot, critérios de aprovação (inclui comida final média do planejador < 15 e óleo final médio < 10), invariantes (determinismo, casa <= 4, recursos >= 0); grava o relatório em `docs/simulacao.md`.
+- `tests/sim.ts`: 300 partidas por bot, critérios de aprovação (inclui perda média de comida por noite do planejador <= 4 e óleo final médio < 10), invariantes (determinismo, casa <= 8 (4 da variedade + 4 de festa), recursos >= 0); grava o relatório em `docs/simulacao.md`.
 - `src/main.ts` + `index.html`: entrada do jogo. `?seed=` (inteiro de até 9 dígitos, validado).
 
 ## Visual e sensação (etapa 2)

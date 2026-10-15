@@ -19,8 +19,10 @@ export const RULES = {
   handSize: 3,
   houseCostFood: 5,
   /** Festa da noite: cada feastFood de comida guardada vira +1 morador (até feastCap por noite) e o estoque zera. */
-  feastFood: 3,
-  feastCap: 6,
+  feastFood: 5,
+  feastCap: 12,
+  /** Convidados que uma casa guarda da festa, além do teto da variedade (houseMax). */
+  feastExtra: 4,
   lanternCostOil: 4,
   discardOil: 1,
   /** Óleo que cada lanterna (menos o Farol) queima numa noite. */
@@ -29,7 +31,7 @@ export const RULES = {
   ruinResidents: 3,
   dockFishBonus: 2,
   goalPoints: 5,
-  residentsGoal: 52,
+  residentsGoal: 66,
   findsGoal: 5,
   rowGoal: 4,
   lightGoal: 0.8,
@@ -73,6 +75,8 @@ export class Game {
   stuckTurns = 0;                   // turnos em que nenhuma carta do baralho cabia em lugar nenhum
   fixedHands = 0;                   // mãos refeitas pela regra da mão garantida
   discards = 0;
+  /** Uma entrada por noite: comida no estoque antes da festa, moradores que a festa pôs e comida perdida. */
+  feasts: Array<{ food: number; placed: number; lost: number; rest: number }> = [];
   log: string[] = [];
 
   constructor(seed: number, from?: Game, blind = false) {
@@ -86,7 +90,7 @@ export class Game {
       this.food = from.food; this.oil = from.oil; this.turn = from.turn;
       this.deck = from.deck.slice(); this.hand = from.hand.slice();
       this.litLand = from.litLand; this.foundCount = from.foundCount; this.ruinsFound = from.ruinsFound;
-      this.stuckTurns = from.stuckTurns; this.fixedHands = from.fixedHands; this.discards = from.discards;
+      this.stuckTurns = from.stuckTurns; this.fixedHands = from.fixedHands; this.discards = from.discards; this.feasts = from.feasts.slice();
       return;
     }
     this.map = generateIsland(seed);
@@ -190,7 +194,7 @@ export class Game {
       if (t === Terrain.Water || t === Terrain.Beach) agua = 1;
       if (this.revealed[n] && this.map.finds[n] === Find.Orchard) pomar = 1;
     }
-    const v = Math.min(RULES.houseMax, 1 + campo + bosque + agua + lant + pomar + pomar + this.feast[h]);
+    const v = Math.min(RULES.houseMax, 1 + campo + bosque + agua + lant + pomar + pomar) + this.feast[h];
     return Math.max(0, v - this.lost[h]);
   }
 
@@ -290,13 +294,21 @@ export class Game {
     }
     // Festa: a comida guardada vira moradores nas casas iluminadas com vaga; o resto do estoque se perde.
     {
-      let n = Math.min(RULES.feastCap, Math.floor(this.food / RULES.feastFood));
-      for (const h of this.houses) {
-        if (n <= 0) break;
-        if (!NB[h].some((c) => lit[c])) continue;
-        const room = this.feastRoom(h);
-        if (room > 0) { this.feast[h]++; n--; }
+      const n0 = Math.min(RULES.feastCap, Math.floor(this.food / RULES.feastFood));
+      let n = n0;
+      // Convidados em rodízio entre as casas iluminadas com vaga, na ordem em que foram construídas.
+      const open = this.houses.filter((h) => NB[h].some((c) => lit[c]));
+      for (let again = true; again && n > 0;) {
+        again = false;
+        for (const h of open) {
+          if (n <= 0) break;
+          if (this.feastRoom(h) > 0) { this.feast[h]++; n--; again = true; }
+        }
       }
+      const placed = n0 - n;
+      // Perda = comida que passa do teto da noite ou não acha casa iluminada com vaga; o resto da divisão fica à parte.
+      const rest = this.food % RULES.feastFood;
+      this.feasts.push({ food: this.food, placed, lost: this.food - placed * RULES.feastFood - rest, rest });
       this.food = 0;
     }
     for (const h of this.houses) {
@@ -306,7 +318,7 @@ export class Game {
   }
 
   /** Quanto a casa ainda comporta de moradores de festa. */
-  feastRoom(h: number): number { return RULES.houseMax - (this.houseResidents(h) + this.lost[h]); }
+  feastRoom(h: number): number { return RULES.feastExtra - this.feast[h]; }
 
   /** Moradores que a festa daria com `food` de comida (casas com lanterna encostada e vaga). */
   feastGain(food = this.food): number {

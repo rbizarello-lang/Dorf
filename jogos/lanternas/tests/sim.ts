@@ -16,6 +16,8 @@ const fail = (msg: string): void => { failures.push(msg); };
 interface Result {
   score: number; goals: number[]; met: boolean[]; litPct: number; cards: number[]; discards: number;
   food20: number; oil20: number; foodEnd: number; oilEnd: number;
+  /** Por noite (10, 20, 30): comida no começo do turno da noite, comida na festa, comida perdida, moradores da festa. */
+  foodBefore: number[]; foodFeast: number[]; foodLost: number[]; foodRest: number[]; feastPlaced: number[];
   tightTurns: number; tightBase: number; stuck: number; fixed: number; hash: string; houseMax: number; minRes: number;
 }
 
@@ -26,7 +28,9 @@ function playGame(bot: BotId, seed: number): Result {
   let tightTurns = 0, tightBase = 0, houseMax = 0, minRes = 99;
   const trace: number[] = [];
   let food20 = 0, oil20 = 0;
+  const foodBefore: number[] = [];
   while (!g.over) {
+    if (RULES.nights.includes(g.turn)) foodBefore.push(g.food);
     const d = decide(bot, g, rng);
     if (d.cardValues.length >= 2) {
       tightBase++;
@@ -45,7 +49,9 @@ function playGame(bot: BotId, seed: number): Result {
   const s = g.summary();
   return {
     score: s.score, goals: s.goals, met: s.goalsMet, litPct: s.litPct, cards, discards: g.discards,
-    food20, oil20, foodEnd: g.food, oilEnd: g.oil, tightTurns, tightBase, stuck: g.stuckTurns, fixed: g.fixedHands, hash: trace.join(',') + '|' + s.score, houseMax, minRes,
+    food20, oil20, foodEnd: g.food, oilEnd: g.oil,
+    foodBefore, foodFeast: g.feasts.map((f) => f.food), foodLost: g.feasts.map((f) => f.lost), foodRest: g.feasts.map((f) => f.rest), feastPlaced: g.feasts.map((f) => f.placed),
+    tightTurns, tightBase, stuck: g.stuckTurns, fixed: g.fixedHands, hash: trace.join(',') + '|' + s.score, houseMax, minRes,
   };
 }
 
@@ -63,7 +69,7 @@ for (const bot of BOTS) {
 // ---------- estatísticas ----------
 interface Stats {
   mean: number; p10: number; p50: number; p90: number; goalRate: number[]; lit: number; cardShare: number[];
-  discards: number; tight: number; food20: number; oil20: number; foodEnd: number; oilEnd: number; stuckGames: number; fixedGames: number;
+  discards: number; tight: number; foodBefore: number[]; foodFeast: number[]; foodLost: number[]; foodRest: number[]; feastPlaced: number[]; lostNight: number; restNight: number; food20: number; oil20: number; foodEnd: number; oilEnd: number; stuckGames: number; fixedGames: number;
 }
 const stats: Record<string, Stats> = {};
 for (const bot of BOTS) {
@@ -81,6 +87,12 @@ for (const bot of BOTS) {
     lit: mean(rs.map((r) => r.litPct)), cardShare: totalCards.map((c) => c / Math.max(1, sumCards)),
     food20: mean(rs.map((r) => r.food20)), oil20: mean(rs.map((r) => r.oil20)),
     foodEnd: mean(rs.map((r) => r.foodEnd)), oilEnd: mean(rs.map((r) => r.oilEnd)),
+    foodBefore: RULES.nights.map((_, k) => mean(rs.map((r) => r.foodBefore[k]))),
+    foodFeast: RULES.nights.map((_, k) => mean(rs.map((r) => r.foodFeast[k]))),
+    foodLost: RULES.nights.map((_, k) => mean(rs.map((r) => r.foodLost[k]))),
+    feastPlaced: RULES.nights.map((_, k) => mean(rs.map((r) => r.feastPlaced[k]))),
+    foodRest: RULES.nights.map((_, k) => mean(rs.map((r) => r.foodRest[k]))),
+    lostNight: mean(rs.map((r) => mean(r.foodLost))), restNight: mean(rs.map((r) => mean(r.foodRest))),
     discards: mean(rs.map((r) => r.discards)), tight: tb ? rs.reduce((a, r) => a + r.tightTurns, 0) / tb : 0,
     stuckGames: rs.filter((r) => r.stuck > 0).length / rs.length, fixedGames: rs.filter((r) => r.fixed > 0).length / rs.length,
   };
@@ -96,6 +108,7 @@ P.cardShare.forEach((s, c) => check(s <= 0.45, `carta ${CARD_NAMES[c]} com ${f0p
 P.goalRate.forEach((r, gid) => { if (!(r >= 0.2 && r <= 0.85)) fail(`meta "${GOAL_NAMES[gid]}" do planejador cumprida em ${f0p(r)} (fora de 20-85%)`); });
 check(P.lit >= 0.45 && P.lit <= 0.9, `ilha revelada pelo planejador: ${f0p(P.lit)} (fora de 45-90%)`);
 check(P.foodEnd < 15, `comida final média do planejador: ${f1(P.foodEnd)} (esperado abaixo de 15)`);
+check(P.lostNight <= 4, `comida perdida por noite pelo planejador: ${f1(P.lostNight)} (esperado até 4)`);
 check(P.oilEnd < 10, `óleo final médio do planejador: ${f1(P.oilEnd)} (esperado abaixo de 10)`);
 for (const bot of BOTS) check(stats[bot].stuckGames === 0, `${bot}: ${f0p(stats[bot].stuckGames)} das partidas com turno sem jogada válida`);
 
@@ -103,7 +116,7 @@ for (const bot of BOTS) check(stats[bot].stuckGames === 0, `${bot}: ${f0p(stats[
 for (const bot of BOTS) {
   const again = results[bot].slice(0, 20).map((_, i) => playGame(bot, i + 1).hash);
   check(again.every((h, i) => h === results[bot][i].hash), `${bot}: mesma semente deu resultado diferente`);
-  check(results[bot].every((r) => r.houseMax <= RULES.houseMax), `${bot}: casa com mais de ${RULES.houseMax} moradores`);
+  check(results[bot].every((r) => r.houseMax <= RULES.houseMax + RULES.feastExtra), `${bot}: casa com mais de ${RULES.houseMax + RULES.feastExtra} moradores`);
   check(results[bot].every((r) => r.minRes >= 0), `${bot}: recurso negativo`);
 }
 {
@@ -137,6 +150,12 @@ for (const bot of BOTS) {
 }
 out.push('', '### Recursos parados (média por partida)', '', '| Jogador | Comida no turno 20 | Óleo no turno 20 | Comida no fim | Óleo no fim |', '|---|---|---|---|---|');
 for (const bot of BOTS) { const s = stats[bot]; out.push(`| ${bot} | ${f1(s.food20)} | ${f1(s.oil20)} | ${f1(s.foodEnd)} | ${f1(s.oilEnd)} |`); }
+out.push('', '### A festa da noite: comida guardada e comida perdida (média por noite 10 / 20 / 30)', '', '| Jogador | Comida no começo do turno da noite (após os turnos 9, 19, 29) | Comida na festa (depois da renda) | Moradores da festa | Comida perdida | Resto da divisão | Perda média por noite (sem o resto) |', '|---|---|---|---|---|---|---|');
+for (const bot of BOTS) {
+  const s = stats[bot], j = (xs: number[]): string => xs.map(f1).join(' / ');
+  out.push(`| ${bot} | ${j(s.foodBefore)} | ${j(s.foodFeast)} | ${j(s.feastPlaced)} | ${j(s.foodLost)} | ${j(s.foodRest)} | ${f1(s.lostNight)} |`);
+}
+out.push('', 'Perda = comida que passa do teto de moradores da noite ou não acha casa iluminada com vaga. O resto da divisão (menos de uma festa de comida) vai em coluna à parte e não entra na perda.');
 out.push('', '### Metas cumpridas (entre as partidas em que a meta foi sorteada)', '', '| Meta | ' + BOTS.join(' | ') + ' |', '|---|' + BOTS.map(() => '---').join('|') + '|');
 for (let gid = 0; gid < 5; gid++) out.push(`| ${GOAL_NAMES[gid]} | ${BOTS.map((b) => f0p(stats[b].goalRate[gid])).join(' | ')} |`);
 out.push('', '### Cartas escolhidas (parte das jogadas, sem contar descartes)', '', '| Carta | ' + BOTS.join(' | ') + ' |', '|---|' + BOTS.map(() => '---').join('|') + '|');

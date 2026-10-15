@@ -21,9 +21,9 @@ Resultados de 300 partidas por jogador (sementes 1..300), 30 turnos cada.
 
 | Jogador | Média | p10 | p50 | p90 | Ilha revelada | Descartes/partida | Escolha apertada | Partidas travadas | Mãos refeitas (partidas) |
 |---|---|---|---|---|---|---|---|---|---|
-| aleatorio | 22.8 | 16 | 22 | 31 | 58% | 0.0 | 0% | 0% | 64% |
-| guloso | 46.2 | 38 | 46 | 57 | 53% | 1.8 | 38% | 0% | 71% |
-| planejador | 56.7 | 48 | 56 | 68 | 81% | 0.2 | 35% | 0% | 71% |
+| aleatorio | 35.3 | 25 | 35 | 47 | 58% | 0.0 | 0% | 0% | 64% |
+| guloso | 58.9 | 48 | 59 | 68 | 53% | 1.8 | 38% | 0% | 71% |
+| planejador | 73.0 | 64 | 73 | 83 | 85% | 0.8 | 37% | 0% | 70% |
 
 ### Recursos parados (média por partida)
 
@@ -31,29 +31,39 @@ Resultados de 300 partidas por jogador (sementes 1..300), 30 turnos cada.
 |---|---|---|---|---|
 | aleatorio | 0.0 | 31.3 | 0.0 | 63.1 |
 | guloso | 0.0 | 43.2 | 0.0 | 78.1 |
-| planejador | 0.0 | 3.8 | 0.0 | 5.8 |
+| planejador | 0.0 | 3.6 | 0.0 | 6.8 |
+
+### A festa da noite: comida guardada e comida perdida (média por noite 10 / 20 / 30)
+
+| Jogador | Comida no começo do turno da noite (após os turnos 9, 19, 29) | Comida na festa (depois da renda) | Moradores da festa | Comida perdida | Resto da divisão | Perda média por noite (sem o resto) |
+|---|---|---|---|---|---|---|
+| aleatorio | 10.9 / 35.2 / 62.3 | 13.1 / 40.4 / 70.8 | 1.3 / 5.2 / 8.4 | 4.9 / 12.3 / 27.0 | 1.9 / 2.0 / 2.0 | 14.7 |
+| guloso | 7.6 / 23.0 / 45.1 | 8.4 / 25.9 / 51.4 | 1.2 / 4.8 / 9.4 | 0.4 / 0.0 / 2.8 | 2.1 / 2.0 / 1.7 | 1.1 |
+| planejador | 12.9 / 39.0 / 54.7 | 14.8 / 43.8 / 61.4 | 2.5 / 8.1 / 10.3 | 0.5 / 1.5 / 8.4 | 2.0 / 1.8 / 1.6 | 3.5 |
+
+Perda = comida que passa do teto de moradores da noite ou não acha casa iluminada com vaga. O resto da divisão (menos de uma festa de comida) vai em coluna à parte e não entra na perda.
 
 ### Metas cumpridas (entre as partidas em que a meta foi sorteada)
 
 | Meta | aleatorio | guloso | planejador |
 |---|---|---|---|
-| Ponta marcada | 0% | 3% | 48% |
-| Moradores | 0% | 13% | 30% |
-| Achados | 5% | 3% | 65% |
-| Fileira de casas | 5% | 56% | 66% |
-| Ilha iluminada | 0% | 2% | 75% |
+| Ponta marcada | 0% | 3% | 51% |
+| Moradores | 0% | 9% | 49% |
+| Achados | 5% | 3% | 76% |
+| Fileira de casas | 5% | 57% | 40% |
+| Ilha iluminada | 0% | 2% | 82% |
 
 ### Cartas escolhidas (parte das jogadas, sem contar descartes)
 
 | Carta | aleatorio | guloso | planejador |
 |---|---|---|---|
-| Casa | 24% | 43% | 37% |
+| Casa | 24% | 43% | 34% |
 | Campo | 20% | 19% | 18% |
-| Oliveiral | 21% | 17% | 10% |
-| Lanterna | 23% | 13% | 25% |
+| Oliveiral | 21% | 17% | 11% |
+| Lanterna | 23% | 13% | 28% |
 | Cais | 12% | 8% | 10% |
 
-Razão planejador / aleatório: 2.48x. Planejador / guloso: 1.23x.
+Razão planejador / aleatório: 2.07x. Planejador / guloso: 1.24x.
 <!-- RELATORIO:FIM -->
 
 ## Ajustes de regra feitos com o simulador
@@ -102,4 +112,29 @@ Por que a festa e não as outras:
 
 Detalhes da regra: a festa roda depois das lanternas queimarem e só põe morador em casa com lanterna acesa encostada e vaga (a casa chega a 4 no máximo, contando festas); o morador da festa fica (é permanente, mas a casa sem lanterna numa noite futura perde 1 morador como sempre). Na noite 30 a festa conta para a pontuação final. Os critérios ficam em `tests/sim.ts`.
 
-Observação: a comida no turno 20 e no fim é 0 por construção (a festa zera o estoque), então o critério de comida final sozinho passaria com qualquer festa. O que mostra que a comida pesa é a mudança de comportamento: o planejador ainda faz 37% de Casas e a pontuação cai só 2,3 pontos.
+Observação: a comida no turno 20 e no fim é 0 por construção (a festa zera o estoque), então o critério de comida final sozinho passaria com qualquer festa. Isso foi corrigido na rodada seguinte (próxima seção).
+
+## Medida honesta da festa: quanto de comida se perde por noite
+
+O critério "comida final < 15" passava por construção (a festa zera o estoque). O relatório agora mede, por noite (10, 20 e 30), a comida no começo do turno da noite, a comida na hora da festa, os moradores que a festa pôs e a **comida perdida**: a que passa do teto de moradores da noite ou não acha casa iluminada com vaga (o resto da divisão por `feastFood` vai à parte). Critério novo: perda média por noite do planejador <= 4.
+
+**Medida antes do ajuste** (festa de 3 comida por morador, teto 6 por noite, 1 convidado por casa por noite, casa até 4): o planejador perdia **35,6 de comida por noite** (11,6 / 35,7 / 59,4 nas três noites; guardava 12 / 35 / 56 e a festa só punha ~1 morador por noite). A festa quase não consumia comida: o limite era a vaga nas casas (poucas casas, já cheias), não a comida. A comida sobrava porque a renda dos campos e cais (19 cartas de 58) é umas 3 vezes o que casas e festa gastam.
+
+O que foi tentado (planejador, 150 a 300 partidas): Casa a 7 ou 9 comida (a perda só caiu a ~31 e a meta Moradores quebrou); conversão 2 por 1 com teto 10 (sem efeito: o gargalo era a vaga); menos campos e cais no baralho (perda ~7, mas o planejador virava um jogador de lanternas, 39%, e as metas Luz e Achados passavam de 95%); mais vagas sozinhas (perda ~27). A saída mais simples foi **mexer na festa (teto, conversão e vagas juntos)**, mais uma noção de demanda no planejador:
+
+- Festa: **5 comida = +1 morador, até 12 por noite** (era 3 por 1, até 6). Cada casa iluminada recebe até **4 convidados** além do teto de 4 da variedade (antes: a festa dividia as 4 vagas com a variedade e dava 1 por casa por noite); os convidados entram em rodízio entre as casas. Uma casa chega a 8 moradores.
+- Por que 5 por 1: com 3 por 1 e teto alto a festa virava a melhor jogada do jogo (pontos de graça por comida); a 5 por 1 uma Casa (5 comida, 1 a 4 moradores) continua sendo o melhor destino da comida e a festa é o escoadouro do que sobra.
+- Metas: Moradores subiu de 52 para **66**, porque a festa maior sobe a pontuação do planejador de ~57 para ~73 (a meta cumpria em 96%; agora 49%).
+- Planejador: a renda de comida só vale cheio enquanto o estoque projetado fica abaixo da demanda estimada (casas ainda por construir mais a festa das noites que faltam, só com o que é público); acima de 1,2 vezes a demanda vale 10% (`ratioLo`, `ratioHi`, `foodExtra`, `houseRate` em `W`).
+
+| Planejador (300 partidas) | Antes | Depois |
+|---|---|---|
+| Média | 56,7 | 73,0 |
+| Comida no começo do turno da noite (9, 19, 29) | 11,8 / 35,0 / 55,6 | 12,9 / 39,0 / 54,7 |
+| Moradores postos pela festa por noite (10 / 20 / 30) | 0,5 / 1,2 / 1,1 | 2,5 / 8,1 / 10,3 |
+| Comida perdida por noite (10 / 20 / 30) | 11,6 / 35,7 / 59,4 | 0,5 / 1,5 / 8,4 |
+| **Perda média por noite** | **35,6** | **3,5** |
+
+(A coluna "antes" conta o resto da divisão como perda; a "depois" não, como no critério. O resto vale ~2 por noite nas duas.)
+
+O que o número mostra com honestidade: a comida continua sobrando em volume (o planejador guarda ~40 a 55 antes das noites 2 e 3) e quase nunca é o gargalo; o que mudou é que a festa a escoa. A última noite ainda perde 8,4 (bate no teto de 12 moradores). Se a comida deve ser escassa de verdade, o caminho é cortar a renda (menos campos e cais, ou campo que rende menos), não a festa; fica nos próximos passos.

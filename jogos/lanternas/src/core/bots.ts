@@ -28,6 +28,7 @@ export const W = {
   farLight: 0.5,
   upkeep: 1.0,
   satur: 0.9,
+  houseRate: 0.3, ratioLo: 0.8, ratioHi: 1.2, foodExtra: 0.1,   // renda de comida a mais que a demanda estimada vale pouco
   feast: 0.9,          // cada morador que a festa da próxima noite promete
 };
 
@@ -50,7 +51,12 @@ function phiPlanner(g: Game): number {
   const cap = W.stockCap;
   v += W.foodStock * Math.min(g.food, cap) * 0.5 + W.oilStock * Math.min(g.oil, cap) * 0.5;
   // Renda vale menos quando o estoque já cobre o que se vai gastar (senão o bot enche campos à toa).
-  const foodSat = g.food >= 2 * RULES.houseCostFood ? W.satur : 1;
+  // Comida que não tem como virar morador (casas e festa) não vale renda: com o estoque projetado acima da demanda estimada, a renda quase não conta.
+  // A demanda usa só o que é público: ~W.houseRate casas por turno restante a RULES.houseCostFood cada e o teto da festa nas noites que faltam.
+  const festaNight = Math.min(RULES.feastCap, (g.houses.length + W.houseRate * tl * 0.5) * RULES.feastExtra) * RULES.feastFood;
+  const demand = W.houseRate * tl * RULES.houseCostFood + g.nightsLeft * festaNight;
+  const ratio = (g.food + g.foodIncome() * tl) / Math.max(1, demand);
+  const foodSat = g.food >= 2 * RULES.houseCostFood ? W.satur : ratio <= W.ratioLo ? 1 : ratio >= W.ratioHi ? W.foodExtra : 1 - (1 - W.foodExtra) * (ratio - W.ratioLo) / (W.ratioHi - W.ratioLo);
   const oilSat = g.oil >= RULES.lanternCostOil + g.nightUpkeep() ? W.satur : 1;
   v += W.foodInc * g.foodIncome() * hor * foodSat + W.oilInc * g.oilIncome() * hor * oilSat;
   v += W.litLand * g.litLand;
