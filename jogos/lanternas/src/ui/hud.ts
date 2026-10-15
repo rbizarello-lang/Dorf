@@ -60,7 +60,7 @@ export class Hud {
       `<div class="pop" aria-label="Moradores"><b>${g.residents()}</b><span>${ICON.people}moradores</span><span class="score">${ICON.star}${g.score()} pontos</span></div>` +
       `<div class="stock">` +
       `<div class="chip${g.oil < RULES.lanternCostOil && g.oil < upkeep ? ' low' : ''}" title="Óleo: acende lanternas e alimenta a luz nas noites">${ICON.oil}<b>${g.oil}</b><small>+${oi}/turno</small></div>` +
-      `<div class="chip${g.food < RULES.houseCostFood ? '' : ''}" title="Comida: constrói casas">${ICON.food}<b>${g.food}</b><small>+${fi}/turno</small></div>` +
+      `<div class="chip${g.food < RULES.houseCostFood ? '' : ''}" title="Comida: constrói casas. Na noite, a que sobrar vira moradores (${RULES.feastFood} comida por morador, até ${RULES.feastCap}) e o estoque zera.">${ICON.food}<b>${g.food}</b><small>+${fi}/turno</small></div>` +
       `</div>` +
       `<div id="menu"><button class="act" id="new2" type="button">${ICON.rotate}Nova ilha</button><span class="seed">semente ${g.seed}</span></div>`;
     $('new2').addEventListener('click', () => this.cb.onNew());
@@ -79,7 +79,8 @@ export class Hud {
       const left = nextNight - g.turn;
       const projected = g.oil + oi * (left + 1);
       const short = Math.max(0, upkeep - projected);
-      need = `Noite no turno ${nextNight}${left ? ` (em ${left} turno${left > 1 ? 's' : ''})` : ' (agora)'}: ${upkeep ? `as lanternas pedem ${upkeep} de óleo${short > 0 ? `, <b>faltam ${short}</b>` : ''}.` : 'casas sem lanterna encostada perdem morador.'}`;
+      const gain = g.feastGain(g.food + fi * (left + 1));
+      need = `Noite no turno ${nextNight}${left ? ` (em ${left} turno${left > 1 ? 's' : ''})` : ' (agora)'}: ${upkeep ? `as lanternas pedem ${upkeep} de óleo${short > 0 ? `, <b>faltam ${short}</b>` : ''}.` : 'casas sem lanterna encostada perdem morador.'} Festa: a comida vira moradores (${RULES.feastFood} por morador, até ${RULES.feastCap}) e o estoque zera${gain > 0 ? `, previsto <b>+${gain}</b>` : ''}.`;
     } else if (!g.over) need = 'Todas as noites já passaram.';
     $('need').innerHTML = need;
     // metas

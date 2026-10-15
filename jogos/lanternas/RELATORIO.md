@@ -14,7 +14,7 @@ Um jogo de cartas e exploração numa ilha hexagonal coberta de névoa, em 3D, q
   - Cais: rende +1 de comida por turno, na praia.
 - **Dois recursos:** comida (para construir casas) e óleo (para lanternas).
 - **A luz:** as lanternas revelam o mapa (a revelação é permanente) e protegem as casas na noite.
-- **Noites nos turnos 10, 20 e 30:** cada lanterna queima 1 de óleo (a que fica sem óleo apaga). A casa sem lanterna encostada perde 1 morador.
+- **Noites nos turnos 10, 20 e 30:** cada lanterna queima 2 de óleo (a que fica sem óleo apaga). A casa sem lanterna encostada perde 1 morador. **Festa:** a comida guardada vira moradores (3 de comida = +1 morador, até 6 por noite, em casas iluminadas com vaga) e o estoque zera.
 - **Achados escondidos:** 6 por ilha (2 ruínas, 1 cardume, 2 pomares, 1 nascente), que só aparecem quando a luz chega neles e dão bônus.
 - **Três metas por partida**, sorteadas entre cinco (ponta marcada, 52 moradores, 5 achados, fileira de 4 casas, 80% da ilha iluminada). Cada meta cumprida vale +5 pontos. A pontuação final é moradores mais metas.
 - **O visual:** um diorama, como uma maquete sobre um pedestal de madeira, com mar recortado, casinhas, campos, árvores, cais e farol. A hora do dia avança do amanhecer ao entardecer, e nas noites as lanternas e janelas acendem. Tudo é desenhado por código, sem arquivos de arte.
@@ -41,20 +41,20 @@ Foram simuladas 300 partidas completas para cada um de três jogadores automáti
 
 | Jogador | Média | p10 | p50 | p90 | Ilha revelada | Escolha apertada |
 |---|---|---|---|---|---|---|
-| Aleatório | 21,9 | 15 | 22 | 29 | 57% | 0% |
-| Guloso | 46,4 | 38 | 46 | 57 | 54% | 36% |
-| Planejador | 59,0 | 48 | 59 | 70 | 83% | 35% |
+| Aleatório | 22,8 | 16 | 22 | 31 | 58% | 0% |
+| Guloso | 46,2 | 38 | 46 | 57 | 53% | 38% |
+| Planejador | 56,7 | 48 | 56 | 68 | 81% | 35% |
 
 (p10, p50 e p90: a pontuação abaixo da qual ficam 10%, 50% e 90% das partidas. "Escolha apertada": nos turnos em que a melhor e a segunda melhor carta valem quase o mesmo, a fração de turnos em que o jogador tem uma decisão difícil de verdade.)
 
-- **Jogar bem compensa:** o planejador faz 2,69 vezes a pontuação do aleatório e 1,27 vez a do guloso.
-- **Metas (entre as partidas em que foram sorteadas), planejador:** ponta marcada 62%, moradores 40%, achados 72%, fileira 60%, ilha iluminada 75%. Nenhuma é automática e nenhuma é impossível.
-- **Uso das cartas, planejador:** Casa 40%, Lanterna 27%, Campo 17%, Cais 9%, Oliveiral 8%. Nenhuma carta passa de 45%, então a escolha não é óbvia.
+- **Jogar bem compensa:** o planejador faz 2,48 vezes a pontuação do aleatório e 1,23 vez a do guloso.
+- **Metas (entre as partidas em que foram sorteadas), planejador:** ponta marcada 48%, moradores 30%, achados 65%, fileira 66%, ilha iluminada 75%. Nenhuma é automática e nenhuma é impossível.
+- **Uso das cartas, planejador:** Casa 37%, Lanterna 25%, Campo 18%, Cais 10%, Oliveiral 10%. Nenhuma carta passa de 45%, então a escolha não é óbvia.
 - **Partidas travadas:** 0% nos três jogadores.
 - **Invariantes (verificações de sanidade):** a mesma semente dá sempre a mesma partida, casa nunca passa de 4 moradores, recursos nunca ficam negativos. Todas passaram.
 - **Desempenho (render por software, sem placa de vídeo):** de 37 a 64 draw calls e de 147 a 169 mil triângulos, dentro do limite que fixamos (150 e 300 mil). O FPS numa placa de vídeo de verdade ainda não foi medido.
 - **Console:** sem erros em nenhuma das 7 capturas. O comando de verificação (`npm run check`: tipos, simulação e build) passa.
-- **Ponto fraco conhecido:** no fim a vila fica com comida de sobra (na captura, 88). A comida só limita no começo.
+- **Comida e óleo no fim:** a sobra de comida (era 98 em média, 88 na captura) foi resolvida pela festa da noite: o estoque zera e a comida guardada vira moradores. O óleo final do planejador é 5,8 em média. Critérios novos no simulador: comida final média < 15 e óleo < 10.
 
 ## Avaliação dos 5 jogos
 
@@ -86,7 +86,7 @@ Foram simuladas 300 partidas completas para cada um de três jogadores automáti
 
 - **Ilha:**
   1. O Roger joga 3 partidas e anota onde ficou sem saber o que fazer. Pronto quando houver 3 anotações.
-  2. Consertar a sobra de comida (no fim chega a 88): casa mais cara conforme a vila cresce, ou comida virando moradores extras. Pronto quando o simulador mostrar comida final média abaixo de 15 sem quebrar os critérios.
+  2. (feito) Sobra de comida resolvida com a festa da noite; ver `docs/simulacao.md`.
   3. Clima tocável, à moda do Weatherglass: tocar no céu chama chuva, que faz os campos renderem +1 naquele turno. Pronto quando aparecer na captura e no simulador.
 - **Estações:** (1) regra com formas simples e simulador (4 estações × 6 turnos, 2 recursos); (2) um canto do mapa bonito em cada estação; (3) o Roger joga.
 - **Diário:** (1) regra de navegação e comida com simulador; (2) a página do diário desenhada; (3) o Roger joga.
@@ -101,7 +101,8 @@ Foram simuladas 300 partidas completas para cada um de três jogadores automáti
 - **Números ajustados pelo simulador** (os motivos estão em `docs/simulacao.md`):
   - Casa passou de 1 para 5 de comida e Lanterna de 2 para 4 de óleo, porque os recursos sobravam e Campo e Oliveiral não valiam nada;
   - baralho de 58 cartas, para que as cartas que sobram sejam uma escolha de verdade;
-  - a noite queima óleo, o que liga a economia à noite;
+  - a noite queima 2 de óleo por lanterna, o que liga a economia à noite;
+  - festa da noite: a comida guardada vira moradores e o estoque zera, para a comida pesar a partida inteira (testadas também casa mais cara e fome; ver `docs/simulacao.md`);
   - socorro da lanterna: se a luz não tem mais terra vazia, a lanterna pode ir à névoa encostada, o que resolveu a única partida travada;
   - mão garantida: se nenhuma das 3 cartas cabe, a 3ª é trocada por uma que caiba;
   - jogadores automáticos sem espiar a névoa: a primeira versão trapaceava, e as metas foram recalibradas depois disso (52 moradores, 5 achados, fileira de 4, 80% da ilha).
@@ -112,7 +113,7 @@ Foram simuladas 300 partidas completas para cada um de três jogadores automáti
 ## Próximos 3 passos
 
 1. O Roger joga 3 partidas e anota onde ficou sem saber o que fazer (pronto com 3 anotações).
-2. Consertar a sobra de comida: casa mais cara conforme a vila cresce, ou comida virando moradores extras (pronto quando o simulador mostrar comida final média abaixo de 15 sem quebrar os critérios).
+2. (feito) A sobra de comida foi resolvida com a festa da noite (comida final média 0, óleo 5,8, todos os critérios passando).
 3. Clima tocável: tocar no céu chama chuva, que faz os campos renderem +1 naquele turno (pronto quando aparecer na captura e no simulador).
 
 ## Quem fez o quê

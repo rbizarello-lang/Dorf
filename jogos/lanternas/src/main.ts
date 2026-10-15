@@ -115,11 +115,11 @@ function predictDark(action: { kind: 'play'; slot: number; idx: number } | { kin
   const c = game.clone();
   if (action.kind === 'play') c.place(c.hand[action.slot], action.idx); else c.oil += RULES.discardOil;
   const others = c.lanterns.slice(1);
-  const k = Math.min(others.length, Math.max(0, c.oil + c.oilIncome()));
+  const k = Math.min(others.length, Math.max(0, Math.floor((c.oil + c.oilIncome()) / RULES.nightOil)));
   return others.slice(k);
 }
 
-function afterMove(prevTurn: number, resBefore: number, lostBefore: Uint8Array, cell: number, dark: number[]): void {
+function afterMove(prevTurn: number, resBefore: number, lostBefore: Uint8Array, feastBefore: Uint8Array, cell: number, dark: number[]): void {
   selected = -1; valid = new Set(); pending = -1;
   world.setGhost(-1, -1); world.setHover(-1);
   world.sync(game, { origin: cell });
@@ -127,8 +127,10 @@ function afterMove(prevTurn: number, resBefore: number, lostBefore: Uint8Array, 
   const night = RULES.nights.includes(prevTurn);
   // texto flutuante: moradores ganhos pela jogada (antes da noite), na peça colocada
   const nightLoss = night ? game.houses.reduce((n, h) => n + (game.lost[h] - lostBefore[h]), 0) : 0;
+  const feastHouses = night ? game.houses.filter((h) => game.feast[h] > feastBefore[h]) : [];
+  const feastGain = feastHouses.reduce((n, h) => n + (game.feast[h] - feastBefore[h]), 0);
   if (cell >= 0) {
-    const gain = game.residents() + nightLoss - resBefore;
+    const gain = game.residents() + nightLoss - feastGain - resBefore;
     if (gain > 0) {
       const p = world.screenPos(cell, 1.4);
       hud.float(p.x, p.y, `+${gain} morador${gain > 1 ? 'es' : ''}`, false, 380);
@@ -140,7 +142,8 @@ function afterMove(prevTurn: number, resBefore: number, lostBefore: Uint8Array, 
     const lostHouses = game.houses.filter((h) => game.lost[h] > lostBefore[h]);
     window.setTimeout(() => {
       lostHouses.forEach((h, k) => { const p = world.screenPos(h, 1.2); hud.float(p.x, p.y, '−1 morador', true, k * 120); });
-      hud.toast(`Noite do turno ${prevTurn}: ` + (lostHouses.length ? `${lostHouses.length} casa${lostHouses.length > 1 ? 's' : ''} sem lanterna por perto perdeu morador.` : 'todas as casas estavam sob a luz.') + (dark.length ? ` ${dark.length} lanterna${dark.length > 1 ? 's' : ''} apagou por falta de óleo.` : ''), 5200);
+      feastHouses.forEach((h, k) => { const p = world.screenPos(h, 1.6); hud.float(p.x, p.y, `+${game.feast[h] - feastBefore[h]} festa`, false, 400 + k * 120); });
+      hud.toast(`Noite do turno ${prevTurn}: ` + (lostHouses.length ? `${lostHouses.length} casa${lostHouses.length > 1 ? 's' : ''} sem lanterna por perto perdeu morador.` : 'todas as casas estavam sob a luz.') + (dark.length ? ` ${dark.length} lanterna${dark.length > 1 ? 's' : ''} apagou por falta de óleo.` : '') + (feastGain ? ` Festa: a comida guardada virou +${feastGain} morador${feastGain > 1 ? 'es' : ''}.` : ' A comida guardada se perdeu.'), 5600);
     }, reduced ? 100 : 1500);
     if (!game.over) {
       nightTimer = window.setTimeout(() => { world.setNight(0); world.setDarkLanterns([]); }, reduced ? 3500 : 6200);
@@ -155,15 +158,15 @@ function afterMove(prevTurn: number, resBefore: number, lostBefore: Uint8Array, 
 
 function play(slot: number, idx: number): void {
   if (game.over) return;
-  const t = game.turn, res = game.residents(), lost = game.lost.slice();
+  const t = game.turn, res = game.residents(), lost = game.lost.slice(), feast = game.feast.slice();
   const dark = RULES.nights.includes(t) ? predictDark({ kind: 'play', slot, idx }) : [];
-  if (game.play(slot, idx)) afterMove(t, res, lost, idx, dark);
+  if (game.play(slot, idx)) afterMove(t, res, lost, feast, idx, dark);
 }
 function discard(): void {
   if (selected < 0 || game.over) return;
-  const t = game.turn, res = game.residents(), lost = game.lost.slice();
+  const t = game.turn, res = game.residents(), lost = game.lost.slice(), feast = game.feast.slice();
   const dark = RULES.nights.includes(t) ? predictDark({ kind: 'discard', slot: selected }) : [];
-  if (game.discard(selected)) afterMove(t, res, lost, -1, dark);
+  if (game.discard(selected)) afterMove(t, res, lost, feast, -1, dark);
 }
 
 world.onHover = (cell) => {

@@ -32,7 +32,7 @@ Nascem a distância >= 4 do centro (relaxa até 3 se faltar lugar). Revelar = en
 1. A mão tem as 3 cartas do topo do baralho. **Mão garantida:** se nenhuma cabe em lugar nenhum, a 3ª troca com a primeira carta do baralho que caiba (se nenhuma do baralho inteiro cabe, o turno conta como "travado").
 2. O jogador escolhe 1 carta e a coloca num hexágono válido, **ou** descarta uma carta por +1 óleo (nunca trava). A carta escolhida sai de jogo; as outras 2 voltam ao fundo do baralho.
 3. Fim do turno: entra a renda (comida e óleo de todos os produtores).
-4. Se for turno 10, 20 ou 30: **noite** (abaixo).
+4. Se for turno 10, 20 ou 30: **noite** (abaixo). A comida só serve para casas e para a festa da noite: não dá para guardá-la.
 5. Turno seguinte, até o 30.
 
 Baralho: 58 cartas, embaralhado pela semente: Casa 16, Campo 10, Oliveiral 10, Lanterna 13, Cais 9. Começo: 2 óleo e 2 comida.
@@ -51,7 +51,8 @@ Baralho: 58 cartas, embaralhado pela semente: Casa 16, Campo 10, Oliveiral 10, L
 
 ## Noite (turnos 10, 20 e 30)
 
-- Cada lanterna, exceto o Farol, queima 1 óleo, na ordem em que foi acesa. Sem óleo, apaga naquela noite.
+- Cada lanterna, exceto o Farol, queima 2 óleo, na ordem em que foi acesa. Sem óleo, apaga naquela noite.
+- **Festa:** depois das lanternas, a comida guardada vira moradores: cada 3 comida = +1 morador, no máximo 6 por noite, em casas com lanterna acesa encostada e com vaga (casa nunca passa de 4). **O estoque de comida zera**, sobre ou não. Por isso vale gastar a comida em casas antes da noite e só guardar o que a festa aproveita.
 - **Casa que não tem lanterna acesa encostada** (distância 1; o Farol vale) perde 1 morador, permanentemente (mínimo 0).
 - A luz que revela a névoa (raio 2) é maior que a que protege à noite (raio 1): é por isso que as casas devem ficar junto de lanternas.
 
@@ -65,17 +66,17 @@ Baralho: 58 cartas, embaralhado pela semente: Casa 16, Campo 10, Oliveiral 10, L
 | Fileira | 4 casas encostadas em linha reta |
 | Ilha iluminada | 80% dos hexágonos de terra revelados |
 
-**Pontuação final = moradores (casas + 3 por Ruína) + 5 por meta cumprida.**
+**Pontuação final = moradores (casas, festas + 3 por Ruína) + 5 por meta cumprida.**
 
 ## Mudanças em relação ao enunciado inicial
 
-Raio de proteção da noite 1; lanternas queimam óleo à noite; Casa 5 comida (era 1); Lanterna 4 óleo (era 2); baralho de 58 cartas; regra de socorro da Lanterna; mão garantida; achados longe do centro e sempre 6; metas: 52 moradores, 5 achados (era 4), fileira de 4 (era 3), ilha 80% (era 60%). Detalhes e motivos em `docs/simulacao.md`.
+Raio de proteção da noite 1; lanternas queimam 2 óleo à noite; festa da noite (comida vira moradores e o estoque zera); Casa 5 comida (era 1); Lanterna 4 óleo (era 2); baralho de 58 cartas; regra de socorro da Lanterna; mão garantida; achados longe do centro e sempre 6; metas: 52 moradores, 5 achados (era 4), fileira de 4 (era 3), ilha 80% (era 60%). Detalhes e motivos em `docs/simulacao.md`.
 
 ## Código
 
 - `src/core/hex.ts`, `rng.ts`, `map.ts` (ilha e achados), `game.ts` (regras, metas, `RULES`), `bots.ts` (aleatório, guloso, planejador).
 - Bots decidem numa cópia cega do jogo (`Game.clone(true)`): não espiam achados sob a névoa.
-- `tests/sim.ts`: 300 partidas por bot, critérios de aprovação, invariantes (determinismo, casa <= 4, recursos >= 0); grava o relatório em `docs/simulacao.md`.
+- `tests/sim.ts`: 300 partidas por bot, critérios de aprovação (inclui comida final média do planejador < 15 e óleo final médio < 10), invariantes (determinismo, casa <= 4, recursos >= 0); grava o relatório em `docs/simulacao.md`.
 - `src/main.ts` + `index.html`: entrada do jogo. `?seed=` (inteiro de até 9 dígitos, validado).
 
 ## Visual e sensação (etapa 2)

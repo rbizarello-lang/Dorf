@@ -15,6 +15,7 @@ const fail = (msg: string): void => { failures.push(msg); };
 
 interface Result {
   score: number; goals: number[]; met: boolean[]; litPct: number; cards: number[]; discards: number;
+  food20: number; oil20: number; foodEnd: number; oilEnd: number;
   tightTurns: number; tightBase: number; stuck: number; fixed: number; hash: string; houseMax: number; minRes: number;
 }
 
@@ -24,6 +25,7 @@ function playGame(bot: BotId, seed: number): Result {
   const cards = [0, 0, 0, 0, 0];
   let tightTurns = 0, tightBase = 0, houseMax = 0, minRes = 99;
   const trace: number[] = [];
+  let food20 = 0, oil20 = 0;
   while (!g.over) {
     const d = decide(bot, g, rng);
     if (d.cardValues.length >= 2) {
@@ -34,6 +36,7 @@ function playGame(bot: BotId, seed: number): Result {
     if (d.action.kind === 'play') cards[g.hand[d.action.slot]]++;
     const ok = g.apply(d.action);
     if (!ok) throw new Error(`${bot} seed ${seed}: ação ilegal`);
+    if (g.turn === 21) { food20 = g.food; oil20 = g.oil; }
     trace.push(d.action.kind === 'play' ? d.action.idx : -1);
     // Invariantes a cada turno.
     minRes = Math.min(minRes, g.food, g.oil);
@@ -42,7 +45,7 @@ function playGame(bot: BotId, seed: number): Result {
   const s = g.summary();
   return {
     score: s.score, goals: s.goals, met: s.goalsMet, litPct: s.litPct, cards, discards: g.discards,
-    tightTurns, tightBase, stuck: g.stuckTurns, fixed: g.fixedHands, hash: trace.join(',') + '|' + s.score, houseMax, minRes,
+    food20, oil20, foodEnd: g.food, oilEnd: g.oil, tightTurns, tightBase, stuck: g.stuckTurns, fixed: g.fixedHands, hash: trace.join(',') + '|' + s.score, houseMax, minRes,
   };
 }
 
@@ -60,7 +63,7 @@ for (const bot of BOTS) {
 // ---------- estatísticas ----------
 interface Stats {
   mean: number; p10: number; p50: number; p90: number; goalRate: number[]; lit: number; cardShare: number[];
-  discards: number; tight: number; stuckGames: number; fixedGames: number;
+  discards: number; tight: number; food20: number; oil20: number; foodEnd: number; oilEnd: number; stuckGames: number; fixedGames: number;
 }
 const stats: Record<string, Stats> = {};
 for (const bot of BOTS) {
@@ -76,6 +79,8 @@ for (const bot of BOTS) {
   stats[bot] = {
     mean: mean(sc), p10: pct(sc, 0.1), p50: pct(sc, 0.5), p90: pct(sc, 0.9), goalRate,
     lit: mean(rs.map((r) => r.litPct)), cardShare: totalCards.map((c) => c / Math.max(1, sumCards)),
+    food20: mean(rs.map((r) => r.food20)), oil20: mean(rs.map((r) => r.oil20)),
+    foodEnd: mean(rs.map((r) => r.foodEnd)), oilEnd: mean(rs.map((r) => r.oilEnd)),
     discards: mean(rs.map((r) => r.discards)), tight: tb ? rs.reduce((a, r) => a + r.tightTurns, 0) / tb : 0,
     stuckGames: rs.filter((r) => r.stuck > 0).length / rs.length, fixedGames: rs.filter((r) => r.fixed > 0).length / rs.length,
   };
@@ -90,6 +95,8 @@ check(P.tight >= 0.25 && P.tight <= 0.65, `escolha apertada do planejador fora d
 P.cardShare.forEach((s, c) => check(s <= 0.45, `carta ${CARD_NAMES[c]} com ${f0p(s)} das escolhas do planejador (> 45%)`));
 P.goalRate.forEach((r, gid) => { if (!(r >= 0.2 && r <= 0.85)) fail(`meta "${GOAL_NAMES[gid]}" do planejador cumprida em ${f0p(r)} (fora de 20-85%)`); });
 check(P.lit >= 0.45 && P.lit <= 0.9, `ilha revelada pelo planejador: ${f0p(P.lit)} (fora de 45-90%)`);
+check(P.foodEnd < 15, `comida final média do planejador: ${f1(P.foodEnd)} (esperado abaixo de 15)`);
+check(P.oilEnd < 10, `óleo final médio do planejador: ${f1(P.oilEnd)} (esperado abaixo de 10)`);
 for (const bot of BOTS) check(stats[bot].stuckGames === 0, `${bot}: ${f0p(stats[bot].stuckGames)} das partidas com turno sem jogada válida`);
 
 // ---------- invariantes ----------
@@ -128,6 +135,8 @@ for (const bot of BOTS) {
   const s = stats[bot];
   out.push(`| ${bot} | ${f1(s.mean)} | ${s.p10} | ${s.p50} | ${s.p90} | ${f0p(s.lit)} | ${f1(s.discards)} | ${f0p(s.tight)} | ${f0p(s.stuckGames)} | ${f0p(s.fixedGames)} |`);
 }
+out.push('', '### Recursos parados (média por partida)', '', '| Jogador | Comida no turno 20 | Óleo no turno 20 | Comida no fim | Óleo no fim |', '|---|---|---|---|---|');
+for (const bot of BOTS) { const s = stats[bot]; out.push(`| ${bot} | ${f1(s.food20)} | ${f1(s.oil20)} | ${f1(s.foodEnd)} | ${f1(s.oilEnd)} |`); }
 out.push('', '### Metas cumpridas (entre as partidas em que a meta foi sorteada)', '', '| Meta | ' + BOTS.join(' | ') + ' |', '|---|' + BOTS.map(() => '---').join('|') + '|');
 for (let gid = 0; gid < 5; gid++) out.push(`| ${GOAL_NAMES[gid]} | ${BOTS.map((b) => f0p(stats[b].goalRate[gid])).join(' | ')} |`);
 out.push('', '### Cartas escolhidas (parte das jogadas, sem contar descartes)', '', '| Carta | ' + BOTS.join(' | ') + ' |', '|---|' + BOTS.map(() => '---').join('|') + '|');

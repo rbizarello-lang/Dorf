@@ -28,6 +28,7 @@ export const W = {
   farLight: 0.5,
   upkeep: 1.0,
   satur: 0.9,
+  feast: 0.9,          // cada morador que a festa da próxima noite promete
 };
 
 /** Potencial do guloso: pontos de agora + recursos e renda simples. */
@@ -70,6 +71,8 @@ function phiPlanner(g: Game): number {
     const projected = g.oil + g.oilIncome() * (nextNight - g.turn + 1);
     v -= W.upkeep * Math.max(0, g.nightUpkeep() - projected);
   }
+  // Festa da noite: a comida guardada vira moradores (até o teto) e o resto do estoque se perde.
+  if (nl > 0) v += W.feast * g.feastGain();
   // Ter óleo à mão vale: abre a chance de acender mais uma lanterna.
   if (tl > 3 && g.oil >= RULES.lanternCostOil) v += W.oilForLantern;
   return v;

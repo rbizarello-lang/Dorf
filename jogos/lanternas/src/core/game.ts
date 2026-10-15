@@ -18,10 +18,13 @@ export const RULES = {
   startOil: 2,
   handSize: 3,
   houseCostFood: 5,
+  /** Festa da noite: cada feastFood de comida guardada vira +1 morador (até feastCap por noite) e o estoque zera. */
+  feastFood: 3,
+  feastCap: 6,
   lanternCostOil: 4,
   discardOil: 1,
   /** Óleo que cada lanterna (menos o Farol) queima numa noite. */
-  nightOil: 1,
+  nightOil: 2,
   houseMax: 4,
   ruinResidents: 3,
   dockFishBonus: 2,
@@ -55,6 +58,7 @@ export class Game {
   struct: Uint8Array;
   revealed: Uint8Array;
   lost: Uint8Array;                 // moradores perdidos nas noites, por casa
+  feast: Uint8Array;                // moradores ganhos nas festas, por casa
   houses: number[] = [];
   prod: number[] = [];              // campos, oliveirais e cais
   lanterns: number[] = [];
@@ -77,7 +81,7 @@ export class Game {
       // Cópia "cega" (para os bots): os achados ainda sob a névoa somem do mapa, então avaliar uma jogada não espia a névoa.
       this.map = blind ? { ...from.map, finds: from.map.finds.map((f, i) => (from.revealed[i] ? f : 0)) } : from.map;
       this.goals = from.goals; this.goalTarget = from.goalTarget;
-      this.struct = from.struct.slice(); this.revealed = from.revealed.slice(); this.lost = from.lost.slice();
+      this.struct = from.struct.slice(); this.revealed = from.revealed.slice(); this.lost = from.lost.slice(); this.feast = from.feast.slice();
       this.houses = from.houses.slice(); this.prod = from.prod.slice(); this.lanterns = from.lanterns.slice();
       this.food = from.food; this.oil = from.oil; this.turn = from.turn;
       this.deck = from.deck.slice(); this.hand = from.hand.slice();
@@ -89,6 +93,7 @@ export class Game {
     this.struct = new Uint8Array(N);
     this.revealed = new Uint8Array(N);
     this.lost = new Uint8Array(N);
+    this.feast = new Uint8Array(N);
     const goalRng = mulberry32(subSeed(seed, 4));
     this.goals = shuffle([0, 1, 2, 3, 4], goalRng).slice(0, 3).sort((a, b) => a - b);
     this.goalTarget = RULES.residentsGoal;
@@ -185,7 +190,7 @@ export class Game {
       if (t === Terrain.Water || t === Terrain.Beach) agua = 1;
       if (this.revealed[n] && this.map.finds[n] === Find.Orchard) pomar = 1;
     }
-    const v = Math.min(RULES.houseMax, 1 + campo + bosque + agua + lant + pomar + pomar);
+    const v = Math.min(RULES.houseMax, 1 + campo + bosque + agua + lant + pomar + pomar + this.feast[h]);
     return Math.max(0, v - this.lost[h]);
   }
 
@@ -275,7 +280,7 @@ export class Game {
 
   /**
    * Noite: cada lanterna (menos o Farol velho) queima RULES.nightOil de óleo, na ordem em que foi acesa;
-   * sem óleo ela apaga naquela noite. Casa sem lanterna acesa encostada perde 1 morador.
+   * sem óleo ela apaga naquela noite. Depois vem a festa. Casa sem lanterna acesa encostada perde 1 morador.
    */
   private night(): void {
     const lit = new Uint8Array(N);
@@ -283,10 +288,31 @@ export class Game {
       if (l === CENTER) { lit[l] = 1; continue; }
       if (this.oil >= RULES.nightOil) { this.oil -= RULES.nightOil; lit[l] = 1; }
     }
+    // Festa: a comida guardada vira moradores nas casas iluminadas com vaga; o resto do estoque se perde.
+    {
+      let n = Math.min(RULES.feastCap, Math.floor(this.food / RULES.feastFood));
+      for (const h of this.houses) {
+        if (n <= 0) break;
+        if (!NB[h].some((c) => lit[c])) continue;
+        const room = this.feastRoom(h);
+        if (room > 0) { this.feast[h]++; n--; }
+      }
+      this.food = 0;
+    }
     for (const h of this.houses) {
       if (this.houseResidents(h) <= 0) continue;
       if (!NB[h].some((n) => lit[n])) this.lost[h]++;
     }
+  }
+
+  /** Quanto a casa ainda comporta de moradores de festa. */
+  feastRoom(h: number): number { return RULES.houseMax - (this.houseResidents(h) + this.lost[h]); }
+
+  /** Moradores que a festa daria com `food` de comida (casas com lanterna encostada e vaga). */
+  feastGain(food = this.food): number {
+    let room = 0;
+    for (const h of this.houses) if (this.houseLit(h)) room += Math.max(0, this.feastRoom(h));
+    return Math.min(RULES.feastCap, Math.floor(food / RULES.feastFood), room);
   }
 
   /** Óleo que as lanternas pedem numa noite (para a interface e para o planejador). */
