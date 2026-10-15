@@ -14,7 +14,9 @@ export type TreeGeo =
   | 'blossom' // copa florida em cachos (cerejeira, ipê)
   | 'palm' // palmeira / buriti / tamareira
   | 'crystal' // cristais (ficção)
-  | 'cypress' // cipreste estreito e alto
+  | 'cypress' // cipreste estreito e alto (quina marcada)
+  | 'puff' // copa gorda e baixa em um bloco só (o contraste da mata contra o cipreste e o abeto)
+  | 'spire' // abeto estreito e alto, de ponta
   | 'olive' // oliveira: copa larga e baixa, tronco retorcido
   | 'oak' // carvalho: copa grande em vários blocos
   | 'birch' // bétula: tronco branco, copa pequena
