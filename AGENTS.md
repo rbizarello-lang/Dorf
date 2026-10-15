@@ -74,7 +74,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 |---|---|
 | `?debug` | mostra FPS, draw calls, triângulos e instâncias |
 | `?perf` | mede 5 s e mostra o FPS mediano e o p95; `window.__perf(segundos)` devolve o mesmo, com as estatísticas do último quadro |
-| `?gallery&theme=<id>` | mostra todos os kits do tema lado a lado; `window.__gallery` lista as chaves |
+| `?gallery&theme=<id>` | mostra todos os kits do tema lado a lado; `window.__gallery` lista as chaves. `?gallery=casas` mostra só as casas (parede e telhado juntos, na era atual) |
 | `?auto=40` | a IA gulosa coloca 40 peças |
 | `?stress=1000` | teste de carga; o resultado fica em `window.__load` |
 | `?focus=4` | centraliza a câmera na peça com mais bordas do terreno (4 = rio); `window.__focus(t, zoom)` |
@@ -237,6 +237,10 @@ Números de 2026-10-02, depois do traço, do pincel, dos aldeões, dos estandart
 4. Adicione o tema em `scripts/screenshots.mjs` e gere a captura.
 
 O menu agrupa os temas pelo campo `period` sem nenhuma outra mudança. Os testes já rodam as regras de todos os temas (`THEMES`). Se o tema tiver `rules` próprias, rode `npm test`.
+
+### Variantes de casa
+
+Cada tema tem 3 a 6 tipos de casa (`houses`); as variantes de silhueta (`steep`, `cross` e o corpo `annex`) entram com peso baixo (0,06 a 0,14) e `minor: true`, que as deixa de fora do sobrado da terceira era (`risingKind`). Parede e telhado de cada tipo são os pools `wall:i` e `roof:i`, então um tipo novo custa 2 draw calls só onde aparece. A proporção de cada casa (largura e profundidade, 0,8 a 1,3) sai de um gerador à parte em `addHouse`, com a mesma tripla de escala na parede e no telhado.
 
 ### Novo kit (árvore, casa, telhado, marco, plantação, animal, barco, veículo, estilo de estrada)
 

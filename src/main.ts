@@ -1508,7 +1508,7 @@ function start(data: unknown) {
       requestAnimationFrame(sample);
     });
   if (params.has('perf')) void (window as unknown as { __perf: (s?: number) => Promise<unknown> }).__perf(5);
-  if (params.has('gallery')) (window as unknown as { __gallery: string[] }).__gallery = world.showGallery();
+  if (params.has('gallery')) (window as unknown as { __gallery: string[] }).__gallery = world.showGallery(params.get('gallery') ?? undefined);
   if (params.has('yaw')) world.rig.yaw = world.rig.goalYaw = Number(params.get('yaw'));
   if (params.has('zoom')) world.rig.dist = world.rig.goalDist = Number(params.get('zoom'));
   // Inclinação guardada (ajuste em radianos) ou pedida pela URL (graus acima do chão, para capturas).
