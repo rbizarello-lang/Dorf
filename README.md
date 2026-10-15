@@ -147,7 +147,7 @@ O botão de qualidade abre a lista: **Auto**, **Cinema**, **Ultra**, **Alta**, *
 | `?auto=40` | a IA coloca 40 peças de uma vez (tabuleiro de exemplo) |
 | `?demo` | a IA joga sozinha, com animação |
 | `?stress=1000` | teste de carga com 1.000 peças |
-| `?gallery` | mostra todos os kits do tema lado a lado (depuração visual) |
+| `?gallery` | mostra todos os kits do tema lado a lado (depuração visual); `?gallery=casas` mostra só as casas |
 | `?specials=all` | põe as peças especiais na partida sem liberá-las (`station`, `watermill`, `lighthouse`, separadas por ponto) |
 | `?zoom=12` `?yaw=0.5` | distância e giro iniciais da câmera |
 | `?pitch=25` | inclinação inicial em graus acima do chão, de 18 a 75 (fora disso, ignorado) |

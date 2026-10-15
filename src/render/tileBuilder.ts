@@ -1203,6 +1203,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // O sorteio extra vem de um gerador à parte (consome sempre o mesmo tanto), então o resto da peça
   // não muda; as chamadas ao `rng` abaixo seguem a ordem antiga.
   const crng = mulberry32((seed ^ 0x5c0105) >>> 0);
+  // Proporção por casa (largura e profundidade 0,8 a 1,3): também de um gerador à parte, para a
+  // peça não mudar em mais nada. Parede e telhado recebem a mesma tripla de escala.
+  const prng = mulberry32((seed ^ 0x27d0a5) >>> 0);
   const tileRoof = new Map<number, string>();
   const addHouse = (x: number, z: number, baseAng: number, sector = -1) => {
     const i = weighted(rng, houseKinds);
@@ -1212,20 +1215,22 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const s = randRange(rng, 1.5, 1.8) * (kind.body === 'long' ? 0.9 : 1);
     const sy = randRange(rng, 0.92, 1.12);
     const ry = baseAng + (rng() < 0.5 ? 0 : Math.PI / 2) + (rng() - 0.5) * 0.12;
-    D(`wall:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(pick(rng, kind.walls)), 0.08));
+    const kx = randRange(prng, 0.8, kind.body === 'long' ? 1.1 : 1.3), kz = randRange(prng, 0.8, 1.3);
+    const sc: [number, number, number] = [s * kx, s * sy, s * kz];
+    D(`wall:${i}`, x, 0, z, ry, sc, vary(rng, tc(pick(rng, kind.walls)), 0.08));
     let roof = tileRoof.get(i);
     if (roof === undefined) tileRoof.set(i, (roof = pick(rng, kind.roofs)));
     else if (rng() < 0.2) roof = pick(rng, kind.roofs);
     const own = pick(crng, kind.roofs);
     if (crng() >= 0.6) roof = own;
-    D(`roof:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(roof), 0.06));
+    D(`roof:${i}`, x, 0, z, ry, sc, vary(rng, tc(roof), 0.06));
     if (meta?.chimney && rng() < 0.85) {
       const [cx, cy, cz] = meta.chimney;
       const c = Math.cos(ry), sn = Math.sin(ry);
-      chimneys.push(x + (cx * c + cz * sn) * s, cy * s * sy, z + (-cx * sn + cz * c) * s, i);
+      chimneys.push(x + (cx * kx * c + cz * kz * sn) * s, cy * s * sy, z + (-cx * kx * sn + cz * kz * c) * s, i);
     }
     taken.push([x, z]);
-    houses.push({ x, z, s, sector });
+    houses.push({ x, z, s: s * Math.max(kx, kz), sector });
   };
 
   const grassN = Math.round(randInt(rng, 9, 15) * detail);

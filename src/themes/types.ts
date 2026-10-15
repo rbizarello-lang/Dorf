@@ -31,7 +31,8 @@ export type BodyStyle =
   | 'long' // casa comprida (viking, rancho)
   | 'cube' // cubo de adobe/pedra (Egito, Mediterrâneo)
   | 'tall' // sobrado estreito de 2-3 andares (Holanda, colonial)
-  | 'round'; // cilíndrica (cabana andina, módulo marciano)
+  | 'round' // cilíndrica (cabana andina, módulo marciano)
+  | 'annex'; // corpo principal com um volume baixo encostado ao lado (celeiro, cozinha, estábulo)
 
 export type RoofStyle =
   | 'gable' // duas águas
@@ -42,6 +43,8 @@ export type RoofStyle =
   | 'thatch' // palha grossa e arredondada
   | 'turf' // grama sobre o telhado (use cor verde)
   | 'stepgable' // empena escalonada holandesa
+  | 'steep' // duas águas muito íngreme, com beiral curto (empena alta e estreita)
+  | 'cross' // cumeeira cruzada: dois telhados de duas águas em cruz
   | 'cone'; // cônico (cabanas redondas)
 
 export interface HouseKind {
@@ -56,6 +59,8 @@ export interface HouseKind {
   trim?: string;
   /** Chaminé com fumaça. */
   chimney?: boolean;
+  /** Variante rara de silhueta: fica de fora da escolha do sobrado da terceira era (`risingKind`). */
+  minor?: boolean;
   // Os campos abaixo vêm da era da vila (src/themes/progress.ts); o tema não precisa escrevê-los.
   /** Escala da casa inteira (padrão 1). */
   scale?: number;
