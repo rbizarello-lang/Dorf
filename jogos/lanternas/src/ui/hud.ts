@@ -5,7 +5,7 @@ import { CARD_ART, CARD_TONE, ICON } from './icons';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
-const CARD_FX = ['1 a 4 moradores', '+1 comida por turno', '+1 óleo por turno', 'Acende luz de raio 2', '+1 comida por turno'];
+const CARD_FX = ['1 a 4, até 8 com festa', '+1 comida por turno', '+1 óleo por turno', 'Acende luz de raio 2', '+1 comida por turno'];
 const CARD_WHERE = ['Prado, Bosque ou Praia', 'Só em Prado', 'Prado ou Rocha', 'Qualquer terra', 'Praia junto da água'];
 
 function costHtml(c: number): string {
