@@ -74,6 +74,10 @@ export class World {
   private viewShift = 0.04;
   private viewX = 0; private viewXT = 0;
   orbit = false;
+  /** Segundos de mundo que ainda podem andar (-1 = sem limite); a 0 o mundo fica congelado. */
+  private hold = -1;
+  holdAfter(sec: number): void { this.hold = sec; }
+  get held(): boolean { return this.hold === 0; }
   // estado visual
   private shown = new Uint8Array(N);
   private revT = new Float32Array(N).fill(Infinity);
@@ -96,6 +100,18 @@ export class World {
   private beam!: THREE.Mesh;
   private flag!: THREE.Mesh; private star!: THREE.Mesh; private tipCell = -1;
   private hl!: THREE.InstancedMesh; private hlMat!: THREE.MeshBasicMaterial;
+  // vento: marcas dos alvos, véu da terra à vista sem luz, rajada e chuva
+  windMark!: THREE.InstancedMesh;
+  private veil!: THREE.InstancedMesh;
+  private veilCells = new Map<number, { off: number }>();
+  private sweepX = new Float32Array(N); private sweepZ = new Float32Array(N);
+  private windHoverCell = -1; private windHoverK = 0;
+  private gust = { t: 9, x: 0, z: 0, dx: 1, dz: 0 };
+  private streaks!: THREE.InstancedMesh;
+  private streakData: Array<{ lane: number; h: number; d: number; len: number; ph: number }> = [];
+  private rainMesh!: THREE.InstancedMesh;
+  private rainData: Array<{ x: number; z: number; y: number; v: number }> = [];
+  private rainT = 99; private rainK = 0;
   private hover!: THREE.Mesh;
   private ghost: THREE.Group | null = null; private ghostCell = -1;
   private ghostMat!: THREE.MeshStandardMaterial; private ghostBasic!: THREE.MeshBasicMaterial;
@@ -342,6 +358,32 @@ export class World {
     this.hl = new THREE.InstancedMesh(K.hexRing(0.95, 0.74, 0.34, [1, 0.42, 0.04]), this.hlMat, N);
     this.hl.frustumCulled = false; this.hl.count = 0; this.hl.renderOrder = 4;
     this.scene.add(this.hl);
+    // vento: anéis acima das nuvens nos alvos do sopro e na área que ele dissolve
+    this.windMark = new THREE.InstancedMesh(K.hexRing(0.95, 0.76, 0.3, [0.8, 0.95, 1]), new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, toneMapped: false }), N);
+    this.windMark.frustumCulled = false; this.windMark.count = 0; this.windMark.renderOrder = 7;
+    const wc = new THREE.Color(1, 1, 1);
+    for (let i = 0; i < N; i++) this.windMark.setColorAt(i, wc);
+    this.scene.add(this.windMark);
+    // véu azulado sobre a terra que o vento mostrou mas a luz ainda não alcança
+    this.veil = new THREE.InstancedMesh(K.hexRing(0.985, 0.04, 0.9, [0.2, 0.26, 0.5]), new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.34, depthWrite: false, toneMapped: false }), N);
+    this.veil.frustumCulled = false; this.veil.count = 0; this.veil.renderOrder = 3;
+    this.scene.add(this.veil);
+    // fiapos de vento da rajada: tiras finas com brilho nas pontas
+    const sc = document.createElement('canvas'); sc.width = 128; sc.height = 8;
+    const sx = sc.getContext('2d')!;
+    const sg = sx.createLinearGradient(0, 0, 128, 0);
+    sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(0.55, 'rgba(255,255,255,0.9)'); sg.addColorStop(1, 'rgba(255,255,255,0)');
+    sx.fillStyle = sg; sx.fillRect(0, 2, 128, 4);
+    const stex = new THREE.CanvasTexture(sc); stex.colorSpace = THREE.SRGBColorSpace;
+    this.streaks = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 0.13).rotateX(-PI / 2), new THREE.MeshBasicMaterial({ map: stex, color: 0x9fd9f2, transparent: true, depthWrite: false, toneMapped: false }), 20);
+    this.streaks.frustumCulled = false; this.streaks.count = 0; this.streaks.renderOrder = 8;
+    for (let i = 0; i < 20; i++) { this.streaks.setColorAt(i, new THREE.Color(1, 1, 1)); this.streakData.push({ lane: (hashN(i, 701) - 0.5) * 5, h: 0.55 + hashN(i, 702) * 1.3, d: hashN(i, 703) * 0.32, len: 2.2 + hashN(i, 704) * 1.8, ph: hashN(i, 705) * 6.28 }); }
+    this.scene.add(this.streaks);
+    // chuva: riscos verticais que olham para a câmera
+    this.rainMesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.022, 0.8), new THREE.MeshBasicMaterial({ color: 0xd6e8ff, transparent: true, opacity: 0.5, depthWrite: false, toneMapped: false }), 280);
+    this.rainMesh.frustumCulled = false; this.rainMesh.count = 0; this.rainMesh.renderOrder = 9;
+    for (let i = 0; i < 280; i++) { const a = hashN(i, 711) * PI * 2, r = Math.sqrt(hashN(i, 712)) * 13; this.rainData.push({ x: Math.cos(a) * r, z: Math.sin(a) * r, y: hashN(i, 713) * 10, v: 11 + hashN(i, 714) * 5 }); }
+    this.scene.add(this.rainMesh);
     this.hover = new THREE.Mesh(K.hexRing(0.98, 0.62, 0.5, [1, 0.8, 0.3]), new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, toneMapped: false }));
     this.hover.visible = false; this.hover.renderOrder = 5;
     this.scene.add(this.hover);
@@ -428,6 +470,7 @@ export class World {
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
+    // Retrato: a ilha enche a largura útil (meia largura visível ~8,5 unidades); em tela larga, o enquadramento de sempre.
     const aspectK = Math.min(1.6, Math.max(1, 1.45 / this.camera.aspect));
     this.fit = aspectK;
     this.camera.setViewOffset(w, h, Math.round(w * this.viewX), Math.round(h * this.viewShift), w, h);
@@ -477,18 +520,24 @@ export class World {
     this.flag.visible = this.star.visible = true;
     this.beam.visible = false;
     this.windowCols = new Map();
+    this.veilCells.clear(); this.sweepX.fill(0); this.sweepZ.fill(0); this.veil.count = 0;
+    this.windHoverCell = -1; this.windHoverK = 0; this.windMark.count = 0;
+    this.gust.t = 9; U.gustAmp.value = 0; this.streaks.count = 0;
+    this.rainT = 99; this.rainK = 0; U.rain.value = 0; this.rainMesh.count = 0;
   }
 
   private windowCols = new Map<number, Item[]>();
 
-  sync(g: Game, o: { instant?: boolean; origin?: number } = {}): void {
+  sync(g: Game, o: { instant?: boolean; origin?: number; wind?: { dx: number; dz: number } } = {}): void {
     this.game = g;
     const inst = !!o.instant, now = this.time, origin = o.origin ?? CENTER;
     const fresh: number[] = [];
     for (let i = 0; i < N; i++) {
-      if (g.revealed[i] && !this.shown[i]) {
+      if (g.seen[i] && !this.shown[i]) {
         this.shown[i] = 1;
-        this.revT[i] = inst ? -100 : now + (this.reduced ? 0 : dist(origin, i) * 0.07);
+        // Névoa soprada pelo vento: as nuvens voam na direção da rajada em vez de subir.
+        if (o.wind && !g.revealed[i]) { this.sweepX[i] = o.wind.dx; this.sweepZ[i] = o.wind.dz; } else { this.sweepX[i] = 0; this.sweepZ[i] = 0; }
+        this.revT[i] = inst ? -100 : now + (this.reduced ? 0 : dist(origin, i) * (o.wind ? 0.05 : 0.07));
         fresh.push(i); this.tileActive.add(i);
       }
     }
@@ -500,6 +549,12 @@ export class World {
       const t0 = inst ? -100 : this.revT[i] + 0.3 + hashN(i, 9) * 0.25;
       this.buildDecor(i, t0);
       this.buildFind(i, t0);
+    }
+    // Véu: terra que o vento mostrou e a luz ainda não alcança (some quando uma lanterna a ilumina).
+    for (let i = 0; i < N; i++) {
+      const v = this.veilCells.get(i);
+      if (g.seen[i] && !g.revealed[i]) { if (!v) this.veilCells.set(i, { off: -1 }); }
+      else if (v && v.off < 0) v.off = inst ? -100 : now;
     }
     this.refreshWindows();
     this.placeTip();
@@ -663,6 +718,53 @@ export class World {
     this.hl.instanceMatrix.needsUpdate = true;
   }
 
+  /** Alvos do sopro (anéis suaves, com o vento armado) e a área que o sopro dissolveria sob o cursor (anéis fortes). */
+  setWindMarks(targets: number[], area: number[], hoverCell = -1): void {
+    this.windHoverCell = hoverCell;
+    if (hoverCell >= 0) this.windWigCell = hoverCell;
+    const m = new THREE.Matrix4(), c = new THREE.Color();
+    let k = 0;
+    const put = (cell: number, bright: number): void => {
+      m.makeTranslation(cellX(cell), this.shown[cell] ? this.topY(cell) + 0.14 : 1.45, cellZ(cell));
+      this.windMark.setMatrixAt(k, m); this.windMark.setColorAt(k, c.setRGB(bright, bright, bright)); k++;
+    };
+    for (const t of targets) if (!area.includes(t)) put(t, 0.55);
+    for (const a of area) put(a, 1);
+    this.windMark.count = k;
+    this.windMark.instanceMatrix.needsUpdate = true;
+    if (this.windMark.instanceColor) this.windMark.instanceColor.needsUpdate = true;
+  }
+  private windWigCell = -1;
+
+  /** Rajada do sopro: fiapos de vento atravessam a nuvem, as copas perto se curvam por 1 s e a névoa é empurrada. */
+  blowAt(cell: number, dx: number, dz: number): void {
+    if (this.reduced) return;
+    this.gust = { t: 0, x: cellX(cell), z: cellZ(cell), dx, dz };
+    U.gustPos.value.set(this.gust.x, this.gust.z); U.gustDir.value.set(dx, dz);
+    for (let k = 0; k < 14 && this.parts.length < 240; k++) {
+      const sp = 2 + Math.random() * 2.6;
+      this.parts.push({ x: this.gust.x - dx * 1.2 + (Math.random() - 0.5) * 1.6, y: 0.7 + Math.random() * 0.8, z: this.gust.z - dz * 1.2 + (Math.random() - 0.5) * 1.6, vx: dx * sp, vz: dz * sp, vy: 0.1, t: 0, life: 0.8 + Math.random() * 0.4, s0: 0.1, s1: 0.26, g: 0 });
+      this.dust.setColorAt(this.parts.length - 1, new THREE.Color(0.96, 0.98, 1));
+    }
+    if (this.dust.instanceColor) this.dust.instanceColor.needsUpdate = true;
+  }
+
+  /** Chuva cosmética de 4 s sobre a ilha (não muda regra nenhuma). */
+  rain(): void { this.rainT = 0; }
+  get raining(): boolean { return this.rainT < 4.4; }
+
+  /** O ponto da tela é céu vazio (fora do tampo do diorama)? */
+  isSky(clientX: number, clientY: number): boolean {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+    this.ray.setFromCamera(ndc, this.camera);
+    const p = new THREE.Vector3();
+    if (!this.ray.ray.intersectPlane(this.pickPlane, p)) return true;
+    return Math.hypot(p.x, p.z) > 16;
+  }
+
+  setCursor(c: string): void { this.renderer.domElement.style.cursor = c; }
+
   setHover(cell: number): void {
     if (cell < 0) { this.hover.visible = false; return; }
     this.hover.visible = true;
@@ -732,11 +834,12 @@ export class World {
     const d = new THREE.Vector3(Math.sin(az) * Math.cos(elev), Math.sin(elev), Math.cos(az) * Math.cos(elev));
     this.sun.position.copy(d).multiplyScalar(52);
     this.sun.color = mix('sun', this.sun.color);
-    this.sun.intensity = lerp(lerp(a.sunI, b.sunI, t), NIGHT.sunI, n);
+    this.sun.intensity = lerp(lerp(a.sunI, b.sunI, t), NIGHT.sunI, n) * (1 - 0.4 * this.rainK);
     mix('hs', this.hemi.color); mix('hg', this.hemi.groundColor);
     this.hemi.intensity = lerp(lerp(a.hI, b.hI, t), NIGHT.hI, n);
     this.renderer.toneMappingExposure = lerp(lerp(a.exp, b.exp, t), NIGHT.exp, n);
-    const top = mix('top', new THREE.Color()).getStyle(), bot = mix('bot', new THREE.Color()).getStyle();
+    const rainTint = new THREE.Color(0x8e9bb0);
+    const top = mix('top', new THREE.Color()).lerp(rainTint, 0.5 * this.rainK).getStyle(), bot = mix('bot', new THREE.Color()).lerp(rainTint, 0.4 * this.rainK).getStyle();
     if (top !== this.cssTop || bot !== this.cssBot) {
       this.cssTop = top; this.cssBot = bot;
       const st = document.documentElement.style;
@@ -758,7 +861,9 @@ export class World {
   // =====================================================================
   frame(dtReal: number): void {
     const dtc = Math.min(dtReal, 0.1);
-    const dt = dtc;
+    let dt = dtc;
+    // Gancho de captura: deixa o mundo andar `hold` segundos e o congela (a câmera e o desenho seguem).
+    if (this.hold >= 0) { dt = Math.min(dtc, this.hold); this.hold -= dt; }
     this.time += dt;
     U.time.value = this.time;
     const t = this.time;
@@ -779,7 +884,12 @@ export class World {
     this.applyLighting();
     this.sun.target.position.set(0, 0, 0);
 
+    this.windHoverK += ((this.windHoverCell >= 0 && !this.reduced ? 1 : 0) - this.windHoverK) * (1 - Math.exp(-dtc * 10));
+    if (this.windHoverK < 0.01 && this.windHoverCell < 0) this.windWigCell = -1;
     this.updateTiles();
+    this.updateVeil(t);
+    this.updateGust(dt);
+    this.updateRain(dt);
     this.updateClouds(t);
     this.updateFish(t);
     for (const p of this.pools) p.refresh(t);
@@ -808,18 +918,81 @@ export class World {
     for (const m of this.tiles) m.instanceMatrix.needsUpdate = true;
   }
 
+  private updateVeil(t: number): void {
+    const m = new THREE.Matrix4();
+    let k = 0;
+    for (const [i, v] of this.veilCells) {
+      if (!this.shown[i]) continue;
+      let s = smooth((t - this.revT[i] - 0.45) / 0.5);
+      if (v.off >= 0) { const u = (t - v.off) / 0.7; if (u >= 1) { this.veilCells.delete(i); continue; } s *= 1 - smooth(u); }
+      m.makeScale(s, 1, s).setPosition(cellX(i), this.topY(i) + 0.075, cellZ(i));
+      this.veil.setMatrixAt(k++, m);
+    }
+    this.veil.count = k;
+    this.veil.instanceMatrix.needsUpdate = true;
+  }
+
+  private updateGust(dt: number): void {
+    const g = this.gust;
+    if (g.t >= 1.4) { if (U.gustAmp.value !== 0) { U.gustAmp.value = 0; this.streaks.count = 0; } return; }
+    g.t += dt;
+    U.gustAmp.value = this.reduced ? 0 : Math.sin(Math.PI * Math.min(1, g.t / 1.0));
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3(), col = new THREE.Color();
+    const ax = new THREE.Vector3(0, 1, 0), base = -Math.atan2(g.dz, g.dx);
+    this.streakData.forEach((d, k) => {
+      const lt = g.t - d.d;
+      const u = lt / 1.0;
+      if (u < 0 || u > 1) { this.streaks.setMatrixAt(k, m.makeScale(0, 0, 0)); return; }
+      const along = -5 + u * 11, fade = Math.pow(Math.sin(Math.PI * u), 0.7);
+      p.set(g.x + g.dx * along - g.dz * d.lane, d.h + Math.sin(u * 6 + d.ph) * 0.12, g.z + g.dz * along + g.dx * d.lane);
+      q.setFromAxisAngle(ax, base + Math.sin(u * 9 + d.ph) * 0.22);
+      sc.set(d.len * (0.6 + 0.4 * fade), 1, 1);
+      this.streaks.setMatrixAt(k, m.compose(p, q, sc));
+      this.streaks.setColorAt(k, col.setRGB(fade, fade, fade));
+    });
+    this.streaks.count = 20;
+    this.streaks.instanceMatrix.needsUpdate = true;
+    if (this.streaks.instanceColor) this.streaks.instanceColor.needsUpdate = true;
+  }
+
+  private updateRain(dt: number): void {
+    if (this.rainT >= 4.4) { if (this.rainK !== 0) { this.rainK = 0; U.rain.value = 0; this.rainMesh.count = 0; } return; }
+    this.rainT += dt;
+    const k = Math.max(0, Math.min(1, this.rainT / 0.6) * Math.min(1, (4 - this.rainT) / 0.9));
+    this.rainK = k;
+    U.rain.value = this.reduced ? 0 : k;
+    const n = Math.floor((this.reduced ? 70 : 280) * k);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
+    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+    const slow = this.reduced ? 0.35 : 1;
+    for (let i = 0; i < n; i++) {
+      const d = this.rainData[i];
+      d.y -= d.v * slow * dt;
+      if (d.y < 0) { d.y += 10; const a = hashN(i, Math.floor(this.rainT * 7)) * PI * 2, r = Math.sqrt(hashN(i, 3 + Math.floor(this.rainT * 5))) * 13; d.x = Math.cos(a) * r; d.z = Math.sin(a) * r; }
+      m.compose(p.set(d.x, d.y, d.z), q, one);
+      this.rainMesh.setMatrixAt(i, m);
+    }
+    this.rainMesh.count = n;
+    this.rainMesh.instanceMatrix.needsUpdate = true;
+    (this.rainMesh.material as THREE.MeshBasicMaterial).opacity = (this.reduced ? 0.3 : 0.5) * Math.min(1, k * 1.4);
+  }
+
   private updateClouds(t: number): void {
     const m = new THREE.Matrix4(), pos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
     this.puffData.forEach((p, n) => {
       const age = t - this.revT[p.cell];
-      let s = 1, lift = 0;
+      let s = 1, lift = 0, px = 0, pz = 0;
       if (age >= 0) {
         const d = age / (this.reduced ? 0.25 : 0.85);
-        if (d >= 1) s = 0; else { s = 1 - d * d * d; lift = d * 0.9; }
+        const sx = this.sweepX[p.cell], sz = this.sweepZ[p.cell];
+        if (d >= 1) s = 0;
+        else if (sx !== 0 || sz !== 0) { s = 1 - d * d; lift = d * 0.3; px = sx * d * d * 3.4; pz = sz * d * d * 3.4; }
+        else { s = 1 - d * d * d; lift = d * 0.9; }
       }
+      const wig = p.cell === this.windWigCell ? this.windHoverK : 0;
       const bob = Math.sin(t * 0.55 + p.ph) * 0.05 * U.motion.value;
-      const r = p.r * s * (1 + Math.sin(t * 0.4 + p.ph * 2) * 0.03 * U.motion.value);
-      pos.set(p.x + Math.sin(t * 0.2 + p.ph) * 0.05 * U.motion.value, p.y + bob + lift, p.z);
+      const r = p.r * s * (1 + Math.sin(t * 0.4 + p.ph * 2) * 0.03 * U.motion.value + Math.sin(t * 13 + p.ph) * 0.06 * wig);
+      pos.set(p.x + px + Math.sin(t * 0.2 + p.ph) * 0.05 * U.motion.value + Math.sin(t * 11 + p.ph * 3) * 0.1 * wig, p.y + bob + lift, p.z + pz + Math.cos(t * 9 + p.ph) * 0.07 * wig);
       sc.set(r, r * 0.72, r);
       m.compose(pos, q.identity(), sc);
       if (s <= 0.001) m.makeScale(0, 0, 0);

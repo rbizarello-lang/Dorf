@@ -21,49 +21,61 @@ Resultados de 300 partidas por jogador (sementes 1..300), 30 turnos cada.
 
 | Jogador | Média | p10 | p50 | p90 | Ilha revelada | Descartes/partida | Escolha apertada | Partidas travadas | Mãos refeitas (partidas) |
 |---|---|---|---|---|---|---|---|---|---|
-| aleatorio | 35.3 | 25 | 35 | 47 | 58% | 0.0 | 0% | 0% | 64% |
-| guloso | 58.9 | 48 | 59 | 68 | 53% | 1.8 | 38% | 0% | 71% |
-| planejador | 73.0 | 64 | 73 | 83 | 85% | 0.8 | 37% | 0% | 70% |
+| aleatorio | 35.5 | 25 | 36 | 47 | 58% | 0.0 | 0% | 0% | 64% |
+| guloso | 59.2 | 49 | 60 | 70 | 50% | 2.3 | 38% | 0% | 74% |
+| planejador | 73.8 | 64 | 74 | 83 | 82% | 0.6 | 37% | 0% | 69% |
+| planejador+sopro | 77.2 | 68 | 78 | 86 | 83% | 0.7 | 38% | 0% | 68% |
+
+### Sopro do vento (planejador sem e com o sopro, mesmas 300 sementes)
+
+| Jogador | Média | p10 | p50 | p90 | Sopros/partida | Ilha revelada | Achados (meta) |
+|---|---|---|---|---|---|---|---|
+| planejador | 73.8 | 64 | 74 | 83 | 0.0 | 82% | 71% |
+| planejador+sopro | 77.2 | 68 | 78 | 86 | 3.0 | 83% | 83% |
+
+Ganho do sopro: **+3.40 pontos** em média (±0.80 no intervalo de 95%); partidas que melhoraram 65%, empataram 7%, pioraram 28%. Critério: entre +1 e +6.
 
 ### Recursos parados (média por partida)
 
 | Jogador | Comida no turno 20 | Óleo no turno 20 | Comida no fim | Óleo no fim |
 |---|---|---|---|---|
 | aleatorio | 0.0 | 31.3 | 0.0 | 63.1 |
-| guloso | 0.0 | 43.2 | 0.0 | 78.1 |
-| planejador | 0.0 | 3.6 | 0.0 | 6.8 |
+| guloso | 0.0 | 44.1 | 0.0 | 81.9 |
+| planejador | 0.0 | 3.8 | 0.0 | 6.6 |
+| planejador+sopro | 0.0 | 3.4 | 0.0 | 6.6 |
 
 ### A festa da noite: comida guardada e comida perdida (média por noite 10 / 20 / 30)
 
 | Jogador | Comida no começo do turno da noite (após os turnos 9, 19, 29) | Comida na festa (depois da renda) | Moradores da festa | Comida perdida | Resto da divisão | Perda média por noite (sem o resto) |
 |---|---|---|---|---|---|---|
-| aleatorio | 10.9 / 35.2 / 62.3 | 13.1 / 40.4 / 70.8 | 1.3 / 5.2 / 8.4 | 4.9 / 12.3 / 27.0 | 1.9 / 2.0 / 2.0 | 14.7 |
-| guloso | 7.6 / 23.0 / 45.1 | 8.4 / 25.9 / 51.4 | 1.2 / 4.8 / 9.4 | 0.4 / 0.0 / 2.8 | 2.1 / 2.0 / 1.7 | 1.1 |
-| planejador | 12.9 / 39.0 / 54.7 | 14.8 / 43.8 / 61.4 | 2.5 / 8.1 / 10.3 | 0.5 / 1.5 / 8.4 | 2.0 / 1.8 / 1.6 | 3.5 |
+| aleatorio | 10.9 / 35.2 / 62.3 | 13.1 / 40.4 / 70.8 | 1.3 / 5.2 / 8.5 | 4.9 / 12.3 / 26.1 | 1.9 / 2.0 / 2.0 | 14.4 |
+| guloso | 7.7 / 23.4 / 45.3 | 8.4 / 26.4 / 51.5 | 1.2 / 4.9 / 9.7 | 0.3 / 0.0 / 1.4 | 2.1 / 1.9 / 1.6 | 0.6 |
+| planejador | 13.0 / 40.2 / 56.8 | 14.9 / 45.3 / 63.7 | 2.5 / 8.4 / 11.3 | 0.6 / 1.2 / 5.7 | 2.0 / 1.9 / 1.6 | 2.5 |
+| planejador+sopro | 13.4 / 42.1 / 60.0 | 15.3 / 47.4 / 67.3 | 2.5 / 8.8 / 11.6 | 0.6 / 1.2 / 7.5 | 2.1 / 2.0 / 1.8 | 3.1 |
 
 Perda = comida que passa do teto de moradores da noite ou não acha casa iluminada com vaga. O resto da divisão (menos de uma festa de comida) vai em coluna à parte e não entra na perda.
 
 ### Metas cumpridas (entre as partidas em que a meta foi sorteada)
 
-| Meta | aleatorio | guloso | planejador |
-|---|---|---|---|
-| Ponta marcada | 0% | 3% | 51% |
-| Moradores | 0% | 9% | 49% |
-| Achados | 5% | 3% | 76% |
-| Fileira de casas | 5% | 57% | 40% |
-| Ilha iluminada | 0% | 2% | 82% |
+| Meta | aleatorio | guloso | planejador | planejador+sopro |
+|---|---|---|---|---|
+| Ponta marcada | 0% | 4% | 41% | 52% |
+| Moradores | 0% | 11% | 58% | 72% |
+| Achados | 5% | 1% | 71% | 83% |
+| Fileira de casas | 5% | 66% | 33% | 33% |
+| Ilha iluminada | 0% | 1% | 71% | 76% |
 
 ### Cartas escolhidas (parte das jogadas, sem contar descartes)
 
-| Carta | aleatorio | guloso | planejador |
-|---|---|---|---|
-| Casa | 24% | 43% | 34% |
-| Campo | 20% | 19% | 18% |
-| Oliveiral | 21% | 17% | 11% |
-| Lanterna | 23% | 13% | 28% |
-| Cais | 12% | 8% | 10% |
+| Carta | aleatorio | guloso | planejador | planejador+sopro |
+|---|---|---|---|---|
+| Casa | 24% | 43% | 34% | 35% |
+| Campo | 20% | 19% | 19% | 19% |
+| Oliveiral | 21% | 18% | 11% | 10% |
+| Lanterna | 23% | 12% | 27% | 26% |
+| Cais | 12% | 8% | 10% | 11% |
 
-Razão planejador / aleatório: 2.07x. Planejador / guloso: 1.24x.
+Razão planejador / aleatório: 2.08x. Planejador / guloso: 1.25x.
 <!-- RELATORIO:FIM -->
 
 ## Ajustes de regra feitos com o simulador
@@ -122,19 +134,41 @@ O critério "comida final < 15" passava por construção (a festa zera o estoque
 
 O que foi tentado (planejador, 150 a 300 partidas): Casa a 7 ou 9 comida (a perda só caiu a ~31 e a meta Moradores quebrou); conversão 2 por 1 com teto 10 (sem efeito: o gargalo era a vaga); menos campos e cais no baralho (perda ~7, mas o planejador virava um jogador de lanternas, 39%, e as metas Luz e Achados passavam de 95%); mais vagas sozinhas (perda ~27). A saída mais simples foi **mexer na festa (teto, conversão e vagas juntos)**, mais uma noção de demanda no planejador:
 
-- Festa: **5 comida = +1 morador, até 12 por noite** (era 3 por 1, até 6). Cada casa iluminada recebe até **4 convidados** além do teto de 4 da variedade (antes: a festa dividia as 4 vagas com a variedade e dava 1 por casa por noite); os convidados entram em rodízio entre as casas. Uma casa chega a 8 moradores.
+- Festa: **5 comida = +1 morador, até 14 por noite** (era 3 por 1, até 6; o teto subiu de 12 para 14 quando o sopro do vento fez o planejador guardar mais comida na última noite). Cada casa iluminada recebe até **4 convidados** além do teto de 4 da variedade (antes: a festa dividia as 4 vagas com a variedade e dava 1 por casa por noite); os convidados entram em rodízio entre as casas. Uma casa chega a 8 moradores.
 - Por que 5 por 1: com 3 por 1 e teto alto a festa virava a melhor jogada do jogo (pontos de graça por comida); a 5 por 1 uma Casa (5 comida, 1 a 4 moradores) continua sendo o melhor destino da comida e a festa é o escoadouro do que sobra.
-- Metas: Moradores subiu de 52 para **66**, porque a festa maior sobe a pontuação do planejador de ~57 para ~73 (a meta cumpria em 96%; agora 49%).
+- Metas: Moradores subiu de 52 para **66**, porque a festa maior sobe a pontuação do planejador de ~57 para ~74 (a meta cumpria em 96%; agora 49%).
 - Planejador: a renda de comida só vale cheio enquanto o estoque projetado fica abaixo da demanda estimada (casas ainda por construir mais a festa das noites que faltam, só com o que é público); acima de 1,2 vezes a demanda vale 10% (`ratioLo`, `ratioHi`, `foodExtra`, `houseRate` em `W`).
 
 | Planejador (300 partidas) | Antes | Depois |
 |---|---|---|
-| Média | 56,7 | 73,0 |
-| Comida no começo do turno da noite (9, 19, 29) | 11,8 / 35,0 / 55,6 | 12,9 / 39,0 / 54,7 |
-| Moradores postos pela festa por noite (10 / 20 / 30) | 0,5 / 1,2 / 1,1 | 2,5 / 8,1 / 10,3 |
-| Comida perdida por noite (10 / 20 / 30) | 11,6 / 35,7 / 59,4 | 0,5 / 1,5 / 8,4 |
-| **Perda média por noite** | **35,6** | **3,5** |
+| Média | 56,7 | 73,8 |
+| Comida no começo do turno da noite (9, 19, 29) | 11,8 / 35,0 / 55,6 | 13,0 / 40,2 / 56,8 |
+| Moradores postos pela festa por noite (10 / 20 / 30) | 0,5 / 1,2 / 1,1 | 2,5 / 8,4 / 11,3 |
+| Comida perdida por noite (10 / 20 / 30) | 11,6 / 35,7 / 59,4 | 0,6 / 1,2 / 5,7 |
+| **Perda média por noite** | **35,6** | **2,5** |
 
 (A coluna "antes" conta o resto da divisão como perda; a "depois" não, como no critério. O resto vale ~2 por noite nas duas.)
 
-O que o número mostra com honestidade: a comida continua sobrando em volume (o planejador guarda ~40 a 55 antes das noites 2 e 3) e quase nunca é o gargalo; o que mudou é que a festa a escoa. A última noite ainda perde 8,4 (bate no teto de 12 moradores). Se a comida deve ser escassa de verdade, o caminho é cortar a renda (menos campos e cais, ou campo que rende menos), não a festa; fica nos próximos passos.
+O que o número mostra com honestidade: a comida continua sobrando em volume (o planejador guarda ~40 a 55 antes das noites 2 e 3) e quase nunca é o gargalo; o que mudou é que a festa a escoa. A última noite ainda perde 5,7 (bate no teto de 14 moradores). Se a comida deve ser escassa de verdade, o caminho é cortar a renda (menos campos e cais, ou campo que rende menos), não a festa; fica nos próximos passos.
+
+## Sopro do vento
+
+Clima que se toca, na linha do Weatherglass. Quem joga tem 1 sopro: tocar numa nuvem de névoa encostada na área iluminada dissolve a névoa num raio 1 em volta dela (7 hexágonos). Revela o terreno e os achados, mas **não ilumina**: casa, campo, oliveiral e cais não cabem ali, e a área não conta como iluminada para as metas (Ilha iluminada, Achados) nem para os efeitos dos achados (Pomar, Nascente, Cardume, Ruína só valem quando a luz chega). O sopro **não gasta o turno**, recarrega em cada noite e guarda no máximo 1 (`RULES.windMax`). Na lógica (`src/core/game.ts`) o estado é `seen` (névoa dissolvida) ao lado de `revealed` (iluminado); a ação `{ kind: 'wind', idx }` entra no `history` junto das jogadas e `Game.replay(seed, ações)` refaz a partida.
+
+**Uma decisão de regra a registrar:** a Lanterna pode ser posta na terra que o vento mostrou (com o óleo de sempre). Sem isso o sopro era só informação e valia +0,3 ponto ao planejador (o planejador já ilumina ~80% da ilha, então saber onde ficam os achados pouco muda). Com a Lanterna na terra soprada, o sopro é alcance: acende-se a até 4 hexágonos da luz atual em vez de 2, ao preço de uma carta e de 4 de óleo. Casa, campo, oliveiral e cais continuam exigindo luz, como no enunciado.
+
+**O planejador aprende a soprar só com o que se vê** (`windMove` em `src/core/bots.ts`): escolhe a nuvem encostada na luz cujo raio 1 mostra mais hexágonos novos na faixa dos achados (distância >= 4 do centro, regra pública) e sopra assim que houver ganho; usa a carga antes da noite que a recarrega. Duas mudanças para ele não espiar: (a) a cópia cega (`Game.clone(true)`) também esconde o terreno sob a névoa (o que não está à vista vale um palpite: terra até a distância 5 do centro, `BLIND_LAND_RADIUS`); os lugares válidos vêm do jogo real, só o valor é cego; (b) a luz sobre névoa que o vento já mostrou não vale mais o bônus de "achado provável" (`farLight`), porque quem soprou já sabe se há achado ali, e `findBonus` passou a valer de fato (antes não era usado). O planejador sem sopro quase não sentiu: com o terreno cego a média foi de 73,0 para 72,4 (a de 73,8 da tabela já traz o teto de festa de 14).
+
+| Planejador (300 sementes, mesmas partidas) | Sem sopro | Com sopro |
+|---|---|---|
+| Média | 73,8 | 77,2 |
+| p10 / p50 / p90 | 64 / 74 / 83 | 68 / 78 / 86 |
+| Sopros por partida | 0 | 3,0 (usa todos: início, depois das noites 10 e 20) |
+| Meta Achados | 71% | 83% |
+| Meta Ponta marcada | 41% | 52% |
+| Meta Moradores | 58% | 72% |
+| Ilha revelada | 82% | 83% |
+
+**Ganho: +3,40 pontos (±0,80, intervalo de 95%)**; melhora em 65% das partidas, empata em 8% e piora em 27%. Critério: entre +1 e +6. Abaixo disso é enfeite, acima é forte demais. Todos os critérios antigos passam também para o planejador com sopro (o teste confere os dois). O teste ainda cobre: o sopro não gasta o turno nem a mão, não ilumina nem conta achado, só vale em nuvem fechada encostada na luz, não deixa soprar sem carga, recarrega na noite com no máximo 1 guardado, e o replay (semente + ações, com sopros no meio) reproduz a pontuação e a névoa.
+
+O que ficou de fora: o aleatório e o guloso não sopram (só o planejador), e o sopro não entrou no cálculo de "escolha apertada". A chuva ao tocar o céu é só visual e não aparece no simulador.

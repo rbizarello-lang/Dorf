@@ -1,6 +1,6 @@
 // HUD em HTML/CSS: recursos e moradores, régua do dia, metas, mão de cartas e tela de fim.
 // Só lê o Game; as ações voltam por callbacks.
-import { CARD_NAMES, Card, GOAL_TITLES, Game, RULES, cardRule, goalLabel } from '../core/game';
+import { CARD_NAMES, Card, GOAL_TITLES, Game, RULES, WIND_RULE, cardRule, goalLabel } from '../core/game';
 import { CARD_ART, CARD_TONE, ICON } from './icons';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -25,7 +25,7 @@ export function dayWord(turn: number): string {
   return p < 0.22 ? 'manhã' : p < 0.58 ? 'meio-dia' : p < 0.85 ? 'tarde' : 'entardecer';
 }
 
-export interface HudCallbacks { onSelect(slot: number): void; onDiscard(): void; onNew(): void }
+export interface HudCallbacks { onSelect(slot: number): void; onDiscard(): void; onNew(): void; onWind(): void }
 
 export class Hud {
   private lastHandKey = '';
@@ -34,6 +34,7 @@ export class Hud {
 
   constructor(private cb: HudCallbacks) {
     $('discard').addEventListener('click', () => cb.onDiscard());
+    $('wind').addEventListener('click', () => cb.onWind());
     $('again').addEventListener('click', () => cb.onNew());
     const ruler = $('ruler'); const marks = $('marks');
     for (let n = 1; n <= RULES.turns; n++) {
@@ -50,7 +51,7 @@ export class Hud {
     }
   }
 
-  render(g: Game, selected: number): void {
+  render(g: Game, selected: number, windArmed = false): void {
     const turn = Math.min(g.turn, RULES.turns);
     const fi = g.foodIncome(), oi = g.oilIncome();
     const nextNight = RULES.nights.find((n) => n >= g.turn);
@@ -96,9 +97,25 @@ export class Hud {
       return `<li class="${done ? 'done' : ''}" title="${goalLabel(id)}"><span class="box">${ICON.check}</span><span class="nm">${GOAL_TITLES[id]}</span><span class="nu">${nu}</span><span class="bar"><i style="width:${prog}%"></i></span></li>`;
     }).join('') + '</ul>';
     this.renderHand(g, selected);
+    this.renderWind(g, windArmed);
     const disc = $('discard') as HTMLButtonElement;
     disc.disabled = selected < 0 || g.over;
     disc.style.display = g.over ? 'none' : ''; // fim da partida: nada a descartar
+  }
+
+  /** Botão do sopro do vento: carga cheia ou vazia, armado, desabilitado (sem carga ou fim de jogo). */
+  private renderWind(g: Game, armed: boolean): void {
+    const b = $('wind'), ready = g.wind > 0 && !g.over;
+    const nextNight = RULES.nights.find((n) => n >= g.turn);
+    const sub = g.wind > 0 ? `${g.wind}/${RULES.windMax} pronto` : nextNight !== undefined ? `volta na noite ${nextNight}` : 'sem sopro';
+    b.innerHTML = `${g.wind > 0 ? ICON.windFull : ICON.windEmpty}<span class="wl">Vento<small>${sub}</small></span>`;
+    b.classList.toggle('ready', ready);
+    b.classList.toggle('armed', armed && ready);
+    b.setAttribute('aria-pressed', String(armed && ready));
+    b.setAttribute('aria-disabled', String(!ready));
+    b.setAttribute('aria-label', `Sopro do vento, tecla V. ${g.wind > 0 ? 'Carga cheia.' : 'Carga vazia, ' + sub + '.'} ${WIND_RULE}`);
+    b.title = WIND_RULE;
+    b.style.display = g.over ? 'none' : '';
   }
 
   private renderHand(g: Game, selected: number): void {

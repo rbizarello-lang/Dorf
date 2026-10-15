@@ -2,14 +2,16 @@
 // Também confere invariantes (determinismo, limite de moradores, recursos). Falha (exit 1) se algo reprovar.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { BOTS, BotId, decide } from '../src/core/bots';
-import { CARD_NAMES, GOAL_TITLES, Game, RULES, Struct } from '../src/core/game';
+import { BOTS, BotId, decide, windMove } from '../src/core/bots';
+import { Action, CARD_NAMES, GOAL_TITLES, Game, RULES, Struct } from '../src/core/game';
 import { N } from '../src/core/hex';
 import { Terrain } from '../src/core/map';
 import { mulberry32 } from '../src/core/rng';
 
 const GAMES = Number(process.env.GAMES ?? 300);
 const GOAL_NAMES = GOAL_TITLES;
+const SOPRO = 'planejador+sopro';
+const VARIANTS: string[] = [...BOTS, SOPRO];
 const failures: string[] = [];
 const fail = (msg: string): void => { failures.push(msg); };
 
@@ -18,10 +20,11 @@ interface Result {
   food20: number; oil20: number; foodEnd: number; oilEnd: number;
   /** Por noite (10, 20, 30): comida no começo do turno da noite, comida na festa, comida perdida, moradores da festa. */
   foodBefore: number[]; foodFeast: number[]; foodLost: number[]; foodRest: number[]; feastPlaced: number[];
-  tightTurns: number; tightBase: number; stuck: number; fixed: number; hash: string; houseMax: number; minRes: number;
+  winds: number; history: Action[]; tightTurns: number; tightBase: number; stuck: number; fixed: number; hash: string; houseMax: number; minRes: number;
 }
 
-function playGame(bot: BotId, seed: number): Result {
+function playGame(variant: string, seed: number): Result {
+  const bot = variant.split('+')[0] as BotId, useWind = variant === SOPRO;
   const g = new Game(seed);
   const rng = mulberry32(seed * 7919 + BOTS.indexOf(bot) + 1);
   const cards = [0, 0, 0, 0, 0];
@@ -31,6 +34,8 @@ function playGame(bot: BotId, seed: number): Result {
   const foodBefore: number[] = [];
   while (!g.over) {
     if (RULES.nights.includes(g.turn)) foodBefore.push(g.food);
+    // O sopro não gasta o turno: o planejador decide só com o que está à vista (windMove).
+    if (useWind) for (let k = 0; k < RULES.windMax; k++) { const w = windMove(g); if (w >= 0) g.apply({ kind: 'wind', idx: w }); }
     const d = decide(bot, g, rng);
     if (d.cardValues.length >= 2) {
       tightBase++;
@@ -51,7 +56,7 @@ function playGame(bot: BotId, seed: number): Result {
     score: s.score, goals: s.goals, met: s.goalsMet, litPct: s.litPct, cards, discards: g.discards,
     food20, oil20, foodEnd: g.food, oilEnd: g.oil,
     foodBefore, foodFeast: g.feasts.map((f) => f.food), foodLost: g.feasts.map((f) => f.lost), foodRest: g.feasts.map((f) => f.rest), feastPlaced: g.feasts.map((f) => f.placed),
-    tightTurns, tightBase, stuck: g.stuckTurns, fixed: g.fixedHands, hash: trace.join(',') + '|' + s.score, houseMax, minRes,
+    winds: g.windsUsed, history: g.history, tightTurns, tightBase, stuck: g.stuckTurns, fixed: g.fixedHands, hash: trace.join(',') + '|' + s.score + '|' + g.seen.join(''), houseMax, minRes,
   };
 }
 
@@ -61,7 +66,7 @@ const f1 = (x: number): string => x.toFixed(1);
 const f0p = (x: number): string => (100 * x).toFixed(0) + '%';
 
 const results: Record<string, Result[]> = {};
-for (const bot of BOTS) {
+for (const bot of VARIANTS) {
   results[bot] = [];
   for (let seed = 1; seed <= GAMES; seed++) results[bot].push(playGame(bot, seed));
 }
@@ -69,10 +74,10 @@ for (const bot of BOTS) {
 // ---------- estatísticas ----------
 interface Stats {
   mean: number; p10: number; p50: number; p90: number; goalRate: number[]; lit: number; cardShare: number[];
-  discards: number; tight: number; foodBefore: number[]; foodFeast: number[]; foodLost: number[]; foodRest: number[]; feastPlaced: number[]; lostNight: number; restNight: number; food20: number; oil20: number; foodEnd: number; oilEnd: number; stuckGames: number; fixedGames: number;
+  winds: number; discards: number; tight: number; foodBefore: number[]; foodFeast: number[]; foodLost: number[]; foodRest: number[]; feastPlaced: number[]; lostNight: number; restNight: number; food20: number; oil20: number; foodEnd: number; oilEnd: number; stuckGames: number; fixedGames: number;
 }
 const stats: Record<string, Stats> = {};
-for (const bot of BOTS) {
+for (const bot of VARIANTS) {
   const rs = results[bot];
   const sc = rs.map((r) => r.score);
   const goalRate = [0, 1, 2, 3, 4].map((gid) => {
@@ -87,6 +92,7 @@ for (const bot of BOTS) {
     lit: mean(rs.map((r) => r.litPct)), cardShare: totalCards.map((c) => c / Math.max(1, sumCards)),
     food20: mean(rs.map((r) => r.food20)), oil20: mean(rs.map((r) => r.oil20)),
     foodEnd: mean(rs.map((r) => r.foodEnd)), oilEnd: mean(rs.map((r) => r.oilEnd)),
+    winds: mean(rs.map((r) => r.winds)),
     foodBefore: RULES.nights.map((_, k) => mean(rs.map((r) => r.foodBefore[k]))),
     foodFeast: RULES.nights.map((_, k) => mean(rs.map((r) => r.foodFeast[k]))),
     foodLost: RULES.nights.map((_, k) => mean(rs.map((r) => r.foodLost[k]))),
@@ -99,21 +105,28 @@ for (const bot of BOTS) {
 }
 
 // ---------- critérios de aprovação ----------
-const P = stats.planejador, Gu = stats.guloso, A = stats.aleatorio;
+const P = stats.planejador, Gu = stats.guloso, A = stats.aleatorio, PS = stats[SOPRO];
 const check = (cond: boolean, msg: string): void => { if (!cond) fail(msg); };
-check(P.mean >= 1.3 * A.mean, `planejador (${f1(P.mean)}) < 1,3x aleatório (${f1(A.mean)})`);
 check(P.mean >= Gu.mean, `planejador (${f1(P.mean)}) < guloso (${f1(Gu.mean)})`);
-check(P.tight >= 0.25 && P.tight <= 0.65, `escolha apertada do planejador fora de 25-65%: ${f0p(P.tight)}`);
-P.cardShare.forEach((s, c) => check(s <= 0.45, `carta ${CARD_NAMES[c]} com ${f0p(s)} das escolhas do planejador (> 45%)`));
-P.goalRate.forEach((r, gid) => { if (!(r >= 0.2 && r <= 0.85)) fail(`meta "${GOAL_NAMES[gid]}" do planejador cumprida em ${f0p(r)} (fora de 20-85%)`); });
-check(P.lit >= 0.45 && P.lit <= 0.9, `ilha revelada pelo planejador: ${f0p(P.lit)} (fora de 45-90%)`);
-check(P.foodEnd < 15, `comida final média do planejador: ${f1(P.foodEnd)} (esperado abaixo de 15)`);
-check(P.lostNight <= 4, `comida perdida por noite pelo planejador: ${f1(P.lostNight)} (esperado até 4)`);
-check(P.oilEnd < 10, `óleo final médio do planejador: ${f1(P.oilEnd)} (esperado abaixo de 10)`);
-for (const bot of BOTS) check(stats[bot].stuckGames === 0, `${bot}: ${f0p(stats[bot].stuckGames)} das partidas com turno sem jogada válida`);
+// Os critérios do planejador valem para ele sem e com o sopro do vento.
+for (const [nome, X] of [['planejador', P], [SOPRO, PS]] as Array<[string, Stats]>) {
+  check(X.mean >= 1.3 * A.mean, `${nome} (${f1(X.mean)}) < 1,3x aleatório (${f1(A.mean)})`);
+  check(X.tight >= 0.25 && X.tight <= 0.65, `${nome}: escolha apertada fora de 25-65%: ${f0p(X.tight)}`);
+  X.cardShare.forEach((sh, c) => check(sh <= 0.45, `${nome}: carta ${CARD_NAMES[c]} com ${f0p(sh)} das escolhas (> 45%)`));
+  X.goalRate.forEach((r, gid) => { if (!(r >= 0.2 && r <= 0.85)) fail(`${nome}: meta "${GOAL_NAMES[gid]}" cumprida em ${f0p(r)} (fora de 20-85%)`); });
+  check(X.lit >= 0.45 && X.lit <= 0.9, `${nome}: ilha revelada ${f0p(X.lit)} (fora de 45-90%)`);
+  check(X.foodEnd < 15, `${nome}: comida final média ${f1(X.foodEnd)} (esperado abaixo de 15)`);
+  check(X.lostNight <= 4, `${nome}: comida perdida por noite ${f1(X.lostNight)} (esperado até 4)`);
+  check(X.oilEnd < 10, `${nome}: óleo final médio ${f1(X.oilEnd)} (esperado abaixo de 10)`);
+}
+// Sopro do vento: o ganho do planejador (mesmas sementes) fica entre +1 e +6 pontos.
+const windGain = PS.mean - P.mean;
+check(windGain >= 1 && windGain <= 6, `ganho do sopro do vento: ${windGain.toFixed(2)} pontos (esperado entre +1 e +6)`);
+check(PS.winds > 0, 'o planejador não usou o sopro');
+for (const v of VARIANTS) check(stats[v].stuckGames === 0, `${v}: ${f0p(stats[v].stuckGames)} das partidas com turno sem jogada válida`);
 
 // ---------- invariantes ----------
-for (const bot of BOTS) {
+for (const bot of VARIANTS) {
   const again = results[bot].slice(0, 20).map((_, i) => playGame(bot, i + 1).hash);
   check(again.every((h, i) => h === results[bot][i].hash), `${bot}: mesma semente deu resultado diferente`);
   check(results[bot].every((r) => r.houseMax <= RULES.houseMax + RULES.feastExtra), `${bot}: casa com mais de ${RULES.houseMax + RULES.feastExtra} moradores`);
@@ -140,26 +153,73 @@ for (const bot of BOTS) {
   }
 }
 
+// ---------- sopro do vento: cenários ----------
+{
+  const g = new Game(7);
+  const lit = [...Array(N).keys()].filter((i) => g.revealed[i]);
+  const edge = [...Array(N).keys()].filter((i) => g.canBlow(i));
+  check(edge.length > 0 && edge.every((i) => !g.revealed[i] && !g.seen[i]), 'sopro: alvos inválidos (têm de ser nuvem fechada)');
+  check(edge.every((i) => g.map.terrain[i] !== undefined) && lit.every((i) => !g.canBlow(i)), 'sopro: alvo dentro da luz');
+  const far = [...Array(N).keys()].find((i) => !g.revealed[i] && !g.canBlow(i))!;
+  check(!g.blow(far) && g.wind === 1, 'sopro: aceitou nuvem longe da luz');
+  const t = g.turn, hand = g.hand.join(), litBefore = g.litLand, found = g.foundCount, rev = g.revealed.join();
+  const target = edge[0];
+  check(g.blow(target) && g.wind === 0 && g.turn === t && g.hand.join() === hand, 'sopro: gastou o turno ou não gastou a carga');
+  check(Game.windArea(target).every((c) => g.seen[c] === 1), 'sopro: não dissolveu o raio 1');
+  check(g.litLand === litBefore && g.foundCount === found && g.revealed.join() === rev, 'sopro: iluminou ou contou achado');
+  check(!g.blow(edge.find((i) => g.canBlow(i)) ?? target), 'sopro: soprou sem carga');
+  // Terra soprada não recebe casa, campo nem cais; só a Lanterna (com óleo).
+  g.oil = 20; g.food = 20;
+  const seenDark = [...Array(N).keys()].find((i) => g.seen[i] && !g.revealed[i] && g.map.terrain[i] !== Terrain.Water && g.map.finds[i] === 0);
+  if (seenDark !== undefined) {
+    for (const c of [0, 1, 2, 4]) check(!g.canPlace(c, seenDark, false), `sopro: carta ${CARD_NAMES[c]} cabe fora da luz`);
+    check(g.canPlace(3, seenDark, false), 'sopro: a Lanterna deveria caber na terra soprada');
+  }
+  // Recarga: a noite devolve a carga, com no máximo 1 guardado.
+  const g2 = new Game(7);
+  g2.blow(edge[0]);
+  const r = new Game(7);
+  r.wind = 1;
+  while (g2.turn <= RULES.nights[0]) g2.apply({ kind: 'discard', slot: 0 });
+  check(g2.wind === 1, 'sopro: não recarregou na noite');
+  while (r.turn <= RULES.nights[0]) r.apply({ kind: 'discard', slot: 0 });
+  check(r.wind === RULES.windMax, 'sopro: guardou mais que o máximo');
+  // Replay: semente + jogadas refazem a partida, com os sopros no meio.
+  const g3 = new Game(11);
+  const rng = mulberry32(5);
+  while (!g3.over) { const w = windMove(g3); if (w >= 0) g3.apply({ kind: 'wind', idx: w }); g3.apply(decide('planejador', g3, rng).action); }
+  const again = Game.replay(11, JSON.parse(JSON.stringify(g3.history)) as Action[]);
+  check(again !== null && again.score() === g3.score() && again.seen.join('') === g3.seen.join('') && again.history.length === g3.history.length, 'replay: a partida refeita difere');
+  check(g3.history.some((a) => a.kind === 'wind'), 'replay: o sopro não ficou no histórico');
+}
+
 // ---------- relatório ----------
 const out: string[] = [];
 out.push(`Resultados de ${GAMES} partidas por jogador (sementes 1..${GAMES}), ${RULES.turns} turnos cada.`, '');
 out.push('### Pontuação', '', '| Jogador | Média | p10 | p50 | p90 | Ilha revelada | Descartes/partida | Escolha apertada | Partidas travadas | Mãos refeitas (partidas) |', '|---|---|---|---|---|---|---|---|---|---|');
-for (const bot of BOTS) {
+for (const bot of VARIANTS) {
   const s = stats[bot];
   out.push(`| ${bot} | ${f1(s.mean)} | ${s.p10} | ${s.p50} | ${s.p90} | ${f0p(s.lit)} | ${f1(s.discards)} | ${f0p(s.tight)} | ${f0p(s.stuckGames)} | ${f0p(s.fixedGames)} |`);
 }
+out.push('', '### Sopro do vento (planejador sem e com o sopro, mesmas 300 sementes)', '', '| Jogador | Média | p10 | p50 | p90 | Sopros/partida | Ilha revelada | Achados (meta) |', '|---|---|---|---|---|---|---|---|');
+for (const v of ['planejador', SOPRO]) { const s = stats[v]; out.push(`| ${v} | ${f1(s.mean)} | ${s.p10} | ${s.p50} | ${s.p90} | ${f1(s.winds)} | ${f0p(s.lit)} | ${f0p(s.goalRate[2])} |`); }
+{
+  const d = results[SOPRO].map((r, i) => r.score - results.planejador[i].score);
+  const sd = Math.sqrt(mean(d.map((x) => (x - mean(d)) ** 2)));
+  out.push('', `Ganho do sopro: **${windGain >= 0 ? '+' : ''}${windGain.toFixed(2)} pontos** em média (±${(1.96 * sd / Math.sqrt(d.length)).toFixed(2)} no intervalo de 95%); partidas que melhoraram ${f0p(d.filter((x) => x > 0).length / d.length)}, empataram ${f0p(d.filter((x) => x === 0).length / d.length)}, pioraram ${f0p(d.filter((x) => x < 0).length / d.length)}. Critério: entre +1 e +6.`);
+}
 out.push('', '### Recursos parados (média por partida)', '', '| Jogador | Comida no turno 20 | Óleo no turno 20 | Comida no fim | Óleo no fim |', '|---|---|---|---|---|');
-for (const bot of BOTS) { const s = stats[bot]; out.push(`| ${bot} | ${f1(s.food20)} | ${f1(s.oil20)} | ${f1(s.foodEnd)} | ${f1(s.oilEnd)} |`); }
+for (const bot of VARIANTS) { const s = stats[bot]; out.push(`| ${bot} | ${f1(s.food20)} | ${f1(s.oil20)} | ${f1(s.foodEnd)} | ${f1(s.oilEnd)} |`); }
 out.push('', '### A festa da noite: comida guardada e comida perdida (média por noite 10 / 20 / 30)', '', '| Jogador | Comida no começo do turno da noite (após os turnos 9, 19, 29) | Comida na festa (depois da renda) | Moradores da festa | Comida perdida | Resto da divisão | Perda média por noite (sem o resto) |', '|---|---|---|---|---|---|---|');
-for (const bot of BOTS) {
+for (const bot of VARIANTS) {
   const s = stats[bot], j = (xs: number[]): string => xs.map(f1).join(' / ');
   out.push(`| ${bot} | ${j(s.foodBefore)} | ${j(s.foodFeast)} | ${j(s.feastPlaced)} | ${j(s.foodLost)} | ${j(s.foodRest)} | ${f1(s.lostNight)} |`);
 }
 out.push('', 'Perda = comida que passa do teto de moradores da noite ou não acha casa iluminada com vaga. O resto da divisão (menos de uma festa de comida) vai em coluna à parte e não entra na perda.');
-out.push('', '### Metas cumpridas (entre as partidas em que a meta foi sorteada)', '', '| Meta | ' + BOTS.join(' | ') + ' |', '|---|' + BOTS.map(() => '---').join('|') + '|');
-for (let gid = 0; gid < 5; gid++) out.push(`| ${GOAL_NAMES[gid]} | ${BOTS.map((b) => f0p(stats[b].goalRate[gid])).join(' | ')} |`);
-out.push('', '### Cartas escolhidas (parte das jogadas, sem contar descartes)', '', '| Carta | ' + BOTS.join(' | ') + ' |', '|---|' + BOTS.map(() => '---').join('|') + '|');
-CARD_NAMES.forEach((n, c) => out.push(`| ${n} | ${BOTS.map((b) => f0p(stats[b].cardShare[c])).join(' | ')} |`));
+out.push('', '### Metas cumpridas (entre as partidas em que a meta foi sorteada)', '', '| Meta | ' + VARIANTS.join(' | ') + ' |', '|---|' + VARIANTS.map(() => '---').join('|') + '|');
+for (let gid = 0; gid < 5; gid++) out.push(`| ${GOAL_NAMES[gid]} | ${VARIANTS.map((b) => f0p(stats[b].goalRate[gid])).join(' | ')} |`);
+out.push('', '### Cartas escolhidas (parte das jogadas, sem contar descartes)', '', '| Carta | ' + VARIANTS.join(' | ') + ' |', '|---|' + VARIANTS.map(() => '---').join('|') + '|');
+CARD_NAMES.forEach((n, c) => out.push(`| ${n} | ${VARIANTS.map((b) => f0p(stats[b].cardShare[c])).join(' | ')} |`));
 out.push('', `Razão planejador / aleatório: ${(P.mean / A.mean).toFixed(2)}x. Planejador / guloso: ${(P.mean / Gu.mean).toFixed(2)}x.`);
 const report = out.join('\n');
 console.log(report);

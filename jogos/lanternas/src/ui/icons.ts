@@ -10,6 +10,8 @@ export const ICON = {
   star: svg('0 0 24 24', '<path d="m12 2.5 2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4 6.1 20.5l1.2-6.5L2.5 9.4l6.6-.9z" fill="#ffc447" stroke="#d9941d" stroke-width="1" stroke-linejoin="round"/>', 'star'),
   check: svg('0 0 24 24', '<path d="m5 12.5 4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>', 'check'),
   flag: svg('0 0 24 24', '<path d="M6 21V3" stroke="#6b4a32" stroke-width="2" stroke-linecap="round"/><path d="M6 4h12l-3 4 3 4H6z" fill="#ffb84a"/>', 'flag'),
+  windFull: svg('0 0 24 24', '<circle cx="12" cy="12" r="10.5" fill="#4fb0bd"/><g stroke="#fff" stroke-width="2" stroke-linecap="round" fill="none"><path d="M5 9.5h9a2.5 2.5 0 1 0-2.5-2.5"/><path d="M5 13h12.5a2.5 2.5 0 1 1-2.5 2.5"/><path d="M5 16.5h6"/></g>', 'wind'),
+  windEmpty: svg('0 0 24 24', '<circle cx="12" cy="12" r="9.6" fill="none" stroke="#9aa6b5" stroke-width="1.6" stroke-dasharray="3 2.6"/><g stroke="#b9c0cc" stroke-width="1.8" stroke-linecap="round" fill="none"><path d="M5.5 9.5h8.5a2.3 2.3 0 1 0-2.3-2.3"/><path d="M5.5 13h11.5a2.3 2.3 0 1 1-2.3 2.3"/></g>', 'wind off'),
   rotate: svg('0 0 24 24', '<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18.5 3v4h-4M5.5 21v-4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>', 'rot'),
 };
 

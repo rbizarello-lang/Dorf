@@ -1,8 +1,8 @@
 // Ilha das Lanternas: entrada. Liga o jogo (src/core), o diorama (src/render) e o HUD (src/ui).
 import './ui/style.css';
-import { decide } from './core/bots';
+import { decide, windMove } from './core/bots';
 import { Card, Game, RULES, Struct, parseSeed } from './core/game';
-import { CELLS, CENTER, N, dist } from './core/hex';
+import { CELLS, CENTER, N, NB, dist } from './core/hex';
 import { FIND_NAMES, TERRAIN_NAMES } from './core/map';
 import { mulberry32, subSeed } from './core/rng';
 import { World, cellX, cellZ } from './render/world';
@@ -28,14 +28,18 @@ const hud = new Hud({
   onSelect: (slot) => select(slot),
   onDiscard: () => discard(),
   onNew: () => startGame(newSeed()),
+  onWind: () => toggleWind(),
 });
 hud.reduced = reduced;
 
-let game: Game;
+let game!: Game;
 let selected = -1;
 let valid = new Set<number>();
 let hover = -1;
 let pending = -1;               // toque: primeiro toque mostra o fantasma, o segundo confirma
+let windArmed = false;          // sopro do vento armado pelo botão: os alvos ficam marcados
+let windPending = -1;           // toque: primeiro toque marca a nuvem, o segundo sopra
+let rainTimer = 0;
 let nightTimer = 0;
 const forcedTurn = intParam('turn', 1, 30);
 
@@ -47,7 +51,7 @@ const CAM_DEFAULT = { yaw: -0.42, pol: 1.0, dist: 44 };
 function startGame(seed: number, auto = 0, first = false): void {
   clearTimeout(nightTimer);
   game = new Game(seed);
-  selected = -1; valid = new Set(); hover = -1; pending = -1;
+  selected = -1; valid = new Set(); hover = -1; pending = -1; windArmed = false; windPending = -1;
   const url = new URL(location.href);
   url.searchParams.set('seed', String(seed));
   if (!first) { url.searchParams.delete('auto'); }
@@ -73,8 +77,12 @@ function startGame(seed: number, auto = 0, first = false): void {
 function describe(i: number): string {
   if (i < 0) return '';
   const { q, r } = CELLS[i];
-  if (!game.revealed[i]) return i === game.map.tip ? 'Névoa · a ponta marcada está aqui' : 'Névoa: acenda uma lanterna perto para ver';
+  if (!game.seen[i]) {
+    const tip = i === game.map.tip ? ' · a ponta marcada está aqui' : '';
+    return game.canBlow(i) ? `Névoa${tip} · toque para soprar o vento (dissolve a névoa num raio 1, sem acender)` : `Névoa${tip}: acenda uma lanterna perto para ver`;
+  }
   const parts = [TERRAIN_NAMES[game.map.terrain[i]]];
+  if (!game.revealed[i]) parts.push('à vista, sem luz (só a Lanterna cabe aqui)');
   const s = game.struct[i];
   if (s === Struct.House) parts.push(`Casa com ${game.houseResidents(i)} morador(es), ${game.houseLit(i) ? 'junto de uma lanterna' : 'sem lanterna por perto'}`);
   else if (i === CENTER && s === Struct.Lantern) parts.push('Farol velho');
@@ -89,14 +97,66 @@ function describe(i: number): string {
 const HINT = 'Escolha uma carta e toque num hexágono brilhante.';
 function updateInfo(): void {
   if (game.over) { hud.setInfo('Gire a ilha para ver as luzes de perto.'); return; }
+  if (windArmed && hover < 0) { hud.setInfo('Vento armado: toque numa nuvem marcada, encostada na luz. Esc cancela.'); return; }
+  if (windPending >= 0 && hover === windPending) { hud.setInfo('Toque de novo para soprar o vento nesta nuvem.'); return; }
   const d = describe(hover);
   hud.setInfo(d || (selected >= 0 ? (valid.size ? 'Toque num hexágono brilhante para colocar a carta.' : 'Essa carta não cabe agora. Escolha outra ou descarte.') : HINT));
 }
 
+/** Nuvens que o sopro alcança agora (encostadas na luz, ainda fechadas). */
+function windTargets(): number[] {
+  const out: number[] = [];
+  if (game.over || game.wind <= 0) return out;
+  for (let i = 0; i < N; i++) if (game.canBlow(i)) out.push(i);
+  return out;
+}
+
 function refresh(): void {
-  hud.render(game, selected);
+  if (windArmed && (game.wind <= 0 || game.over)) windArmed = false;
+  hud.render(game, selected, windArmed);
   world.setValid([...valid]);
+  world.setWindMarks(windArmed ? windTargets() : [], [], -1);
   updateInfo();
+}
+
+function toggleWind(): void {
+  if (game.over) return;
+  if (game.wind <= 0) {
+    const nextNight = RULES.nights.find((n) => n >= game.turn);
+    hud.toast(nextNight !== undefined ? `Sem sopro agora: o vento volta na noite do turno ${nextNight}.` : 'O vento já não volta nesta temporada.', 3200);
+    return;
+  }
+  windArmed = !windArmed; windPending = -1;
+  if (windArmed) { selected = -1; valid = new Set(); pending = -1; world.setGhost(-1, -1); world.setHover(-1); }
+  refresh();
+}
+
+/** Sopro do vento: dissolve a névoa num raio 1 em volta da nuvem (revela, mas não ilumina). Não gasta o turno. */
+function blow(cell: number): void {
+  if (!game.canBlow(cell)) return;
+  const before = game.seen.slice();
+  const from = NB[cell].find((n) => game.revealed[n]) ?? CENTER;
+  let dx = cellX(cell) - cellX(from), dz = cellZ(cell) - cellZ(from);
+  const len = Math.hypot(dx, dz) || 1; dx /= len; dz /= len;
+  if (!game.blow(cell)) return;
+  windArmed = false; windPending = -1;
+  world.blowAt(cell, dx, dz);
+  world.sync(game, { origin: cell, wind: { dx, dz } });
+  world.setWindMarks([], [], -1);
+  world.setCursor('');
+  const fresh = [...Array(N).keys()].filter((i) => game.seen[i] && !before[i]);
+  const finds = fresh.filter((i) => game.map.finds[i]).map((i) => FIND_NAMES[game.map.finds[i]]);
+  const land = fresh.filter((i) => game.map.terrain[i] !== 0).length;
+  hud.toast(`Sopro do vento: ${land} hexágono${land === 1 ? '' : 's'} de terra à vista${finds.length ? `, achado: ${finds.join(', ')}` : ''}. Sem luz não dá para construir ali: só uma Lanterna.`, 4800);
+  refresh();
+}
+
+/** Chuvinha cosmética: tocar no céu vazio. Não muda regra nenhuma. */
+function rainOnIsland(): void {
+  world.rain();
+  hud.setInfo('Chove sobre a ilha por um instante…');
+  clearTimeout(rainTimer);
+  rainTimer = window.setTimeout(updateInfo, 4300);
 }
 
 function select(slot: number): void {
@@ -107,6 +167,7 @@ function select(slot: number): void {
   selected = selected === slot ? -1 : slot;
   valid = selected >= 0 ? new Set(game.validCells(selected)) : new Set();
   pending = -1; world.setGhost(-1, -1); world.setHover(-1);
+  windArmed = false; windPending = -1;
   refresh();
 }
 
@@ -120,7 +181,7 @@ function predictDark(action: { kind: 'play'; slot: number; idx: number } | { kin
 }
 
 function afterMove(prevTurn: number, resBefore: number, lostBefore: Uint8Array, feastBefore: Uint8Array, cell: number, dark: number[]): void {
-  selected = -1; valid = new Set(); pending = -1;
+  selected = -1; valid = new Set(); pending = -1; windArmed = false; windPending = -1;
   world.setGhost(-1, -1); world.setHover(-1);
   world.sync(game, { origin: cell });
   if (forcedTurn === null) world.setDay(game.turn, game.over);
@@ -174,11 +235,31 @@ world.onHover = (cell) => {
   const ok = selected >= 0 && valid.has(cell);
   world.setHover(ok ? cell : -1);
   world.setGhost(ok ? game.hand[selected] : -1, ok ? cell : -1);
+  // Nuvem alcançável pelo sopro: ela balança e a área que seria dissolvida se marca.
+  const wind = !ok && cell >= 0 && !game.over && game.canBlow(cell);
+  world.setWindMarks(windArmed ? windTargets() : [], wind ? Game.windArea(cell) : [], wind ? cell : -1);
+  world.setCursor(wind ? 'pointer' : '');
   updateInfo();
 };
 world.onTap = (cell, e) => {
-  if (cell < 0) { hover = -1; world.setHover(-1); world.setGhost(-1, -1); updateInfo(); return; }
+  if (cell < 0) {
+    hover = -1; world.setHover(-1); world.setGhost(-1, -1); windPending = -1;
+    if (world.isSky(e.clientX, e.clientY)) rainOnIsland(); else updateInfo();
+    return;
+  }
   const touch = e.pointerType !== 'mouse';
+  const cardOk = !game.over && selected >= 0 && valid.has(cell);
+  if (!cardOk && !game.over && game.canBlow(cell)) {
+    if (touch && windPending !== cell) {
+      windPending = cell; hover = cell;
+      world.setWindMarks(windArmed ? windTargets() : [], Game.windArea(cell), cell);
+      updateInfo();
+      return;
+    }
+    blow(cell);
+    return;
+  }
+  windPending = -1;
   if (game.over || selected < 0 || !valid.has(cell)) { hover = cell; updateInfo(); return; }
   if (touch && pending !== cell) {
     pending = cell; hover = cell;
@@ -191,7 +272,8 @@ world.onTap = (cell, e) => {
 addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
   if (e.key >= '1' && e.key <= '3') select(Number(e.key) - 1);
-  else if (e.key === 'Escape') { selected = -1; valid = new Set(); world.setGhost(-1, -1); world.setHover(-1); refresh(); }
+  else if (e.key === 'Escape') { selected = -1; valid = new Set(); windArmed = false; windPending = -1; world.setGhost(-1, -1); world.setHover(-1); refresh(); }
+  else if (e.key === 'v' || e.key === 'V') toggleWind();
   else if (e.key === 'ArrowLeft') world.rotate(-0.18);
   else if (e.key === 'ArrowRight') world.rotate(0.18);
   else if (e.key === 'ArrowUp') world.rotate(0, 0.08);
@@ -213,7 +295,7 @@ new ResizeObserver(fitView).observe(document.getElementById('hud-top')!);
 // ---------- partida inicial e ganchos de depuração ----------
 const seed0 = parseSeed(params.get('seed')) ?? newSeed();
 const auto0 = intParam('auto', 0, 60) ?? 0;
-const dbg = auto0 > 0 || params.has('yaw') || params.has('pitch') || params.has('zoom') || params.has('focus') || params.has('select') || params.has('night') || params.has('turn');
+const dbg = auto0 > 0 || params.get('blow') === '1' || params.get('rain') === '1' || params.has('yaw') || params.has('pitch') || params.has('zoom') || params.has('focus') || params.has('select') || params.has('night') || params.has('turn');
 startGame(seed0, auto0, true);
 
 {
@@ -221,6 +303,12 @@ startGame(seed0, auto0, true);
   const focus = params.get('focus');
   let cell = -1;
   if (focus === 'vila') cell = world.focusVillage();
+  // Ganhos de captura: `?blow=1` sopra o vento no melhor alvo e congela a rajada no meio; `?rain=1` congela a chuva no meio.
+  if (params.get('blow') === '1') {
+    const t = windMove(game);
+    const target = t >= 0 ? t : windTargets()[0] ?? -1;
+    if (target >= 0) { blow(target); cell = target; world.holdAfter(floatParam('hold', 0.1, 9) ?? 0.5); }
+  } else if (params.get('rain') === '1') { world.rain(); world.holdAfter(2.2); }
   const sel = intParam('select', 0, 2);
   world.setCamera({ yaw: yaw ?? CAM_DEFAULT.yaw, pol: pol ?? CAM_DEFAULT.pol, dist: zoom ?? (dbg ? CAM_DEFAULT.dist : CAM_DEFAULT.dist * 1.35), cell });
   if (!dbg && !reduced) world.aim({ dist: CAM_DEFAULT.dist });
@@ -233,6 +321,7 @@ startGame(seed0, auto0, true);
 
 Object.defineProperty(window, '__stats', { get: () => world.stats });
 Object.defineProperty(window, '__ready', { get: () => world.frames >= 4 });
+Object.defineProperty(window, '__held', { get: () => world.held && world.frames >= 6 });
 Object.defineProperty(window, '__frames', { get: () => world.frames });
 Object.assign(window, { __world: world, __game: () => game, __cell: (i: number) => ({ x: cellX(i), z: cellZ(i) }), __cards: Card, __N: N });
 

@@ -114,6 +114,18 @@ button.act.primary { background: linear-gradient(180deg, #ffc454, var(--amber));
 #discard { align-self: flex-end; margin-bottom: 6px; flex-direction: column; gap: 0; padding: 8px 12px; line-height: 1.2; text-align: center; }
 #discard small { font-weight: 500; color: var(--dim); font-size: 12px; display: flex; gap: 3px; align-items: center; }
 
+/* sopro do vento: carga cheia (turquesa) ou vazia, armado (âmbar), foco e desabilitado */
+#wind { align-self: flex-end; margin-bottom: 6px; flex-direction: row; gap: 7px; padding: 7px 12px 7px 8px; line-height: 1.15; text-align: left; }
+#wind .ic { width: 26px; height: 26px; }
+#wind .wl { display: flex; flex-direction: column; }
+#wind small { font-weight: 500; color: var(--dim); font-size: 12px; }
+#wind.ready { border-color: #6fbcc4; background: linear-gradient(180deg, #f4fdfd, #dcf0f1); }
+#wind.ready:hover { border-color: var(--teal); }
+#wind.armed { border-color: var(--amber); box-shadow: 0 0 0 3px #f0a93a66, 0 6px 14px #1a1f4a2e; transform: translateY(-4px); }
+#wind[aria-disabled="true"] { opacity: .55; cursor: default; background: linear-gradient(180deg, #f3ecdc, #e8dcc0); }
+#wind[aria-disabled="true"]:hover { transform: none; border-color: var(--edge); box-shadow: none; }
+#wind:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
+
 /* ---------- avisos e fim ---------- */
 #toast { position: fixed; top: 112px; left: 50%; transform: translate(-50%, -6px); padding: 8px 16px; max-width: min(560px, 90vw); text-align: center; opacity: 0; pointer-events: none; transition: opacity .4s, transform .4s; font-size: 14px; }
 #toast.on { opacity: 1; transform: translate(-50%, 0); }
@@ -160,11 +172,12 @@ button.act.primary { background: linear-gradient(180deg, #ffc454, var(--amber));
   .card .art { height: 48px; } .card .art svg { width: 40px; height: 40px; } .card .key { display: none; }
   .card .fx, .card .where { display: none; } .card .nm { font-size: 15px; flex-wrap: wrap; } .card .body { padding: 6px 8px 8px; } .card .why { font-size: 11px; }
   .card.sel { transform: translateY(-8px); }
+  #wind { position: fixed; right: 18px; top: 17px; margin: 0; padding: 5px 7px; z-index: 2; } #wind .ic { width: 24px; height: 24px; } #wind .wl { display: none; }
   #discard { position: absolute; right: 8px; top: -42px; margin: 0; flex-direction: row; gap: 6px; padding: 5px 10px; background: #fffaf0e8; } #discard small { font-size: 11px; }
   #end { right: 8px; left: 8px; top: auto; bottom: 8px; width: auto; transform: translateY(30px); padding: 12px 14px; }
   #end.on { transform: none; } #end h2 { font-size: 20px; } #end .lead { display: none; } #end .big { font-size: 44px; } #end ul { margin: 6px 0; font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .card, .card.deal, .float, #toast, #end, #goals .bar i, #sun { animation: none !important; transition: none !important; }
+  .card, .card.deal, .float, #toast, #end, #goals .bar i, #sun, #wind { animation: none !important; transition: none !important; }
   .float { margin-top: -24px; opacity: 1; animation: none; }
 }

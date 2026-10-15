@@ -37,6 +37,14 @@ Nascem a distância >= 4 do centro (relaxa até 3 se faltar lugar). Revelar = en
 
 Baralho: 58 cartas, embaralhado pela semente: Casa 16, Campo 10, Oliveiral 10, Lanterna 13, Cais 9. Começo: 2 óleo e 2 comida.
 
+## Sopro do vento (clima que se toca)
+
+- Quem joga tem **1 sopro**. Tocar numa nuvem de névoa encostada na área iluminada dissolve a névoa num raio 1 em volta dela (7 hexágonos): revela o terreno e os achados, mas **não ilumina**. Ali não cabe Casa, Campo, Oliveiral nem Cais; a área não conta como iluminada para as metas nem ativa o efeito dos achados. A **Lanterna** cabe na terra soprada (é como se ganha o chão), com o custo de sempre.
+- O sopro **não gasta o turno**, recarrega em cada noite (turnos 10 e 20; no 30 já não serve) e guarda no máximo 1.
+- Lógica em `src/core` (`seen`, `canBlow`, `blow`, `Game.windArea`); a ação `{ kind: 'wind', idx }` entra no `history` e `Game.replay(seed, ações)` refaz a partida.
+- **Interface:** botão "Vento" no HUD (carga cheia ou vazia, armado, foco, desabilitado; tecla V). Passar o cursor numa nuvem válida a faz balançar e marca a área; tocar solta a rajada (fiapos de vento, copas e trigo vizinhos se curvam por 1 s, a névoa é empurrada). No toque, o primeiro toque marca a nuvem e o segundo sopra. Terra à vista sem luz ganha um véu azulado até uma lanterna chegar. `prefers-reduced-motion` desliga balanço, rajada e chuva animada (a névoa some rápido).
+- **Chuvinha cosmética:** tocar no céu vazio, fora do tampo da ilha, faz chover por 4 s (riscos de chuva, mar mais agitado, luz mais cinza). Não muda regra nenhuma.
+
 ## Cartas
 
 | Carta | Custo | Onde | Efeito |
@@ -52,7 +60,7 @@ Baralho: 58 cartas, embaralhado pela semente: Casa 16, Campo 10, Oliveiral 10, L
 ## Noite (turnos 10, 20 e 30)
 
 - Cada lanterna, exceto o Farol, queima 2 óleo, na ordem em que foi acesa. Sem óleo, apaga naquela noite.
-- **Festa:** depois das lanternas, a comida guardada vira moradores: cada 5 comida = +1 morador, no máximo 12 por noite, em casas com lanterna acesa encostada e com vaga (cada casa recebe até 4 convidados além dos 4 da variedade, em rodízio). **O estoque de comida zera**, sobre ou não. Por isso vale gastar a comida em casas antes da noite e só guardar o que a festa aproveita.
+- **Festa:** depois das lanternas, a comida guardada vira moradores: cada 5 comida = +1 morador, no máximo 14 por noite, em casas com lanterna acesa encostada e com vaga (cada casa recebe até 4 convidados além dos 4 da variedade, em rodízio). **O estoque de comida zera**, sobre ou não. Por isso vale gastar a comida em casas antes da noite e só guardar o que a festa aproveita.
 - **Casa que não tem lanterna acesa encostada** (distância 1; o Farol vale) perde 1 morador, permanentemente (mínimo 0).
 - A luz que revela a névoa (raio 2) é maior que a que protege à noite (raio 1): é por isso que as casas devem ficar junto de lanternas.
 
@@ -70,7 +78,7 @@ Baralho: 58 cartas, embaralhado pela semente: Casa 16, Campo 10, Oliveiral 10, L
 
 ## Mudanças em relação ao enunciado inicial
 
-Raio de proteção da noite 1; lanternas queimam 2 óleo à noite; festa da noite (5 comida = +1 morador, até 12 por noite, 4 convidados por casa além dos 4 da variedade; o estoque zera); Casa 5 comida (era 1); Lanterna 4 óleo (era 2); baralho de 58 cartas; regra de socorro da Lanterna; mão garantida; achados longe do centro e sempre 6; metas: 66 moradores, 5 achados (era 4), fileira de 4 (era 3), ilha 80% (era 60%). Detalhes e motivos em `docs/simulacao.md`.
+Raio de proteção da noite 1; lanternas queimam 2 óleo à noite; festa da noite (5 comida = +1 morador, até 14 por noite, 4 convidados por casa além dos 4 da variedade; o estoque zera); Casa 5 comida (era 1); Lanterna 4 óleo (era 2); baralho de 58 cartas; regra de socorro da Lanterna; mão garantida; achados longe do centro e sempre 6; metas: 66 moradores, 5 achados (era 4), fileira de 4 (era 3), ilha 80% (era 60%). Detalhes e motivos em `docs/simulacao.md`.
 
 ## Código
 
@@ -89,14 +97,17 @@ Tudo gerado em código (sem arquivos de arte), WebGLRenderer do three, ACESFilmi
 - **Kits (`src/render/kits.ts`, instanciados por `Pool`):** 3 árvores, casas de 3 cores de telhado com chaminé (cada morador acende uma das 4 janelas), campo em fileiras, oliveiral, cais com barquinho, lanterna, Farol velho com casa do faroleiro e feixe, rocha, ruína, pomar, nascente, cardume.
 - **Névoa:** nuvens baixas low-poly que se dissolvem em ~0,85 s quando a área é revelada; a ponta marcada é uma bandeira com estrela acima das nuvens.
 - **Hora do dia:** do turno 1 ao 30 a luz vai de manhã a entardecer. Nas noites (10, 20, 30) há um anoitecer curto: lanternas com halo e poça de luz no chão, janelas acesas, lanternas sem óleo apagadas e "−1 morador" sobre as casas que perderam gente. No fim da partida a ilha fica à noite, com a câmera girando devagar.
+- **Vento e chuva (`world.ts`, `materials.ts`):** `U.gustPos/gustDir/gustAmp` curvam copas e trigo perto da rajada (no vertex shader dos materiais com vento); `U.rain` agita o mar; a névoa soprada voa na direção da rajada em vez de subir; um véu azulado cobre a terra à vista sem luz; fiapos de vento e riscos de chuva são `InstancedMesh` próprios (+4 draw calls no pior caso).
 - **Sensação:** peça cai com quique e poeira, "+N moradores" flutuando, hexágonos válidos realçados em âmbar, fantasma da peça sob o cursor (no toque: primeiro toque mostra, segundo confirma). `prefers-reduced-motion` desliga queda, poeira, vento, órbita e acelera a névoa.
 - **HUD (`src/ui/`):** cartas desenhadas com ícone em SVG inline, recursos e moradores em bloco, régua de dia e noite com aviso do óleo que a próxima noite pede, metas com barra e marca, tela de fim ao lado da ilha. Fontes do sistema, sem CDN: o build é um HTML único e funciona offline.
-- **Orçamento medido:** ~40 a 70 draw calls e ~150 a 170 mil triângulos com a ilha cheia (limite: 150 e 300 mil).
+- **Orçamento medido:** 37 a 65 draw calls e 147 a 178 mil triângulos nas capturas, com a ilha cheia e as camadas do vento e da chuva (limite: 150 e 300 mil).
 
 ### Ganchos de depuração
 
-`?seed=N`, `?auto=N` (o planejador joga N turnos ao abrir, sem animação), `?turn=N` (hora do dia fixa), `?night=1`, `?yaw= ?pitch= ?zoom=`, `?focus=vila`, `?select=0..2`, `?hover=valid`, `?reduzir=1`. `window.__stats` (draw calls e triângulos do último quadro), `window.__ready`, `window.__world`, `window.__game()`.
+`?seed=N`, `?auto=N` (o planejador joga N turnos ao abrir, sem animação), `?blow=1` (sopra o vento no melhor alvo e congela a rajada no meio; `&hold=S` escolhe quantos segundos de mundo deixar andar), `?rain=1` (congela a chuva no meio), `?turn=N` (hora do dia fixa), `?night=1`, `?yaw= ?pitch= ?zoom=`, `?focus=vila`, `?select=0..2`, `?hover=valid`, `?reduzir=1`. `window.__stats` (draw calls e triângulos do último quadro), `window.__ready`, `window.__world`, `window.__game()`.
 
 ### Capturas
 
 `npm run build && npm run shot` (ou `node scripts/shot.mjs [nome ...]`) sobe o `dist/` num servidor próprio, abre no Chromium com SwiftShader e grava `docs/screens/*.png` (1280x800; `celular` em 390x780), imprimindo os erros do console e o `__stats` de cada uma.
+
+Capturas do vento e da chuva: `vento` (rajada no meio, mundo congelado por `?blow=1`), `ventoveu` (3 s depois, com o véu sobre a terra à vista), `chuva` (`?rain=1`). O `shot.mjs` espera `window.__held` nelas, em vez da intro assentar.

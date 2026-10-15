@@ -29,8 +29,12 @@ export const W = {
   upkeep: 1.0,
   satur: 0.9,
   houseRate: 0.3, ratioLo: 0.8, ratioHi: 1.2, foodExtra: 0.1,   // renda de comida a mais que a demanda estimada vale pouco
+  windZone: 1.0, windMin: 2, windWait: 3,   // sopro: peso de hexágono novo na faixa dos achados, mínimo para soprar, turnos de espera pela noite
   feast: 0.9,          // cada morador que a festa da próxima noite promete
 };
+
+/** O que já estava à vista no começo da decisão (o planejador só valoriza luz sobre névoa de verdade). */
+let seen0: Uint8Array = new Uint8Array(N);
 
 /** Potencial do guloso: pontos de agora + recursos e renda simples. */
 function phiGreedy(g: Game): number {
@@ -59,10 +63,11 @@ function phiPlanner(g: Game): number {
   const foodSat = g.food >= 2 * RULES.houseCostFood ? W.satur : ratio <= W.ratioLo ? 1 : ratio >= W.ratioHi ? W.foodExtra : 1 - (1 - W.foodExtra) * (ratio - W.ratioLo) / (W.ratioHi - W.ratioLo);
   const oilSat = g.oil >= RULES.lanternCostOil + g.nightUpkeep() ? W.satur : 1;
   v += W.foodInc * g.foodIncome() * hor * foodSat + W.oilInc * g.oilIncome() * hor * oilSat;
-  v += W.litLand * g.litLand;
+  v += W.litLand * g.litLand + W.findBonus * g.foundCount;
   // Regra pública: os achados ficam longe do centro (distância >= 4). Luz nessa faixa vale a busca.
   let far = 0;
-  for (let i = 0; i < N; i++) if (g.revealed[i] && g.map.terrain[i] !== Terrain.Water && dist(i, CENTER) >= 4) far++;
+  // Hexágono que o sopro do vento já mostrou não esconde achado novo (se tinha, está à vista): só conta a luz em cima do que ainda era névoa.
+  for (let i = 0; i < N; i++) if (g.revealed[i] && !seen0[i] && g.map.terrain[i] !== Terrain.Water && dist(i, CENTER) >= 4) far++;
   v += W.farLight * far;
   // Casas expostas à noite (sem lanterna encostada) perdem moradores nas noites que restam.
   const nl = g.nightsLeft;
@@ -97,11 +102,13 @@ export function decide(bot: BotId, real: Game, rng: Rng): Decision {
   }
   // Os bots só decidem com o que o jogador vê: a cópia cega esconde os achados da névoa.
   const game = real.clone(true);
+  seen0 = real.seen;
   const base = phi(bot, game);
   // Melhor jogada de cada carta distinta.
   const best = new Map<number, { v: number; slot: number; idx: number }>();
   hand.forEach((card, slot) => {
-    for (const idx of game.placements(card)) {
+    // Os lugares válidos vêm do jogo de verdade (a regra de socorro olha o terreno sob a névoa); o valor vem da cópia cega.
+    for (const idx of real.placements(card)) {
       const g2 = game.clone();
       g2.place(card, idx);
       const v = phi(bot, g2) - base;
@@ -119,4 +126,24 @@ export function decide(bot: BotId, real: Game, rng: Rng): Decision {
   const cardValues = entries.map((e) => e.v);
   if (!entries.length || entries[0].v < discardValue) return { action: { kind: 'discard', slot: discardSlot }, cardValues };
   return { action: { kind: 'play', slot: entries[0].slot, idx: entries[0].idx }, cardValues };
+}
+
+/**
+ * Onde o planejador sopra o vento (ou -1 para guardar). Só usa o que o jogador vê: o que já está à vista, as lanternas e a regra
+ * pública de que os achados ficam a distância >= 4 do centro (não espia a névoa nem o terreno sob ela). Escolhe a nuvem encostada
+ * na luz cujo raio 1 mostra mais hexágonos novos na faixa dos achados; sopra quando vale a pena ou quando a noite vai recarregar.
+ */
+export function windMove(real: Game): number {
+  if (real.wind <= 0 || real.over) return -1;
+  let best = -1, bestV = 0;
+  for (let i = 0; i < N; i++) {
+    if (!real.canBlow(i)) continue;
+    let v = 0;
+    for (const c of Game.windArea(i)) if (!real.seen[c] && dist(c, CENTER) >= 4) v += W.windZone;
+    if (v > bestV) { bestV = v; best = i; }
+  }
+  const nextNight = RULES.nights.find((n) => n >= real.turn);
+  const toNight = nextNight === undefined ? 99 : nextNight - real.turn;
+  // Perto da noite (que recarrega) qualquer ganho serve; longe, só um ganho bom.
+  return bestV >= (toNight <= W.windWait ? 1 : W.windMin) ? best : -1;
 }

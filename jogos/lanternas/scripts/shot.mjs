@@ -19,6 +19,12 @@ const SHOTS = {
   jogando: 'seed=3&auto=8&select=0&hover=valid',
   noite: 'seed=3&auto=20&night=1',
   celular: 'seed=3&auto=12',
+  celularfim: 'seed=3&auto=30',
+  vento: 'seed=3&auto=15&blow=1&zoom=21&pitch=0.95&yaw=-0.7',
+  ventoveu: 'seed=3&auto=15&blow=1&hold=3&zoom=21&pitch=0.95&yaw=-0.7',
+  chuva: 'seed=3&auto=18&rain=1',
+  cardume: 'seed=3&auto=8&blow=1&hold=3&zoom=14&pitch=0.95',
+  cardumenoite: 'seed=3&auto=8&blow=1&hold=3&zoom=14&pitch=0.95&night=1',
 };
 const want = process.argv.slice(2);
 const names = want.length ? want : Object.keys(SHOTS);
@@ -44,7 +50,7 @@ let bad = 0;
 for (const name of names) {
   const q = SHOTS[name];
   if (!q) { console.log('desconhecida:', name); bad++; continue; }
-  const mobile = name === 'celular';
+  const mobile = name.startsWith('celular');
   const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 780 } : { width: 1280, height: 800 }, deviceScaleFactor: 1, hasTouch: mobile });
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(`[${m.type()}] ${m.text()}`); });
@@ -52,7 +58,9 @@ for (const name of names) {
   await page.goto(`http://127.0.0.1:${port}/?${q}`);
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 120000 });
   // deixa a névoa/queda/intro assentarem: o tempo do mundo anda com os quadros
-  await page.waitForFunction(() => window.__world.time > 5, null, { timeout: 120000 });
+  // vento e chuva congelam o mundo no meio do efeito (?blow=1, ?rain=1); as outras esperam a intro assentar
+  if (name === 'vento' || name === 'ventoveu' || name === 'chuva' || name.startsWith('cardume')) await page.waitForFunction(() => window.__held === true, null, { timeout: 120000 });
+  else await page.waitForFunction(() => window.__world.time > 5, null, { timeout: 120000 });
   await page.waitForTimeout(500);
   const stats = await page.evaluate(() => ({ ...window.__stats, frames: window.__frames }));
   await page.screenshot({ path: join(out, name + '.png') });

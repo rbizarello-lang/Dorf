@@ -14,9 +14,10 @@ Um jogo de cartas e exploração numa ilha hexagonal coberta de névoa, em 3D, q
   - Cais: rende +1 de comida por turno, na praia.
 - **Dois recursos:** comida (para construir casas) e óleo (para lanternas).
 - **A luz:** as lanternas revelam o mapa (a revelação é permanente) e protegem as casas na noite.
-- **Noites nos turnos 10, 20 e 30:** cada lanterna queima 2 de óleo (a que fica sem óleo apaga). A casa sem lanterna encostada perde 1 morador. **Festa:** a comida guardada vira moradores (3 de comida = +1 morador, até 6 por noite, em casas iluminadas com vaga) e o estoque zera.
+- **Noites nos turnos 10, 20 e 30:** cada lanterna queima 2 de óleo (a que fica sem óleo apaga). A casa sem lanterna encostada perde 1 morador. **Festa:** a comida guardada vira moradores (5 de comida = +1 morador, até 14 por noite, em casas iluminadas com vaga; cada casa recebe até 4 convidados além dos 4 da variedade) e o estoque zera.
+- **Sopro do vento:** quem joga tem 1 sopro. Tocar numa nuvem de névoa encostada na luz dissolve a névoa num raio 1: mostra o terreno e os achados, mas não ilumina (só a Lanterna cabe ali; não conta nas metas). Não gasta o turno e recarrega a cada noite, com no máximo 1 guardado. Tocar no céu vazio faz chover por 4 s, só pelo prazer.
 - **Achados escondidos:** 6 por ilha (2 ruínas, 1 cardume, 2 pomares, 1 nascente), que só aparecem quando a luz chega neles e dão bônus.
-- **Três metas por partida**, sorteadas entre cinco (ponta marcada, 52 moradores, 5 achados, fileira de 4 casas, 80% da ilha iluminada). Cada meta cumprida vale +5 pontos. A pontuação final é moradores mais metas.
+- **Três metas por partida**, sorteadas entre cinco (ponta marcada, 66 moradores, 5 achados, fileira de 4 casas, 80% da ilha iluminada). Cada meta cumprida vale +5 pontos. A pontuação final é moradores mais metas.
 - **O visual:** um diorama, como uma maquete sobre um pedestal de madeira, com mar recortado, casinhas, campos, árvores, cais e farol. A hora do dia avança do amanhecer ao entardecer, e nas noites as lanternas e janelas acendem. Tudo é desenhado por código, sem arquivos de arte.
 
 ![Fim da partida](docs/screens/fim.png)
@@ -33,28 +34,36 @@ Um jogo de cartas e exploração numa ilha hexagonal coberta de névoa, em 3D, q
   - arrastar gira e inclina a ilha (também as setas do teclado);
   - a roda do mouse aproxima e afasta (ou pinça no celular, teclas + e -);
   - "Descartar" (ou a tecla D) joga fora a carta escolhida e dá +1 de óleo; Esc desfaz a escolha;
+  - "Vento" (ou a tecla V) arma o sopro e marca as nuvens que ele alcança; também dá para tocar direto numa nuvem (no celular, toque duas vezes). Tocar no céu faz chover;
   - `?seed=N` no endereço repete a mesma ilha (por exemplo `index.html?seed=3`).
 
 ## O que os testes mostraram
 
-Foram simuladas 300 partidas completas para cada um de três jogadores automáticos: o aleatório, o guloso (olha só o ganho imediato) e o planejador (pensa em luz, metas e noites). Nenhum deles enxerga o baralho nem os achados sob a névoa.
+Foram simuladas 300 partidas completas para cada jogador automático: o aleatório, o guloso (olha só o ganho imediato), o planejador (pensa em luz, metas e noites) e o planejador com sopro do vento. Nenhum deles enxerga o baralho, os achados nem o terreno sob a névoa.
 
 | Jogador | Média | p10 | p50 | p90 | Ilha revelada | Escolha apertada |
 |---|---|---|---|---|---|---|
-| Aleatório | 22,8 | 16 | 22 | 31 | 58% | 0% |
-| Guloso | 46,2 | 38 | 46 | 57 | 53% | 38% |
-| Planejador | 56,7 | 48 | 56 | 68 | 81% | 35% |
+| Aleatório | 35,5 | 25 | 36 | 47 | 58% | 0% |
+| Guloso | 59,2 | 49 | 60 | 70 | 50% | 38% |
+| Planejador | 73,8 | 64 | 74 | 83 | 82% | 37% |
+| Planejador com sopro | 77,2 | 68 | 78 | 86 | 83% | 38% |
 
-(p10, p50 e p90: a pontuação abaixo da qual ficam 10%, 50% e 90% das partidas. "Escolha apertada": nos turnos em que a melhor e a segunda melhor carta valem quase o mesmo, a fração de turnos em que o jogador tem uma decisão difícil de verdade.)
+(p10, p50 e p90: a pontuação abaixo da qual ficam 10%, 50% e 90% das partidas. "Escolha apertada": nos turnos em que a melhor e a segunda melhor carta valem quase o mesmo, a fração de turnos em que o jogador tem uma decisão difícil de verdade. As médias subiram em relação à primeira versão porque a festa da noite ficou maior; a meta de moradores subiu de 52 para 66 por isso.)
 
-- **Jogar bem compensa:** o planejador faz 2,48 vezes a pontuação do aleatório e 1,23 vez a do guloso.
-- **Metas (entre as partidas em que foram sorteadas), planejador:** ponta marcada 48%, moradores 30%, achados 65%, fileira 66%, ilha iluminada 75%. Nenhuma é automática e nenhuma é impossível.
-- **Uso das cartas, planejador:** Casa 37%, Lanterna 25%, Campo 18%, Cais 10%, Oliveiral 10%. Nenhuma carta passa de 45%, então a escolha não é óbvia.
-- **Partidas travadas:** 0% nos três jogadores.
-- **Invariantes (verificações de sanidade):** a mesma semente dá sempre a mesma partida, casa nunca passa de 4 moradores, recursos nunca ficam negativos. Todas passaram.
-- **Desempenho (render por software, sem placa de vídeo):** de 37 a 64 draw calls e de 147 a 169 mil triângulos, dentro do limite que fixamos (150 e 300 mil). O FPS numa placa de vídeo de verdade ainda não foi medido.
-- **Console:** sem erros em nenhuma das 7 capturas. O comando de verificação (`npm run check`: tipos, simulação e build) passa.
-- **Comida e óleo no fim:** a sobra de comida (era 98 em média, 88 na captura) foi resolvida pela festa da noite: o estoque zera e a comida guardada vira moradores. O óleo final do planejador é 5,8 em média. Critérios novos no simulador: comida final média < 15 e óleo < 10.
+- **Jogar bem compensa:** o planejador faz 2,08 vezes a pontuação do aleatório e 1,25 vez a do guloso.
+- **A festa agora é medida de verdade.** Antes, "comida final < 15" passava por construção (a festa zera o estoque). Agora o simulador mede a comida que cada jogador perde por noite (a que passa do teto de moradores ou não acha casa com vaga). O planejador perdia **35,6 por noite** com a festa antiga; com a festa de 5 por 1, até 14 moradores e 4 convidados por casa, perde **2,5** (critério: até 4). A comida ainda sobra em volume (~40 a 57 antes das noites 2 e 3), mas agora é escoada; ver `docs/simulacao.md`.
+- **O sopro do vento vale +3,4 pontos** ao planejador (±0,8; critério: entre +1 e +6). Ele usa os 3 sopros possíveis por partida (início e depois das noites 10 e 20) e melhora a meta de achados de 71% para 83%. Para o sopro valer algo foi preciso deixar a Lanterna ser posta na terra soprada; sem isso o ganho era de +0,3.
+- **Metas (entre as partidas em que foram sorteadas), planejador sem sopro:** ponta marcada 41%, moradores 58%, achados 71%, fileira 33%, ilha iluminada 71%. Nenhuma é automática e nenhuma é impossível.
+- **Uso das cartas, planejador:** Casa 34%, Lanterna 27%, Campo 19%, Cais 10%, Oliveiral 11%. Nenhuma carta passa de 45%, então a escolha não é óbvia.
+- **Partidas travadas:** 0% em todos.
+- **Invariantes (verificações de sanidade):** a mesma semente dá sempre a mesma partida (também com sopros), casa nunca passa de 8 moradores (4 da variedade e 4 da festa), recursos nunca ficam negativos, o sopro não gasta o turno nem ilumina e o replay (semente + ações) refaz a partida. Todas passaram.
+- **Desempenho (render por software, sem placa de vídeo):** de 37 a 65 draw calls e de 147 a 178 mil triângulos nas 13 capturas (maior: o fim da partida), dentro do limite que fixamos (150 e 300 mil). O FPS numa placa de vídeo de verdade ainda não foi medido.
+- **Console:** sem erros nas capturas nem no teste de interação (mouse, teclado e toque). O comando de verificação (`npm run check`: tipos, simulação e build) passa.
+- **Comida e óleo no fim:** o óleo final do planejador é 6,6 em média.
+
+![Rajada do vento](docs/screens/vento.png)
+
+![Chuva](docs/screens/chuva.png)
 
 ## Avaliação dos 5 jogos
 
@@ -86,8 +95,8 @@ Foram simuladas 300 partidas completas para cada um de três jogadores automáti
 
 - **Ilha:**
   1. O Roger joga 3 partidas e anota onde ficou sem saber o que fazer. Pronto quando houver 3 anotações.
-  2. (feito) Sobra de comida resolvida com a festa da noite; ver `docs/simulacao.md`.
-  3. Clima tocável, à moda do Weatherglass: tocar no céu chama chuva, que faz os campos renderem +1 naquele turno. Pronto quando aparecer na captura e no simulador.
+  2. Comida escassa de verdade: a festa já escoa a sobra, mas a renda é umas 3 vezes o que casas e festa gastam. Cortar a renda (menos Campo e Cais no baralho, ou campo que rende só por alguns turnos) e medir se Campo contra Oliveiral vira uma escolha difícil. Pronto quando o planejador guardar menos de 20 de comida antes da noite 3 sem a meta de moradores cair abaixo de 20%.
+  3. Ensinar as regras novas em 3 dicas curtas nas primeiras jogadas (festa da noite, sopro do vento, lanterna na terra soprada). Pronto quando um jogador novo usar o sopro na 1ª partida sem ler a ajuda.
 - **Estações:** (1) regra com formas simples e simulador (4 estações × 6 turnos, 2 recursos); (2) um canto do mapa bonito em cada estação; (3) o Roger joga.
 - **Diário:** (1) regra de navegação e comida com simulador; (2) a página do diário desenhada; (3) o Roger joga.
 - **Mascates:** (1) traçar trilha no toque com formas simples; (2) carroças andando; (3) o Roger joga.
@@ -102,10 +111,11 @@ Foram simuladas 300 partidas completas para cada um de três jogadores automáti
   - Casa passou de 1 para 5 de comida e Lanterna de 2 para 4 de óleo, porque os recursos sobravam e Campo e Oliveiral não valiam nada;
   - baralho de 58 cartas, para que as cartas que sobram sejam uma escolha de verdade;
   - a noite queima 2 de óleo por lanterna, o que liga a economia à noite;
-  - festa da noite: a comida guardada vira moradores e o estoque zera, para a comida pesar a partida inteira (testadas também casa mais cara e fome; ver `docs/simulacao.md`);
+  - festa da noite: a comida guardada vira moradores (5 por 1, até 14 por noite, 4 convidados por casa) e o estoque zera, e o simulador mede a comida que se perde (testadas também casa mais cara, fome e menos campos; ver `docs/simulacao.md`);
+  - sopro do vento: revela sem iluminar, não gasta o turno, recarrega na noite; a Lanterna cabe na terra soprada (sem isso valia +0,3 ponto e era enfeite);
   - socorro da lanterna: se a luz não tem mais terra vazia, a lanterna pode ir à névoa encostada, o que resolveu a única partida travada;
   - mão garantida: se nenhuma das 3 cartas cabe, a 3ª é trocada por uma que caiba;
-  - jogadores automáticos sem espiar a névoa: a primeira versão trapaceava, e as metas foram recalibradas depois disso (52 moradores, 5 achados, fileira de 4, 80% da ilha).
+  - jogadores automáticos sem espiar a névoa: a primeira versão trapaceava, e as metas foram recalibradas depois disso (66 moradores depois da festa maior, 5 achados, fileira de 4, 80% da ilha).
 - **Arte toda em código**, sem arquivos de imagem ou modelo.
 - **Fontes do sistema**, sem baixar nada da internet.
 - **HTML único**, que abre offline.
@@ -113,8 +123,8 @@ Foram simuladas 300 partidas completas para cada um de três jogadores automáti
 ## Próximos 3 passos
 
 1. O Roger joga 3 partidas e anota onde ficou sem saber o que fazer (pronto com 3 anotações).
-2. (feito) A sobra de comida foi resolvida com a festa da noite (comida final média 0, óleo 5,8, todos os critérios passando).
-3. Clima tocável: tocar no céu chama chuva, que faz os campos renderem +1 naquele turno (pronto quando aparecer na captura e no simulador).
+2. Comida escassa de verdade: cortar a renda de comida e medir se a escolha entre Campo e Oliveiral aperta (pronto quando o planejador guardar menos de 20 de comida antes da noite 3 sem a meta de moradores cair abaixo de 20%).
+3. Três dicas curtas nas primeiras jogadas para a festa e o vento (pronto quando um jogador novo usar o sopro na 1ª partida sem ler a ajuda).
 
 ## Quem fez o quê
 

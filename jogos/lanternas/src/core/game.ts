@@ -3,6 +3,9 @@ import { CELLS, CENTER, LIT, N, NB, NB_DIR, dist } from './hex';
 import { Find, IslandMap, Terrain, generateIsland } from './map';
 import { mulberry32, shuffle, subSeed } from './rng';
 
+/** Palpite público do terreno sob a névoa: até esta distância do centro conta como terra (a ilha tem raio 7). */
+export const BLIND_LAND_RADIUS = 5;
+
 export const Card = { House: 0, Field: 1, Olive: 2, Lantern: 3, Dock: 4 } as const;
 export const CARD_NAMES = ['Casa', 'Campo', 'Oliveiral', 'Lanterna', 'Cais'];
 export const Struct = { None: 0, House: 1, Field: 2, Olive: 3, Lantern: 4, Dock: 5 } as const;
@@ -20,9 +23,11 @@ export const RULES = {
   houseCostFood: 5,
   /** Festa da noite: cada feastFood de comida guardada vira +1 morador (até feastCap por noite) e o estoque zera. */
   feastFood: 5,
-  feastCap: 12,
+  feastCap: 14,
   /** Convidados que uma casa guarda da festa, além do teto da variedade (houseMax). */
   feastExtra: 4,
+  /** Sopros do vento guardados no máximo (começa cheio e recarrega a cada noite). */
+  windMax: 1,
   lanternCostOil: 4,
   discardOil: 1,
   /** Óleo que cada lanterna (menos o Farol) queima numa noite. */
@@ -41,7 +46,9 @@ export const RULES = {
 
 export type Action =
   | { kind: 'play'; slot: number; idx: number }
-  | { kind: 'discard'; slot: number };
+  | { kind: 'discard'; slot: number }
+  /** Sopro do vento na névoa de `idx`: não gasta o turno. */
+  | { kind: 'wind'; idx: number };
 
 export interface Summary {
   score: number;
@@ -58,7 +65,8 @@ export class Game {
   readonly goals: number[];
   readonly goalTarget: number;      // moradores da meta
   struct: Uint8Array;
-  revealed: Uint8Array;
+  revealed: Uint8Array;             // iluminado (a luz de uma lanterna chega): pode receber peça e conta nas metas
+  seen: Uint8Array;                 // névoa dissolvida: terreno e achados à vista (iluminado ou soprado pelo vento)
   lost: Uint8Array;                 // moradores perdidos nas noites, por casa
   feast: Uint8Array;                // moradores ganhos nas festas, por casa
   houses: number[] = [];
@@ -75,6 +83,10 @@ export class Game {
   stuckTurns = 0;                   // turnos em que nenhuma carta do baralho cabia em lugar nenhum
   fixedHands = 0;                   // mãos refeitas pela regra da mão garantida
   discards = 0;
+  wind = RULES.windMax;             // sopros do vento guardados
+  windsUsed = 0;
+  /** Jogadas aplicadas (colocar, descartar, soprar): com a semente, refazem a partida (replay). */
+  history: Action[] = [];
   /** Uma entrada por noite: comida no estoque antes da festa, moradores que a festa pôs e comida perdida. */
   feasts: Array<{ food: number; placed: number; lost: number; rest: number }> = [];
   log: string[] = [];
@@ -83,19 +95,26 @@ export class Game {
     this.seed = seed;
     if (from) {
       // Cópia "cega" (para os bots): os achados ainda sob a névoa somem do mapa, então avaliar uma jogada não espia a névoa.
-      this.map = blind ? { ...from.map, finds: from.map.finds.map((f, i) => (from.revealed[i] ? f : 0)) } : from.map;
+      this.map = blind ? {
+        ...from.map,
+        finds: from.map.finds.map((f, i) => (from.seen[i] ? f : 0)),
+        // Terreno sob a névoa também some: o que não está à vista vale o palpite público (a ilha tem raio 7 e a terra fica perto do centro).
+        terrain: from.map.terrain.map((t, i) => (from.seen[i] ? t : dist(i, CENTER) <= BLIND_LAND_RADIUS ? Terrain.Meadow : Terrain.Water)),
+      } : from.map;
       this.goals = from.goals; this.goalTarget = from.goalTarget;
-      this.struct = from.struct.slice(); this.revealed = from.revealed.slice(); this.lost = from.lost.slice(); this.feast = from.feast.slice();
+      this.struct = from.struct.slice(); this.revealed = from.revealed.slice(); this.seen = from.seen.slice(); this.lost = from.lost.slice(); this.feast = from.feast.slice();
       this.houses = from.houses.slice(); this.prod = from.prod.slice(); this.lanterns = from.lanterns.slice();
       this.food = from.food; this.oil = from.oil; this.turn = from.turn;
       this.deck = from.deck.slice(); this.hand = from.hand.slice();
       this.litLand = from.litLand; this.foundCount = from.foundCount; this.ruinsFound = from.ruinsFound;
       this.stuckTurns = from.stuckTurns; this.fixedHands = from.fixedHands; this.discards = from.discards; this.feasts = from.feasts.slice();
+      this.wind = from.wind; this.windsUsed = from.windsUsed; this.history = from.history.slice();
       return;
     }
     this.map = generateIsland(seed);
     this.struct = new Uint8Array(N);
     this.revealed = new Uint8Array(N);
+    this.seen = new Uint8Array(N);
     this.lost = new Uint8Array(N);
     this.feast = new Uint8Array(N);
     const goalRng = mulberry32(subSeed(seed, 4));
@@ -123,6 +142,7 @@ export class Game {
     for (const c of LIT[idx]) {
       if (this.revealed[c]) continue;
       this.revealed[c] = 1;
+      this.seen[c] = 1;
       if (this.map.terrain[c] !== Terrain.Water) this.litLand++;
       const f = this.map.finds[c];
       if (f !== Find.None) {
@@ -130,6 +150,22 @@ export class Game {
         if (f === Find.Ruin) this.ruinsFound++;
       }
     }
+  }
+
+  // ---------- sopro do vento ----------
+  /** O sopro pode soprar a névoa de `idx`? Nuvem ainda fechada, encostada na área iluminada, e há carga. */
+  canBlow(idx: number): boolean {
+    return !this.over && this.wind > 0 && !this.seen[idx] && NB[idx].some((n) => this.revealed[n]);
+  }
+  /** Hexágonos que o sopro em `idx` dissolve: o próprio e os vizinhos (raio 1). */
+  static windArea(idx: number): number[] { return [idx, ...NB[idx]]; }
+  /** Sopra: dissolve a névoa num raio 1 (revela terreno e achados, mas não ilumina). Não gasta o turno. */
+  blow(idx: number): boolean {
+    if (!this.canBlow(idx)) return false;
+    for (const c of Game.windArea(idx)) this.seen[c] = 1;
+    this.wind--; this.windsUsed++;
+    this.history.push({ kind: 'wind', idx });
+    return true;
   }
 
   /** Casa protegida na noite: encostada numa lanterna (ou o farol). */
@@ -156,8 +192,9 @@ export class Game {
     if (this.struct[idx] !== Struct.None || this.map.finds[idx] !== Find.None) return false;
     const t = this.map.terrain[idx];
     if (!this.revealed[idx]) {
-      return rescue && card === Card.Lantern && this.oil >= RULES.lanternCostOil && t !== Terrain.Water
-        && NB[idx].some((n) => this.revealed[n]);
+      // Só a Lanterna vale fora da luz: na terra que o vento já mostrou (acender ali é o jeito de ganhar o chão) ou, no socorro, na encostada à luz.
+      if (card !== Card.Lantern || this.oil < RULES.lanternCostOil || t === Terrain.Water) return false;
+      return this.seen[idx] === 1 || (rescue && NB[idx].some((n) => this.revealed[n]));
     }
     switch (card) {
       case Card.House: return this.food >= RULES.houseCostFood && (t === Terrain.Meadow || t === Terrain.Wood || t === Terrain.Beach);
@@ -311,6 +348,7 @@ export class Game {
       this.feasts.push({ food: this.food, placed, lost: this.food - placed * RULES.feastFood - rest, rest });
       this.food = 0;
     }
+    this.wind = Math.min(RULES.windMax, this.wind + 1);
     for (const h of this.houses) {
       if (this.houseResidents(h) <= 0) continue;
       if (!NB[h].some((n) => lit[n])) this.lost[h]++;
@@ -335,6 +373,7 @@ export class Game {
     if (this.over || slot < 0 || slot >= this.hand.length) return false;
     const card = this.hand[slot];
     if (!this.canPlace(card, idx, card === Card.Lantern && this.noLitSpot())) return false;
+    this.history.push({ kind: 'play', slot, idx });
     this.place(card, idx);
     this.endTurn(slot);
     return true;
@@ -343,13 +382,24 @@ export class Game {
   /** Descarta a carta `slot` por +1 óleo e fecha o turno. */
   discard(slot: number): boolean {
     if (this.over || slot < 0 || slot >= this.hand.length) return false;
+    this.history.push({ kind: 'discard', slot });
     this.oil += RULES.discardOil;
     this.discards++;
     this.endTurn(slot);
     return true;
   }
 
-  apply(a: Action): boolean { return a.kind === 'play' ? this.play(a.slot, a.idx) : this.discard(a.slot); }
+  apply(a: Action): boolean {
+    if (a.kind === 'wind') return this.blow(a.idx);
+    return a.kind === 'play' ? this.play(a.slot, a.idx) : this.discard(a.slot);
+  }
+
+  /** Refaz uma partida a partir da semente e das jogadas (o que a tela de replay e os testes usam). */
+  static replay(seed: number, actions: Action[]): Game | null {
+    const g = new Game(seed);
+    for (const a of actions) if (!g.apply(a)) return null;
+    return g;
+  }
 
   private endTurn(chosen: number): void {
     // As outras cartas da mão voltam ao fundo do baralho; a escolhida sai de jogo.
@@ -377,7 +427,7 @@ export class Game {
     }
   }
 
-  /** Todas as ações legais (colocar em cada lugar; descartar cada carta distinta). */
+  /** Todas as ações que fecham o turno (colocar em cada lugar; descartar cada carta). O sopro não entra: não gasta o turno. */
   legalActions(): Action[] {
     const out: Action[] = [];
     this.hand.forEach((card, slot) => {
@@ -424,3 +474,5 @@ export function cardRule(c: number): string {
     default: return '';
   }
 }
+
+export const WIND_RULE = 'Sopro do vento: toque numa nuvem de névoa encostada na luz e ela se dissolve num raio 1. Mostra o terreno e os achados, mas não ilumina: não dá para construir ali sem lanterna, e não conta nas metas. Não gasta o turno. Recarrega a cada noite (1 guardado).';
