@@ -34,6 +34,8 @@ export class Dicas {
   private timer = 0;
   /** Chamado quando uma dica aparece (a telemetria marca o turno). */
   onShow: (id: string) => void = () => {};
+  /** Capturas de tela: a dica não some sozinha. */
+  sticky = false;
 
   constructor(private variant: Variant, private skipMenu: (on: boolean) => void) {
     this.key = 'lanternas.dicas.' + variant;
@@ -61,7 +63,7 @@ export class Dicas {
     $('dica').classList.add('on');
     this.onShow(id);
     clearTimeout(this.timer);
-    this.timer = window.setTimeout(() => this.hide(), hideAfter);
+    if (!this.sticky) this.timer = window.setTimeout(() => this.hide(), hideAfter);
   }
 
   /** A jogada que a dica pedia aconteceu: some. */

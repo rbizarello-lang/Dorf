@@ -114,7 +114,7 @@ function begin(v: Variant): void {
   startGame(seed0 ?? newSeed(), auto0, firstBegin);
   seed0 = null; auto0 = 0;
   if (firstBegin) { first0Done = true; applyDebugCamera(); }
-  if (params.get('dicas') === '1') dicas.at('inicio');
+  if (params.get('dicas') === '1') { dicas.sticky = true; dicas.at('inicio'); }
   if (params.get('exportar') === '1') exporter.open();
   if (dicas.active && !dbg) window.setTimeout(() => { if (playing && selected < 0 && game.turn === 1) dicas?.at('inicio'); }, reduced ? 300 : 1800);
 }

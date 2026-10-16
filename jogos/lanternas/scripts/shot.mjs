@@ -22,6 +22,7 @@ const SHOTS = {
   'celular-a': 'ab=A&seed=3&auto=12',
   'b-jogando': 'ab=B&seed=3&auto=6&select=0&hover=valid',
   'b-dicas': 'ab=B&seed=3&dicas=1',
+  'celular-dica': 'ab=A&seed=3&dicas=1',
   exportar: 'ab=B&seed=3&auto=8&exportar=1',
   inicio: 'ab=A&seed=3',
   meio: 'ab=A&seed=3&auto=15',
