@@ -46,7 +46,7 @@ Observação: o "100" do enunciado conta também detalhes de interface e visual;
 | 23 | O baralho tem 58 cartas em composição fixa (16 Casa, 10 Campo, 10 Oliveiral, 13 Lanterna, 9 Cais), embaralhado pela semente. | M | simplifica: 41 cartas (12/8/8/9/4) |
 | 24 | **[E]** Mão garantida: se nenhuma das 3 cabe, a terceira troca com a primeira do baralho que caiba. | E | simplifica: refaz a mão inteira (regra geral, sem exceção por carta) |
 | 25 | Se nada do baralho cabe, o turno fica travado (só é contado). | M | simplifica: a noite cai antes |
-| 26 | Descartar uma carta dá +1 óleo e gasta o turno. | M | sai |
+| 26 | **[E]** Descartar uma carta dá +1 óleo e gasta o turno (válvula para mão sem jogada boa ou sem óleo). | E | sai |
 
 ## Recursos
 
@@ -115,5 +115,5 @@ Observação: o "100" do enunciado conta também detalhes de interface e visual;
 
 ## Resumo
 
-- Mantém: 20 regras. Simplifica: 16. Saem: 25. Exceções: 9 (itens 7, 8, 15, 17, 24, 44, 47, 48 e a regra de que a pontuação do sopro não ilumina, contada em 51), das quais nenhuma sobra na B.
+- Das 61 regras listadas: mantém 21, simplifica 16, saem 24. As 9 exceções (itens 7, 8, 15, 17, 24, 26, 44, 47 e 48) não sobram na B: 5 saem e 4 viram regra geral ou deixam de existir como exceção (8, 15, 24 e 7 por falta do sopro).
 - A B acrescenta uma só ideia, que a A não tem: a vila (3 casas encostadas) com marcos.

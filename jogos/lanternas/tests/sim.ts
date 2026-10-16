@@ -7,6 +7,7 @@ import { Action, CARD_NAMES, GOAL_TITLES, Game, RULES, Struct } from '../src/cor
 import { N } from '../src/core/hex';
 import { Terrain } from '../src/core/map';
 import { mulberry32 } from '../src/core/rng';
+import { runVersionB } from './simB';
 
 const GAMES = Number(process.env.GAMES ?? 300);
 const GOAL_NAMES = GOAL_TITLES;
@@ -230,6 +231,20 @@ if (existsSync(docPath) && GAMES === 300) {
   const a = '<!-- RELATORIO:INICIO -->', b = '<!-- RELATORIO:FIM -->';
   if (cur.includes(a) && cur.includes(b)) {
     const next = cur.slice(0, cur.indexOf(a) + a.length) + '\n' + report + '\n' + cur.slice(cur.indexOf(b));
+    if (next !== cur) writeFileSync(docPath, next);
+  }
+}
+
+// ---------- versão B (tests/simB.ts) e comparação A × B ----------
+const asB = (x: Stats) => ({ mean: x.mean, p10: x.p10, p90: x.p90, tight: x.tight, cardShare: x.cardShare });
+const resB = runVersionB(GAMES, { aleatorio: asB(A), guloso: asB(Gu), planejador: asB(P) });
+console.log('\n## Versão B\n\n' + resB.report);
+for (const m of resB.failures) fail(m);
+if (existsSync(docPath) && GAMES === 300) {
+  const cur = readFileSync(docPath, 'utf8');
+  const a = '<!-- VERSAO_B:INICIO -->', b = '<!-- VERSAO_B:FIM -->';
+  if (cur.includes(a) && cur.includes(b)) {
+    const next = cur.slice(0, cur.indexOf(a) + a.length) + '\n' + resB.report + '\n' + cur.slice(cur.indexOf(b));
     if (next !== cur) writeFileSync(docPath, next);
   }
 }

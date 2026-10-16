@@ -172,3 +172,8 @@ Clima que se toca, na linha do Weatherglass. Quem joga tem 1 sopro: tocar numa n
 **Ganho: +3,40 pontos (±0,80, intervalo de 95%)**; melhora em 65% das partidas, empata em 8% e piora em 27%. Critério: entre +1 e +6. Abaixo disso é enfeite, acima é forte demais. Todos os critérios antigos passam também para o planejador com sopro (o teste confere os dois). O teste ainda cobre: o sopro não gasta o turno nem a mão, não ilumina nem conta achado, só vale em nuvem fechada encostada na luz, não deixa soprar sem carga, recarrega na noite com no máximo 1 guardado, e o replay (semente + ações, com sopros no meio) reproduz a pontuação e a névoa.
 
 O que ficou de fora: o aleatório e o guloso não sopram (só o planejador), e o sopro não entrou no cálculo de "escolha apertada". A chuva ao tocar o céu é só visual e não aparece no simulador.
+
+## Versão B
+
+<!-- VERSAO_B:INICIO -->
+<!-- VERSAO_B:FIM -->

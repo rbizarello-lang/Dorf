@@ -147,3 +147,6 @@ export function windMove(real: Game): number {
   // Perto da noite (que recarrega) qualquer ganho serve; longe, só um ganho bom.
   return bestV >= (toNight <= W.windWait ? 1 : W.windMin) ? best : -1;
 }
+
+/** Valor de uma posição na régua do bot, com `seenBefore` como o que estava à vista antes da jogada (usado pelo arrependimento da simulação). */
+export function phiWith(bot: BotId, g: Game, seenBefore: Uint8Array): number { seen0 = seenBefore; return phi(bot, g); }
