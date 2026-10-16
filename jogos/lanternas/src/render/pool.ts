@@ -5,12 +5,14 @@ export interface Item {
   cell: number; tag: string;
   x: number; y: number; z: number; yaw: number; s: number;
   t0: number;
-  anim: 'pop' | 'drop' | 'none';
+  anim: 'pop' | 'drop' | 'grow' | 'none';
   col?: THREE.Color;
   parent?: Item; local?: THREE.Matrix4;
   m: THREE.Matrix4;
   /** Balanço de boia (barcos) em amplitude. */
   bob?: number;
+  /** Balanço de pêndulo em torno do eixo x (sino), em radianos. */
+  swing?: number;
 }
 
 const easeOutBack = (p: number): number => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); };
@@ -74,6 +76,7 @@ export class Pool {
       if (age < 0) sc = 0;
       else if (this.reduced) sc = it.s;
       else if (it.anim === 'pop') sc = it.s * easeOutBack(Math.min(1, age / 0.55));
+      else if (it.anim === 'grow') sc = it.s * (0.78 + 0.22 * easeOutBack(Math.min(1, age / 0.5)));
       else if (it.anim === 'drop') { const d = dropCurve(age); dy = d.dy; sy = d.sy; sxz = d.sxz; }
       if (it.parent) {
         if (sc === 0 || it.parent.m.elements[0] === 0) it.m.copy(MZ);
@@ -82,6 +85,7 @@ export class Pool {
         P.set(it.x, it.y + dy + (it.bob ? Math.sin(time * 1.3 + it.x * 3) * it.bob : 0), it.z);
         Q.setFromAxisAngle(Y, it.yaw);
         if (it.bob) { const r = Math.sin(time * 1.1 + it.z * 2) * it.bob * 1.2; Q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), r)); }
+        if (it.swing) Q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sin(time * 2.6 + it.x * 5) * it.swing));
         S.set(sc * sxz, sc * sy, sc * sxz);
         it.m.compose(P, Q, S);
         if (sc === 0) it.m.copy(MZ);

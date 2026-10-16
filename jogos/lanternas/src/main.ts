@@ -493,6 +493,7 @@ function applyDebugCamera(): void {
   const focus = params.get('focus');
   let cell = -1;
   if (focus === 'vila') cell = world.focusVillage();
+  else if (focus === 'marco') cell = world.focusMark();
   // Ganchos de captura: `?blow=1` sopra o vento no melhor alvo e congela a rajada no meio; `?rain=1` congela a chuva no meio.
   if (!isB() && params.get('blow') === '1') {
     const t = windMove(gA());

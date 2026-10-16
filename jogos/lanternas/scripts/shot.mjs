@@ -17,7 +17,7 @@ const SHOTS = {
   'a-meio': 'ab=A&seed=3&auto=15',
   'b-meio': 'ab=B&seed=3&auto=15',
   'b-fim': 'ab=B&seed=3&auto=30',
-  'b-perto': 'ab=B&seed=3&auto=24&focus=vila&zoom=12&pitch=0.78&yaw=-0.5',
+  'b-perto': 'ab=B&seed=3&auto=24&focus=marco&zoom=10&pitch=0.75&yaw=-0.5',
   'celular-b': 'ab=B&seed=3&auto=15',
   'celular-a': 'ab=A&seed=3&auto=12',
   'b-jogando': 'ab=B&seed=3&auto=6&select=0&hover=valid',
@@ -37,8 +37,10 @@ const SHOTS = {
   cardume: 'ab=A&seed=3&auto=8&blow=1&hold=3&zoom=14&pitch=0.95',
   cardumenoite: 'ab=A&seed=3&auto=8&blow=1&hold=3&zoom=14&pitch=0.95&night=1',
 };
+// Captura avulsa: `nome::consulta` (ex.: tmp::ab=B&seed=3&auto=24&zoom=9).
 const want = process.argv.slice(2);
-const names = want.length ? want : Object.keys(SHOTS);
+for (const w of want) { const k = w.indexOf('::'); if (k > 0) SHOTS[w.slice(0, k)] = w.slice(k + 2); }
+const names = want.length ? want.map((w) => (w.includes('::') ? w.slice(0, w.indexOf('::')) : w)) : Object.keys(SHOTS);
 
 const server = createServer(async (req, res) => {
   try {

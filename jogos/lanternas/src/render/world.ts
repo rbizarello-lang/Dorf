@@ -3,7 +3,8 @@
 import * as THREE from 'three';
 import { CELLS, CENTER, DIRS, N, NB_DIR, dist } from '../core/hex';
 import { Card, Struct } from '../core/game';
-import type { View } from './view';
+import { StructB } from '../core/gameB';
+import type { View, ViewB } from './view';
 import { Find, Terrain } from '../core/map';
 import * as K from './kits';
 import { basicMat, litMat, seaMaterial, swayMat, U } from './materials';
@@ -23,6 +24,12 @@ const hashN = (a: number, b: number): number => {
 const clamp01 = (x: number): number => Math.min(1, Math.max(0, x));
 const smooth = (x: number): number => { const t = clamp01(x); return t * t * (3 - 2 * t); };
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+/** Altura do mar. */
+const SEA_Y = 0;
+/** Escala das casas da B (todas as formas cabem numa pegada de ~1 hexágono). */
+const HB_SCALE = 1.15;
+/** Escala de cada marco da vila (poço, praça, capela): bem legíveis ao lado das casas. */
+const MARK_SCALE = [1.5, 1.3, 1.45];
 
 // ---------- peças de terra ----------
 // Índice = Terrain (0 = névoa/"mist", que também cobre a água ainda não revelada).
@@ -125,6 +132,14 @@ export class World {
   private parts: Array<{ x: number; y: number; z: number; vx: number; vy: number; vz: number; t: number; life: number; s0: number; s1: number; g: number }> = [];
   private later: Array<{ t: number; fn: () => void }> = [];
   private windowMat = basicMat();
+  // B: casas por nível, marcos da vila, achados com brilho e presente, final aceso
+  private levelShown = new Map<number, number>();
+  private anchors = new Map<number, number>();
+  private marksShown = new Map<string, { items: Item[] }>();
+  private finds: Array<{ cell: number; x: number; y: number; z: number; t0: number; ph: number; gift: Item }> = [];
+  private shafts!: THREE.InstancedMesh; private shaftMat!: THREE.MeshBasicMaterial;
+  private findGlow!: THREE.InstancedMesh;
+  private sparkAt = 0;
   private lastNight = -1;
   private haloK = 0.3;
   // hora do dia
@@ -302,6 +317,14 @@ export class World {
     this.P.rock1 = this.addPool(K.rockPile(1), litMat({ roughness: 0.95 }), 80);
     const roofs = [PAL.clay, PAL.teal, PAL.mustard];
     roofs.forEach((c, v) => { this.P['house' + v] = this.addPool(K.house(c), litMat(), 40); });
+    for (let v = 0; v < 3; v++) for (let l = 1; l <= 4; l++) this.P[`hb${v}_${l}`] = this.addPool(K.houseB(l, roofs[v]), litMat(), 40);
+    this.P.well = this.addPool(K.well(), litMat(), 6);
+    this.P.plaza = this.addPool(K.plaza(), litMat(), 6);
+    this.P.chapel = this.addPool(K.chapel(), litMat(), 6);
+    this.P.bell = this.addPool(K.bell(), litMat({ roughness: 0.4 }), 6, { cast: false });
+    this.P.bell.always = true;
+    this.P.gift = this.addPool(K.gift(), litMat({ emissive: new THREE.Color(0x5a3208), emissiveIntensity: 0.8 }), 8, { cast: false });
+    this.P.gift.always = true;
     this.P.win = this.addPool(K.windowPane(), this.windowMat, 4 * 120, { cast: false, receive: false });
     this.P.win.always = true;
     this.P.field = this.addPool(K.field(), swayMat(0.05), 60);
@@ -341,11 +364,19 @@ export class World {
     cx.fillStyle = gr; cx.fillRect(0, 0, 128, 128);
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
     // halos: quadrados que olham para a câmera, com brilho aditivo (um só draw call)
-    this.halo = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }), 64);
+    this.halo = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }), 128);
     this.halo.frustumCulled = false; this.halo.count = 0; this.halo.renderOrder = 6;
     const w1 = new THREE.Color(1, 1, 1);
-    for (let i = 0; i < 64; i++) this.halo.setColorAt(i, w1);
+    for (let i = 0; i < 128; i++) this.halo.setColorAt(i, w1);
     this.scene.add(this.halo);
+    // achados revelados: coluna de luz e poça dourada no chão
+    this.shaftMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false, opacity: 0.8 });
+    this.shafts = new THREE.InstancedMesh(K.lightShaft(1.7, 0.3), this.shaftMat, 12);
+    this.shafts.frustumCulled = false; this.shafts.count = 0; this.shafts.renderOrder = 6;
+    this.scene.add(this.shafts);
+    this.findGlow = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-PI / 2), new THREE.MeshBasicMaterial({ map: tex, color: 0xffd36a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.6, toneMapped: false }), 12);
+    this.findGlow.frustumCulled = false; this.findGlow.count = 0; this.findGlow.renderOrder = 2;
+    this.scene.add(this.findGlow);
     // poça de luz no chão
     this.glow = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-PI / 2), new THREE.MeshBasicMaterial({ map: tex, color: PAL.flame, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }), 64);
     this.glow.frustumCulled = false; this.glow.count = 0;
@@ -528,6 +559,8 @@ export class World {
     this.flag.visible = this.star.visible = variant === 'A';
     this.beam.visible = false;
     this.windowCols = new Map();
+    this.levelShown.clear(); this.anchors.clear(); this.marksShown.clear(); this.finds = [];
+    this.shafts.count = 0; this.findGlow.count = 0;
     this.veilCells.clear(); this.sweepX.fill(0); this.sweepZ.fill(0); this.veil.count = 0;
     this.windHoverCell = -1; this.windHoverK = 0; this.windMark.count = 0;
     this.gust.t = 9; U.gustAmp.value = 0; this.streaks.count = 0;
@@ -552,6 +585,7 @@ export class World {
     for (let i = 0; i < N; i++) {
       if (g.struct[i] !== this.structShown[i]) this.buildStruct(i, g.struct[i], inst);
     }
+    if (this.variant === 'B') this.syncLevels(inst);
     for (const i of fresh) {
       if (g.map.terrain[i] !== Terrain.Water) this.updateShore(i);
       const t0 = inst ? -100 : this.revT[i] + 0.3 + hashN(i, 9) * 0.25;
@@ -564,6 +598,7 @@ export class World {
       if (g.seen[i] && !g.revealed[i]) { if (!v) this.veilCells.set(i, { off: -1 }); }
       else if (v && v.off < 0) v.off = inst ? -100 : now;
     }
+    if (this.variant === 'B') this.syncMarks(inst);
     this.refreshWindows();
     this.placeTip();
   }
@@ -620,6 +655,10 @@ export class World {
         this.fishData.push({ it, cell: i, a: hashN(i, 600 + k) * 6.28, r: 0.3 + hashN(i, 620 + k) * 0.5, sp: (0.5 + hashN(i, 640 + k) * 0.6) * (k % 2 ? 1 : -1), ph: hashN(i, 660 + k) * 6.28, per: 4 + hashN(i, 680 + k) * 5, hop: 0 });
       }
     }
+    // O achado revelado ganha um brilho (coluna de luz e poça dourada) e um presente que flutua.
+    const by = t === Terrain.Water ? SEA_Y : y;
+    const gift = this.P.gift.make(i, 'find', cx, by + 1.05, cz, hashN(i, 22) * PI * 2, 1.25, t0 + 0.25, 'pop');
+    this.finds.push({ cell: i, x: cx, y: by, z: cz, t0, ph: hashN(i, 23) * 6.28, gift });
     if (!this.reduced) this.later.push({ t: t0 + 0.2, fn: () => this.burst(cx, y + 0.5, cz, 14, 0xffe08a, 1.4, true) });
   }
 
@@ -638,6 +677,7 @@ export class World {
     const land = (): void => { if (!inst && !this.reduced) this.later.push({ t: t0 + 0.4, fn: () => this.burst(cx, y + 0.1, cz, 9, 0xe7d8b5, 1) }); };
     switch (s) {
       case Struct.House: {
+        if (this.variant === 'B') { this.placeHouseB(i, (this.game as ViewB).level(i), t0, inst ? 'none' : 'drop'); land(); break; }
         const v = Math.floor(hashN(i, 33) * 3);
         const it = this.P['house' + v].make(i, 'struct', cx, y, cz, yaw, 1.3, t0, drop);
         const wins: Item[] = [];
@@ -681,6 +721,92 @@ export class World {
       }
     }
     this.applyLanternColors();
+  }
+
+  // ---------- B: casas que sobem de nível e marcos da vila ----------
+  private placeHouseB(i: number, level: number, t0: number, anim: 'drop' | 'grow' | 'none'): void {
+    const g = this.game, t = g.map.terrain[i], y = surf(t), cx = cellX(i), cz = cellZ(i);
+    const yaw = Math.floor(hashN(i, 31) * 6) * PI / 3 + (hashN(i, 32) - 0.5) * 0.25;
+    const v = Math.floor(hashN(i, 33) * 3);
+    const it = this.P[`hb${v}_${level}`].make(i, 'struct', cx, y, cz, yaw, HB_SCALE, t0, anim);
+    const wins: Item[] = [];
+    K.WINDOW_SLOTS_B[level].forEach((w) => {
+      const wi = this.P.win.make(i, 'struct', 0, 0, 0, 0, 1, t0, 'none');
+      wi.parent = it;
+      wi.local = new THREE.Matrix4().compose(new THREE.Vector3(w.x, w.y, w.z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), w.ry), new THREE.Vector3(1, 1, 1));
+      wins.push(wi);
+    });
+    this.windowCols.set(i, wins);
+    this.levelShown.set(i, level);
+    const c = K.HOUSE_CHIM_B[level], cs = Math.cos(yaw), sn = Math.sin(yaw);
+    this.emitters.push({ cell: i, x: cx + (c.x * cs + c.z * sn) * HB_SCALE, y: y + c.y * HB_SCALE, z: cz + (-c.x * sn + c.z * cs) * HB_SCALE, next: this.time + 0.5 + hashN(i, 34) });
+  }
+
+  /** A casa mudou de nível: troca a forma, com um quique e brilhos (a casa nova nasce em 78% e cresce). */
+  private syncLevels(inst: boolean): void {
+    const g = this.game as ViewB;
+    for (const h of g.houses) {
+      if (this.structShown[h] !== StructB.House) continue;
+      const l = g.level(h), old = this.levelShown.get(h);
+      if (old === undefined || old === l) continue;
+      for (const p of this.pools) p.removeCell(h, 'struct');
+      this.emitters = this.emitters.filter((e) => e.cell !== h);
+      this.windowCols.delete(h);
+      const t0 = inst ? -100 : this.time;
+      this.placeHouseB(h, l, t0, inst ? 'none' : 'grow');
+      if (!inst && !this.reduced) {
+        const cx = cellX(h), cz = cellZ(h), y = surf(g.map.terrain[h]);
+        this.later.push({ t: t0 + 0.12, fn: () => this.burst(cx, y + 0.5, cz, 14, 0xffe08a, 1.5, true) });
+        this.later.push({ t: t0 + 0.2, fn: () => this.burst(cx, y + 0.15, cz, 8, 0xe7d8b5, 1) });
+      }
+    }
+  }
+
+  /** O centro de uma vila: o hexágono de casa mais perto do centro das casas; vale o que já foi escolhido (não pula). */
+  private anchorFor(cells: number[]): number {
+    for (const c of cells) { const a = this.anchors.get(c); if (a !== undefined && cells.includes(a)) { for (const k of cells) this.anchors.set(k, a); return a; } }
+    let mx = 0, mz = 0;
+    for (const c of cells) { mx += cellX(c); mz += cellZ(c); }
+    mx /= cells.length; mz /= cells.length;
+    let best = cells[0], bd = Infinity;
+    for (const c of cells) { const d = (cellX(c) - mx) ** 2 + (cellZ(c) - mz) ** 2; if (d < bd - 1e-9) { bd = d; best = c; } }
+    for (const k of cells) this.anchors.set(k, best);
+    return best;
+  }
+
+  /** Marcos da vila (poço, praça, capela) nos cantos do hexágono central, três cantos alternados (ficam fora da casa). */
+  private syncMarks(inst: boolean): void {
+    const g = this.game as ViewB;
+    const want = new Map<string, { kind: number; x: number; y: number; z: number; yaw: number }>();
+    for (const v of g.villages()) {
+      if (v.marks <= 0) continue;
+      const a = this.anchorFor(v.cells);
+      const base = hashN(a, 77) < 0.5 ? 0 : 1;
+      for (let k = 0; k < v.marks; k++) {
+        const ang = (base + 2 * k) * PI / 3;
+        const x = cellX(a) + Math.cos(ang) * 0.98, z = cellZ(a) + Math.sin(ang) * 0.98;
+        want.set(`${k}:${a}`, { kind: k, x, y: surf(g.map.terrain[a]) - 0.03, z, yaw: Math.atan2(-Math.cos(ang), -Math.sin(ang)) });
+      }
+    }
+    for (const [key, m] of [...this.marksShown]) {
+      if (want.has(key)) continue;
+      for (const p of [this.P.well, this.P.plaza, this.P.chapel, this.P.bell]) p.items = p.items.filter((it) => !m.items.includes(it)), p.dirty = true;
+      this.marksShown.delete(key);
+    }
+    for (const [key, w] of want) {
+      if (this.marksShown.has(key)) continue;
+      const t0 = inst ? -100 : this.time + 0.35;
+      const pool = [this.P.well, this.P.plaza, this.P.chapel][w.kind];
+      const ms = MARK_SCALE[w.kind];
+      const items = [pool.make(-1, 'mark', w.x, w.y, w.z, w.yaw, ms, t0, 'pop')];
+      if (w.kind === 2) {
+        const b = this.P.bell.make(-1, 'mark', w.x, w.y + K.CHAPEL_BELL_Y * ms, w.z, w.yaw, ms, t0 + 0.1, 'pop');
+        b.swing = 0.28;
+        items.push(b);
+      }
+      this.marksShown.set(key, { items });
+      if (!inst && !this.reduced) this.later.push({ t: t0 + 0.25, fn: () => this.burst(w.x, w.y + 0.35, w.z, 16, 0xffe08a, 1.5, true) });
+    }
   }
 
   /** Lanternas apagadas por falta de óleo (só durante a noite). */
@@ -901,6 +1027,7 @@ export class World {
     this.updateRain(dt);
     this.updateClouds(t);
     this.updateFish(t);
+    this.updateFinds(t);
     for (const p of this.pools) p.refresh(t);
     this.updateLights(t);
     this.updateParticles(dt, t);
@@ -1029,6 +1156,31 @@ export class World {
     }
   }
 
+  /** Achados revelados: o presente flutua e gira, a coluna de luz e a poça dourada pulsam (mais fortes à noite). */
+  private updateFinds(t: number): void {
+    const m = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+    const mo = U.motion.value;
+    let k = 0;
+    for (const f of this.finds) {
+      const age = t - f.t0;
+      if (age < 0) continue;
+      const a = smooth(age / (this.reduced ? 0.2 : 0.7));
+      f.gift.y = f.y + 1.05 + Math.sin(t * 1.7 + f.ph) * 0.07 * mo;
+      f.gift.yaw = t * 0.8 * mo + f.ph;
+      const pulse = 1 + Math.sin(t * 2 + f.ph) * 0.06 * mo;
+      m.compose(p.set(f.x, f.y + 0.02, f.z), q.identity(), sc.set(a * pulse, a, a * pulse));
+      this.shafts.setMatrixAt(k, m);
+      const r = 1.7 * a * pulse;
+      m.compose(p.set(f.x, f.y + 0.07, f.z), q.identity(), sc.set(r, 1, r));
+      this.findGlow.setMatrixAt(k, m);
+      k++;
+    }
+    this.shafts.count = this.findGlow.count = k;
+    this.shafts.instanceMatrix.needsUpdate = this.findGlow.instanceMatrix.needsUpdate = true;
+    this.shaftMat.opacity = Math.min(1, 0.5 + 0.12 * Math.sin(t * 2) * mo + 0.4 * this.night);
+    (this.findGlow.material as THREE.MeshBasicMaterial).opacity = 0.42 + 0.2 * Math.sin(t * 2) * mo + 0.3 * this.night;
+  }
+
   private updateLights(t: number): void {
     const gm = new THREE.Matrix4(), gp = new THREE.Vector3(), gs = new THREE.Vector3(), gq = new THREE.Quaternion();
     let gn = 0, hn = 0;
@@ -1055,6 +1207,8 @@ export class World {
       gm.compose(gp, gq.identity(), gs);
       this.glow.setMatrixAt(gn++, gm);
     }
+    // Final da B: cada casa acende uma luz quente.
+    if (this.finaleOn && this.night > 0.3) for (const cell of this.windowCols.keys()) halo(cellX(cell), this.topY(cell) + 0.5, cellZ(cell), 1.5, this.night * 0.5, 1, 0.72, 0.35);
     if (this.night > 0.1) for (const f of this.fishData) if (t >= f.it.t0) halo(f.it.x, f.it.y + 0.1, f.it.z, 0.34, this.night * 0.22, 0.4, 0.9, 1);
     if (this.star.visible) halo(this.star.position.x, this.star.position.y, this.star.position.z, 1.5, 0.5 * this.night, 1, 0.85, 0.4);
     this.glow.count = gn; this.glow.instanceMatrix.needsUpdate = true;
@@ -1091,6 +1245,12 @@ export class World {
           if (this.dust.instanceColor) this.dust.instanceColor.needsUpdate = true;
         }
       }
+    }
+    // Final da B: faíscas douradas sobem das casas acesas.
+    if (this.finaleOn && !this.reduced && t >= this.sparkAt) {
+      this.sparkAt = t + 0.16;
+      const keys = [...this.windowCols.keys()];
+      if (keys.length) { const c = keys[Math.floor(Math.random() * keys.length)]; this.burst(cellX(c) + (Math.random() - 0.5) * 0.6, this.topY(c) + 0.6, cellZ(c) + (Math.random() - 0.5) * 0.6, 1, 0xffe08a, 0.5, true); }
     }
     while (this.later.length && this.later[0].t <= t) this.later.shift()!.fn();
     this.later.sort((a, b) => a.t - b.t);
@@ -1138,10 +1298,21 @@ export class World {
   }
 
   /** Fim da B: a ilha se acende (sem regra: só visual). */
-  finale(): void { this.finaleOn = true; this.refreshWindows(); }
+  finale(): void {
+    this.finaleOn = true; this.refreshWindows();
+    if (this.reduced) return;
+    this.lights.forEach((l, k) => this.later.push({ t: this.time + 0.5 + k * 0.2, fn: () => this.burst(l.x, l.y, l.z, 14, 0xffd36a, 1.5, true) }));
+  }
   private finaleOn = false;
   /** Gancho de captura: um bando de pássaros já em pleno voo. */
   flockNow(): void { /* preenchido com os pássaros */ }
+
+  /** Gancho de captura: o hexágono central da vila com mais marcos (ou -1). */
+  focusMark(): number {
+    let best = -1, bm = 0;
+    for (const key of this.marksShown.keys()) { const [k, a] = key.split(':').map(Number); if (k + 1 > bm) { bm = k + 1; best = a; } }
+    return best;
+  }
 
   /** Efeitos pós-captura/depuração. */
   get info(): { calls: number; triangles: number } { return this.stats; }

@@ -196,6 +196,148 @@ export const house = (roof: number): THREE.BufferGeometry => new Geo(29)
   .cyl(0.05, 0.05, 0.1, PAL.timber, 6, { x: 0.36, y: 0.1, z: 0.2 })
   .build();
 
+// ---------- casas da B: a forma muda com o nível ----------
+/** Casa da B em 4 formas: 1 térrea, 2 sobrado, 3 casarão, 4 solar (torrezinha e jardim). Mesma pegada de ~1 hexágono. */
+export const houseB = (level: number, roof: number): THREE.BufferGeometry => {
+  if (level <= 1) return house(roof);
+  const g = new Geo(100 + level);
+  if (level === 2) {
+    g.box(0.62, 0.08, 0.54, PAL.stone, { y: 0.04 })
+      .box(0.5, 0.3, 0.42, PAL.cream, { y: 0.23, grad: [0.82, 1] })
+      .box(0.54, 0.035, 0.46, PAL.timber, { y: 0.395 })
+      .box(0.46, 0.27, 0.38, 0xf1dcae, { y: 0.545, grad: [0.9, 1] })
+      .add(gable(0.62, 0.26, 0.5), roof, { y: 0.68, grad: [0.85, 1.08] })
+      .box(0.085, 0.24, 0.085, PAL.stoneDark, { x: 0.15, y: 0.86, z: -0.1 })
+      .box(0.115, 0.03, 0.115, PAL.walnut, { x: 0.15, y: 0.99, z: -0.1 })
+      .box(0.1, 0.17, 0.02, PAL.walnut, { y: 0.165, z: 0.215 })
+      .box(0.26, 0.03, 0.1, PAL.timber, { y: 0.4, z: 0.26 })
+      .box(0.26, 0.05, 0.015, PAL.walnut, { y: 0.44, z: 0.3 })
+      .ico(0.1, PAL.leafA, 0, { x: -0.36, y: 0.09, z: 0.2, jit: 0.04 });
+    return g.build();
+  }
+  // 3 e 4: corpo largo com asa e varanda
+  g.box(0.96, 0.08, 0.6, PAL.stone, { y: 0.04 })
+    .box(0.6, 0.36, 0.44, PAL.cream, { x: -0.1, y: 0.26, grad: [0.82, 1] })
+    .add(gable(0.68, 0.3, 0.52), roof, { x: -0.1, y: 0.44, grad: [0.85, 1.08] })
+    .box(0.32, 0.28, 0.38, 0xf1dcae, { x: 0.34, y: 0.22, z: 0.02, grad: [0.85, 1] })
+    .add(gable(0.4, 0.2, 0.34), roof, { x: 0.34, y: 0.36, z: 0.02, ry: PI / 2, grad: [0.85, 1.08] })
+    .box(0.16, 0.13, 0.12, PAL.cream, { x: -0.1, y: 0.7, z: 0.08 })
+    .add(gable(0.2, 0.1, 0.14), roof, { x: -0.1, y: 0.765, z: 0.08, grad: [0.9, 1.1] })
+    .box(0.085, 0.22, 0.085, PAL.stoneDark, { x: -0.3, y: 0.72, z: -0.1 })
+    .box(0.115, 0.03, 0.115, PAL.walnut, { x: -0.3, y: 0.84, z: -0.1 })
+    .box(0.36, 0.03, 0.14, PAL.timber, { x: -0.1, y: 0.385, z: 0.3 })
+    .cyl(0.018, 0.018, 0.3, PAL.cream, 5, { x: -0.25, y: 0.22, z: 0.34 })
+    .cyl(0.018, 0.018, 0.3, PAL.cream, 5, { x: 0.05, y: 0.22, z: 0.34 })
+    .box(0.1, 0.18, 0.02, PAL.walnut, { x: -0.1, y: 0.17, z: 0.225 });
+  if (level === 4) {
+    // torrezinha com bandeira e jardim com sebes, árvore e flores
+    g.cyl(0.13, 0.15, 0.76, PAL.cream, 8, { x: -0.38, y: 0.46, z: -0.14, grad: [0.85, 1.05] })
+      .cyl(0.16, 0.14, 0.04, PAL.walnut, 8, { x: -0.38, y: 0.86, z: -0.14 })
+      .cone(0.19, 0.3, PAL.clayDark, 8, { x: -0.38, y: 1.03, z: -0.14, grad: [0.8, 1.1] })
+      .cyl(0.008, 0.008, 0.2, PAL.walnut, 3, { x: -0.38, y: 1.26, z: -0.14 })
+      .add(new THREE.BoxGeometry(0.13, 0.07, 0.01), PAL.flame, { x: -0.31, y: 1.3, z: -0.14, grad: [1, 1] })
+      .box(0.46, 0.07, 0.06, PAL.leafA, { x: 0.02, y: 0.11, z: 0.4, jit: 0.02 })
+      .box(0.14, 0.07, 0.24, PAL.leafA, { x: 0.3, y: 0.11, z: 0.3, jit: 0.02 })
+      .cyl(0.02, 0.03, 0.2, PAL.timber, 5, { x: 0.38, y: 0.1, z: -0.3 })
+      .ico(0.15, PAL.leafC, 1, { x: 0.38, y: 0.32, z: -0.3, jit: 0.05, grad: [0.7, 1.1] });
+    for (let k = 0; k < 4; k++) g.ico(0.03, [0xf5a3b8, 0xffd45a, 0xffffff, 0xf5a3b8][k], 0, { x: -0.18 + k * 0.12, y: 0.16, z: 0.4 });
+  } else {
+    g.ico(0.1, PAL.leafA, 0, { x: -0.44, y: 0.09, z: 0.24, jit: 0.04 }).cyl(0.05, 0.05, 0.1, PAL.timber, 6, { x: 0.44, y: 0.1, z: 0.28 });
+  }
+  return g.build();
+};
+
+/** Janelas por nível (as acesas são tantas quanto o nível); x, y, z no espaço da casa, ry = giro. */
+export const WINDOW_SLOTS_B: Array<Array<{ x: number; y: number; z: number; ry: number }>> = [
+  [],
+  [{ x: -0.14, y: 0.26, z: 0.215, ry: 0 }, { x: 0.14, y: 0.26, z: 0.215, ry: 0 }, { x: 0.255, y: 0.26, z: -0.08, ry: PI / 2 }, { x: 0.255, y: 0.26, z: 0.08, ry: PI / 2 }],
+  [{ x: -0.14, y: 0.26, z: 0.215, ry: 0 }, { x: 0.14, y: 0.26, z: 0.215, ry: 0 }, { x: -0.12, y: 0.55, z: 0.195, ry: 0 }, { x: 0.12, y: 0.55, z: 0.195, ry: 0 }],
+  [{ x: -0.28, y: 0.3, z: 0.225, ry: 0 }, { x: 0.08, y: 0.3, z: 0.225, ry: 0 }, { x: 0.34, y: 0.24, z: 0.215, ry: 0 }, { x: -0.1, y: 0.72, z: 0.155, ry: 0 }],
+  [{ x: -0.28, y: 0.3, z: 0.225, ry: 0 }, { x: 0.08, y: 0.3, z: 0.225, ry: 0 }, { x: 0.34, y: 0.24, z: 0.215, ry: 0 }, { x: -0.38, y: 0.6, z: 0.0, ry: 0 }],
+];
+/** Chaminé (topo) por nível, no espaço da casa. */
+export const HOUSE_CHIM_B = [{ x: 0, y: 0, z: 0 }, { x: 0.14, y: 0.72, z: -0.09 }, { x: 0.15, y: 1.02, z: -0.1 }, { x: -0.3, y: 0.88, z: -0.1 }, { x: -0.3, y: 0.88, z: -0.1 }];
+
+// ---------- marcos da vila (B): poço, praça com árvore e bancos, capela com sino ----------
+export const well = (): THREE.BufferGeometry => new Geo(110)
+  .cyl(0.17, 0.19, 0.05, PAL.stoneDark, 8, { y: 0.025 })
+  .cyl(0.14, 0.15, 0.14, PAL.stone, 8, { y: 0.12, grad: [0.75, 1.05] })
+  .cyl(0.1, 0.1, 0.02, 0x4cc8d6, 8, { y: 0.19, grad: [1, 1] })
+  .cyl(0.014, 0.014, 0.32, PAL.walnut, 4, { x: -0.13, y: 0.3 })
+  .cyl(0.014, 0.014, 0.32, PAL.walnut, 4, { x: 0.13, y: 0.3 })
+  .cone(0.2, 0.13, PAL.clay, 4, { y: 0.52, ry: PI / 4, grad: [0.85, 1.1] })
+  .box(0.26, 0.018, 0.018, PAL.walnut, { y: 0.44 })
+  .cyl(0.03, 0.025, 0.05, PAL.timberLight, 5, { x: 0.02, y: 0.38 })
+  .build();
+
+export const plaza = (): THREE.BufferGeometry => {
+  const g = new Geo(111)
+    .cyl(0.32, 0.34, 0.035, PAL.stone, 10, { y: 0.017, grad: [0.85, 1] })
+    .cyl(0.2, 0.22, 0.012, PAL.cream, 10, { y: 0.04, grad: [1, 1] })
+    .cyl(0.025, 0.04, 0.26, PAL.timber, 5, { y: 0.17 })
+    .ico(0.17, PAL.leafA, 1, { y: 0.4, sy: 0.9, jit: 0.07, grad: [0.65, 1.08] })
+    .ico(0.1, PAL.leafC, 1, { x: 0.08, y: 0.52, z: -0.03, jit: 0.05, grad: [0.75, 1.1] });
+  for (const a of [PI * 0.1, PI * 1.1]) {
+    const bx = Math.cos(a) * 0.27, bz = Math.sin(a) * 0.27;
+    g.box(0.2, 0.025, 0.07, PAL.timberLight, { x: bx, z: bz, y: 0.1, ry: -a + PI / 2 })
+      .box(0.2, 0.05, 0.015, PAL.timber, { x: bx + Math.sin(a) * 0.03, z: bz - Math.cos(a) * 0.03, y: 0.14, ry: -a + PI / 2 })
+      .box(0.02, 0.07, 0.05, PAL.walnut, { x: bx + Math.cos(a) * 0.06, z: bz + Math.sin(a) * 0.06, y: 0.055, ry: -a + PI / 2 })
+      .box(0.02, 0.07, 0.05, PAL.walnut, { x: bx - Math.cos(a) * 0.06, z: bz - Math.sin(a) * 0.06, y: 0.055, ry: -a + PI / 2 });
+  }
+  for (let k = 0; k < 5; k++) { const a = k * 1.26 + 0.4; g.ico(0.025, [0xf5a3b8, 0xffd45a, 0xffffff][k % 3], 0, { x: Math.cos(a) * 0.3, z: Math.sin(a) * 0.3, y: 0.06 }); }
+  return g.build();
+};
+
+/** Capela com torre e gaiola do sino no eixo (0, 0): o sino é uma peça à parte, que balança. */
+export const chapel = (): THREE.BufferGeometry => new Geo(112)
+  .box(0.34, 0.05, 0.5, PAL.stone, { z: 0.12, y: 0.025 })
+  .box(0.26, 0.24, 0.36, PAL.cream, { z: 0.16, y: 0.17, grad: [0.82, 1] })
+  .add(gable(0.32, 0.18, 0.42), PAL.clay, { z: 0.16, y: 0.29, grad: [0.85, 1.08] })
+  .box(0.17, 0.5, 0.17, PAL.cream, { y: 0.3, grad: [0.85, 1.05] })
+  .box(0.17, 0.03, 0.17, PAL.walnut, { y: 0.56 })
+  .cyl(0.012, 0.012, 0.13, PAL.walnut, 4, { x: -0.07, z: -0.07, y: 0.63 })
+  .cyl(0.012, 0.012, 0.13, PAL.walnut, 4, { x: 0.07, z: -0.07, y: 0.63 })
+  .cyl(0.012, 0.012, 0.13, PAL.walnut, 4, { x: -0.07, z: 0.07, y: 0.63 })
+  .cyl(0.012, 0.012, 0.13, PAL.walnut, 4, { x: 0.07, z: 0.07, y: 0.63 })
+  .cone(0.15, 0.17, PAL.clayDark, 4, { y: 0.77, ry: PI / 4, grad: [0.8, 1.1] })
+  .box(0.012, 0.09, 0.012, PAL.flame, { y: 0.9 })
+  .box(0.05, 0.012, 0.012, PAL.flame, { y: 0.92 })
+  .box(0.08, 0.15, 0.02, PAL.walnut, { z: 0.345, y: 0.115 })
+  .add(new THREE.CircleGeometry(0.045, 6), 0xffc15e, { z: 0.347, y: 0.22, grad: [1, 1] })
+  .build();
+export const CHAPEL_BELL_Y = 0.6;
+/** Sino pendurado: a origem é o ponto de suspensão (gira em torno dele). */
+export const bell = (): THREE.BufferGeometry => new Geo(113)
+  .cone(0.05, 0.08, PAL.flameHot, 8, { y: -0.04, grad: [0.8, 1.1] })
+  .ico(0.012, PAL.walnut, 0, { y: -0.09 })
+  .build();
+
+// ---------- achados: o presente e a coluna de luz ----------
+export const gift = (): THREE.BufferGeometry => new Geo(114)
+  .box(0.2, 0.15, 0.2, PAL.apple, { y: 0.075, grad: [0.8, 1.05] })
+  .box(0.21, 0.155, 0.045, PAL.flameHot, { y: 0.075, grad: [1, 1] })
+  .box(0.045, 0.155, 0.21, PAL.flameHot, { y: 0.075, grad: [1, 1] })
+  .box(0.22, 0.04, 0.22, 0xe8645a, { y: 0.17, grad: [1, 1] })
+  .ico(0.045, PAL.flameHot, 0, { x: -0.04, y: 0.225, sx: 1.4, sy: 0.8 })
+  .ico(0.045, PAL.flameHot, 0, { x: 0.04, y: 0.225, sx: 1.4, sy: 0.8 })
+  .build();
+
+/** Coluna de luz aberta (alfa por vértice: some no topo e na base), para marcar um achado revelado. */
+export function lightShaft(h: number, r: number): THREE.BufferGeometry {
+  const seg = 12, pos: number[] = [], col: number[] = [];
+  const rings = [{ y: 0, r: r * 1.35, a: 0.0 }, { y: h * 0.12, r: r * 1.15, a: 0.55 }, { y: h * 0.6, r, a: 0.22 }, { y: h, r: r * 0.8, a: 0 }];
+  for (let i = 0; i < rings.length - 1; i++) for (let k = 0; k < seg; k++) {
+    const a0 = (k / seg) * PI * 2, a1 = ((k + 1) / seg) * PI * 2;
+    const P = (ring: typeof rings[0], a: number): [number, number, number, number] => [Math.cos(a) * ring.r, ring.y, Math.sin(a) * ring.r, ring.a];
+    const v = [P(rings[i], a0), P(rings[i], a1), P(rings[i + 1], a0), P(rings[i + 1], a1), P(rings[i + 1], a0), P(rings[i], a1)];
+    for (const q of v) { pos.push(q[0], q[1], q[2]); col.push(1, 0.86, 0.45, q[3]); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+  return g;
+}
+
 /** Janelas de uma casa: quatro posições (duas na frente, duas na lateral). */
 export const WINDOW_SLOTS: Array<{ x: number; y: number; z: number; ry: number }> = [
   { x: -0.14, y: 0.26, z: 0.215, ry: 0 }, { x: 0.14, y: 0.26, z: 0.215, ry: 0 },
