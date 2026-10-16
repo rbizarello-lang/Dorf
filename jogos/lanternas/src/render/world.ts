@@ -1,6 +1,7 @@
 // O diorama: ilha sobre um pedestal, mar, névoa de nuvens, kits instanciados, luz do dia e da noite.
 // Lê o estado de Game (somente leitura) e o desenha; nenhuma regra mora aqui.
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { CELLS, CENTER, DIRS, N, NB_DIR, dist } from '../core/hex';
 import { Card, Struct } from '../core/game';
 import { StructB } from '../core/gameB';
@@ -16,6 +17,8 @@ const SPLASH = new THREE.Color(1.5, 1.7, 1.8);
 const PI = Math.PI;
 export const cellX = (i: number): number => 1.5 * CELLS[i].q;
 export const cellZ = (i: number): number => S3 * (CELLS[i].r + CELLS[i].q / 2);
+/** Os pássaros do bando em V: (para trás, para o lado) em relação ao líder. */
+const FLOCK: Array<[number, number]> = [[0, 0], [-0.9, 0.8], [-0.9, -0.8], [-1.8, 1.6], [-1.8, -1.6], [-2.7, 0.7]];
 const hashN = (a: number, b: number): number => {
   let h = Math.imul(a | 0, 374761393) ^ Math.imul((b + 17) | 0, 668265263);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -25,7 +28,9 @@ const clamp01 = (x: number): number => Math.min(1, Math.max(0, x));
 const smooth = (x: number): number => { const t = clamp01(x); return t * t * (3 - 2 * t); };
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 /** Altura do mar. */
-const SEA_Y = 0;
+const SEA_Y = -0.58;
+/** Fundo das peças de terra: encosta no fundo da bandeja do pedestal, abaixo do mar. */
+const TILE_BOTTOM = -1.0;
 /** Escala das casas da B (todas as formas cabem numa pegada de ~1 hexágono). */
 const HB_SCALE = 1.15;
 /** Escala de cada marco da vila (poço, praça, capela): bem legíveis ao lado das casas. */
@@ -34,11 +39,11 @@ const MARK_SCALE = [1.5, 1.3, 1.45];
 // ---------- peças de terra ----------
 // Índice = Terrain (0 = névoa/"mist", que também cobre a água ainda não revelada).
 const TILE_SPECS: K.TileSpec[] = [
-  { bottom: -0.5, top: 0.16, bevel: 0.08, bump: 0.03, jag: 0, topCol: 0xdceaf2, lipCol: 0xeef6fa, sideCol: 0xa9c4d8, seed: 1 },
-  { bottom: -0.5, top: 0.2, bevel: 0.07, bump: 0.025, jag: 0, topCol: PAL.sand, lipCol: 0xf8ebc0, sideCol: PAL.sandDark, seed: 2 },
-  { bottom: -0.5, top: 0.36, bevel: 0.08, bump: 0.07, jag: 0, topCol: PAL.meadow, lipCol: 0xc0e684, sideCol: PAL.soil, seed: 3 },
-  { bottom: -0.5, top: 0.4, bevel: 0.08, bump: 0.06, jag: 0, topCol: PAL.wood, lipCol: 0x86bb68, sideCol: PAL.soilDark, seed: 4 },
-  { bottom: -0.5, top: 0.58, bevel: 0.09, bump: 0.16, jag: 0.11, topCol: PAL.rock, lipCol: 0xcbc7bf, sideCol: PAL.rockDark, seed: 5 },
+  { bottom: TILE_BOTTOM, top: 0.16, bevel: 0.08, bump: 0.03, jag: 0, topCol: 0xdceaf2, lipCol: 0xeef6fa, sideCol: 0xa9c4d8, seed: 1 },
+  { bottom: TILE_BOTTOM, top: 0.2, bevel: 0.07, bump: 0.025, jag: 0, topCol: PAL.sand, lipCol: 0xf8ebc0, sideCol: PAL.sandDark, seed: 2, strata: [0xc9a869, 0xa9824f, 0x8c8272] },
+  { bottom: TILE_BOTTOM, top: 0.36, bevel: 0.08, bump: 0.07, jag: 0, topCol: PAL.meadow, lipCol: 0xc0e684, sideCol: PAL.soil, seed: 3, strata: [0x6e4d33, 0x9c6a3e, 0x8a8478] },
+  { bottom: TILE_BOTTOM, top: 0.4, bevel: 0.08, bump: 0.06, jag: 0, topCol: PAL.wood, lipCol: 0x86bb68, sideCol: PAL.soilDark, seed: 4, strata: [0x5f4230, 0x8d5c36, 0x7d776c] },
+  { bottom: TILE_BOTTOM, top: 0.58, bevel: 0.09, bump: 0.16, jag: 0.11, topCol: PAL.rock, lipCol: 0xcbc7bf, sideCol: PAL.rockDark, seed: 5, strata: [0x8d8982, 0x77736d, 0x5f5b57] },
 ];
 const surf = (t: number): number => TILE_SPECS[t].top + TILE_SPECS[t].bump * 0.5;
 
@@ -46,12 +51,12 @@ const surf = (t: number): number => TILE_SPECS[t].top + TILE_SPECS[t].bump * 0.5
 interface Key { p: number; elev: number; az: number; sun: THREE.Color; sunI: number; hs: THREE.Color; hg: THREE.Color; hI: number; top: THREE.Color; bot: THREE.Color; exp: number }
 const col = (h: number | string): THREE.Color => new THREE.Color(h);
 const KEYS: Key[] = [
-  { p: 0.0, elev: 22, az: -78, sun: col(0xffd2a0), sunI: 2.5, hs: col(0xc9e4ff), hg: col(0x9aa77a), hI: 1.25, top: col('#8fcbe6'), bot: col('#fbe3c4'), exp: 1.0 },
-  { p: 0.35, elev: 54, az: -28, sun: col(0xfff0d6), sunI: 3.0, hs: col(0xd6ecff), hg: col(0xa8b88a), hI: 1.3, top: col('#74bde6'), bot: col('#ecf6ee'), exp: 1.0 },
-  { p: 0.72, elev: 32, az: 42, sun: col(0xffd59a), sunI: 2.8, hs: col(0xf3dfd0), hg: col(0xa8987a), hI: 1.2, top: col('#97bde6'), bot: col('#fcdcb8'), exp: 1.0 },
-  { p: 1.0, elev: 11, az: 82, sun: col(0xff9558), sunI: 2.4, hs: col(0xf2b69c), hg: col(0x7c6b6c), hI: 1.0, top: col('#cf9ab4'), bot: col('#fbc088'), exp: 0.98 },
+  { p: 0.0, elev: 22, az: -78, sun: col(0xffd2a0), sunI: 2.5, hs: col(0xc9e4ff), hg: col(0x9aa77a), hI: 1.25, top: col('#1c120d'), bot: col('#5a3a26'), exp: 1.0 },
+  { p: 0.35, elev: 54, az: -28, sun: col(0xfff0d6), sunI: 3.0, hs: col(0xd6ecff), hg: col(0xa8b88a), hI: 1.3, top: col('#1a1210'), bot: col('#46362b'), exp: 1.0 },
+  { p: 0.72, elev: 32, az: 42, sun: col(0xffd59a), sunI: 2.8, hs: col(0xf3dfd0), hg: col(0xa8987a), hI: 1.2, top: col('#1e1311'), bot: col('#6a3f2c'), exp: 1.0 },
+  { p: 1.0, elev: 11, az: 82, sun: col(0xff9558), sunI: 2.4, hs: col(0xf2b69c), hg: col(0x7c6b6c), hI: 1.0, top: col('#1b1018'), bot: col('#7a3e34'), exp: 0.98 },
 ];
-const NIGHT = { elev: 48, az: -135, sun: col(0x9db2ff), sunI: 1.5, hs: col(0x4a60aa), hg: col(0x262e5a), hI: 1.25, top: col('#0b1230'), bot: col('#2a3a6a'), exp: 1.05 };
+const NIGHT = { elev: 48, az: -135, sun: col(0x9db2ff), sunI: 1.5, hs: col(0x4a60aa), hg: col(0x262e5a), hI: 1.25, top: col('#07080f'), bot: col('#1c1830'), exp: 1.05 };
 
 const WATER_DIR = (g: View, i: number): number => {
   for (let d = 0; d < 6; d++) { const n = NB_DIR[i][d]; if (n >= 0 && g.map.terrain[n] === Terrain.Water) return d; }
@@ -197,14 +202,21 @@ export class World {
     const mesh = new THREE.Mesh(K.pedestal(), m);
     mesh.castShadow = true; mesh.receiveShadow = true;
     this.scene.add(mesh);
-    // sombra suave no "tampo" sob o pedestal
+    // Aros de latão: metal de verdade (reflete uma sala de estúdio gerada em código, só neste material).
+    const pm = new THREE.PMREMGenerator(this.renderer);
+    const env = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+    pm.dispose();
+    const brass = new THREE.Mesh(K.brassRings(), new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.92, roughness: 0.3, envMap: env, envMapIntensity: 1.35 }));
+    brass.castShadow = true; brass.receiveShadow = true;
+    this.scene.add(brass);
+    // Luz quente de mesa no chão, sob o pedestal (o fundo é escuro): um brilho âmbar suave.
     const cv = document.createElement('canvas'); cv.width = cv.height = 128;
     const cx = cv.getContext('2d')!;
-    const gr = cx.createRadialGradient(64, 64, 18, 64, 64, 64);
-    gr.addColorStop(0, 'rgba(20,24,50,0.5)'); gr.addColorStop(0.6, 'rgba(20,24,50,0.2)'); gr.addColorStop(1, 'rgba(20,24,50,0)');
+    const gr = cx.createRadialGradient(64, 64, 10, 64, 64, 64);
+    gr.addColorStop(0, 'rgba(255,170,90,0.5)'); gr.addColorStop(0.55, 'rgba(255,140,60,0.16)'); gr.addColorStop(1, 'rgba(255,120,40,0)');
     cx.fillStyle = gr; cx.fillRect(0, 0, 128, 128);
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
-    const sh = new THREE.Mesh(new THREE.PlaneGeometry(46, 46).rotateX(-PI / 2), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+    const sh = new THREE.Mesh(new THREE.PlaneGeometry(52, 52).rotateX(-PI / 2), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, opacity: 0.55 }));
     sh.position.y = -4.25;
     this.scene.add(sh);
   }
@@ -235,6 +247,7 @@ export class World {
     this.sea = new THREE.Mesh(g, seaMaterial());
     this.sea.receiveShadow = true;
     this.sea.frustumCulled = false;
+    this.sea.position.y = SEA_Y;
     this.scene.add(this.sea);
   }
 
@@ -277,7 +290,7 @@ export class World {
   private tileMatrix(i: number, s: number, yaw: number): THREE.Matrix4 {
     const m = new THREE.Matrix4();
     if (s <= 0.001) return m.makeScale(0, 0, 0);
-    m.compose(new THREE.Vector3(cellX(i), -0.5 * (1 - s), cellZ(i)), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(1, s, 1));
+    m.compose(new THREE.Vector3(cellX(i), TILE_BOTTOM * (1 - s), cellZ(i)), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(1, s, 1));
     return m;
   }
 
@@ -426,9 +439,9 @@ export class World {
     this.scene.add(this.hover);
     this.ghostMat = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, opacity: 0.58, depthWrite: false, roughness: 0.9 });
     this.ghostBasic = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.8, depthWrite: false });
-    // gaivotas
-    this.gulls = new THREE.InstancedMesh(K.gull(), new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }), 4);
-    this.gulls.frustumCulled = false;
+    // pássaros pequenos: um bando cruza a ilha de vez em quando
+    this.gulls = new THREE.InstancedMesh(K.gull(), new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }), FLOCK.length);
+    this.gulls.frustumCulled = false; this.gulls.count = 0;
     this.scene.add(this.gulls);
     // poeira, fumaça e faíscas
     this.dust = new THREE.InstancedMesh(K.dustBall(), new THREE.MeshBasicMaterial({ vertexColors: true }), 260);
@@ -649,9 +662,9 @@ export class World {
       this.P.springStone.make(i, 'find', cx, y, cz, yaw, 1, t0, 'pop');
       this.P.springWater.make(i, 'find', cx, y, cz, yaw, 1, t0, 'pop');
     } else if (f === Find.Fish) {
-      this.P.school.make(i, 'find', cx, 0, cz, 0, 1, t0, 'pop');
+      this.P.school.make(i, 'find', cx, SEA_Y, cz, 0, 1, t0, 'pop');
       for (let k = 0; k < 14; k++) {
-        const it = this.P.fish.make(i, 'find', cx, 0.0, cz, 0, 1, t0 + k * 0.04, 'pop');
+        const it = this.P.fish.make(i, 'find', cx, SEA_Y, cz, 0, 1, t0 + k * 0.04, 'pop');
         this.fishData.push({ it, cell: i, a: hashN(i, 600 + k) * 6.28, r: 0.3 + hashN(i, 620 + k) * 0.5, sp: (0.5 + hashN(i, 640 + k) * 0.6) * (k % 2 ? 1 : -1), ph: hashN(i, 660 + k) * 6.28, per: 4 + hashN(i, 680 + k) * 5, hop: 0 });
       }
     }
@@ -701,7 +714,7 @@ export class World {
         const dy = TILE_SPECS[Terrain.Beach].top + 0.06;
         this.P.dock.make(i, 'struct', cx, dy, cz, ang, 1, t0, drop);
         const len = Math.hypot(dx, dz), ux = dx / len, uz = dz / len;
-        const b = this.P.boat.make(i, 'struct', cx + ux * 1.3 - uz * 0.5, 0.02, cz + uz * 1.3 + ux * 0.5, ang + 0.15, 1, t0 + 0.2, 'pop');
+        const b = this.P.boat.make(i, 'struct', cx + ux * 1.3 - uz * 0.5, SEA_Y + 0.02, cz + uz * 1.3 + ux * 0.5, ang + 0.15, 1, t0 + 0.2, 'pop');
         b.bob = 0.025;
         land();
         break;
@@ -1142,7 +1155,7 @@ export class World {
       const a = f.a + t * f.sp;
       f.it.x = cellX(f.cell) + Math.cos(a) * f.r;
       f.it.z = cellZ(f.cell) + Math.sin(a) * f.r;
-      f.it.y = 0.03 + Math.sin(t * 2 + f.ph) * 0.012;
+      f.it.y = SEA_Y + 0.03 + Math.sin(t * 2 + f.ph) * 0.012;
       f.it.yaw = -a + (f.sp > 0 ? -PI / 2 : PI / 2);
       f.it.s = 1.15 + 0.45 * Math.max(0, Math.sin(t * 3.1 + f.ph * 3));
       // de vez em quando um peixe salta e respinga (sem movimento reduzido)
@@ -1150,8 +1163,8 @@ export class World {
         const c = (t + f.ph * 2) % f.per;
         if (c < 0.7) {
           f.it.y += Math.sin(Math.PI * c / 0.7) * 0.5;
-          if (!f.hop) { f.hop = 1; this.burst(f.it.x, 0.06, f.it.z, 5, 0xffffff, 0.45, true, SPLASH); }
-        } else if (f.hop) { f.hop = 0; this.burst(f.it.x, 0.06, f.it.z, 7, 0xffffff, 0.55, true, SPLASH); }
+          if (!f.hop) { f.hop = 1; this.burst(f.it.x, SEA_Y + 0.06, f.it.z, 5, 0xffffff, 0.45, true, SPLASH); }
+        } else if (f.hop) { f.hop = 0; this.burst(f.it.x, SEA_Y + 0.06, f.it.z, 7, 0xffffff, 0.55, true, SPLASH); }
       }
     }
   }
@@ -1240,8 +1253,8 @@ export class World {
       if (t >= e.next) {
         e.next = t + 1.4 + Math.random() * 0.8;
         if (this.parts.length < 240) {
-          this.parts.push({ x: e.x, y: e.y, z: e.z, vx: 0.07, vz: 0.03, vy: 0.22, t: 0, life: 3, s0: 0.03, s1: 0.11, g: 0.02 });
-          this.dust.setColorAt(this.parts.length - 1, new THREE.Color(0.8, 0.82, 0.88));
+          this.parts.push({ x: e.x, y: e.y, z: e.z, vx: 0.08, vz: 0.03, vy: 0.26, t: 0, life: 3.6, s0: 0.035, s1: 0.11, g: 0.02 });
+          this.dust.setColorAt(this.parts.length - 1, new THREE.Color(0.8, 0.77, 0.75));
           if (this.dust.instanceColor) this.dust.instanceColor.needsUpdate = true;
         }
       }
@@ -1282,20 +1295,40 @@ export class World {
     if (this.dust.instanceColor) this.dust.instanceColor.needsUpdate = true;
   }
 
+  private startFlock(t0: number, fixed = false): void {
+    // Entra por um lado, cruza por cima da ilha e sai pelo outro; a direção e a altura variam de bando para bando.
+    const a = fixed ? 2.7 : Math.random() * PI * 2, side = fixed ? 0 : (Math.random() - 0.5) * 8;
+    const dx = -Math.cos(a), dz = -Math.sin(a);
+    this.flock = { t0, dur: 15, sx: Math.cos(a) * 21 - dz * side, sz: Math.sin(a) * 21 + dx * side, dx, dz, h: fixed ? 3.6 : 4.2 + Math.random() * 2.2 };
+  }
+
   private updateMisc(t: number): void {
-    // gaivotas em órbita
     const m = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(), y = new THREE.Vector3(0, 1, 0);
-    for (let k = 0; k < 4; k++) {
-      const a = t * (0.12 + k * 0.025) + k * 1.7, r = 9 + k * 1.6;
-      p.set(Math.cos(a) * r, 4.2 + k * 0.7 + Math.sin(t * 0.7 + k) * 0.3, Math.sin(a) * r);
-      q.setFromAxisAngle(y, -a - PI);
-      const flap = 0.6 + 0.4 * Math.sin(t * 5 + k * 2) * (this.reduced ? 0.1 : 1);
-      s.set(1.2, 1.2, 1.2 * flap);
-      m.compose(p, q, s);
-      this.gulls.setMatrixAt(k, m);
+    if (!this.reduced && !this.flock && t >= this.nextFlock) this.startFlock(t);
+    let n = 0;
+    const f = this.flock;
+    if (f) {
+      const u = (t - f.t0) / f.dur;
+      if (u > 1) { this.flock = null; this.nextFlock = t + 12 + Math.random() * 16; }
+      else {
+        const along = u * 42, yaw = -Math.atan2(f.dz, f.dx);
+        FLOCK.forEach(([back, lat], k) => {
+          const wob = Math.sin(t * 0.9 + k * 1.7) * 0.25;
+          p.set(f.sx + f.dx * (along + back) - f.dz * (lat + wob), f.h + Math.sin(u * 3 + k) * 0.25 + wob * 0.4, f.sz + f.dz * (along + back) + f.dx * (lat + wob));
+          q.setFromAxisAngle(y, yaw);
+          const flap = 0.45 + 0.55 * Math.abs(Math.sin(t * 8.5 + k * 2.1));
+          s.set(2.0, 2.0, 2.0 * flap);
+          m.compose(p, q, s);
+          this.gulls.setMatrixAt(n++, m);
+        });
+      }
     }
+    this.gulls.count = n;
     this.gulls.instanceMatrix.needsUpdate = true;
   }
+
+  private flock: { t0: number; dur: number; sx: number; sz: number; dx: number; dz: number; h: number } | null = null;
+  private nextFlock = 7;
 
   /** Fim da B: a ilha se acende (sem regra: só visual). */
   finale(): void {
@@ -1305,7 +1338,7 @@ export class World {
   }
   private finaleOn = false;
   /** Gancho de captura: um bando de pássaros já em pleno voo. */
-  flockNow(): void { /* preenchido com os pássaros */ }
+  flockNow(): void { this.startFlock(this.time - 3, true); }
 
   /** Gancho de captura: o hexágono central da vila com mais marcos (ou -1). */
   focusMark(): number {

@@ -14,10 +14,10 @@ const out = join(root, 'docs', 'screens');
 const SHOTS = {
   // Teste às cegas: a tela inicial (sem `ab`) e as duas versões com o mesmo visual (`ab=A|B` pula a escolha).
   escolha: '',
-  'a-meio': 'ab=A&seed=3&auto=15',
-  'b-meio': 'ab=B&seed=3&auto=15',
+  'a-meio': 'ab=A&seed=3&auto=15&aves=1',
+  'b-meio': 'ab=B&seed=3&auto=15&aves=1',
   'b-fim': 'ab=B&seed=3&auto=30',
-  'b-perto': 'ab=B&seed=3&auto=24&focus=marco&zoom=10&pitch=0.75&yaw=-0.5',
+  'b-perto': 'ab=B&seed=3&auto=24&focus=marco&zoom=14&pitch=0.8&yaw=-0.5',
   'celular-b': 'ab=B&seed=3&auto=15',
   'celular-a': 'ab=A&seed=3&auto=12',
   'b-jogando': 'ab=B&seed=3&auto=6&select=0&hover=valid',

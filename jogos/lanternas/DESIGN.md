@@ -113,3 +113,18 @@ Tudo gerado em código (sem arquivos de arte), WebGLRenderer do three, ACESFilmi
 `npm run build && npm run shot` (ou `node scripts/shot.mjs [nome ...]`) sobe o `dist/` num servidor próprio, abre no Chromium com SwiftShader e grava `docs/screens/*.png` (1280x800; `celular` e `celularfim` em 390x780), imprimindo os erros do console e o `__stats` de cada uma.
 
 Capturas do vento, da chuva e do cardume: `vento` (rajada no meio, mundo congelado por `?blow=1`), `ventoveu` (3 s depois, com o véu sobre a terra à vista), `chuva` (`?rain=1`), `cardume` e `cardumenoite`. O `shot.mjs` espera `window.__held` nelas, em vez da intro assentar.
+
+## Página do teste às cegas (etapa 3)
+
+Uma página só (`dist/index.html`) em que a pessoa joga "Ilha 1" e "Ilha 2". Uma é a versão A (regras de `game.ts`) e a outra a B (`gameB.ts`); o visual é o mesmo, só mudam as regras e o que decorre delas.
+
+- **Escolha às cegas (`src/ab.ts`):** a correspondência é sorteada uma vez por aparelho e fica em `localStorage` (`lanternas.ab`); se falhar, vale um sorteio por sessão. A tela de escolha só diz "Ilha 1" e "Ilha 2". Gancho `?ab=A|B` pula a escolha (depuração e capturas). `?seed=`, `?auto=` etc. seguem valendo.
+- **Uma View para as duas versões (`src/render/view.ts`):** o diorama lê `seen`, `revealed`, `struct`, `houses` e `houseResidents`; a B entra por um adaptador (`viewB`) que lê o `GameB` ao vivo, sem mexer no `src/core`.
+- **O que decorre das regras:** só a B tem casas que mudam de forma com o nível (térrea, sobrado, casarão, solar), marcos da vila (poço, praça, capela), Bosque como peça, e o final aceso sem noites no meio. A A tem óleo, comida, descarte, vento e noites; o HUD de cada uma segue as próprias regras (`hud.ts` e `hudB.ts`, sobre `hudBase.ts`).
+- **Achados com brilho e presente:** nas duas versões, o achado revelado ganha coluna de luz, poça dourada e um presente que flutua.
+- **Direção visual Weatherglass (nas duas):** fundo escuro e quente por hora do dia; ilha num pedestal de nogueira com aros de latão (metal com reflexo de uma sala de estúdio gerada em código, só nesse material); corte lateral em camadas (terra, argila, pedra) nas bordas da terra, com o mar abaixo do topo das peças; bando de pássaros que cruza a ilha de vez em quando; fumaça nas chaminés; controles de nogueira e latão (painéis com parafusos, régua do dia como escala de mostrador, peças como plaquetas, botões de latão). Texto creme sobre madeira escura e tinta escura sobre latão, para manter o contraste.
+- **Dicas (`src/ui/dicas.ts`):** na 1ª partida de cada ilha, dicas de uma linha, uma por vez, na hora em que a regra importa; "Pular dicas" (na dica e no menu). O que já foi visto fica em `lanternas.dicas.A|B`.
+- **Telemetria local (`src/telemetry.ts`):** `lanternas.registro` guarda as 20 últimas partidas: id anônimo do aparelho, ilha, versão, semente, início e fim, por turno as peças oferecidas, a escolhida, o lugar, os segundos até decidir (só com a aba à vista), se havia dica, se descartou, e se a partida foi abandonada. Também `recomecou` (começou outra partida depois de terminar). Nada sai do aparelho. "Exportar minha sessão" (menu) abre o texto JSON com um botão Copiar.
+- **Medidor de FPS:** `?fps` mostra o FPS mediano dos últimos 5 s e o nome da placa de vídeo (quando o navegador informa).
+- **Orçamento medido (capturas, renderização por software):** ver `docs/screens` e o relatório da etapa; limite de 150 draw calls e 300 mil triângulos.
+- **Teste de ponta a ponta:** `node scripts/jogar.mjs` joga as duas ilhas inteiras pela interface (cliques de verdade) e confere a telemetria e a exportação.

@@ -15,6 +15,8 @@ const hash = (a: number, b: number): number => {
 export interface TileSpec {
   bottom: number; top: number; bevel: number; bump: number; jag: number;
   topCol: number; lipCol: number; sideCol: number; seed: number; R?: number;
+  /** Corte lateral em camadas (terra, argila, pedra): três cores de cima para baixo. Sem isto, o lado é de uma cor só. */
+  strata?: [number, number, number];
 }
 
 /** Hexágono chanfrado, de bottom a top, com o miolo levemente erguido (relevo) e, se `jag`, a borda irregular. */
@@ -30,6 +32,12 @@ export function tileGeometry(s: TileSpec): THREE.BufferGeometry {
   const L0 = [0, 1, 2, 3, 4, 5].map((k) => ring(R, s.bottom, k));
   const L1 = [0, 1, 2, 3, 4, 5].map((k) => ring(R, yLip, k));
   const L2 = [0, 1, 2, 3, 4, 5].map((k) => ring(R - s.bevel, s.top, k, s.jag * (hash(k, s.seed) * 0.9 + 0.1)));
+  // Fronteiras das camadas (de yLip até o fundo), com ondulação por canto.
+  const depth = [0, 0.15, 0.45, 0.84];
+  const bands: THREE.Vector3[][] = [];
+  for (let j = 0; j < 4; j++) bands.push([0, 1, 2, 3, 4, 5].map((k) => ring(R, Math.max(s.bottom + 0.1, yLip - depth[j] + (j === 0 ? 0 : (hash(k * 7 + j, s.seed) - 0.5) * 0.12)), k)));
+  bands.push(L0);
+  const SC = s.strata ? [s.strata[0], s.strata[1], s.strata[2], (new THREE.Color(s.strata[2])).multiplyScalar(0.72).getHex()] : [];
   const C = new THREE.Vector3(0, s.top + s.bump, 0);
   const mid = new THREE.Vector3(0, (s.top + s.bottom) / 2, 0);
   const tri = (a: THREE.Vector3, b: THREE.Vector3, d: THREE.Vector3, ca: number, cb: number, cd: number, ma = 1, mb = 1, md = 1): void => {
@@ -46,8 +54,18 @@ export function tileGeometry(s: TileSpec): THREE.BufferGeometry {
   for (let k = 0; k < 6; k++) {
     const k1 = (k + 1) % 6;
     // lado (escurece embaixo), chanfro (cor do lábio), topo (leque até o miolo)
-    tri(L0[k], L0[k1], L1[k], s.sideCol, s.sideCol, s.sideCol, 0.62, 0.62, 1);
-    tri(L0[k1], L1[k1], L1[k], s.sideCol, s.sideCol, s.sideCol, 0.62, 1, 1);
+    if (s.strata) {
+      // Camadas: de cima para baixo terra, argila e pedra, com a divisa ondulando de canto a canto (cada hexágono gira ao acaso).
+      for (let j = 0; j < 4; j++) {
+        const A0 = bands[j][k], B0 = bands[j][k1], A1 = bands[j + 1][k], B1 = bands[j + 1][k1];
+        const cc = SC[j], m0 = 1 - j * 0.07, m1 = 1 - (j + 1) * 0.07;
+        tri(A0, B0, A1, cc, cc, cc, m0, m0, m1);
+        tri(B0, B1, A1, cc, cc, cc, m0, m1, m1);
+      }
+    } else {
+      tri(L0[k], L0[k1], L1[k], s.sideCol, s.sideCol, s.sideCol, 0.62, 0.62, 1);
+      tri(L0[k1], L1[k1], L1[k], s.sideCol, s.sideCol, s.sideCol, 0.62, 1, 1);
+    }
     tri(L1[k], L1[k1], L2[k], s.lipCol, s.lipCol, s.lipCol);
     tri(L1[k1], L2[k1], L2[k], s.lipCol, s.lipCol, s.lipCol);
     // o miolo é um pouco mais claro: relevo lido pela cor, além da forma
@@ -501,7 +519,7 @@ export const gull = (): THREE.BufferGeometry => {
     -0.1, 0, 0, 0.14, 0, 0.0, 0.02, 0.03, 0,
   ]);
   g.setAttribute('position', new THREE.BufferAttribute(v, 3));
-  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(27).fill(1), 3));
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(27).fill(0.2), 3));
   g.computeVertexNormals();
   return g;
 };
@@ -522,9 +540,16 @@ export function pedestal(): THREE.BufferGeometry {
   const g = new Geo(79);
   g.add(lathe([[0, -4.2], [15.8, -4.2], [16.0, -4.0], [16.0, -3.5], [15.3, -3.3], [15.0, -3.1], [14.95, -2.75], [15.4, -2.5], [15.55, -2.1], [15.4, -1.7], [15.0, -1.3]]), PAL.walnut, { grad: [0.7, 1.05] });
   g.add(lathe([[15.0, -1.3], [14.95, -0.7]]), PAL.timber, { grad: [0.85, 1.05] });
-  g.add(lathe([[14.95, -0.7], [15.25, -0.58], [15.25, 0.1], [14.7, 0.24], [13.85, 0.24]]), PAL.timberLight, { grad: [0.9, 1.1] });
+  g.add(lathe([[14.95, -0.7], [15.25, -0.58], [15.25, 0.1], [14.7, 0.24], [13.85, 0.24]]), 0x7a4c2c, { grad: [0.9, 1.1] });
   g.add(lathe([[13.85, 0.24], [13.8, 0.1], [13.8, -0.9]]), PAL.timber, { grad: [0.6, 0.95] });
-  g.add(new THREE.TorusGeometry(15.12, 0.07, 4, 56).rotateX(PI / 2), PAL.flame, { y: -0.66, grad: [1, 1] });
-  g.add(new THREE.TorusGeometry(15.5, 0.06, 4, 56).rotateX(PI / 2), PAL.flame, { y: -3.35, grad: [1, 1] });
+  return g.build();
+}
+
+/** Aros de latão do pedestal: borda interna e externa do tampo, faixa do meio e faixa da base (um só desenho). */
+export function brassRings(): THREE.BufferGeometry {
+  const brass = 0xd4a64a;
+  const ring = (r: number, tube: number, y: number): [THREE.BufferGeometry, number, { y: number; grad: [number, number] }] => [new THREE.TorusGeometry(r, tube, 8, 72).rotateX(PI / 2), brass, { y, grad: [0.85, 1.1] }];
+  const g = new Geo(81);
+  for (const [geo, c, o] of [ring(13.9, 0.1, 0.25), ring(15.2, 0.1, 0.1), ring(15.12, 0.08, -0.66), ring(15.5, 0.08, -3.35), ring(15.3, 0.06, -2.05)]) g.add(geo, c, o);
   return g.build();
 }

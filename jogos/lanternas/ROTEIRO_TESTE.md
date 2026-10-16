@@ -4,7 +4,7 @@ Para quem aplica o teste, sem precisar entender de jogo. Você só observa e ano
 
 ## Preparação
 
-1. Abra o link do jogo no celular ou no PC (o que a pessoa usa no dia a dia). Os dois modos se chamam **"Ilha 1"** e **"Ilha 2"**; você não precisa saber qual é qual.
+1. Abra o link do jogo no celular ou no PC (o que a pessoa usa no dia a dia). Os dois modos se chamam **"Ilha 1"** e **"Ilha 2"**; você não precisa saber qual é qual (o sorteio fica guardado no aparelho: em cada aparelho, "Ilha 1" é sempre a mesma). Use o **mesmo aparelho** nas duas ilhas e **não limpe os dados do navegador** no meio do teste.
 2. Se puder, grave a tela (o gravador do celular serve).
 3. Tenha papel e caneta, e um relógio ou cronômetro.
 4. Diga só isto: *"Jogue como achar melhor e fale em voz alta o que está pensando. Não vou ajudar."*
@@ -32,4 +32,12 @@ Para quem aplica o teste, sem precisar entender de jogo. Você só observa e ano
 
 ## Exportar a sessão
 
-Ao terminar, toque no botão **"Exportar minha sessão"** (no menu do jogo). Ele baixa um arquivo com o que a pessoa fez (jogadas e tempos). Envie o arquivo junto com as suas anotações e a gravação de tela, se houver.
+Ao terminar **as duas ilhas**, toque no botão de menu (as três barrinhas, no painel do topo) e depois em **"Exportar minha sessão"**. Abre um painel com o texto da sessão: toque em **"Copiar"** e cole numa mensagem para quem aplica o teste (se o botão não copiar, o texto já fica selecionado: use Ctrl+C, ou toque e segure e escolha Copiar). Nada sai do aparelho sozinho.
+
+Atenção: o texto mostra qual ilha era a versão A e qual era a B. **Exporte só no fim**, depois de a pessoa responder as 5 perguntas, para não estragar o teste às cegas.
+
+O que o texto traz: o id anônimo do aparelho, por partida a ilha (1 ou 2), a versão, a semente, a hora de início e de fim, e por turno as peças oferecidas, a escolhida, o lugar, os segundos até decidir, se havia dica na tela, se descartou, e se a partida foi abandonada. Guarda as 20 últimas partidas. Também diz se a pessoa começou outra partida depois de terminar uma (`recomecou`), que é o critério (a) da decisão.
+
+## Medir o desempenho (opcional)
+
+Abra o mesmo link com `?fps` no fim (por exemplo `.../index.html?fps`). Aparece no canto o FPS mediano dos últimos 5 s e o nome da placa de vídeo. Se a pessoa reclamar de travadas, anote o número e o nome da placa.

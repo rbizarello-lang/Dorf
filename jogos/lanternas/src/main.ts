@@ -93,8 +93,8 @@ function showChoose(): void {
   world.reset(demo, 'A'); world.sync(demo, { instant: true });
   world.setNight(0, true); world.setDay(8, false, true);
   world.setValid([]); world.setGhost(-1, -1); world.setHover(-1);
-  world.setViewX(0, true); world.setViewShift(0);
-  world.setCamera({ yaw: -0.42, pol: 0.95, dist: portrait ? 56 : 50, cell: CENTER });
+  world.setViewX(0, true); world.setViewShift(portrait ? 0.2 : 0.17);
+  world.setCamera({ yaw: -0.42, pol: 0.95, dist: portrait ? 60 : 58, cell: CENTER });
   world.orbit = !reduced;
   ($('ilha1') as HTMLButtonElement).focus({ preventScroll: true });
 }
@@ -103,6 +103,7 @@ function begin(v: Variant): void {
   variant = v;
   hud = isB() ? hudB : hudA;
   hud.activate();
+  document.body.classList.toggle('vb', isB());
   document.body.classList.remove('choosing');
   playing = true;
   const island = islandOf(v);
@@ -197,7 +198,7 @@ function describeB(i: number): string {
   return parts.join(' · ');
 }
 
-const HINT = 'Arraste para girar a ilha; a roda ou os dois dedos aproximam.';
+const HINT = 'Arraste para girar; roda ou pinça aproximam.';
 function updateInfo(): void {
   if (game.over) { hud.setInfo('Gire a ilha para ver as luzes de perto.'); return; }
   if (!isB()) {
