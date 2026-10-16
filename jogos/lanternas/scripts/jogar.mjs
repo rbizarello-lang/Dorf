@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 
 const dist = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
-const ilhas = process.argv[2] ? [Number(process.argv[2])] : [1, 2];
+const soAbandono = process.argv[2] === 'abandono';
+const ilhas = soAbandono ? [] : process.argv[2] ? [Number(process.argv[2])] : [1, 2];
 const maxTurns = Number(process.argv[3] || 40);
 
 const server = createServer(async (req, res) => {
@@ -98,6 +99,35 @@ for (const n of ilhas) {
   await page.click('#expClose');
   if (errors.length) fail('erros no console: ' + errors.join(' | '));
   await page.close();
+}
+// Abandono: joga 2 turnos e fecha a página; na visita seguinte o registro deve dizer que a partida foi abandonada.
+{
+  const p1 = await ctx.newPage();
+  await p1.goto(`http://127.0.0.1:${port}/?ab=B&seed=5`);
+  await p1.waitForFunction(() => window.__ready === true && window.__world.time > 4, null, { timeout: 120000 });
+  for (let k = 0; k < 2; k++) {
+    const m = await p1.evaluate(() => {
+      const g = window.__game(), w = window.__world;
+      for (let s = 0; s < g.hand.length; s++) {
+        if (!g.playable(g.hand[s])) continue;
+        for (const c of g.validCells(s)) { const p = w.screenPos(c, 0.2); const el = document.elementFromPoint(p.x, p.y); if (el && el.tagName === 'CANVAS') return { s, x: p.x, y: p.y, t: g.turn }; }
+      }
+      return null;
+    });
+    await p1.keyboard.press(String(m.s + 1)); await p1.waitForTimeout(60);
+    await p1.mouse.move(m.x, m.y); await p1.mouse.click(m.x, m.y);
+    await p1.waitForFunction((t) => window.__game().turn > t, m.t, { timeout: 30000 });
+  }
+  await p1.close();
+  const p2 = await ctx.newPage();
+  await p2.goto(`http://127.0.0.1:${port}/?ab=A&seed=6`);
+  await p2.waitForFunction(() => window.__ready === true, null, { timeout: 120000 });
+  await p2.click('#menuBtn'); await p2.click('#mExport');
+  const o = JSON.parse(await p2.locator('#expTxt').inputValue());
+  const ab = o.partidas.find((g) => g.semente === 5);
+  console.log('abandono: ' + JSON.stringify({ versao: ab.versao, turnos: ab.turnos.length, terminou: ab.terminou, abandonada: ab.abandonada, fim: !!ab.fim }));
+  if (!ab.abandonada || ab.turnos.length !== 2) fail('o registro da partida fechada não ficou como abandonada com 2 turnos');
+  await p2.close();
 }
 await browser.close();
 server.close();
