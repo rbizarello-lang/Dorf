@@ -2,7 +2,8 @@
 // Lê o estado de Game (somente leitura) e o desenha; nenhuma regra mora aqui.
 import * as THREE from 'three';
 import { CELLS, CENTER, DIRS, N, NB_DIR, dist } from '../core/hex';
-import { Card, Game, Struct } from '../core/game';
+import { Card, Struct } from '../core/game';
+import type { View } from './view';
 import { Find, Terrain } from '../core/map';
 import * as K from './kits';
 import { basicMat, litMat, seaMaterial, swayMat, U } from './materials';
@@ -45,7 +46,7 @@ const KEYS: Key[] = [
 ];
 const NIGHT = { elev: 48, az: -135, sun: col(0x9db2ff), sunI: 1.5, hs: col(0x4a60aa), hg: col(0x262e5a), hI: 1.25, top: col('#0b1230'), bot: col('#2a3a6a'), exp: 1.05 };
 
-const WATER_DIR = (g: Game, i: number): number => {
+const WATER_DIR = (g: View, i: number): number => {
   for (let d = 0; d < 6; d++) { const n = NB_DIR[i][d]; if (n >= 0 && g.map.terrain[n] === Terrain.Water) return d; }
   return 0;
 };
@@ -64,7 +65,9 @@ export class World {
   frames = 0;
   stats = { calls: 0, triangles: 0, geometries: 0, textures: 0 };
 
-  private game!: Game;
+  private game!: View;
+  /** Qual versão das regras está na tela (só muda detalhes que decorrem das regras). */
+  variant: 'A' | 'B' = 'A';
   private sun = new THREE.DirectionalLight(0xffffff, 3);
   private hemi = new THREE.HemisphereLight(0xffffff, 0x888888, 1.2);
   // câmera
@@ -303,6 +306,7 @@ export class World {
     this.P.win.always = true;
     this.P.field = this.addPool(K.field(), swayMat(0.05), 60);
     this.P.olive = this.addPool(K.oliveGrove(), swayMat(0.025), 60);
+    this.P.grove = this.addPool(K.grove(), swayMat(0.04), 60);
     this.P.dock = this.addPool(K.dock(), litMat(), 40);
     this.P.boat = this.addPool(K.boat(), swayMat(0.02), 40);
     this.P.boat.always = true;
@@ -507,8 +511,8 @@ export class World {
   }
 
   /** Esquece tudo e recomeça (nova ilha). */
-  reset(g: Game): void {
-    this.game = g;
+  reset(g: View, variant: 'A' | 'B' = 'A'): void {
+    this.game = g; this.variant = variant;
     this.shown.fill(0); this.revT.fill(Infinity); this.structShown.fill(0);
     this.tileActive.clear();
     for (const p of this.pools) p.clear();
@@ -520,7 +524,8 @@ export class World {
     for (const t of this.tiles) t.instanceMatrix.needsUpdate = true;
     this.hl.count = 0; this.hover.visible = false; this.setGhost(-1, -1);
     this.tipCell = g.map.tip;
-    this.flag.visible = this.star.visible = true;
+    this.finaleOn = false;
+    this.flag.visible = this.star.visible = variant === 'A';
     this.beam.visible = false;
     this.windowCols = new Map();
     this.veilCells.clear(); this.sweepX.fill(0); this.sweepZ.fill(0); this.veil.count = 0;
@@ -531,7 +536,7 @@ export class World {
 
   private windowCols = new Map<number, Item[]>();
 
-  sync(g: Game, o: { instant?: boolean; origin?: number; wind?: { dx: number; dz: number } } = {}): void {
+  sync(g: View, o: { instant?: boolean; origin?: number; wind?: { dx: number; dz: number } } = {}): void {
     this.game = g;
     const inst = !!o.instant, now = this.time, origin = o.origin ?? CENTER;
     const fresh: number[] = [];
@@ -649,7 +654,7 @@ export class World {
         break;
       }
       case Struct.Field: this.P.field.make(i, 'struct', cx, y, cz, Math.floor(hashN(i, 35) * 6) * PI / 3, 1, t0, drop); land(); break;
-      case Struct.Olive: this.P.olive.make(i, 'struct', cx, y, cz, yaw, 1, t0, drop); land(); break;
+      case Struct.Olive: (this.variant === 'B' ? this.P.grove : this.P.olive).make(i, 'struct', cx, y, cz, yaw, 1, t0, drop); land(); break;
       case Struct.Dock: {
         const d = WATER_DIR(g, i), dq = DIRS[d][0], dr = DIRS[d][1];
         const dx = 1.5 * dq, dz = S3 * (dr + dq / 2), ang = -Math.atan2(dz, dx);
@@ -698,7 +703,7 @@ export class World {
     const off = new THREE.Color(lerp(0.5, 0.07, n), lerp(0.64, 0.09, n), lerp(0.72, 0.15, n));
     for (const [cell, wins] of this.windowCols) {
       const r = g.houseResidents(cell);
-      wins.forEach((w, k) => { w.col = k < r ? lit : off; });
+      wins.forEach((w, k) => { w.col = this.finaleOn || k < r ? lit : off; });
     }
     this.P.win.dirty = true;
   }
@@ -786,7 +791,7 @@ export class World {
     switch (card) {
       case Card.House: part(this.P.house0.mesh.geometry, false, 1.3); break;
       case Card.Field: part(this.P.field.mesh.geometry); break;
-      case Card.Olive: part(this.P.olive.mesh.geometry); break;
+      case Card.Olive: part((this.variant === 'B' ? this.P.grove : this.P.olive).mesh.geometry); break;
       case Card.Lantern: part(this.P.pole.mesh.geometry, false, 1.3); part(this.P.glass.mesh.geometry, true, 1.3); break;
       case Card.Dock: {
         part(this.P.dock.mesh.geometry);
@@ -1131,6 +1136,12 @@ export class World {
     }
     this.gulls.instanceMatrix.needsUpdate = true;
   }
+
+  /** Fim da B: a ilha se acende (sem regra: só visual). */
+  finale(): void { this.finaleOn = true; this.refreshWindows(); }
+  private finaleOn = false;
+  /** Gancho de captura: um bando de pássaros já em pleno voo. */
+  flockNow(): void { /* preenchido com os pássaros */ }
 
   /** Efeitos pós-captura/depuração. */
   get info(): { calls: number; triangles: number } { return this.stats; }

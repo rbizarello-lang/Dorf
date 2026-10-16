@@ -116,6 +116,26 @@ export const oliveGrove = (): THREE.BufferGeometry => {
   return g.build();
 };
 
+/** Bosque plantado (carta Bosque da B): cinco árvores de copas variadas num mesmo hexágono. */
+export const grove = (): THREE.BufferGeometry => {
+  const g = new Geo(83);
+  const spots: Array<[number, number, number, number]> = [[-0.42, -0.22, 0.95, 0], [0.4, -0.14, 1.0, 1], [0.02, 0.44, 0.9, 2], [-0.08, -0.04, 1.2, 1], [0.46, 0.42, 0.7, 0], [-0.46, 0.34, 0.75, 1]];
+  spots.forEach(([x, z, k, kind]) => {
+    g.cyl(0.04 * k, 0.06 * k, 0.26 * k, PAL.timber, 5, { x, z, y: 0.13 * k });
+    if (kind === 0) {
+      g.cone(0.3 * k, 0.38 * k, PAL.leafB, 6, { x, z, y: 0.4 * k, jit: 0.05, grad: [0.7, 1] });
+      g.cone(0.22 * k, 0.34 * k, PAL.leafA, 6, { x, z, y: 0.62 * k, jit: 0.04, grad: [0.75, 1] });
+      g.cone(0.15 * k, 0.28 * k, PAL.leafC, 6, { x, z, y: 0.82 * k, jit: 0.03, grad: [0.8, 1.05] });
+    } else if (kind === 1) {
+      g.ico(0.27 * k, PAL.leafA, 1, { x, z, y: 0.48 * k, sy: 0.9, jit: 0.1, grad: [0.62, 1.05] });
+      g.ico(0.17 * k, PAL.leafC, 1, { x: x + 0.12 * k, z: z - 0.05 * k, y: 0.68 * k, jit: 0.07, grad: [0.75, 1.1] });
+    } else {
+      g.ico(0.18 * k, PAL.leafC, 1, { x, z, y: 0.58 * k, sy: 2.0, jit: 0.06, grad: [0.62, 1.12] });
+    }
+  });
+  return g.build();
+};
+
 const wheatRows = (): THREE.BufferGeometry => {
   const g = new Geo(13);
   g.cyl(0.88, 0.9, 0.035, PAL.soil, 6, { y: 0.017, ry: PI / 6, grad: [0.8, 1] });

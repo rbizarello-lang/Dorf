@@ -2,8 +2,7 @@
 // Só lê o Game; as ações voltam por callbacks.
 import { CARD_NAMES, Card, GOAL_TITLES, Game, RULES, WIND_RULE, cardRule, goalLabel } from '../core/game';
 import { CARD_ART, CARD_TONE, ICON } from './icons';
-
-const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
+import { $, HudBase } from './hudBase';
 
 const CARD_FX = ['1 a 4, até 8 com festa', '+1 comida por turno', '+1 óleo por turno', 'Acende luz de raio 2', '+1 comida por turno'];
 const CARD_WHERE = ['Prado, Bosque ou Praia', 'Só em Prado', 'Prado ou Rocha', 'Qualquer terra', 'Praia junto da água'];
@@ -25,18 +24,23 @@ export function dayWord(turn: number): string {
   return p < 0.22 ? 'manhã' : p < 0.58 ? 'meio-dia' : p < 0.85 ? 'tarde' : 'entardecer';
 }
 
-export interface HudCallbacks { onSelect(slot: number): void; onDiscard(): void; onNew(): void; onWind(): void }
+export interface HudCallbacks { onSelect(slot: number): void; onDiscard(): void; onWind(): void }
 
-export class Hud {
+export class Hud extends HudBase {
   private lastHandKey = '';
-  private toastTimer = 0;
-  reduced = false;
 
   constructor(private cb: HudCallbacks) {
+    super();
     $('discard').addEventListener('click', () => cb.onDiscard());
     $('wind').addEventListener('click', () => cb.onWind());
-    $('again').addEventListener('click', () => cb.onNew());
+  }
+
+  /** Monta a régua desta versão (três noites) e mostra de novo os botões do descarte e do vento. */
+  activate(): void {
     const ruler = $('ruler'); const marks = $('marks');
+    ruler.innerHTML = ''; marks.innerHTML = '';
+    $('discard').style.display = ''; $('wind').style.display = '';
+    this.lastHandKey = '';
     for (let n = 1; n <= RULES.turns; n++) {
       const i = document.createElement('i');
       if (RULES.nights.includes(n)) i.className = 'night';
@@ -62,9 +66,7 @@ export class Hud {
       `<div class="stock">` +
       `<div class="chip${g.oil < RULES.lanternCostOil && g.oil < upkeep ? ' low' : ''}" title="Óleo: acende lanternas e alimenta a luz nas noites">${ICON.oil}<b>${g.oil}</b><small>+${oi}/turno</small></div>` +
       `<div class="chip${g.food < RULES.houseCostFood ? '' : ''}" title="Comida: constrói casas. Na noite, a que sobrar vira moradores (${RULES.feastFood} comida por morador, até ${RULES.feastCap}) e o estoque zera.">${ICON.food}<b>${g.food}</b><small>+${fi}/turno</small></div>` +
-      `</div>` +
-      `<div id="menu"><button class="act" id="new2" type="button">${ICON.rotate}Nova ilha</button><span class="seed">semente ${g.seed}</span></div>`;
-    $('new2').addEventListener('click', () => this.cb.onNew());
+      `</div>`;
     // régua do dia
     const ticks = $('ruler').children;
     for (let i = 0; i < ticks.length; i++) {
@@ -149,32 +151,6 @@ export class Hud {
     });
   }
 
-  shake(slot: number): void {
-    const el = $('hand').querySelectorAll<HTMLElement>('.card')[slot];
-    if (!el || this.reduced) return;
-    el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake');
-  }
-
-  setInfo(text: string): void { $('info').textContent = text; }
-
-  toast(text: string, ms = 4200): void {
-    const t = $('toast');
-    t.textContent = text; t.classList.add('on');
-    clearTimeout(this.toastTimer);
-    this.toastTimer = window.setTimeout(() => t.classList.remove('on'), ms);
-  }
-
-  float(x: number, y: number, text: string, lost = false, delay = 0): void {
-    window.setTimeout(() => {
-      const d = document.createElement('div');
-      d.className = 'float' + (lost ? ' lost' : '');
-      d.textContent = text;
-      d.style.left = x + 'px'; d.style.top = y + 'px';
-      document.body.appendChild(d);
-      window.setTimeout(() => d.remove(), this.reduced ? 2600 : 2000);
-    }, delay);
-  }
-
   showEnd(g: Game, delay = 0): void {
     const s = g.summary();
     const goals = s.goals.map((id, k) => `<li class="${s.goalsMet[k] ? 'ok' : 'no'}"><span class="mk">${ICON.check}</span>${GOAL_TITLES[id]}</li>`).join('');
@@ -185,5 +161,4 @@ export class Hud {
       `<div class="row" style="border:0;padding-top:2px"><span>Ilha iluminada</span><span>${Math.round(s.litPct * 100)}%</span></div>`;
     window.setTimeout(() => { $('end').classList.add('on'); ($('again') as HTMLButtonElement).focus({ preventScroll: true }); }, delay);
   }
-  hideEnd(): void { $('end').classList.remove('on'); }
 }

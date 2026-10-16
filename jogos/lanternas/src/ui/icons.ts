@@ -30,3 +30,8 @@ export const CARD_ART: string[] = [
 ];
 
 export const CARD_TONE = ['#f6dcc0', '#f1e2a6', '#d8e6c8', '#ffe6b0', '#c8e6ea'];
+
+/** Bosque (carta da B): três copas num hexágono. */
+const GROVE_ART = svg('0 0 64 64', '<ellipse cx="32" cy="56" rx="24" ry="5" fill="#000" opacity=".12"/><g stroke="#6a4d34" stroke-width="4" stroke-linecap="round"><path d="M18 56V40M46 56V38M32 56V34"/></g><path d="M18 14 32 34H4z" fill="#2f7448" transform="translate(0 6)"/><path d="M32 8 48 32H16z" fill="#3e8c52"/><path d="M46 14 60 36H32z" fill="#7db55a" transform="translate(0 4)"/><path d="M32 4 41 18H23z" fill="#7db55a"/>', 'art');
+export const CARD_ART_B: string[] = [CARD_ART[0], CARD_ART[1], GROVE_ART, CARD_ART[3], CARD_ART[4]];
+export const CARD_TONE_B = ['#f6dcc0', '#f1e2a6', '#cfe5c2', '#ffe6b0', '#c8e6ea'];

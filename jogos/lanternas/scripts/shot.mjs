@@ -12,19 +12,30 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
 const out = join(root, 'docs', 'screens');
 const SHOTS = {
-  inicio: 'seed=3',
-  meio: 'seed=3&auto=15',
-  fim: 'seed=3&auto=30',
-  perto: 'seed=3&auto=15&focus=vila&zoom=14&pitch=0.85',
-  jogando: 'seed=3&auto=8&select=0&hover=valid',
-  noite: 'seed=3&auto=20&night=1',
-  celular: 'seed=3&auto=12',
-  celularfim: 'seed=3&auto=30',
-  vento: 'seed=3&auto=15&blow=1&zoom=21&pitch=0.95&yaw=-0.7',
-  ventoveu: 'seed=3&auto=15&blow=1&hold=3&zoom=21&pitch=0.95&yaw=-0.7',
-  chuva: 'seed=3&auto=18&rain=1',
-  cardume: 'seed=3&auto=8&blow=1&hold=3&zoom=14&pitch=0.95',
-  cardumenoite: 'seed=3&auto=8&blow=1&hold=3&zoom=14&pitch=0.95&night=1',
+  // Teste às cegas: a tela inicial (sem `ab`) e as duas versões com o mesmo visual (`ab=A|B` pula a escolha).
+  escolha: '',
+  'a-meio': 'ab=A&seed=3&auto=15',
+  'b-meio': 'ab=B&seed=3&auto=15',
+  'b-fim': 'ab=B&seed=3&auto=30',
+  'b-perto': 'ab=B&seed=3&auto=24&focus=vila&zoom=12&pitch=0.78&yaw=-0.5',
+  'celular-b': 'ab=B&seed=3&auto=15',
+  'celular-a': 'ab=A&seed=3&auto=12',
+  'b-jogando': 'ab=B&seed=3&auto=6&select=0&hover=valid',
+  'b-dicas': 'ab=B&seed=3&dicas=1',
+  exportar: 'ab=B&seed=3&auto=8&exportar=1',
+  inicio: 'ab=A&seed=3',
+  meio: 'ab=A&seed=3&auto=15',
+  fim: 'ab=A&seed=3&auto=30',
+  perto: 'ab=A&seed=3&auto=15&focus=vila&zoom=14&pitch=0.85',
+  jogando: 'ab=A&seed=3&auto=8&select=0&hover=valid',
+  noite: 'ab=A&seed=3&auto=20&night=1',
+  celular: 'ab=A&seed=3&auto=12',
+  celularfim: 'ab=A&seed=3&auto=30',
+  vento: 'ab=A&seed=3&auto=15&blow=1&zoom=21&pitch=0.95&yaw=-0.7',
+  ventoveu: 'ab=A&seed=3&auto=15&blow=1&hold=3&zoom=21&pitch=0.95&yaw=-0.7',
+  chuva: 'ab=A&seed=3&auto=18&rain=1',
+  cardume: 'ab=A&seed=3&auto=8&blow=1&hold=3&zoom=14&pitch=0.95',
+  cardumenoite: 'ab=A&seed=3&auto=8&blow=1&hold=3&zoom=14&pitch=0.95&night=1',
 };
 const want = process.argv.slice(2);
 const names = want.length ? want : Object.keys(SHOTS);
@@ -49,13 +60,14 @@ await mkdir(out, { recursive: true });
 let bad = 0;
 for (const name of names) {
   const q = SHOTS[name];
-  if (!q) { console.log('desconhecida:', name); bad++; continue; }
+  if (q === undefined) { console.log('desconhecida:', name); bad++; continue; }
   const mobile = name.startsWith('celular');
+  // ?fps nas capturas não, para não sujar a imagem
   const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 780 } : { width: 1280, height: 800 }, deviceScaleFactor: 1, hasTouch: mobile });
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(`[${m.type()}] ${m.text()}`); });
   page.on('pageerror', (e) => errors.push('[pageerror] ' + e.message));
-  await page.goto(`http://127.0.0.1:${port}/?${q}`);
+  await page.goto(`http://127.0.0.1:${port}/${q ? '?' + q : ''}`);
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 120000 });
   // deixa a névoa/queda/intro assentarem: o tempo do mundo anda com os quadros
   // vento e chuva congelam o mundo no meio do efeito (?blow=1, ?rain=1); as outras esperam a intro assentar
