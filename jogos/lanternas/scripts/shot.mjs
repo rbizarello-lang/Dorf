@@ -23,6 +23,7 @@ const SHOTS = {
   'b-jogando': 'ab=B&seed=3&auto=6&select=0&hover=valid',
   'b-dicas': 'ab=B&seed=3&dicas=1',
   'celular-dica': 'ab=A&seed=3&dicas=1',
+  'b-fps': 'ab=B&seed=3&auto=15&fps',
   exportar: 'ab=B&seed=3&auto=8&exportar=1',
   inicio: 'ab=A&seed=3',
   meio: 'ab=A&seed=3&auto=15',
