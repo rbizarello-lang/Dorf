@@ -30,9 +30,11 @@ export const RULES_B = {
   springReach: 2,
   goalPoints: 5,
   /** Solares (casas de nível 4) da meta. */
-  manorGoal: 2,
-  findsGoal: 4,
-  lightGoal: 0.7,
+  manorGoal: 11,
+  /** Casas da vila da meta "vila com praça" (a praça vem aos 6; mais casas é o desafio). */
+  plazaGoal: 8,
+  findsGoal: 6,
+  lightGoal: 0.9,
   /** Composição do baralho (cartas por tipo), na ordem de CardB. */
   deck: [12, 8, 8, 9, 4],
 };
@@ -205,7 +207,7 @@ export class GameB {
   goalProgress(g: number): number {
     switch (g) {
       case GoalIdB.Manor: return Math.min(1, this.manors() / RULES_B.manorGoal);
-      case GoalIdB.Plaza: return Math.min(1, this.biggestVillage() / RULES_B.landmarkAt[1]);
+      case GoalIdB.Plaza: return Math.min(1, this.biggestVillage() / RULES_B.plazaGoal);
       case GoalIdB.Finds: return Math.min(1, this.foundCount / RULES_B.findsGoal);
       case GoalIdB.Light: return Math.min(1, this.litFraction() / RULES_B.lightGoal);
       default: return 0;
@@ -290,7 +292,7 @@ export class GameB {
 export function goalLabelB(g: number): string {
   switch (g) {
     case GoalIdB.Manor: return RULES_B.manorGoal === 1 ? 'Tenha um solar (casa de nível 4)' : `Tenha ${RULES_B.manorGoal} solares (casas de nível 4)`;
-    case GoalIdB.Plaza: return `Forme uma vila de ${RULES_B.landmarkAt[1]} casas, com praça`;
+    case GoalIdB.Plaza: return `Forme uma vila de ${RULES_B.plazaGoal} casas (com praça)`;
     case GoalIdB.Finds: return `Revele ${RULES_B.findsGoal} achados`;
     case GoalIdB.Light: return `Ilumine ${Math.round(RULES_B.lightGoal * 100)}% da ilha`;
     default: return '';

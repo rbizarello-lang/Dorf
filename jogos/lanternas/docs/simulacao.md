@@ -176,4 +176,81 @@ O que ficou de fora: o aleatório e o guloso não sopram (só o planejador), e o
 ## Versão B
 
 <!-- VERSAO_B:INICIO -->
+Resultados de 300 partidas por jogador (sementes 1..300), 30 peças cada.
+
+### Pontuação da B
+
+| Jogador | Média | p10 | p50 | p90 | Ilha iluminada | Escolha apertada | Partidas travadas | Mãos refeitas por partida |
+|---|---|---|---|---|---|---|---|---|
+| aleatorio | 35.1 | 27 | 35 | 43 | 66% | 0% | 0% | 0.00 |
+| guloso | 73.0 | 67 | 73 | 78 | 93% | 31% | 0% | 0.00 |
+| planejador | 72.4 | 67 | 73 | 78 | 92% | 35% | 0% | 0.00 |
+
+Razão planejador / aleatório: 2.06x. Planejador / guloso: 0.99x.
+
+### De onde vêm os pontos na B (média por partida)
+
+| Jogador | Casas | Moradores | Solares | Maior vila | Achados revelados |
+|---|---|---|---|---|---|
+| aleatorio | 9.0 | 35.0 | 3.3 | 3.2 | 3.4 |
+| guloso | 12.0 | 62.4 | 11.5 | 8.3 | 5.3 |
+| planejador | 11.9 | 62.0 | 11.6 | 8.1 | 5.3 |
+
+### Metas da B cumpridas (entre as partidas em que a meta foi sorteada)
+
+| Meta | aleatorio | guloso | planejador |
+|---|---|---|---|
+| Um solar | 0% | 91% | 95% |
+| Vila com praça | 1% | 77% | 75% |
+| Achados | 3% | 31% | 26% |
+| Ilha iluminada | 0% | 83% | 80% |
+
+### Peças escolhidas na B (parte das jogadas)
+
+| Peça | aleatorio | guloso | planejador |
+|---|---|---|---|
+| Casa | 30% | 40% | 40% |
+| Campo | 19% | 16% | 15% |
+| Bosque | 20% | 13% | 14% |
+| Lanterna | 22% | 26% | 25% |
+| Cais | 9% | 6% | 7% |
+
+### A × B
+
+Mesmas 300 sementes. A tem o planejador sem o sopro do vento (a coluna "A+sopro" da seção acima fica de fora aqui). Arrependimento: 16 sementes por jogador; turno de decisão: 40 sementes.
+
+| Versão | Jogador | Média | p10 | p90 | Razão contra o aleatório | Escolha apertada | Arrependimento médio por turno |
+|---|---|---|---|---|---|---|---|
+| A | aleatorio | 35.5 | 25 | 47 | 1.00x | 0% | 4.31 |
+| A | guloso | 59.2 | 49 | 70 | 1.67x | 38% | 3.09 |
+| A | planejador | 73.8 | 64 | 83 | 2.08x | 37% | 1.11 |
+| B | aleatorio | 35.1 | 27 | 43 | 1.00x | 0% | 6.33 |
+| B | guloso | 73.0 | 67 | 78 | 2.08x | 31% | 2.33 |
+| B | planejador | 72.4 | 67 | 78 | 2.06x | 35% | 1.11 |
+
+Arrependimento = em cada turno, quanto a jogada escolhida valia menos que a melhor jogada de um turno à frente (a jogada, a mão seguinte e a melhor resposta), na régua do planejador de cada versão, com a névoa à vista. Unidade: pontos de potencial (cerca de 1 ponto de pontuação). O aleatório mostra o piso; um jogador que escolhe bem fica perto de 0.
+
+#### Turno de decisão
+
+Do começo de cada turno, completa a partida com o planejador e com o aleatório. A diferença média dos finais é quanto as jogadas que faltam ainda mudam o resultado. Turno de decisão = primeiro turno em que ela cai a 10% (ou 25%) da diferença do turno 1.
+
+| Versão | turno 1 | turno 5 | turno 10 | turno 15 | turno 20 | turno 25 | turno 28 | turno 30 | Decisão (10%) | Decisão (25%) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| A | 39.2 | 35.7 | 32.7 | 26.9 | 18.1 | 11.6 | 6.2 | 2.5 | turno 30 | turno 27 |
+| B | 38.9 | 37.3 | 32.9 | 23.9 | 14.2 | 5.4 | 2.2 | 0.7 | turno 27 | turno 23 |
+
+#### Uso de peças do planejador
+
+| Versão | Casa | Campo | Oliveiral / Bosque | Lanterna | Cais |
+|---|---|---|---|---|---|
+| A | Casa 34% | Campo 19% | Oliveiral 11% | Lanterna 27% | Cais 10% |
+| B | Casa 40% | Campo 15% | Bosque 14% | Lanterna 25% | Cais 7% |
 <!-- VERSAO_B:FIM -->
+
+### Ajustes da B (só números, nenhuma regra nova)
+
+1. **Primeira rodada (300 sementes):** todos os critérios passaram, mas as metas eram fáceis demais: o planejador cumpria 100% de "Um solar" (2 solares), "Achados" (4) e "Ilha iluminada" (70%), e a pontuação ficava colada no teto (p50 = p90 = 78, planejador = guloso). Com meta que sempre sai, o desafio some e o final já está decidido.
+2. **Metas endurecidas:** solares de 2 para 11; achados de 4 para 6 (todos); luz de 70% para 90%; vila com praça passou a pedir 8 casas (`plazaGoal`, antes lia o marco da praça aos 6). Resultado do planejador em 100 sementes: solar 97%, vila 78%, achados 28%, luz 83%. O baralho (12/8/8/9/4) e os marcos (3, 6, 10) ficaram como estavam, porque os critérios do simulador já passavam.
+3. **Efeito:** média do planejador 77,0 para 72,4; p10-p90 de 74-78 para 67-78; o turno de decisão passou do 25 para o 27 (10%) e do 21 para o 23 (25%), ou seja, a partida segue aberta mais tempo.
+
+Limite conhecido: na B o planejador não supera o guloso (razão 0,99x). A regra "1 + tipos diferentes" é fácil de otimizar com uma boa heurística simples, então a profundidade vem mais de **como** a vila é desenhada do que de calcular. Isso combina com "nada complexo" do Roger, mas é um risco para quem quer desafio e fica para o teste com pessoas decidir.
