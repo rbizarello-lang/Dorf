@@ -114,7 +114,7 @@ Os papéis seguem a regra do projeto: o Opus planeja e audita, o Sonnet escreve 
 - os 3 primeiros degraus da capital;
 - 1 estação trocando;
 - 3 detalhes raros;
-- a vitrine (a província vista como diorama sobre uma base, na linha do Weatherglass);
+- a vitrine, na linha do Weatherglass (página do claude.ai, ver `REFERENCIAS.md` §9): a província vista como diorama numa caixa de vidro, com a câmera derivando sozinha quando ninguém mexe e as estações deslizando de uma para outra;
 - as capturas lado a lado com as referências.
 
 O primeiro dia é um pico curto, para saber se o desenho do Retalhos aceita regiões sem alterar a `main`. Se não aceitar, copiamos para a pasta só o mínimo necessário e anotamos o motivo.

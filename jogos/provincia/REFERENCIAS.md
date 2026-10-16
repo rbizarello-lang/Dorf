@@ -1,6 +1,6 @@
 # Referências: sessões curtas, progresso entre sessões e mapa que se preenche
 
-> **Nota da auditoria (Opus).** Esta pesquisa foi feita por um agente Haiku, que leu só os trechos devolvidos pela busca: o acesso às páginas falhou na rede deste ambiente. Os dados marcados como "(inferido)" ou vindos de wiki de fã valem como pista, não como fato. O **Weatherglass** não foi encontrado. Assim que o Roger mandar o link, a seção 9 será refeita. **O que o `PLANO.md` aproveitou:**
+> **Nota da auditoria (Opus).** Esta pesquisa foi feita por um agente Haiku, que leu só os trechos devolvidos pela busca: o acesso às páginas falhou na rede deste ambiente. Os dados marcados como "(inferido)" ou vindos de wiki de fã valem como pista, não como fato. O **Weatherglass** não é um jogo de loja, e sim uma página do claude.ai. O Roger mandou o link, e a seção 9 foi refeita a partir do código da página. **O que o `PLANO.md` aproveitou:**
 > - a sessão que acaba sozinha quando a área se completa (padrões 1 e 10);
 > - o primeiro minuto com uma regra só, a cor da borda (padrão 9);
 > - a satisfação no próprio gesto de assentar a peça (padrão 8);
@@ -18,7 +18,7 @@ Pesquisa feita em 2026-10-16 para o projeto *Província* (jogo de 15 min em que 
 - **As páginas não foram lidas na íntegra.** Durante a pesquisa, todas as tentativas de abrir páginas diretamente (WebFetch) falharam por erro de DNS (`ENOTFOUND`), inclusive a própria Steam, a Wikipedia e os sites de desenvolvedores. O que está abaixo vem, na maioria, dos **trechos devolvidos pela busca** (WebSearch). Trechos de loja e de resenha foram citados como tal. Quando um dado depende de um trecho ambíguo, a seção diz isso.
 - **Os números de duração são, quase todos, de agregadores** (HowLongToBeat via DekuDeals, RAWG, SteamPulse). Eles medem partida completa ou campanha, não sessão. Nenhuma fonte encontrada dá a duração típica de uma sessão de cada jogo.
 - **Fontes de qualidade mista:** a maioria são resenhas e notas de imprensa. Os postmortems e entrevistas de desenvolvedores encontrados são poucos e, em vários casos, só o começo deles apareceu no trecho.
-- **Weatherglass não foi identificado** (ver seção própria). Nenhum dos 9 jogos pedidos foi deixado de fora; só este não tem fonte.
+- **Weatherglass:** a busca na web não o achou porque é uma página do claude.ai. A seção 9 foi refeita depois, com o link mandado pelo Roger.
 - **Extras (Tiny Glade, Cloud Gardens, Cozy Grove, Wilmot's Warehouse) não foram pesquisados** por falta de fôlego. Não entram nas tabelas.
 - Marcação: "(inferido)" = não há fonte direta; "não encontrado" = a busca não trouxe o dado.
 
@@ -259,11 +259,49 @@ Pesquisa feita em 2026-10-16 para o projeto *Província* (jogo de 15 min em que 
 
 ## 9. Weatherglass
 
-**Não encontrado.** Três buscas em inglês não acharam nenhum jogo com esse nome. Os resultados mais próximos foram *Emberglass* (riddlefoxgames, itch.io), *Weather Guardian* (itch.io), *Lovely Weather We're Having* (2015) e *MirrorMoon EP* (2013). Nenhum deles é claramente o que se pediu.
+**O que é:** não é um jogo de loja. É uma página publicada no claude.ai, um diorama vivo selado numa caixa de vidro ("A miniature living landscape sealed in a glass box"). Fonte: https://claude.ai/artifact/3bhygX763cPdpcHQYmfrPk, lida pela ferramenta Artifact. O código foi analisado por um agente Haiku como dado; o conteúdo é de terceiros.
 
-**Pedido ao usuário:** informar o estúdio, a plataforma ou um link da Steam ou do itch.io. Com isso, a seção pode ser refeita.
+**A cena:**
+- vale com lago e montanhas, cabanas com fumaça nas chaminés, pinheiros, rochas, barcos, peixes, pássaros e nenúfares;
+- condensação no vidro: as gotas se formam e escorrem (`beads`, `drips`).
 
----
+**Interação, sem pontuação nem fim:**
+- 5 ferramentas:
+  - Mão: arrasta as nuvens; segurar faz chover e sacudir faz tempestade com raio;
+  - Vento;
+  - Nuvem;
+  - Névoa (pincelada);
+  - Limpar o vidro.
+- Hora do dia num mostrador circular com sol e lua.
+- As 4 estações num mostrador arrastável; a troca desliza até o alvo (`glideTo`, `seasonTarget`).
+- Cenários prontos: calmo, chuva, tempestade, neve, névoa, outono, noite e entardecer.
+
+**O que acontece sozinho:**
+- a câmera deriva depois de 30 s parada (`enabledDrift`);
+- vento com ruído, pássaros, peixes e vaga-lumes;
+- a chuva enche o lago (`waterRise`), e o lago congela e degela com a temperatura;
+- a neve depende da altitude (`lapse`).
+
+**Primeiros 60 segundos:** 6 dicas de primeiro uso, guardadas por sessão (`So`). As ferramentas se explicam pelo gesto.
+
+**Luz e paleta:**
+- painéis de vidro fosco escuro com detalhes de latão dourado (`#ffd98a`, `#b98a45`) e texto creme (`#f4efe6`);
+- névoa azul clara e noite azul-marinho;
+- tom sóbrio e quente.
+
+**Técnica:**
+- three.js r186 em WebGL, com shaders próprios;
+- tudo procedural, sem arquivos de arte;
+- arquivo único de cerca de 1,5 MB.
+
+**Duração da sessão e o que se acumula:** é um brinquedo, sem sessão nem progresso. Não se aplica.
+
+**O que a Província leva dele:**
+- **a vitrine:** a província inteira vista como um diorama numa caixa de vidro, com a condensação como moldura;
+- **as estações deslizando** de uma para outra;
+- **a câmera que deriva sozinha** quando ninguém mexe, transformando a tela parada em contemplação;
+- **mostradores de latão** em vez de botões genéricos;
+- **brinquedos que não pontuam**, como tocar o céu para chover. Ficam fora das 6 regras: são enfeite, nunca obrigação.
 
 ## Tabela-resumo
 
@@ -277,7 +315,7 @@ Pesquisa feita em 2026-10-16 para o projeto *Província* (jogo de 15 min em que 
 | Carcassonne (digital) | não encontrado; turnos curtos | Expansões (dado de 2017 pode estar desatualizado); ranking | Não encontrado; regra de uma peça por rodada | Fechar cidade ou estrada; placar | Partidas assíncronas e ranking |
 | Kingdom Two Crowns | não encontrado; 3 a 6 h por campanha (relato, peso baixo) | Personagens e ilhas desbloqueados (Dead Lands) | Não encontrado; leitura visual | Noite de ataque e defesa da coroa | Desafios, dificuldades, cooperativo |
 | Before We Leave | não encontrado; campanha de 17 h (agregador) | Não encontrado | Não encontrado; cenário no comunicado | Não encontrado; manter os Peeps felizes | Não encontrado; críticas sobre logística |
-| Weatherglass | não identificado | não encontrado | não encontrado | não encontrado | não encontrado |
+| Weatherglass | brinquedo, sem sessão | nada | 6 dicas e ferramentas que se explicam pelo gesto | clima nascendo da mão (chuva que enche o lago, raio) | contemplação; a paisagem muda sozinha |
 
 ---
 
