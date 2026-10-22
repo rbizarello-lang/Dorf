@@ -857,6 +857,13 @@ kbd {
   height: 64px;
   will-change: transform;
   filter: drop-shadow(0 2px 2px rgb(0 0 0 / 0.25));
+  transition: opacity 0.25s ease;
+}
+
+/* Estandarte longe da câmera (e com a lista de missões fechada): some, sem tapar peças. */
+.marker.far {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Estandarte apagado enquanto a peça da vez passa por baixo dele. */
@@ -1633,7 +1640,10 @@ html[data-text='l'] .minimap {
 }
 
 .quest-fold {
-  display: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   width: 100%;
   border: 0;
   border-radius: 12px;
@@ -1644,18 +1654,39 @@ html[data-text='l'] .minimap {
   font: inherit;
   font-weight: 800;
   text-align: left;
+  cursor: pointer;
 }
 
-@media (pointer: coarse), (max-width: 520px) {
-  .quests {
-    pointer-events: auto;
-  }
-  .quest-fold {
-    display: block;
-  }
-  .quests:not(.open) .quest {
-    display: none;
-  }
+.quest-fold[hidden] {
+  display: none;
+}
+
+.quest-fold::after {
+  content: '›';
+  font-size: 18px;
+  line-height: 1;
+  color: var(--soft);
+  transition: transform 0.2s ease;
+}
+
+.quest-fold[aria-expanded='true']::after {
+  transform: rotate(90deg);
+}
+
+/* As missões são sempre um cartão só ("N missões ›"); um clique ou toque abre a lista. */
+.quests {
+  pointer-events: auto;
+}
+.quests:not(.open) .quest {
+  display: none;
+}
+.quest {
+  cursor: pointer;
+}
+
+/* Interface mínima (ligada por padrão): o brasão sai do placar; segue no menu de temas. */
+html.min-ui .crest {
+  display: none;
 }
 
 /* ---------- era da vila */

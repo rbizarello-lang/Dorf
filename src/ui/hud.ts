@@ -24,6 +24,8 @@ export interface MarkerView {
   kind?: string;
   /** Estandarte apagado: a peça da vez está passando por baixo dele. */
   dim?: boolean;
+  /** Estandarte de missão longe da câmera: fica invisível (some com um fade). */
+  far?: boolean;
 }
 
 function esc(s: string) {
@@ -253,6 +255,7 @@ export class Hud {
     const n = quests.filter((q) => q.state === 'active').length;
     fold.hidden = n === 0;
     fold.textContent = n === 1 ? '1 missão' : `${n} missões`;
+    fold.title = 'Mostrar ou esconder a lista de missões';
     fold.setAttribute('aria-expanded', String(this.quests.classList.contains('open')));
     for (const q of quests) {
       let el = this.questEls.get(q.id);
@@ -260,6 +263,9 @@ export class Hud {
         el = document.createElement('div');
         el.className = 'quest';
         el.innerHTML = `<i class="ico" style="background:${questCard(q, theme).color}">${glyph(questGlyph(q), questCard(q, theme).color)}</i><b></b><span class="reward">+${q.reward} peças</span><span class="bar"><i></i></span>`;
+        el.addEventListener('click', () => {
+          if (this.quests.classList.contains('open')) this.onQuestGoto?.(q.anchor.q, q.anchor.r);
+        });
         this.quests.appendChild(el);
         this.questEls.set(q.id, el);
       }
@@ -280,7 +286,15 @@ export class Hud {
     }
   }
 
-  /** No toque as missões ficam neste botão até alguém abrir a lista. */
+  /** A lista de missões está aberta (os estandartes aparecem de longe). */
+  get questsOpen() {
+    return this.quests.classList.contains('open');
+  }
+
+  /** Clicar numa missão da lista leva a câmera até a peça dela. */
+  onQuestGoto: ((q: number, r: number) => void) | null = null;
+
+  /** As missões ficam neste botão até alguém abrir a lista. */
   private ensureFold() {
     if (this.foldBtn) return this.foldBtn;
     const b = document.createElement('button');
@@ -322,9 +336,10 @@ export class Hud {
       el.style.setProperty('--c', m.color);
       el.style.display = m.visible ? '' : 'none';
       el.classList.toggle('dim', !!m.dim);
+      el.classList.toggle('far', !!m.far);
       // O pé do mastro (ou a ponta da etiqueta do sítio) fica no ponto da peça.
       // No celular o estandarte encolhe em volta do pé do mastro, para tapar menos peças.
-      el.style.transform = m.kind ? `translate(${(m.x - 4).toFixed(1)}px, ${(m.y - 44).toFixed(1)}px)` : `translate(${(m.x - 1).toFixed(1)}px, ${(m.y - 64).toFixed(1)}px)${narrow ? ' scale(0.7)' : ''}`;
+      el.style.transform = m.kind ? `translate(${(m.x - 4).toFixed(1)}px, ${(m.y - 44).toFixed(1)}px)` : `translate(${(m.x - 1).toFixed(1)}px, ${(m.y - 64).toFixed(1)}px)${narrow ? ' scale(0.5)' : ' scale(0.62)'}`;
     }
     for (const [id, el] of this.markerEls) {
       if (!alive.has(id)) {

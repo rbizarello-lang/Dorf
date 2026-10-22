@@ -48,7 +48,7 @@ O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Re
 
 **Maravilha:** na última era, a próxima peça com 2 ou mais bordas de vila vira o canteiro da maravilha do tema (Castelo de Conto no Vale, Pilone de Karnak no Egito, Cúpula de Brunelleschi na Toscana, Terraços de Moray nos Andes etc.). Cada peça colocada depois avança uma etapa da obra, que sobe dentro do andaime; com as 6 etapas ela fica pronta e rende +300 pontos e +6 peças.
 
-**Sua casa:** no topo do menu de temas, escolha uma das 8 cores da casa (ou a do tema) e monte o brasão (metal, peça e móvel). A cor aparece no placar, nos estandartes das missões, nas bandeiras do Centro, dos marcos e dos barcos e nas camisas de metade dos aldeões.
+**Sua casa:** no topo do menu de temas, escolha uma das 8 cores da casa (ou a do tema) e monte o brasão (metal, peça e móvel). A cor aparece no placar, nos estandartes das missões (pequenos, só aparecem com a câmera perto ou com a lista de missões aberta), nas bandeiras do Centro, dos marcos e dos barcos e nas camisas de metade dos aldeões.
 
 **Moldura do tema:** os painéis mudam de material com o lugar (papiro no Egito, tábuas na Terra dos Vikings, seda na Dinastia Song, washi no Japão Edo, metal em Marte, cartaz no Oeste). O emblema ao lado do nome diz o tema antes do texto.
 
@@ -58,7 +58,7 @@ O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Re
 
 **Peças especiais:** liberadas jogando, valem para as partidas seguintes e entram duas vezes em cada uma (menos no Desafio do dia, que é igual para todos). A **Estação** (8 missões cumpridas no total) vale +12 por peça com trilho a até 2 casas e +2 peças; o **Moinho d'água** (30 interações) vale +20 por vizinha com plantação e +1 peça; o **Farol** (6 sítios descobertos) vale +10 por peça com rio a até 2 casas e mostra as próximas peças por 5 jogadas. O fim da partida mostra quanto falta para a próxima.
 
-**Almanaque:** a aba Almanaque da ajuda (`H`, ou o botão no fim da partida) soma tudo o que já se fez entre as partidas: peças, missões, interações, sítios por tipo, peças especiais (liberadas e quanto falta para as outras) e, por tema, partidas, maior era, maravilha e recorde.
+**Almanaque:** a aba Almanaque da ajuda (`H`, a tecla `I`, ou o botão no fim da partida) soma tudo o que já se fez entre as partidas: peças, missões, interações, sítios por tipo, peças especiais (liberadas e quanto falta para as outras) e, por tema, partidas, maior era, maravilha e recorde.
 
 **Bônus de cada tema:** cada época tem uma regra curta, como a Dádiva do Nilo (borda de rio encaixada vale +5) no Egito ou os Moinhos de pôlder (+5 por moinho) na Holanda. Aparece no menu de temas.
 
@@ -95,7 +95,10 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 | Inclinar câmera (do horizonte à vista de mapa) | arrastar com o botão direito para cima ou para baixo, `PgUp` / `PgDn`; `Home` volta ao ângulo padrão | dois dedos para cima ou para baixo |
 | Amanhecer, dia, hora dourada, entardecer e noite | `L` ou botão ☀ | botão ☀ |
 | Som: música e efeitos, só efeitos, mudo | botão Som (cada clique alterna) | botão ♫ |
-| Minimapa | `M` abre ou fecha; clique leva a câmera | o mesmo; começa fechado |
+| Minimapa | `M` abre ou fecha; clique leva a câmera | o mesmo; começa fechado (também no computador, com a interface mínima) |
+| Almanaque | `I`, ou a aba Almanaque da ajuda | menu ⋯ |
+| Missões | cartão "N missões ›" no canto: abre a lista; clicar numa missão leva a câmera até ela | o mesmo |
+| Interface mínima (ligada por padrão) | Aa, "Interface mínima": esconde o brasão do placar, começa com o minimapa fechado e apaga a faixa de dicas depois da 1ª jogada | o mesmo |
 | Ajuda, nova partida, estatísticas | `H`, `N`, `F` | botões no topo |
 | Cor da casa e brasão | menu de temas, seção "Sua casa" | o mesmo |
 | Foto sem a interface | `P` (Espaço pausa, `L` muda a hora, Enter salva, Esc sai) | botão Câmera |
@@ -124,7 +127,7 @@ Durante a gravação, o jogo anota só a câmera e as jogadas, então não fica 
 O botão de qualidade abre a lista: **Auto**, **Ultra**, **Alta**, **Média** e **Baixa**, cada uma com uma linha dizendo para que placa serve.
 
 - **Auto** escolhe o começo pelo nome da placa de vídeo (por exemplo, Alta numa RX 580 e Ultra numa RTX 3060; gráficos integrados Intel e Ryzen começam na Média, e uma placa desconhecida no computador começa na Alta, enquanto as telas de toque começam na Média). Se o quadro ficar lento, primeiro baixa a resolução interna, em degraus até 60%, e só depois desce de nível. O nome da placa e o nível escolhido aparecem no título do botão.
-- **Celular e tablet:** com a tela parada (sem toque e sem peça caindo), o jogo desenha a 30 quadros e, depois de 15 s, a 20, para poupar bateria; o mundo continua animado. No computador nada muda. No toque, o topo fica com o tema, o desfazer e o menu ⋯, e as missões cabem num botão que abre a lista. Torcer dois dedos gira a câmera. O botão Aa (dentro do ⋯) muda o tamanho do texto, liga cores que se separam para quem não distingue verde de vermelho, e o "menos movimento", que também para a onda dourada, os voos da câmera e o quique da peça. Uma vibração curta ao encaixar só acontece nos navegadores que aceitam.
+- **Celular e tablet:** com a tela parada (sem toque e sem peça caindo), o jogo desenha a 30 quadros e, depois de 15 s, a 20, para poupar bateria; o mundo continua animado. No computador nada muda. No toque, o topo fica com o tema, o desfazer e o menu ⋯, e as missões cabem num botão que abre a lista (no computador também). Torcer dois dedos gira a câmera. O botão Aa (dentro do ⋯) muda o tamanho do texto, liga cores que se separam para quem não distingue verde de vermelho, e o "menos movimento", que também para a onda dourada, os voos da câmera e o quique da peça. Uma vibração curta ao encaixar só acontece nos navegadores que aceitam.
 - **Cinema** não está na lista: é o nível das fotos e dos vídeos, que o jogo liga sozinho só na hora de tirar a foto ou desenhar o vídeo. Desenha 1,5× acima da tela, com mais amostras de luz e de reflexo, sombras mais finas e mais vegetação. O Auto nunca escolhe o Cinema.
 - **Ultra** e **Alta** usam o mesmo grão de filme e a mesma aberração de lente do Cinema. O que não desce de nível é o que pesa: no Ultra ficam a luz indireta, o reflexo na água, os raios de sol, as três cascatas de sombra e a vegetação extra; na Alta ficam a oclusão em meia resolução, o bloom, o desfoque e uma sombra só.
 

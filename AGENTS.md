@@ -225,6 +225,10 @@ scripts/         capturas, teste de carga, conversão para página publicável; 
     - Efeito de jogada que o vídeo também deve mostrar vai em `World.placeFx`, que o jogo e o vídeo chamam do mesmo jeito.
     - Foto e vídeo copiam o canvas logo depois do `tick`, no mesmo passo do desenho.
 
+### Interface calma
+
+O HUD mostra, além do placar, no máximo um cartão: as missões são um único cartão ("N missões ›", `quest-fold` em `hud.ts`) que abre a lista; clicar numa missão leva a câmera até ela. Os estandartes (`.marker`, DOM) são pequenos e levam a classe `far` (opacidade 0) quando o zoom está aberto (`rig.dist` > `QUEST_FLAG_DIST`), a peça está longe do centro (`QUEST_FLAG_REACH`) e a lista está fechada. A opção "Interface mínima" (`retalhos.minimal`, ligada por padrão; só `'0'` a desliga; fica em Aa) põe `html.min-ui`: esconde o brasão do placar (segue no menu de temas), abre o minimapa fechado e apaga a faixa de dicas depois da 1ª jogada. O Almanaque tem a tecla `I` e um item no menu ⋯. Não esconda nada de que se precisa para jogar (placar, pilha, desfazer).
+
 ## Orçamento de desempenho
 
 Medido com `RUNS=300:high node scripts/stress.mjs`, renderização por software:
