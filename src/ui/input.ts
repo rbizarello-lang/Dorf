@@ -26,10 +26,15 @@ export interface InputHost {
   place(q: number, r: number): void;
   rotate(dir: 1 | -1): void;
   cycleTime(): void;
+  /** Toque no céu (fora do chão): faz passar o próximo clima. */
+  skyTap(): void;
   showHelp(): void;
   requestNewGame(): void;
   undo(): void;
   toggleMap(): void;
+  showAlmanac(): void;
+  /** "Onde encaixa": liga ou desliga as 3 melhores casas da peça atual. */
+  toggleHints(): void;
   /** Escolhe a carta 0 ou 1 quando a escolha de era está aberta; devolve se escolheu. */
   choose(pick: number): boolean;
 }
@@ -151,7 +156,11 @@ export function bindInput(h: InputHost): Input {
       return;
     }
     const t = hoverAt(e.clientX, e.clientY);
-    if (!t) return;
+    if (!t) {
+      // O raio não cruza o chão: é céu, não uma jogada.
+      h.skyTap();
+      return;
+    }
     if (d.touch) {
       // Toque: primeiro mostra a peça no espaço, o segundo toque confirma.
       const hover = h.hover();
@@ -225,6 +234,8 @@ export function bindInput(h: InputHost): Input {
     else if (k === 'n') h.requestNewGame();
     else if (k === 'u') h.undo();
     else if (k === 'm') h.toggleMap();
+    else if (k === 'i') h.showAlmanac();
+    else if (k === 'o') h.toggleHints();
     else if (k === 'p') capture.enterPhoto();
     else if (k === 'v') {
       if (capture.take) capture.stopTake();

@@ -231,6 +231,7 @@ const KINDS: Record<Exclude<WeatherKind, 'none'>, { size: number; fall: [number,
   leaves: { size: 0.075, fall: [0.25, 0.42], drift: 0.3, sway: 0.3, spin: 2.8, flutter: 0.8, aspect: 0.42, glow: 0, count: 380 },
   dust: { size: 0.022, fall: [0.02, 0.06], drift: 0.9, sway: 0.08, spin: 0, flutter: 0, aspect: 1, glow: 0.05, count: 700 },
   pollen: { size: 0.022, fall: [0.015, 0.05], drift: 0.25, sway: 0.18, spin: 0, flutter: 0, aspect: 1, glow: 0.45, count: 420 },
+  rain: { size: 0.3, fall: [2.6, 3.6], drift: 0.2, sway: 0, spin: 0, flutter: 0, aspect: 0.07, glow: 0.1, count: 1000 },
 };
 
 export class Weather {
@@ -249,6 +250,10 @@ export class Weather {
     glow: uniform(0),
     c1: uniform(new THREE.Color('#ffffff')),
     c2: uniform(new THREE.Color('#ffffff')),
+    /** Opacidade geral (o clima tocável entra e sai por aqui). */
+    amount: uniform(1),
+    /** 1 = sem rotação aleatória (a chuva cai em riscos na vertical). */
+    upright: uniform(0),
   };
   private want = 0;
 
@@ -268,7 +273,7 @@ export class Weather {
     const px = wrap(s.x, drift.x, FX.focus.x).add(sin(t.mul(1.3).add(s.w.mul(20))).mul(u.sway));
     const pz = wrap(s.z, drift.y, FX.focus.z).add(cos(t.mul(1.1).add(s.x.mul(20))).mul(u.sway));
     const py = float(1).sub(fract(s.y.add(t.mul(speed).div(H)))).mul(H).sub(0.15);
-    const ang = t.mul(u.spin).mul(s.y.sub(0.5).mul(2)).add(s.z.mul(6.283));
+    const ang = t.mul(u.spin).mul(s.y.sub(0.5).mul(2)).add(s.z.mul(6.283)).mul(float(1).sub(u.upright));
     const flip = mix(float(1), abs(sin(t.mul(3.1).add(s.x.mul(30)))).max(0.15), u.flutter);
     const sz = u.size.mul(FX.scale).mul(s.w.mul(0.6).add(0.7));
     const lx = positionGeometry.x.mul(sz).mul(u.aspect).mul(flip);
@@ -281,7 +286,7 @@ export class Weather {
     const edge = max(abs(px.sub(FX.focus.x)), abs(pz.sub(FX.focus.z))).div(FX.box.x);
     const fade = smoothstep(1, 0.75, edge).mul(smoothstep(-0.15, 0.08, py)).mul(smoothstep(H.sub(0.15), H.sub(0.6), py));
     m.colorNode = mix(u.c1, u.c2, s.x).mul(FX.ambient.mul(float(1).sub(u.glow)).add(u.glow));
-    m.opacityNode = smoothstep(1, 0.55, d).mul(fade).mul(0.9);
+    m.opacityNode = smoothstep(1, 0.55, d).mul(fade).mul(0.9).mul(u.amount);
     this.mesh = new THREE.Mesh(this.geo, m);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 3;
@@ -293,9 +298,14 @@ export class Weather {
       this.want = 0;
       return;
     }
-    const k = KINDS[w.kind];
+    this.setKind(w.kind, w.colors, w.density);
+  }
+
+  /** Escolhe o tipo, as cores e a densidade (o tema, ou o clima tocável). */
+  setKind(kind: Exclude<WeatherKind, 'none'>, colors: [string, string], density: number, sizeMul = 1) {
+    const k = KINDS[kind];
     const u = this.u;
-    u.size.value = k.size;
+    u.size.value = k.size * sizeMul;
     u.fallMin.value = k.fall[0];
     u.fallMax.value = k.fall[1];
     u.drift.value = k.drift;
@@ -304,9 +314,15 @@ export class Weather {
     u.flutter.value = k.flutter;
     u.aspect.value = k.aspect;
     u.glow.value = k.glow;
-    u.c1.value.set(w.colors[0]);
-    u.c2.value.set(w.colors[1]);
-    this.want = Math.min(this.max, Math.round(k.count * w.density));
+    u.upright.value = kind === 'rain' ? 1 : 0;
+    u.c1.value.set(colors[0]);
+    u.c2.value.set(colors[1]);
+    this.want = Math.min(this.max, Math.round(k.count * density));
+  }
+
+  /** Opacidade geral, de 0 a 1. */
+  setAmount(a: number) {
+    this.u.amount.value = a;
   }
 
   /** Densidade pela qualidade (1 = cheia, 0 = desliga). */

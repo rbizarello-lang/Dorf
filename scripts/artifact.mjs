@@ -6,7 +6,7 @@ const html = fs.readFileSync('dist/index.html', 'utf8');
 const head = html.match(/<head>([\s\S]*?)<\/head>/)[1];
 const body = html.match(/<body>([\s\S]*?)<\/body>/)[1];
 const title = head.match(/<title>[\s\S]*?<\/title>/)[0];
-const links = [...head.matchAll(/<link [^>]*>/g)].map((m) => m[0]).join('\n');
+const links = [...head.matchAll(/<link [^>]*>/g)].map((m) => m[0]).filter((l) => !/rel="(manifest|apple-touch-icon)"/.test(l)).join('\n');
 const styles = [...head.matchAll(/<style[^>]*>[\s\S]*?<\/style>/g)].map((m) => m[0]).join('\n');
 const scripts = [...head.matchAll(/<script[^>]*>[\s\S]*?<\/script>/g)].map((m) => m[0]).join('\n');
 const bodyNoScript = body.replace(/<script[^>]*src="[^"]*"[^>]*><\/script>/g, '');

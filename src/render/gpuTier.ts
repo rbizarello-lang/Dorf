@@ -71,14 +71,15 @@ export function tierForGpu(info: GpuInfo): StartTier | null {
   // Gráficos integrados dos Ryzen ("Radeon Graphics", "Vega 8", "780M"): Média.
   if (/radeon(\s*\(tm\))?\s*graphics|vega\s*\d+\b|radeon\s*\d{3}m\b/.test(r)) return 'medium';
 
-  // Intel Arc dedicada: A750/A770 e as B no Ultra, A5xx na Alta; o resto (integradas) na Média;
-  // os gráficos UHD e HD, mais fracos, na Baixa.
+  // Intel Arc dedicada: A750/A770 e as B no Ultra, A5xx na Alta; o resto (integradas, incluindo
+  // Iris Xe, UHD e HD) na Média. Os UHD e HD eram Baixa, mas a Média (MSAA, sem pós pesado) é o
+  // piso razoável: sem sombras o jogo perde muito, e a resolução dinâmica já cobre o quadro lento.
   const arc = r.match(/arc.*?\b([ab])(\d)\d0\b/);
   if (arc) return arc[1] === 'b' || Number(arc[2]) >= 7 ? 'ultra' : Number(arc[2]) >= 5 ? 'high' : 'medium';
   if (/arc|iris|xe graphics/.test(r)) return 'medium';
-  if (/uhd|hd graphics/.test(r)) return 'low';
+  if (/uhd|hd graphics/.test(r)) return 'medium';
 
-  // Apple: M Pro, Max e Ultra no Ultra; o chip básico na Alta.
+  // Apple: M Pro, Max e Ultra no Ultra; o chip básico (M1 a M4, GPU integrada mas forte) na Alta.
   const m = r.match(/apple m(\d)(\s*(pro|max|ultra))?/);
   if (m) return m[3] ? 'ultra' : 'high';
 
@@ -91,4 +92,13 @@ export function tierForGpu(info: GpuInfo): StartTier | null {
   if (vendor === 'intel') return /xe-?hpg|xe2|xe-?3/.test(arch) ? 'high' : 'medium';
   if (vendor === 'apple') return 'high';
   return null;
+}
+
+/**
+ * Nível em que o Auto começa. Placa desconhecida no computador começa na Alta (prudente: o Ultra
+ * custa caro numa integrada que o nome não denunciou, e o Auto ainda sobe a resolução e desce
+ * de nível se faltar); telas de toque continuam na Média.
+ */
+export function autoStartTier(info: GpuInfo, coarsePointer: boolean): StartTier {
+  return tierForGpu(info) ?? (coarsePointer ? 'medium' : 'high');
 }

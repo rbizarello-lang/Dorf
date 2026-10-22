@@ -3,28 +3,31 @@ import { Sfx } from './audio';
 import { SEASON_KIND, SEASON_NAME, seasonAt } from './core/seasons';
 import { DEFAULT_RULES, type PlaceResult, type Rules } from './core/board';
 import { Game } from './core/game';
-import { MODES, dailySeed, modeById, type Mode, type ModeId } from './core/modes';
+import { MODES, dailyRule, dailySeed, modeById, modeRules, type Mode, type ModeId } from './core/modes';
+import { shareLine, shareUrl, terrainPoints } from './core/share';
 import { LOOKOUT_MOVES, SITE_REWARD, type SiteKind } from './core/sites';
 import { SPECIALS, SPECIAL_KINDS, type SpecialKind } from './core/specials';
 import { mulberry32 } from './core/rng';
 import { T } from './core/tiles';
 import { DIRS, hexDistance, hexToWorld, hkey, unkey, worldToHex } from './core/hex';
 import { routeMarks, type RouteHit, type RouteMark } from './core/routes';
-import type { Quality, TimeOfDay } from './render/world';
+import type { PassingWeather, Quality, TimeOfDay } from './render/world';
 import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
 import { DynRes } from './render/dynres';
+import { dtCap, shouldRender, targetFps } from './render/framePacing';
 import { readGpuInfo } from './render/gpu';
-import { gpuName, tierForGpu } from './render/gpuTier';
+import { autoStartTier, gpuName } from './render/gpuTier';
 import { FX_FLAGS } from './render/post';
 import { U } from './render/materials';
-import { World } from './render/world';
+import { WEATHER_SECONDS, World } from './render/world';
 import { THEMES, themeById, type Theme } from './themes/themes';
 import { withSafeColors } from './ui/a11y';
 import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor } from './ui/banner';
 import { Capture, VIDEO_QUALITIES } from './ui/capture';
 import { Hud, TIME_ICON, TIME_LABEL, TIME_ORDER, glyph, questLabel, questMarker } from './ui/hud';
 import { bindInput } from './ui/input';
-import { MONUMENT_KINDS, MONUMENT_NAME, Progress, SPECIAL_NAME, UNLOCKS, type MonumentKind } from './ui/progress';
+import { persist as requestPersistence, exportKeys, importKeys } from './ui/storage';
+import { MONUMENT_KINDS, MONUMENT_NAME, Progress, cleanProgress, SPECIAL_NAME, UNLOCKS, type MonumentKind } from './ui/progress';
 import { Tutorial } from './ui/tutorial';
 import { blessingName, blessingRule, choiceHtml } from './ui/eraChoice';
 import { Minimap, timelineSvg, type TurnNote } from './ui/minimap';
@@ -35,9 +38,9 @@ import './ui/style.css';
 type QualityMode = 'auto' | Quality;
 /** q, r, giro e as escolhas de era (0 ou 1) feitas logo depois da jogada. */
 type MoveRec = number[];
-/** v11: a rota da Estrada Real dobrou de peso. Guarda a pontuação para conferir o replay. */
+/** v13: junta a regra do dia (D17, v12) e as mudanças dos modos fracos (D18, v12) numa só versão. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 11;
+  v: 13;
   seed: number;
   rulesId: string;
   mode: ModeId;
@@ -48,7 +51,7 @@ interface Save {
   /** Peças especiais que entraram nesta partida (mudam a sequência da pilha). */
   specials: SpecialKind[];
 }
-const SAVE_VERSION = 11;
+const SAVE_VERSION = 13;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -107,7 +110,7 @@ const world = await createWorld();
 hud.preview.appendChild(world.preview.canvas);
 
 // Minimapa (proposta 16): o clique leva a câmera; M abre e fecha.
-const minimap = new Minimap(document.getElementById('minimap')!, store, (x, z) => world.rig.goal.set(x, 0, z));
+const minimap = new Minimap(document.getElementById('minimap')!, store, (x, z) => world.rig.goal.set(x, 0, z), store.get('minimal') !== '0');
 
 // Cor da casa e brasão (proposta 15): a cor troca o destaque do tema no HUD e no mundo.
 let house = validHouse(store.get('house'));
@@ -124,6 +127,8 @@ const a11yCalm = store.get('a11y-calm');
 const a11y = {
   text: a11yText === 's' || a11yText === 'l' ? a11yText : 'm',
   safe: store.get('a11y-safe') === '1',
+  /** Interface mínima: ligada por padrão; só o valor '0' guardado a desliga. */
+  minimal: store.get('minimal') !== '0',
   calm: a11yCalm === '1' || (a11yCalm !== '0' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)),
 };
 
@@ -136,6 +141,7 @@ function applyA11y() {
   if (a11y.text === 'm') delete document.documentElement.dataset.text;
   else document.documentElement.dataset.text = a11y.text;
   document.documentElement.classList.toggle('calm', a11y.calm);
+  document.documentElement.classList.toggle('min-ui', a11y.minimal);
   world.reducedMotion = a11y.calm;
   world.rig.snap = a11y.calm;
 }
@@ -151,6 +157,9 @@ function buzz(ms: number) {
   }
 }
 
+/** A faixa de dicas do rodapé some depois de tantas jogadas (na interface mínima, logo na primeira). */
+const hintMoves = () => (a11y.minimal ? 1 : 6);
+
 function showA11y() {
   hud.showModal(`<h2 id="modal-title">Acessibilidade</h2>
     <form class="a11y">
@@ -164,6 +173,8 @@ function showA11y() {
       <p>As bordas passam a amarelo, verde-azulado, laranja, roxo, azul e cinza, no chão e nos ícones.</p>
       <label><input type="checkbox" name="calm"${a11y.calm ? ' checked' : ''}> Menos movimento</label>
       <p>A onda dourada, os voos da câmera, o bando de pássaros e o quique da peça param. O vento e a água continuam.</p>
+      <label><input type="checkbox" name="minimal"${a11y.minimal ? ' checked' : ''}> Interface mínima</label>
+      <p>Esconde o brasão do placar e começa com o minimapa fechado. O Almanaque fica na tecla <kbd>I</kbd> (e no menu ⋯), o brasão no menu de temas, e o minimapa na tecla <kbd>M</kbd>.</p>
       <button type="button" class="secondary">Fechar</button>
     </form>`);
   const form = hud.modalBody.querySelector('form')!;
@@ -175,6 +186,8 @@ function showA11y() {
     store.set('a11y-text', a11y.text);
     store.set('a11y-safe', a11y.safe ? '1' : '0');
     store.set('a11y-calm', a11y.calm ? '1' : '0');
+    a11y.minimal = (form.querySelector('input[name="minimal"]') as HTMLInputElement).checked;
+    store.set('minimal', a11y.minimal ? '1' : '0');
     applyA11y();
     const s = shownTheme();
     world.setTheme(s, game.board);
@@ -194,6 +207,26 @@ let tradeMarks: RouteMark[] = [];
 /** Rota que a peça da vez renderia na casa do fantasma. */
 let routePeek: RouteHit[] = [];
 let scorePeek: number | null = null;
+/** "Onde encaixa": as melhores casas da peça atual. Valem só para a jogada e o giro em que foram pedidas. */
+let hints: { q: number; r: number; rot: number; points: number }[] | null = null;
+let hintsKey = '';
+const hintsKeyNow = () => `${moves.length}:${game.board.list.length}:${game.rot}:${game.stack}:${game.seed}`;
+function clearHints() {
+  if (!hints) return;
+  hints = null;
+  document.getElementById('btn-hints')!.setAttribute('aria-pressed', 'false');
+}
+function toggleHints() {
+  const btn = document.getElementById('btn-hints')!;
+  if (hints || !game.current || game.over || hud.modalOpen || capture.stage !== 'play') {
+    hints = null;
+  } else {
+    hints = game.rankMoves(3);
+    hintsKey = hintsKeyNow();
+    if (!hints.length) hints = null;
+  }
+  btn.setAttribute('aria-pressed', String(!!hints));
+}
 let routePeekAt = '';
 let rotSteps = 0;
 let hover: { q: number; r: number } | null = null;
@@ -220,9 +253,13 @@ const BENCH_SEED = 7;
 const BENCH_TILES = 60;
 const BENCH_SECONDS = 15;
 const BENCH_LEVELS: Quality[] = ['low', 'medium', 'high', 'ultra'];
-const QUALITIES: QualityMode[] = ['auto', 'cinema', 'ultra', 'high', 'medium', 'low'];
-const pickQ = (v: string | null) => (v && (QUALITIES as string[]).includes(v) ? (v as QualityMode) : null);
-let qualityMode: QualityMode = pickQ(params.get('quality')) ?? pickQ(store.get('quality')) ?? 'auto';
+// O seletor em tempo real vai até o Ultra. O Cinema só existe na foto e no vídeo; para medir o Cinema ao
+// vivo, `?quality=cinema` vale junto de um gancho de depuração (debug, perf, stress, auto ou demo).
+const QUALITIES: QualityMode[] = ['auto', 'ultra', 'high', 'medium', 'low'];
+const pickQ = (v: string | null) => (v && (QUALITIES as string[]).includes(v) ? (v as QualityMode) : v === 'cinema' ? 'ultra' : null);
+const urlQuality = params.get('quality');
+const debugCinema = urlQuality === 'cinema' && ['debug', 'perf', 'stress', 'auto', 'demo'].some((k) => params.has(k));
+let qualityMode: QualityMode = debugCinema ? 'cinema' : pickQ(urlQuality) ?? pickQ(store.get('quality')) ?? 'auto';
 let gameOverShown = false;
 let overTimer = 0;
 let bestAtStart = 0;
@@ -236,8 +273,11 @@ let committed = false;
 // ?specials=station.watermill.lighthouse (ou all) põe peças especiais na partida sem liberá-las (capturas).
 const forcedSpecials: SpecialKind[] | null = params.has('specials') ? (params.get('specials') === 'all' ? [...SPECIAL_KINDS] : SPECIAL_KINDS.filter((k) => params.get('specials')!.split('.').includes(k))) : null;
 
-// Regras: padrão ← tema ← modo. O desafio do dia ignora as regras do tema (é igual para todos).
-const rulesFor = (t: Theme, m: Mode = mode): Rules => ({ ...DEFAULT_RULES, ...(m.daily ? {} : t.rules), ...m.rules });
+// Regras: padrão ← tema ← modo. O desafio do dia ignora as regras do tema (é igual para todos) e soma a regra do dia,
+// que sai da semente (AAAAMMDD local): o save já a guarda, então o replay refaz a mesma regra.
+const rulesFor = (t: Theme, seed: number, m: Mode = mode): Rules => ({ ...DEFAULT_RULES, ...(m.daily ? {} : t.rules), ...modeRules(m, seed) });
+/** Nome do modo no HUD; no desafio do dia, com a regra do dia. */
+const modeLabel = () => (mode.daily ? `${mode.name} · ${dailyRule(game.seed).name}` : mode.name);
 let mode: Mode = modeById(params.get('mode') ?? store.get('mode'));
 let undone = 0;
 const ERA_NAMES = ['Aldeia', 'Vila', 'Burgo', 'Cidade'];
@@ -269,11 +309,12 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   clearTimeout(overTimer);
   for (const t of synTimers.splice(0)) clearTimeout(t);
   // Peças especiais: as liberadas entram em toda partida nova, menos no Desafio do dia (igual para todos).
-  game = new Game(seed, rulesFor(rulesTheme), specials ?? forcedSpecials ?? (mode.daily ? [] : progress.unlocked));
+  game = new Game(seed, rulesFor(rulesTheme, seed), specials ?? forcedSpecials ?? (mode.daily ? [] : progress.unlocked));
   // Partida nova (não um replay do desfazer ou do save): ainda não entrou no progresso.
   if (!replay.length) committed = false;
   undone = undos;
   moves = [];
+  clearHints();
   turns = [];
   for (const [q, r, rot, ...picks] of replay) {
     game.rot = rot;
@@ -292,7 +333,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   loadBest();
   bestAtStart = best;
   recordCheered = false;
-  hud.hint.style.opacity = moves.length >= 6 ? '0' : '';
+  hud.hint.style.opacity = moves.length >= hintMoves() ? '0' : '';
   world.dropGhost();
   world.setTheme(shownTheme(), game.board);
   world.setMonuments(progress.monuments);
@@ -359,9 +400,12 @@ function readSave(): Save | null {
 /** Nova partida pedida pelo jogador: confirma se há uma partida em andamento. */
 function requestNewGame() {
   const warn = !game.over && moves.length >= 3 ? `<p class="muted">A partida atual (${moves.length} peças, ${game.board.score.toLocaleString('pt-BR')} pontos) será descartada.</p>` : '';
-  const cards = MODES.map(
-    (m) => `<button class="mode-card" type="button" data-act="mode" data-mode="${m.id}" aria-current="${m.id === mode.id}"><strong>${m.name}</strong><span>${m.tagline}</span></button>`,
-  ).join('');
+  const card = (m: Mode) =>
+    `<button class="mode-card" type="button" data-act="mode" data-mode="${m.id}" aria-current="${m.id === mode.id}"><strong>${m.name}${m.more ? ' <em>em teste</em>' : ''}</strong><span>${m.tagline}</span></button>`;
+  const more = MODES.filter((m) => m.more);
+  const cards =
+    MODES.filter((m) => !m.more).map(card).join('') +
+    (more.length ? `<details class="more-modes"${mode.more ? ' open' : ''}><summary>Mais modos</summary>${more.map(card).join('')}</details>` : '');
   hud.showModal(`
     <h2 id="modal-title">Nova partida</h2>
     <p>Escolha o modo. O tema continua: ${theme.name}.</p>
@@ -376,7 +420,14 @@ function startFresh(m: Mode = mode) {
   store.set('mode', m.id);
   rulesTheme = theme;
   newGame();
-  hud.toast(m.daily ? `Desafio do dia ${dailySeed()} · ${m.name}` : `Nova partida · ${m.name} · ${theme.name}`);
+  if (m.daily) announceDaily();
+  else hud.toast(`Nova partida · ${m.name} · ${theme.name}`);
+}
+
+/** A regra do dia, no começo do Desafio do dia. */
+function announceDaily() {
+  const r = dailyRule(game.seed);
+  hud.toast(`Desafio do dia ${game.seed} · ${r.name}: ${r.desc}`, 'good');
 }
 
 /** Desfaz a última jogada: refaz a partida pelo replay sem ela (o mesmo caminho do save). */
@@ -419,7 +470,7 @@ function refreshHud(instant = false) {
   const b = game.board, es = game.rules.eraScores;
   const nextAt = es[b.era + 1];
   const season = SEASON_NAME[seasonAt(Math.max(0, b.list.length - 2), game.rules.seasonLock)];
-  hud.setEra(es.length > 1 ? `Era ${['I', 'II', 'III', 'IV', 'V', 'VI'][b.era] ?? b.era + 1} · ${eraName(b.era)} · ${season} · ${mode.name}` : `${mode.name} · ${season}`, nextAt === undefined ? null : Math.min(1, (b.score - es[b.era]) / (nextAt - es[b.era])));
+  hud.setEra(es.length > 1 ? `Era ${['I', 'II', 'III', 'IV', 'V', 'VI'][b.era] ?? b.era + 1} · ${eraName(b.era)} · ${season} · ${modeLabel()}` : `${modeLabel()} · ${season}`, nextAt === undefined ? null : Math.min(1, (b.score - es[b.era]) / (nextAt - es[b.era])));
   hud.setUndo(Math.min(mode.undos - undone, moves.length ? 99 : 0));
   // Com 1 peça na pilha, a "próxima" só entraria se a jogada render peças: não mostra.
   hud.renderNext(game.stack <= 1 && !game.rules.infinite ? null : game.next, theme, game.board.lookout > 0 ? game.upcoming(3) : []);
@@ -461,11 +512,16 @@ function updateGhost() {
 function rotate(dir: 1 | -1) {
   if (!game.current) return;
   game.rotate(dir);
+  clearHints();
   rotSteps += dir;
   sfx.rotate(dir);
   world.setPreview(game.current, rotSteps * (Math.PI / 3), game.stack);
   updateGhost();
 }
+
+/** Estandarte de missão: zoom mais fechado que isto e peça a até REACH do centro da câmera. */
+const QUEST_FLAG_DIST = 14;
+const QUEST_FLAG_REACH = 9;
 
 function screenOf(q: number, r: number, y = 0.4) {
   const { x, z } = hexToWorld(q, r);
@@ -480,6 +536,7 @@ function place(q: number, r: number) {
     showChoice();
     return;
   }
+  clearHints();
   const check = game.check(q, r);
   if (!check?.valid) {
     if (check && !check.occupied && check.neighbors > 0) {
@@ -533,7 +590,7 @@ function place(q: number, r: number) {
     world.flushBirds(w.x, w.z);
     hud.toast(`Novo recorde! Passou de ${bestAtStart.toLocaleString('pt-BR')} pontos.`, 'good');
   }
-  if (moves.length >= 6) hud.hint.style.opacity = '0';
+  if (moves.length >= hintMoves()) hud.hint.style.opacity = '0';
   refreshHud();
   hud.say(`${res.points > 0 ? `Mais ${res.points} pontos. ` : ''}Total ${game.board.score.toLocaleString('pt-BR')}. ${game.rules.infinite ? '' : `${game.stack} peças na pilha.`}`);
   persist();
@@ -607,7 +664,70 @@ function commitProgress() {
   committed = true;
   const w = game.board.wonder;
   for (const k of progress.commit(game.board, rulesTheme.id, !!w && w.stage >= game.rules.wonderStages)) unlockedToast(k);
+  // Depois da primeira partida acabada já há o que perder: pede ao navegador que não apague.
+  if (game.over) void requestPersistence();
 }
+
+/** Baixa um .json com tudo o que o jogo guarda no navegador (partida, progresso, preferências). */
+function exportProgress() {
+  const blob = new Blob([JSON.stringify(exportKeys('retalhos.'), null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `retalhos-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  hud.toast('Progresso exportado.');
+}
+
+let pendingImport: (() => void) | null = null;
+function safeParse(v: string): unknown {
+  try {
+    return JSON.parse(v);
+  } catch {
+    return null;
+  }
+}
+
+/** Lê o arquivo escolhido, confere campo a campo e, se tudo estiver certo, pergunta, grava e recarrega. */
+function importProgress(file: File) {
+  if (file.size > 3_000_000) return hud.toast('O arquivo é grande demais para ser um backup.');
+  void file.text().then((text) => {
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      return hud.toast('O arquivo não é um JSON válido.');
+    }
+    const themeIds = THEMES.map((t) => t.id);
+    // Confere sem gravar (armazenamento falso) para só então perguntar; a gravação real repete a mesma conferência.
+    const mem = new Map<string, string>();
+    const fake = { get length() { return mem.size; }, key: (i: number) => [...mem.keys()][i] ?? null, getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v) };
+    const check = (k: string, v: string) => (k === 'save' ? (validSave(safeParse(v)) ? v : null) : k === 'progress' ? cleanProgress(v, themeIds) : v);
+    const dry = importKeys(json, 'retalhos.', check, fake);
+    if (!dry.ok) return hud.toast(dry.error);
+    hud.showModal(`
+      <h2 id="modal-title">Importar progresso</h2>
+      <p>O arquivo tem ${dry.count} itens. Importar <b>substitui</b> a partida salva e o progresso deste navegador por eles. Não dá para desfazer.</p>
+      <div class="row"><button class="primary" type="button" data-act="import-go">Importar e recarregar</button><button class="secondary" type="button" data-act="close">Cancelar</button></div>`);
+    pendingImport = () => {
+      const r = importKeys(json, 'retalhos.', check);
+      if (!r.ok) return hud.toast(r.error);
+      location.reload();
+    };
+  });
+}
+const importInput = document.createElement('input');
+importInput.type = 'file';
+importInput.accept = 'application/json,.json';
+importInput.hidden = true;
+importInput.addEventListener('change', () => {
+  const f = importInput.files?.[0];
+  importInput.value = '';
+  if (f) importProgress(f);
+});
+document.body.appendChild(importInput);
 
 /** Fim de partida: as peças especiais que faltam liberar e quanto falta para cada uma. */
 function specialsLine() {
@@ -823,6 +943,7 @@ function showHelp(tab = 'basico') {
         <li>Toque: toque num espaço para ver a peça, toque de novo (ou ✓) para colocar. No celular o topo fica com o tema, o desfazer e o menu ⋯, e as missões cabem num botão.</li>
         <li>O botão Aa (no ⋯, no celular) abre o tamanho do texto, as cores para daltônicos e o menos movimento.</li>
         <li>O botão de som alterna entre música e efeitos, só efeitos e mudo.</li>
+        <li><kbd>I</kbd> abre o Almanaque. A "Interface mínima" (Acessibilidade, Aa) esconde o brasão do placar e começa com o minimapa fechado.</li>
         <li><kbd>M</kbd> abre ou fecha o minimapa. Um clique ou toque nele leva a câmera até ali. No celular ele começa fechado.</li>
         <li>O botão Câmera tira fotos sem a interface (<kbd>P</kbd>) e grava vídeos de até 2 minutos (<kbd>V</kbd>), salvos em MP4 de até 4K.</li>
       </ul>`,
@@ -885,7 +1006,10 @@ function almanac() {
       return on ? `<li><b>${MONUMENT_NAME[k]}</b>: na praça do Centro.</li>` : `<li class="locked"><b>${MONUMENT_NAME[k]}</b>: preso, ${how}.</li>`;
     }).join('')}</ul>
     <h3>Temas</h3>
-    <table class="almanac"><thead><tr><th>Tema</th><th>Partidas</th><th>Maior era</th><th>Recorde</th></tr></thead><tbody>${rows}</tbody></table>`;
+    <table class="almanac"><thead><tr><th>Tema</th><th>Partidas</th><th>Maior era</th><th>Recorde</th></tr></thead><tbody>${rows}</tbody></table>
+    <h3>Guardar o progresso</h3>
+    <p class="muted">O progresso fica só neste navegador. Exporte para um arquivo como cópia de segurança ou para levar a outro aparelho.</p>
+    <div class="row"><button class="secondary" type="button" data-act="export">Exportar progresso</button><button class="secondary" type="button" data-act="import">Importar progresso</button></div>`;
 }
 
 function synergyLegend() {
@@ -895,13 +1019,35 @@ function synergyLegend() {
   return [row(3, 1, theme.synergy.lumber), row(3, 2, theme.synergy.mill), row(3, 0, theme.synergy.pasture), row(2, 0, theme.synergy.apiary)].join('');
 }
 
+/** Compartilhar o resultado do desafio: `navigator.share` quando há, área de transferência como reserva. */
+async function shareResult() {
+  const top = terrainPoints(game.board, game.rules).slice(0, 3).map(([t]) => t);
+  const base = location.href.split(/[?#]/)[0];
+  const text = `${shareLine(game.seed, game.board.score, top)}\nRegra: ${dailyRule(game.seed).name}`;
+  const url = shareUrl(base, game.seed);
+  try {
+    if (typeof navigator.share === 'function') {
+      await navigator.share({ text, url });
+      return;
+    }
+  } catch (err) {
+    if ((err as Error)?.name === 'AbortError') return; // a pessoa fechou a folha de compartilhar
+  }
+  try {
+    await navigator.clipboard.writeText(`${text}\n${url}`);
+    hud.toast('Resultado copiado. É só colar.', 'good');
+  } catch {
+    hud.toast('Não deu para copiar: o navegador bloqueou a área de transferência.', 'bad');
+  }
+}
+
 function showGameOver() {
   ensureTurns();
   const b = game.board;
   const record = b.score > bestAtStart && b.score > 0;
   hud.showModal(`
     <h2 id="modal-title">${record ? 'Novo recorde!' : b.sites.length && !b.sitesLeft() && game.rules.endOnSites ? 'Todos os sítios achados!' : 'Pilha vazia'}</h2>
-    <p class="muted">${mode.name} · ${theme.name} · semente ${game.seed}</p>
+    <p class="muted">${modeLabel()} · ${theme.name} · semente ${game.seed}</p>
     <div class="final">
       <div><b data-count="${b.score}">${b.score.toLocaleString('pt-BR')}</b><span>pontos</span></div>
       <div><b>${game.placedCount}</b><span>peças</span></div>
@@ -914,7 +1060,7 @@ function showGameOver() {
     ${special ? '' : specialsLine()}
     <div class="row">
       <button class="primary" type="button" data-act="new">Jogar de novo</button>
-      ${mode.daily ? '' : `<button class="secondary" type="button" data-act="replay-seed">Repetir a semente</button>`}
+      ${mode.daily ? `<button class="secondary" type="button" data-act="share">Compartilhar</button>` : `<button class="secondary" type="button" data-act="replay-seed">Repetir a semente</button>`}
       <button class="secondary" type="button" data-act="theme">Trocar tema</button>
       ${special ? '' : `<button class="secondary" type="button" data-act="almanac">Almanaque</button>`}
     </div>
@@ -945,8 +1091,24 @@ hud.modal.addEventListener('click', (e) => {
     capture.showExportDialog('film');
     return;
   }
+  if (act === 'share') {
+    void shareResult();
+    return;
+  }
   if (act === 'almanac') {
     showHelp('almanaque');
+    return;
+  }
+  if (act === 'export') {
+    exportProgress();
+    return;
+  }
+  if (act === 'import') {
+    importInput.click();
+    return;
+  }
+  if (act === 'import-go') {
+    pendingImport?.();
     return;
   }
   if (act === 'tips') {
@@ -1019,7 +1181,7 @@ function pickTheme(t: Theme) {
   if (game.over) {
     rulesTheme = t;
     newGame();
-  } else if (!mode.daily && JSON.stringify(rulesFor(t)) !== JSON.stringify(game.rules)) {
+  } else if (!mode.daily && JSON.stringify(rulesFor(t, game.seed)) !== JSON.stringify(game.rules)) {
     hud.toast(`${t.ruleNote ?? 'Regras padrão.'} Vale a partir da próxima partida.`);
   }
 }
@@ -1028,8 +1190,8 @@ function pickTheme(t: Theme) {
 
 const qualityLabel: Record<QualityMode, string> = { auto: 'Auto', cinema: 'Cinema', ultra: 'Ultra', high: 'Alta', medium: 'Média', low: 'Baixa' };
 const QUALITY_NOTE: Record<Quality, string> = {
-  cinema: 'Desenha 1,5× acima da tela, com mais luz, sombra e vegetação, grão e lente. Para placas de topo (classe RTX 4080)',
-  ultra: 'Luz indireta, reflexos, raios de sol, desfoque de miniatura, grão de filme e lente. Para placas acima da RX 580',
+  cinema: 'Desenha 1,5× acima da tela, com mais luz, sombra e vegetação, grão e lente. Só na foto e no vídeo',
+  ultra: 'Oclusão reforçada, desfoque de miniatura, grão de filme e lente. Para placas acima da RX 580',
   high: 'Oclusão, bloom, desfoque de miniatura, grão de filme e lente',
   medium: 'Leve, para notebooks e celulares',
   low: 'Sem sombras nem pós-processamento',
@@ -1037,11 +1199,11 @@ const QUALITY_NOTE: Record<Quality, string> = {
 const qualityBtn = document.getElementById('btn-quality')!;
 
 // O modo Auto começa pelo nome da placa de vídeo (gpuTier.ts). Sem um nome conhecido, começa em
-// Média nas telas de toque (celular, tablet) e em Ultra no computador.
+// Média nas telas de toque (celular, tablet) e em Alta no computador.
 const gpu = readGpuInfo(world.renderer);
 const gpuLabel = gpuName(gpu);
 const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-const autoStart: Quality = tierForGpu(gpu) ?? (coarsePointer ? 'medium' : 'ultra');
+const autoStart: Quality = autoStartTier(gpu, coarsePointer);
 const LOWER: Record<Quality, Quality> = { cinema: 'ultra', ultra: 'high', high: 'medium', medium: 'low', low: 'low' };
 let autoLevel: Quality = autoStart;
 /** Resolução dinâmica do Auto: cede antes de o nível descer. */
@@ -1121,12 +1283,20 @@ const input = bindInput({
   place,
   rotate,
   cycleTime,
+  skyTap: () => cycleWeather(),
   showHelp: () => showHelp(),
   requestNewGame,
   undo,
   toggleMap: () => minimap.toggle(),
+  showAlmanac: () => showHelp('almanaque'),
+  toggleHints,
   choose: (pick) => !!hud.modalBody.querySelector('.blessings') && chooseBlessing(pick),
 });
+
+hud.onQuestGoto = (q, r) => {
+  const w = hexToWorld(q, r);
+  world.rig.goal.set(w.x, 0, w.z);
+};
 
 document.getElementById('rot-left')!.addEventListener('click', () => {
   sfx.unlock();
@@ -1143,6 +1313,7 @@ document.getElementById('btn-help')!.addEventListener('click', () => showHelp())
 document.getElementById('btn-a11y')!.addEventListener('click', () => showA11y());
 document.getElementById('btn-new')!.addEventListener('click', requestNewGame);
 document.getElementById('btn-undo')!.addEventListener('click', undo);
+document.getElementById('btn-hints')!.addEventListener('click', toggleHints);
 hud.themeBtn.addEventListener('click', () => {
   if (hud.themeMenu.hidden) hud.openThemeMenu(theme, pickTheme, { color: house, banner, themeAccent: themeById(theme.id).ui.accent, onChange: setHouse });
   else hud.closeThemeMenu();
@@ -1160,7 +1331,7 @@ qualityBtn.addEventListener('click', () => {
     if (!next) return;
     applyQuality(next);
     store.set('quality', next);
-    hud.toast(`Qualidade: ${qualityLabel[next]}${next === 'cinema' ? ' · pede uma placa de vídeo de topo' : ''}`);
+    hud.toast(`Qualidade: ${qualityLabel[next]}`);
   });
 });
 const setTimeLabel = (t: TimeOfDay) => {
@@ -1186,6 +1357,31 @@ timeBtn.addEventListener('click', cycleTime);
     sfx.setMood(saved === 'aurora' ? 'dawn' : saved);
   }
 }
+
+// Clima tocável: cada toque faz passar o próximo (chuva, neve, sol) por 30 s; efeito passageiro, fora do save.
+const WEATHER_ORDER: PassingWeather[] = ['rain', 'snow', 'sun'];
+const WEATHER_LABEL: Record<PassingWeather | 'none', string> = { none: '', rain: 'Chuva', snow: 'Neve', sun: 'Sol' };
+const WEATHER_ICON: Record<PassingWeather | 'none', string> = { none: '☂', rain: '☂', snow: '❄', sun: '☀' };
+const weatherBtn = document.getElementById('btn-weather')!;
+let weatherShown: PassingWeather | null = null;
+function setWeather(kind: PassingWeather | null, age = 0) {
+  world.setWeather(kind, age);
+  sfx.weather(kind, WEATHER_SECONDS);
+  syncWeatherBtn();
+}
+function syncWeatherBtn() {
+  const k = world.passingWeather;
+  weatherShown = k;
+  weatherBtn.setAttribute('aria-pressed', String(!!k));
+  weatherBtn.querySelector('.long')!.textContent = k ? WEATHER_LABEL[k] : 'Clima';
+  weatherBtn.querySelector('.short')!.textContent = WEATHER_ICON[k ?? 'none'];
+}
+function cycleWeather() {
+  sfx.unlock();
+  const k = world.passingWeather;
+  setWeather(WEATHER_ORDER[(k ? WEATHER_ORDER.indexOf(k) + 1 : 0) % WEATHER_ORDER.length]);
+}
+weatherBtn.addEventListener('click', cycleWeather);
 
 // Som em três estados: música e efeitos ('1'), só efeitos ('sfx'), mudo ('0').
 type SoundMode = '1' | 'sfx' | '0';
@@ -1221,13 +1417,17 @@ document.getElementById('btn-more')!.addEventListener('click', () => {
       { id: 'time', label: 'Hora do dia', note: TIME_LABEL[world.timeOfDay] },
       { id: 'quality', label: 'Qualidade', note: qualityLabel[qualityMode] },
       { id: 'camera', label: 'Foto e vídeo' },
+      { id: 'weather', label: 'Clima', note: WEATHER_LABEL[world.passingWeather ?? 'none'] },
       { id: 'sound', label: 'Som', note: soundBtn.querySelector('.long')!.textContent ?? '' },
+      { id: 'hints', label: 'Onde encaixa' },
       { id: 'help', label: 'Como jogar' },
+      { id: 'almanac', label: 'Almanaque' },
       { id: 'new', label: 'Nova partida' },
       { id: 'a11y', label: 'Acessibilidade' },
     ],
     (id) => {
       if (id === 'a11y') showA11y();
+      else if (id === 'almanac') showHelp('almanaque');
       else document.getElementById(`btn-${id}`)?.click();
     },
   );
@@ -1260,6 +1460,7 @@ function autoPlace(n: number, infinite: boolean) {
     noteTurn(res);
     while (game.discardIfStuck());
   }
+  if (moves.length >= hintMoves()) hud.hint.style.opacity = '0';
   const logic = performance.now() - t0;
   const t1 = performance.now();
   world.placeInstant(placed, game.board);
@@ -1385,13 +1586,22 @@ function updateAmbience(now: number) {
   });
 }
 
-// Bateria: em tela de toque, com o jogo parado (sem toque, tecla ou peça caindo), desenha a 30
-// quadros e, depois de 15 s, a 20. O mundo continua animado; no computador nada muda.
-const saveBattery = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-let lastInput = 0;
-let frameNo = 0;
+// Economia de quadros (src/render/framePacing.ts): com o jogo parado (sem entrada e sem nada se
+// movendo), desenha a 30 quadros e, depois de 15 s, a 20; sem foco na janela, 20. O mundo continua
+// animado, só em menos quadros, e o `dt` do tick é o tempo real decorrido. Qualquer entrada volta
+// à taxa cheia na hora. Gravação, foto, ?perf/?bench/?stress e `__perf` desligam a economia.
+let lastInput = performance.now();
+let winFocused = document.hasFocus();
+let measuring = 0;
+let lastStep = 0;
+let paceFps = 0;
+let wasPaced = false;
+let stepCount = 0;
+const noPacing = params.has('stress') || params.has('perf') || params.has('bench') || params.has('auto') || params.has('demo') || params.get('economia') === '0';
 for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart'])
   window.addEventListener(ev, () => (lastInput = performance.now()), { capture: true, passive: true });
+window.addEventListener('focus', () => ((winFocused = true), (lastInput = performance.now())));
+window.addEventListener('blur', () => (winFocused = false));
 
 /** Peças já estão no canvas; aqui só o que muda sem jogada: missões, sítios e a câmera. */
 function mapFrame() {
@@ -1410,9 +1620,16 @@ function mapFrame() {
 
 function frame(now: number) {
   try {
-    const idle = now - lastInput;
-    const skip = saveBattery && !special && capture.stage === 'play' && !capture.take && !capture.shooting && idle > 4000 ? (idle > 15000 ? 3 : 2) : 1;
-    if (++frameNo % skip === 0) step(now);
+    paceFps = targetFps({
+      enabled: !noPacing && !measuring && capture.stage === 'play' && !capture.take && !capture.shooting,
+      idleMs: now - lastInput,
+      focused: winFocused,
+      busy: world.isSettling(),
+    });
+    if (shouldRender(now, lastStep, paceFps)) {
+      lastStep = now;
+      step(now);
+    }
   } finally {
     requestAnimationFrame(frame);
   }
@@ -1423,7 +1640,7 @@ const timeScale = THREE.MathUtils.clamp(Number(params.get('timescale')) || 1, 0.
 
 function step(now: number) {
   const realDt = (now - last) / 1000;
-  const dt = Math.min(0.05, realDt) * timeScale;
+  const dt = Math.min(dtCap(paceFps), realDt) * timeScale;
   last = now;
   // A foto e o vídeo desenham por conta própria.
   if (capture.stage === 'export' || capture.shooting) return;
@@ -1436,6 +1653,7 @@ function step(now: number) {
     world.scout(game.board);
   }
   world.tick(dt);
+  if (world.passingWeather !== weatherShown) syncWeatherBtn();
   mapFrame();
   updateAmbience(now);
   if (capture.take && !capture.take.frame(realDt, { x: world.rig.target.x, z: world.rig.target.z, dist: world.rig.dist, yaw: world.rig.yaw, tilt: world.rig.tilt })) capture.stopTake('A gravação chegou a 2 minutos.');
@@ -1446,7 +1664,10 @@ function step(now: number) {
     const s = screenOf(q.anchor.q, q.anchor.r, 0.55);
     // O estandarte não tapa a jogada: apaga quando o fantasma passa na peça dele ou numa vizinha.
     const dim = !!hover && hexDistance(hover.q, hover.r, q.anchor.q, q.anchor.r) <= 1;
-    markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: questMarker(q), color: q.kind === 'perfect' ? theme.ui.accent : shownTheme().terrainColors[q.terrain], dim });
+    // Só aparece com a câmera perto (zoom fechado e peça perto do centro) ou com a lista de missões aberta.
+    const w = hexToWorld(q.anchor.q, q.anchor.r);
+    const far = !hud.questsOpen && !(world.rig.dist <= QUEST_FLAG_DIST && Math.hypot(w.x - world.rig.target.x, w.z - world.rig.target.z) <= QUEST_FLAG_REACH);
+    markers.push({ id: q.id, x: s.x, y: s.y, visible: s.visible, text: questMarker(q), color: q.kind === 'perfect' ? theme.ui.accent : shownTheme().terrainColors[q.terrain], dim, far });
   }
   // Maravilha em obra: etiqueta com a etapa sobre o canteiro.
   const wd = game.board.wonder;
@@ -1465,6 +1686,16 @@ function step(now: number) {
     const dim = !!hover && hexDistance(hover.q, hover.r, m.q, m.r) <= 1;
     const text = m.kind === 'both' ? 'mercado · porto' : m.kind === 'market' ? 'mercado' : 'porto';
     markers.push({ id: 500000 + hkey(m.q, m.r), x: s.x, y: s.y, visible: s.visible, text, color: m.kind === 'port' ? '#2f6f8f' : '#6b5344', dim, kind: m.kind });
+  }
+  // Onde encaixa: some ao colocar a peça ou girar (a chave muda).
+  if (hints && hintsKey !== hintsKeyNow()) clearHints();
+  if (hints) {
+    hints.forEach((m, i) => {
+      const s = screenOf(m.q, m.r, 0.5);
+      const turn = (m.rot - game.rot + 6) % 6;
+      const girar = turn ? ` · girar ${turn}×` : '';
+      markers.push({ id: 300000 + i, x: s.x, y: s.y, visible: s.visible, text: `${i + 1}º · +${m.points}${girar}`, color: theme.ui.accent, kind: 'score' });
+    });
   }
   // Prévia: o total da jogada, e a rota quando ela entra na conta.
   if (scorePeek !== null && hover) {
@@ -1501,13 +1732,17 @@ function step(now: number) {
         `instâncias ${s.instances.toLocaleString('pt-BR')}`,
         `qualidade ${qualityLabel[qualityMode]}${qualityMode === 'auto' ? ` (${autoNote()})` : ''}`,
         `placa ${gpuLabel || '?'}`,
+        `taxa-alvo ${paceFps ? `${paceFps} qps (economia)` : `cheia${world.settlingWhy() ? ` (${world.settlingWhy()})` : ''}`}`,
         ...(perfNote ? [perfNote] : []),
       ].join('\n');
     }
-    (window as unknown as { __stats: unknown }).__stats = { ...statsText, ...world.stats(), tiles: game.board.list.length, quality: world.quality, res: dynres.scale, gpu: gpuLabel };
+    (window as unknown as { __stats: unknown }).__stats = { ...statsText, ...world.stats(), tiles: game.board.list.length, quality: world.quality, res: dynres.scale, pace: paceFps, steps: stepCount, settling: world.settlingWhy(), gpu: gpuLabel };
     if (capture.take) capture.updateCameraBtn();
   }
-  adaptQuality(realDt, now);
+  stepCount++;
+  // Quadros espaçados pela economia não dizem nada sobre a velocidade da placa.
+  if (paceFps === 0 && !wasPaced) adaptQuality(realDt, now);
+  wasPaced = paceFps > 0;
 }
 
 // ------------------------------------------------------------------ início
@@ -1531,6 +1766,7 @@ function start(data: unknown) {
   if (!resumed) {
     rulesTheme = theme;
     newGame(wantSeed > 0 ? wantSeed : undefined);
+    if (mode.daily && !special) announceDaily();
   }
   if (params.has('stress')) {
     const r = autoPlace(Number(params.get('stress')) || 1000, true);
@@ -1548,6 +1784,7 @@ function start(data: unknown) {
   (window as unknown as { __perf: (seconds?: number) => Promise<Record<string, unknown>> }).__perf = (seconds = 5) =>
     new Promise((resolve) => {
       const n = Math.min(30, Math.max(1, Number(seconds) || 5));
+      measuring++;
       const samples: number[] = [];
       let prev = performance.now();
       const stop = prev + n * 1000;
@@ -1566,6 +1803,7 @@ function start(data: unknown) {
             frames: samples.length,
             ...(window as unknown as { __stats?: object }).__stats,
           };
+          measuring--;
           perfNote = `medição ${result.fps} FPS (mediana) · p95 ${result.p95Ms} ms`;
           (window as unknown as { __perfResult: unknown }).__perfResult = result;
           hud.stats.hidden = false;
@@ -1626,6 +1864,10 @@ function start(data: unknown) {
 (window as unknown as { __celebrate: () => void }).__celebrate = () => {
   world.halo(world.rig.target.x, world.rig.target.z, 2);
   world.flushBirds(world.rig.target.x, world.rig.target.z);
+};
+(window as unknown as { __weather: (kind: PassingWeather | null, age?: number) => void }).__weather = (kind, age = 0) => {
+  if (kind !== null && !WEATHER_ORDER.includes(kind)) return;
+  setWeather(kind, age);
 };
 (window as unknown as { __ripple: (age: number) => void }).__ripple = (age) => world.ripple(world.rig.target.x, world.rig.target.z, 1, age);
 
@@ -1823,7 +2065,30 @@ function start(data: unknown) {
   return { bytes: blob.size, ms: performance.now() - t0, b64: btoa(bin) };
 };
 
+// Tira a foto sem o diálogo (teste no contêiner): entra no modo foto se preciso, usa o tamanho salvo
+// e devolve o nível antes e depois, a resolução desenhada e a final, e o PNG em base64.
+(window as unknown as { __photo: (o?: { size?: string }) => Promise<unknown> }).__photo = async (o = {}) => {
+  if (capture.stage === 'play') capture.enterPhoto();
+  if (capture.stage !== 'photo') return null;
+  const before = world.quality;
+  const r = await capture.renderPhoto(o.size);
+  world.timeScale = 1;
+  const buf = new Uint8Array(await r.blob.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  return { before, during: r.quality, after: world.quality, width: r.width, height: r.height, drawn: r.drawn, ms: r.ms, bytes: r.blob.size, b64: btoa(bin) };
+};
+
 const hot = (window as unknown as { claude?: { hot?: Hot } }).claude?.hot;
 hot?.snapshot?.(() => ({ ...snapshot(), theme: theme.id }));
 if (hot?.ready) hot.ready(start);
 else start(hot?.data);
+
+// Service worker: jogar sem internet e instalar no celular. Só em https/localhost, nunca nos modos
+// de medida e de captura, e em silêncio quando a página roda sem os arquivos vizinhos (artifact).
+if ('serviceWorker' in navigator && isSecureContext && /^https?:$/.test(location.protocol) && !special && !params.has('bench')) {
+  // O `await createWorld()` do topo faz este trecho rodar depois do `load`: sem a checagem o callback nunca dispara.
+  const registerSw = () => void navigator.serviceWorker.register('./sw.js').catch(() => {});
+  if (document.readyState === 'complete') registerSw();
+  else window.addEventListener('load', registerSw, { once: true });
+}

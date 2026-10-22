@@ -50,7 +50,7 @@ export class Game {
     };
     this.board.placeRaw(0, 0, starter, 0);
     this.board.computeGroups();
-    this.board.sites = generateSites(seed, rules.sites);
+    this.board.sites = generateSites(seed, rules.sites, rules.siteScale);
     this.stack = rules.startTiles;
     this.current = this.draw();
     this.next = this.draw();
@@ -117,12 +117,16 @@ export class Game {
    * na pilha, nas rotas pagas ou na sequência. O total inclui a sobra dos Exploradores.
    */
   preview(q: number, r: number): PlaceResult | null {
+    return this.previewAt(q, r, this.rot);
+  }
+
+  private previewAt(q: number, r: number, rot: number): PlaceResult | null {
     const def = this.current;
     if (!def) return null;
+    const edges = rotateEdges(def.edges, rot);
+    if (!this.board.check(q, r, edges).valid) return null;
     const board = this.board.clone();
-    const edges = rotateEdges(def.edges, this.rot);
-    if (!board.check(q, r, edges).valid) return null;
-    const res = board.place(q, r, def, this.rot);
+    const res = board.place(q, r, def, rot);
     if (this.rules.endOnSites && board.sites.length && board.sitesLeft() === 0) {
       const left = Math.max(0, this.stack + res.tilesGained - 1);
       const bonus = left * this.rules.leftoverPoints;
@@ -143,6 +147,7 @@ export class Game {
     // Uma jogada pode abrir mais de uma era; cada uma traz a sua escolha. Cartas já escolhidas
     // ou ainda na mesa não voltam.
     if (this.rules.blessings) for (let e = era + 1; e <= this.board.era; e++) this.offers.push(blessingOffer(this.seed, e, [...this.board.blessings, ...this.offers.flat()]));
+    if (this.rules.fixedStack) res.tilesGained = 0;
     if (!this.rules.infinite) this.stack += res.tilesGained - 1;
     // Exploradores: achou o último sítio, a partida acaba e cada peça que sobrou vale pontos.
     if (this.rules.endOnSites && this.board.sites.length && this.board.sitesLeft() === 0) {
@@ -187,6 +192,29 @@ export class Game {
       for (let rot = 0; rot < 6; rot++) if (this.board.check(q, r, rotateEdges(def.edges, rot)).valid) return true;
     }
     return false;
+  }
+
+  /**
+   * As `n` melhores casas para a peça atual ("Onde encaixa"), com o giro e os pontos reais da
+   * jogada (a mesma conta de `place`, sobre uma cópia do tabuleiro). Determinística: não usa
+   * sorteio, não mexe em nada e, para cada casa, fica com o melhor giro. Desempate estável:
+   * mais pontos, depois menor q, menor r e menor giro.
+   */
+  rankMoves(n: number): (Move & { points: number })[] {
+    const def = this.current;
+    if (!def || n <= 0) return [];
+    const out: (Move & { points: number })[] = [];
+    for (const k of this.board.frontier) {
+      const [q, r] = unkey(k);
+      let best: (Move & { points: number }) | null = null;
+      for (let rot = 0; rot < 6; rot++) {
+        const res = this.previewAt(q, r, rot);
+        if (res && (!best || res.points > best.points)) best = { q, r, rot, score: res.points, points: res.points };
+      }
+      if (best) out.push(best);
+    }
+    out.sort((a, b) => b.points - a.points || a.q - b.q || a.r - b.r);
+    return out.slice(0, n);
   }
 
   /**

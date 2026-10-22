@@ -6,12 +6,12 @@ import { Game } from '../src/core/game';
 import { DIRS, hkey, opposite, unkey, hexToWorld, worldToHex, hexDistance } from '../src/core/hex';
 import { T, isStrict, rotateEdges, type TileDef } from '../src/core/tiles';
 import { mulberry32 } from '../src/core/rng';
-import { MODES, type Mode } from '../src/core/modes';
+import { MODES, modeRules, type Mode } from '../src/core/modes';
 import { generateSites } from '../src/core/sites';
 import { SPECIAL_KINDS, type SpecialKind } from '../src/core/specials';
 import { THEMES } from '../src/themes/themes';
 
-const rulesFor = (t: { rules?: Partial<Rules> }, mode?: Mode): Rules => ({ ...DEFAULT_RULES, ...(mode?.daily ? {} : t.rules), ...mode?.rules });
+const rulesFor = (t: { rules?: Partial<Rules> }, mode: Mode | undefined, seed: number): Rules => ({ ...DEFAULT_RULES, ...(mode?.daily ? {} : t.rules), ...(mode ? modeRules(mode, seed) : {}) });
 
 // Recompensas dos sítios (cópia independente da tabela de src/core/sites.ts).
 const ORACLE_SITE: Record<string, { points: number; tiles: number }> = {
@@ -328,7 +328,7 @@ function oraclePayOne(b: Board, placed: Placed, terr: T, isNode: (p: Placed) => 
 function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: Policy = 'greedy', mode: Mode = MODES[0], specials: SpecialKind[] = []): GameLog {
   const prnd = mulberry32(seed ^ 0x5bd1e995);
   const theme = THEMES[themeIdx];
-  const rules = rulesFor(theme, mode);
+  const rules = rulesFor(theme, mode, seed);
   // Zen não acaba: a simulação para num teto de jogadas.
   const maxMoves = rules.infinite ? 70 : Infinity;
   let expectedEra = 0;
@@ -653,6 +653,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
 
     // --- exploradores: último sítio encerra e as peças que sobram viram pontos
     const allFound = rules.endOnSites && b.sites.length > 0 && b.sites.every((st) => st.found);
+    if (rules.fixedStack) gained = 0; // pilha fixa: nada devolve peças
     if (!rules.infinite) expectedStack += gained - 1;
     if (allFound) {
       const bonus = Math.max(0, expectedStack) * rules.leftoverPoints;
@@ -789,6 +790,13 @@ for (let g = 0; g < N_GAMES; g++) {
   inc('modo_' + mode.id);
   logs.push(lg);
 }
+// Partida rápida: a pilha de 30 nunca cresce, então colocadas + descartadas ≤ 30 em toda partida.
+{
+  const quick = logs.filter((l) => l.mode === 'rapida');
+  assert(quick.length > 0, 'nenhuma partida simulada no modo rápido');
+  for (const l of quick) assert(l.placed + l.discarded <= 30 && l.finalStack === 0, `rápida: ${l.placed} colocadas + ${l.discarded} descartes, pilha final ${l.finalStack}`);
+  console.log(`Partida rápida: ${quick.length} partidas, no máximo ${Math.max(...quick.map((l) => l.placed + l.discarded))} peças`);
+}
 console.log(`Simulação: ${N_GAMES} partidas em ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 
 // Replay completo e parcial
@@ -916,6 +924,17 @@ if (contBad) fail(`continuação pós-replay divergiu em ${contBad} partidas`);
       }
     }
   }
+  // Escala dos anéis (Exploradores usa 0,5): ainda são 10 sítios, mais perto, sem ficarem a menos de 3 um do outro.
+  for (let seed = 1; seed <= 400; seed++) {
+    const a = generateSites(seed, 10, 0.5), a1 = generateSites(seed, 10, 1);
+    total++;
+    if (a.length !== 10) bad++;
+    if (JSON.stringify(a1) !== JSON.stringify(generateSites(seed, 10))) bad++;
+    for (let i = 0; i < a.length; i++) {
+      if (dist(a[i], { q: 0, r: 0 }) > 8) bad++;
+      for (let j = i + 1; j < a.length; j++) if (dist(a[i], a[j]) < 3) bad++;
+    }
+  }
   // A semente dos sítios não mexe na sequência de peças: mesma semente, mesmas peças com e sem sítios.
   for (let seed = 1; seed <= 50; seed++) {
     const g1 = new Game(seed, { ...DEFAULT_RULES, sites: 0 });
@@ -947,7 +966,7 @@ if (contBad) fail(`continuação pós-replay divergiu em ${contBad} partidas`);
     if (mode.id === 'zen') continue;
     for (let seed = 1; seed <= 8; seed++) {
       const theme = THEMES[seed % THEMES.length];
-      const game = new Game(seed + mode.id.length * 100, rulesFor(theme, mode), seed % 2 ? ['station', 'lighthouse'] : []);
+      const game = new Game(seed + mode.id.length * 100, rulesFor(theme, mode, seed + mode.id.length * 100), seed % 2 ? ['station', 'lighthouse'] : []);
       const rand = mulberry32((seed ^ 0x5eed) >>> 0);
       let guard = 0;
       while (game.current && guard++ < 60) {

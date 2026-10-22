@@ -98,6 +98,8 @@ export const U = {
   seam: uniform(1),
   /** Força dos lampiões (0 de dia): poças de luz na cor das janelas em volta das casas. */
   lamps: uniform(0),
+  /** Halo largo e morno em volta das casas acesas (só o Ultra, à noite): faz as vezes da luz que o SSGI espalhava. */
+  halo: uniform(0),
   /** Estação da partida: 0 primavera, 1 verão, 2 outono, 3 inverno. */
   season: uniform(1),
   /** 1 no inverno: neve nas faces viradas para cima e gelo na beira da água. */
@@ -228,7 +230,10 @@ const extraLight = Fn(() => {
   const pool = texture(groundMap.texture, uv).level(float(0.5)).a;
   const flicker = texture(noiseTex, p.xz.mul(0.5).add(vec2(U.time.mul(0.37), U.time.mul(-0.29)))).g.mul(0.5).add(0.75);
   const lamp = U.glow.mul(U.lamps.mul(pool).mul(flicker).mul(smoothstep(0.5, 0, p.y)).mul(normalWorld.y.mul(0.7).add(0.3)));
-  return bounce.add(lamp).mul(above);
+  // Halo: a mesma luz dos lampiões lida num nível grosso do mapa, então a poça vira uma
+  // mancha larga que alcança o chão, a água e as paredes ao redor (sem custo de passe).
+  const halo = U.glow.mul(U.halo.mul(texture(groundMap.texture, uv).level(float(3.5)).a).mul(smoothstep(0.9, 0, p.y)).mul(normalWorld.y.mul(0.5).add(0.5)));
+  return bounce.add(lamp).add(halo).mul(above);
 });
 
 class SplitLighting extends THREE.PhysicalLightingModel {

@@ -46,6 +46,22 @@ const ZENITH_TINT = new THREE.Color(0.86, 0.93, 1.08);
 // Ultra e Cinema passam de 1: mais árvores, capim e plantações de perto (alvo: GPUs acima da atual).
 const DETAIL: Record<Quality, number> = { cinema: 1.6, ultra: 1.35, high: 1, medium: 0.65, low: 0.4 };
 /** Mapa de sombra por nível. No Ultra e no Cinema, cada uma das cascatas tem esse tamanho. */
+// Conta os draw calls dos passes de sombra (um por cascata redesenhada): é o que mostra, em
+// `stats().shadowDraws`, que num quadro parado o mapa guardado não é refeito.
+const shadowCount = { draws: 0, passes: 0, patched: false };
+function countShadowPasses(renderer: THREE.WebGPURenderer) {
+  if (shadowCount.patched) return;
+  shadowCount.patched = true;
+  const proto = THREE.ShadowNode.prototype as unknown as { renderShadow(frame: unknown): void };
+  const orig = proto.renderShadow;
+  proto.renderShadow = function (this: unknown, frame: unknown) {
+    const before = renderer.info.render.drawCalls;
+    orig.call(this, frame);
+    shadowCount.draws += renderer.info.render.drawCalls - before;
+    shadowCount.passes++;
+  };
+}
+
 const SHADOW_MAP: Record<Quality, number> = { cinema: 4096, ultra: 4096, high: 2048, medium: 1024, low: 1024 };
 /**
  * Cascatas da sombra do sol (0 = sombra única) e onde cada uma termina, em frações de maxFar.
@@ -72,6 +88,16 @@ const SUPERSAMPLE: Record<Quality, number> = { cinema: 1.5, ultra: 1, high: 1, m
 const MAX_SIDE = 8192;
 /** Quanto da luz que chega ao chão ele devolve para paredes e copas (a cor vem do mapa do chão). */
 const BOUNCE = 0.7;
+/** O Ultra não tem o SSGI (ver post.ts): o mapa do chão devolve um pouco mais de luz para compensar. */
+const BOUNCE_ULTRA = 1.3;
+/** À noite o Ultra sobe a luz rebatida até aqui (de dia fica em BOUNCE_ULTRA, para o dia não mudar). */
+const BOUNCE_ULTRA_NIGHT = 2.2;
+/** E as poças dos lampiões: o SSGI espalhava também a luz das janelas acesas. */
+const LAMPS_ULTRA = 9;
+/** Halo largo e morno das casas acesas, só no Ultra e só à noite. */
+const HALO_ULTRA = 2;
+/** Ambiente morno que o Ultra soma à noite (na luz rebatida do chão) no lugar do que o SSGI espalhava. */
+const WARM_ULTRA = new THREE.Color(0.45, 0.3, 0.15);
 /** Força das poças dos lampiões com a noite fechada. */
 const LAMPS = 5;
 
@@ -327,8 +353,20 @@ interface Sky {
   mist: number;
 }
 
+/** Clima passageiro (o jogador toca no céu ou no botão): chuva, neve ou sol limpo. */
+export type PassingWeather = 'rain' | 'snow' | 'sun';
+/** Quanto dura o clima tocável (segundos do mundo) e quanto leva para entrar e sair. */
+export const WEATHER_SECONDS = 30;
+const WEATHER_FADE = 2.5;
+const WX: Record<PassingWeather, { kind: 'rain' | 'snow' | 'pollen'; colors: [string, string]; density: number; size: number; opacity: number; clouds: number; tint: string; tintK: number; sunI: number; hemiI: number; mist: number }> = {
+  rain: { kind: 'rain', colors: ['#d8e4f2', '#b4c8de'], density: 1, size: 1, opacity: 0.8, clouds: 0.36, tint: '#9fb0c6', tintK: 0.55, sunI: 0.4, hemiI: 0.9, mist: 0.35 },
+  snow: { kind: 'snow', colors: ['#ffffff', '#e6eefa'], density: 1.6, size: 1.5, opacity: 1, clouds: 0.3, tint: '#c4d2e4', tintK: 0.4, sunI: 0.6, hemiI: 0.95, mist: 0.3 },
+  sun: { kind: 'pollen', colors: ['#fff3b8', '#ffd47a'], density: 1.5, size: 2.4, opacity: 1, clouds: 0, tint: '#ffe0a0', tintK: 0.28, sunI: 1.2, hemiI: 1.04, mist: -1 },
+};
+
 const tmpSnap = new THREE.Vector3();
 const tmpGrade = new THREE.Color();
+const tmpColor2 = new THREE.Color();
 const axX = new THREE.Vector3();
 const axY = new THREE.Vector3();
 const axZ = new THREE.Vector3();
@@ -478,6 +516,11 @@ export class World {
   private shadowAt = new THREE.Vector2(1e9, 0);
   private shadowDist = 0;
   private shadowClock = 0.25;
+  /** Sombra das cascatas guardada: direção do sol e pose da câmera do último redesenho. */
+  private csmSun = new THREE.Vector3();
+  private csmCamPos = new THREE.Vector3(1e9, 0, 0);
+  private csmCamQuat = new THREE.Quaternion();
+  private csmGated = false;
   /** Sombras em cascata do sol (Ultra e Cinema): nítidas perto da câmera, cobrindo até a névoa. */
   private csm: CSMShadowNode | null = null;
   /**
@@ -517,6 +560,14 @@ export class World {
   private drops: Drop[] = [];
   private sprites = new Sprites();
   private weather = new Weather();
+  /** Chuva, neve ou pólen do clima tocável: uma segunda camada, escondida quando não há clima. */
+  private precip = new Weather();
+  private wx: { kind: PassingWeather; age: number } | null = null;
+  /** Tipo cuja luz e partículas estão no ar (fica até a saída terminar) e a força atual, de 0 a 1. */
+  private wxKind: PassingWeather | null = null;
+  private wxAmt = 0;
+  private cloudsBase = 0.16;
+  private wxSkyBuf: Sky | null = null;
   private fireflies = new Fireflies();
   private smokeClock = 0;
   /** Velocidade suavizada do fantasma (inclina na direção do movimento). */
@@ -578,6 +629,7 @@ export class World {
     this.life.onTrade = (x, z) => this.burst(x, z, 'sparkle', 12, 0.12);
 
     this.sun.castShadow = true;
+    countShadowPasses(this.renderer);
     this.sun.shadow.autoUpdate = false;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.0006;
@@ -646,7 +698,8 @@ export class World {
       this.scene.add(m);
     }
 
-    this.scene.add(this.sprites.group, this.weather.mesh, this.fireflies.mesh);
+    this.precip.mesh.visible = false;
+    this.scene.add(this.sprites.group, this.weather.mesh, this.precip.mesh, this.fireflies.mesh);
     this.cloudScene.add(this.clouds);
     (this.cloudScene as THREE.Scene & { fogNode?: THREE.Node }).fogNode = fogNode;
   }
@@ -671,7 +724,8 @@ export class World {
     this.theme = theme;
     this.lib.applyTheme(theme);
     this.waterColor.set(theme.water);
-    U.clouds.value = theme.period === 'futuro' ? 0.08 : 0.16;
+    this.cloudsBase = theme.period === 'futuro' ? 0.08 : 0.16;
+    U.clouds.value = this.cloudsBase;
     this.setSurround(theme);
     this.skyTarget = skyFor(theme, this.timeOfDay);
     this.sky = skyFor(theme, this.timeOfDay);
@@ -708,8 +762,71 @@ export class World {
     U.snow.value = s === 3 ? 1 : 0;
   }
 
+  /** Tipo do clima tocável em curso (ou null). */
+  get passingWeather(): PassingWeather | null {
+    return this.wx?.kind ?? null;
+  }
+
+  /** Começa o clima tocável (30 s, com entrada e saída suaves); `null` encerra o que estiver passando. */
+  setWeather(kind: PassingWeather | null, age = 0) {
+    if (!kind) {
+      if (this.wx) this.wx.age = Math.max(this.wx.age, WEATHER_SECONDS - WEATHER_FADE);
+      return;
+    }
+    const w = WX[kind];
+    this.wx = { kind, age };
+    this.wxKind = kind;
+    // Com `age` (capturas por software, onde o quadro é lento), o clima já entra com essa idade.
+    if (age > 0) this.wxAmt = Math.min(1, age / WEATHER_FADE);
+    this.precip.setKind(w.kind, w.colors, w.density, w.size);
+    this.precip.setDetail(this.quality === 'low' ? 0.8 : WEATHER[this.quality]);
+  }
+
+  /** Passo do clima tocável pelo tempo do mundo (`dt` já multiplicado por `timeScale`). */
+  private stepWeather(dt: number) {
+    const w = this.wx;
+    if (!w && this.wxAmt === 0) return;
+    if (w) w.age += dt;
+    const target = w && w.age < WEATHER_SECONDS - WEATHER_FADE ? 1 : 0;
+    const d = dt / WEATHER_FADE;
+    this.wxAmt = Math.max(0, Math.min(1, this.wxAmt + Math.max(-d, Math.min(d, target - this.wxAmt))));
+    const e = this.wxAmt * this.wxAmt * (3 - 2 * this.wxAmt);
+    const k = this.wxKind ? WX[this.wxKind] : null;
+    this.precip.setAmount(e * (k?.opacity ?? 0));
+    this.precip.mesh.visible = e > 1e-3;
+    U.clouds.value = THREE.MathUtils.lerp(this.cloudsBase, k?.clouds ?? this.cloudsBase, e);
+    if (this.wxAmt === 0 && target === 0) {
+      this.wx = null;
+      this.wxKind = null;
+      U.clouds.value = this.cloudsBase;
+    }
+  }
+
+  /** O céu do tema com a luz do clima tocável por cima (mais fria e fraca na chuva, quente e limpa no sol). */
+  private weatherSky(): Sky {
+    const s = this.sky, k = this.wxKind ? WX[this.wxKind] : null;
+    const e = this.wxAmt * this.wxAmt * (3 - 2 * this.wxAmt);
+    if (!k || e < 1e-3) return s;
+    const o = (this.wxSkyBuf ??= { ...s, bg: s.bg.clone(), fill: s.fill.clone(), line: s.line.clone(), sun: s.sun.clone(), sunDir: s.sunDir.clone(), hemiSky: s.hemiSky.clone(), hemiGround: s.hemiGround.clone() });
+    const t = tmpColor2.set(k.tint);
+    const f = e * k.tintK;
+    o.bg.copy(s.bg).lerp(t, f * 0.7);
+    o.fill.copy(s.fill).lerp(t, f * 0.5);
+    o.line.copy(s.line).lerp(t, f * 0.4);
+    o.sun.copy(s.sun).lerp(t, f);
+    o.hemiSky.copy(s.hemiSky).lerp(t, f);
+    o.hemiGround.copy(s.hemiGround).lerp(t, f * 0.4);
+    o.sunDir.copy(s.sunDir);
+    o.sunI = s.sunI * THREE.MathUtils.lerp(1, k.sunI, e);
+    o.hemiI = s.hemiI * THREE.MathUtils.lerp(1, k.hemiI, e);
+    o.night = s.night;
+    o.haze = s.haze;
+    o.mist = k.mist < 0 ? s.mist * (1 - e) : Math.max(s.mist, k.mist * e);
+    return o;
+  }
+
   private applySky() {
-    const s = this.sky;
+    const s = this.weatherSky();
     if (!(this.scene.background instanceof THREE.Color)) this.scene.background = s.bg.clone();
     else this.scene.background.copy(s.bg);
     A.bg.value.copy(s.bg);
@@ -724,8 +841,12 @@ export class World {
     A.mist.value = s.mist;
     // Luz que o chão recebe (o sol pela altura dele e o céu), devolvida na cor do mapa do chão.
     const up = Math.max(0, s.sunDir.y / s.sunDir.length());
-    U.bounce.value.copy(s.sun).multiplyScalar(s.sunI * up).add(tmpColor.copy(s.hemiSky).multiplyScalar(s.hemiI)).multiplyScalar(BOUNCE);
-    U.lamps.value = THREE.MathUtils.smoothstep(s.night, 0.25, 0.9) * LAMPS;
+    const nightK = THREE.MathUtils.smoothstep(s.night, 0.25, 0.9);
+    const bounceK = this.quality === 'ultra' ? BOUNCE_ULTRA + (BOUNCE_ULTRA_NIGHT - BOUNCE_ULTRA) * nightK : BOUNCE;
+    U.bounce.value.copy(s.sun).multiplyScalar(s.sunI * up).add(tmpColor.copy(s.hemiSky).multiplyScalar(s.hemiI)).multiplyScalar(bounceK);
+    U.lamps.value = nightK * (this.quality === 'ultra' ? LAMPS_ULTRA : LAMPS);
+    U.halo.value = this.quality === 'ultra' ? nightK * HALO_ULTRA : 0;
+    if (this.quality === 'ultra') U.bounce.value.add(tmpColor.copy(WARM_ULTRA).multiplyScalar(nightK));
     // Nuvens: o topo ao sol um pouco mais claro que o fundo do tema, a base na cor do chão.
     CL.sun.value.copy(s.sun).multiplyScalar(s.sunI * 0.42);
     CL.sky.value.copy(s.hemiSky).multiplyScalar(s.hemiI * 0.35);
@@ -779,6 +900,8 @@ export class World {
     const detailChanged = DETAIL[q] !== DETAIL[this.quality];
     const postChanged = q !== this.quality || !this.post;
     this.quality = q;
+    // O reforço da luz rebatida do Ultra vale já; no construtor o céu ainda não existe.
+    if (this.sky) this.applySky();
     const shadows = q !== 'low';
     if (this.renderer.shadowMap.enabled !== shadows) {
       this.renderer.shadowMap.enabled = shadows;
@@ -794,9 +917,11 @@ export class World {
     }
     this.setCascades(CASCADES[q]);
     this.weather.setDetail(WEATHER[q]);
+    this.precip.setDetail(q === 'low' ? 0.8 : WEATHER[q]);
     if (postChanged) {
       this.post?.dispose();
-      const rays = CASCADES[q].length > 0 && (!this.fx || this.fx.includes('rays'));
+      // Raios de luz só no Cinema (o Ultra os trocou por barateza); `?fx=` decide quando presente.
+      const rays = CASCADES[q].length > 0 && (this.fx ? this.fx.includes('rays') : q === 'cinema');
       this.setRayLight(rays);
       this.post = q === 'low' ? null : buildPost(this.renderer, this.scene, this.camera, q, this.fx, rays ? this.rayLight : undefined, this.cloudScene);
       CL.temporal.value = this.post?.temporal ? 1 : 0;
@@ -829,6 +954,7 @@ export class World {
       this.csm.dispose();
       this.csm = null;
     }
+    this.csmGated = false;
     if (splits.length) {
       // A cascata nasce como cópia da sombra do sol (filtro, viés), então vem depois do mapSize.
       this.sun.shadow.camera.near = 1;
@@ -1638,13 +1764,36 @@ export class World {
       .sort((a, b) => b.tris - a.tris);
   }
 
+  /**
+   * Algo se move por conta própria (peça caindo, câmera chegando, fantasma deslizando, troca de
+   * hora, avanço de era)? Enquanto sim, a economia de quadros (framePacing.ts) desenha a taxa cheia.
+   * As animações contínuas do mundo (vento, água, bichos) não contam: andam bem em menos quadros.
+   */
+  isSettling() {
+    return this.settlingWhy() !== '';
+  }
+
+  /** O que está se movendo (vazio = parado); serve ao `?debug` e a quem investiga por que a economia não entra. */
+  settlingWhy(): string {
+    if (this.drops.length) return 'peça caindo';
+    if (this.centerAnim >= 0) return 'era';
+    if (U.eraWave.value.w > 0 && this.time - U.eraWave.value.z < 8) return 'onda de era';
+    const r = this.rig;
+    if (r.target.distanceToSquared(r.goal) > 1e-6 || Math.abs(r.goalYaw - r.yaw) > 1e-3 || Math.abs(r.goalDist - r.dist) > 1e-3 || Math.abs(r.goalTilt - r.tilt) > 1e-3) return 'câmera';
+    const g = this.ghost?.group;
+    if (g?.visible && (Math.hypot(this.ghostTarget.x - g.position.x, this.ghostTarget.z - g.position.z) > 2e-3 || Math.abs(this.ghostVel.x) + Math.abs(this.ghostVel.y) > 0.02)) return 'fantasma';
+    const a = this.sky, b = this.skyTarget;
+    if (a && b && (Math.abs(a.night - b.night) > 1e-3 || Math.abs(a.sunI - b.sunI) > 1e-3 || a.sunDir.distanceToSquared(b.sunDir) > 1e-6 || Math.abs(a.haze - b.haze) > 1e-3)) return 'hora';
+    return Math.abs(this.voidU.radius.value - this.voidGoal) > 1e-2 ? 'vazio' : '';
+  }
+
   stats() {
     const info = this.renderer.info;
     let tris = 0;
     for (const c of this.chunks.values()) tris += c.triangles();
     let inst = 0;
     for (const p of this.pools.values()) inst += p.count;
-    return { calls: info.render.drawCalls, triangles: info.render.triangles, chunks: this.chunks.size, pools: this.pools.size, instances: inst, groundTris: tris, life: this.life.counts(), backend: this.backend };
+    return { calls: info.render.drawCalls, triangles: info.render.triangles, chunks: this.chunks.size, pools: this.pools.size, instances: inst, groundTris: tris, life: this.life.counts(), backend: this.backend, shadowDraws: shadowCount.draws, shadowPasses: shadowCount.passes };
   }
 
   setPreview(def: TileDef | null, angle: number, stack: number) {
@@ -1704,6 +1853,7 @@ export class World {
   }
 
   tick(realDt: number) {
+    shadowCount.draws = 0;
     this.renderer.info.reset();
     // A câmera, o fantasma e a troca de hora seguem o tempo real; o resto, o tempo do mundo.
     const dt = realDt * this.timeScale;
@@ -1715,6 +1865,7 @@ export class World {
     U.wind.value.set(Math.cos(wa), Math.sin(wa));
     U.gust.value = this.theme?.atmos?.wind ?? 1;
     this.applySeason();
+    this.stepWeather(dt);
     this.stepSky(realDt);
     this.voidU.radius.value += (this.voidGoal - this.voidU.radius.value) * Math.min(1, realDt / 1.2);
     this.rig.snap = this.reducedMotion;
@@ -1773,15 +1924,44 @@ export class World {
     const sd = this.sky.sunDir;
     const ext = Math.min(28, this.rig.dist * 0.95 + 2);
     const tx = this.rig.target.x, tz = this.rig.target.z;
-    const shadowDue = !!this.csm
-      || this.shadowClock >= 0.25
-      || Math.hypot(tx - this.shadowAt.x, tz - this.shadowAt.y) > 0.35
-      || Math.abs(this.rig.dist - this.shadowDist) > 0.4;
+    // Com cascatas (Ultra e Cinema) vale a mesma regra, com limiares mais finos: o mapa é de 4096
+    // sobre um recorte pequeno. O sol se mover mais de ~0,4°, a câmera andar ou girar, uma peça
+    // assentar (shadowClock forçado) ou passarem 0,25 s (árvores ao vento, barcos, moinhos) refaz.
+    const cam = this.camera;
+    let csmDue = false;
+    if (this.csm) {
+      const lit = this.csm.lights;
+      if (lit.length && !this.csmGated) {
+        // As cascatas nascem como cópia da sombra do sol (autoUpdate ligado) e desenham no
+        // primeiro quadro; depois disso só quando pedimos.
+        this.csmGated = true;
+        csmDue = true;
+      }
+      if (this.csmGated) {
+        // O mapa próprio do sol não é lido com cascatas: não há motivo para redesenhá-lo.
+        this.sun.shadow.autoUpdate = false;
+        for (const l of lit) l.shadow!.autoUpdate = false;
+      }
+      csmDue ||= this.shadowClock >= 0.25
+        || sd.dot(this.csmSun) < 0.99998
+        || cam.position.distanceToSquared(this.csmCamPos) > 0.0225
+        || cam.quaternion.angleTo(this.csmCamQuat) > 0.006;
+    }
+    const shadowDue = this.csm ? csmDue
+      : this.shadowClock >= 0.25
+        || Math.hypot(tx - this.shadowAt.x, tz - this.shadowAt.y) > 0.35
+        || Math.abs(this.rig.dist - this.shadowDist) > 0.4;
     if (shadowDue) {
       this.shadowAt.set(tx, tz);
       this.shadowDist = this.rig.dist;
       this.shadowClock = 0;
       if (!this.csm) this.sun.shadow.needsUpdate = true;
+      else {
+        for (const l of this.csm.lights) l.shadow!.needsUpdate = true;
+        this.csmSun.copy(sd);
+        this.csmCamPos.copy(cam.position);
+        this.csmCamQuat.copy(cam.quaternion);
+      }
       // Sem cascatas, o centro da sombra anda de texel em texel no plano da luz: as bordas não
       // tremem quando a câmera desliza (as cascatas do Ultra já se prendem à grade sozinhas).
       const t = this.csm ? this.rig.target : snapToTexel(this.rig.target, sd, (2 * ext) / this.sun.shadow.mapSize.x, tmpSnap);
@@ -1796,6 +1976,9 @@ export class World {
         }
       }
       if (this.rayLight.parent) {
+        // O mapa dos raios também fica guardado: o redesenho acompanha o do sol.
+        this.rayLight.shadow.autoUpdate = false;
+        this.rayLight.shadow.needsUpdate = true;
         this.rayLight.target.position.copy(t);
         this.rayLight.position.copy(this.sun.position);
         const rc = this.rayLight.shadow.camera;
@@ -1807,15 +1990,15 @@ export class World {
           rc.updateProjectionMatrix();
         }
       }
-      const cam = this.sun.shadow.camera;
-      if (!this.csm && cam.right !== ext) {
-        cam.left = -ext;
-        cam.right = ext;
-        cam.top = ext;
-        cam.bottom = -ext;
-        cam.near = 1;
-        cam.far = 60;
-        cam.updateProjectionMatrix();
+      const scam = this.sun.shadow.camera;
+      if (!this.csm && scam.right !== ext) {
+        scam.left = -ext;
+        scam.right = ext;
+        scam.top = ext;
+        scam.bottom = -ext;
+        scam.near = 1;
+        scam.far = 60;
+        scam.updateProjectionMatrix();
       }
     }
     if (this.rayLight.parent) {

@@ -48,7 +48,7 @@ O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Re
 
 **Maravilha:** na última era, a próxima peça com 2 ou mais bordas de vila vira o canteiro da maravilha do tema (Castelo de Conto no Vale, Pilone de Karnak no Egito, Cúpula de Brunelleschi na Toscana, Terraços de Moray nos Andes etc.). Cada peça colocada depois avança uma etapa da obra, que sobe dentro do andaime; com as 6 etapas ela fica pronta e rende +300 pontos e +6 peças.
 
-**Sua casa:** no topo do menu de temas, escolha uma das 8 cores da casa (ou a do tema) e monte o brasão (metal, peça e móvel). A cor aparece no placar, nos estandartes das missões, nas bandeiras do Centro, dos marcos e dos barcos e nas camisas de metade dos aldeões.
+**Sua casa:** no topo do menu de temas, escolha uma das 8 cores da casa (ou a do tema) e monte o brasão (metal, peça e móvel). A cor aparece no placar, nos estandartes das missões (pequenos, só aparecem com a câmera perto ou com a lista de missões aberta), nas bandeiras do Centro, dos marcos e dos barcos e nas camisas de metade dos aldeões.
 
 **Moldura do tema:** os painéis mudam de material com o lugar (papiro no Egito, tábuas na Terra dos Vikings, seda na Dinastia Song, washi no Japão Edo, metal em Marte, cartaz no Oeste). O emblema ao lado do nome diz o tema antes do texto.
 
@@ -58,7 +58,7 @@ O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Re
 
 **Peças especiais:** liberadas jogando, valem para as partidas seguintes e entram duas vezes em cada uma (menos no Desafio do dia, que é igual para todos). A **Estação** (8 missões cumpridas no total) vale +12 por peça com trilho a até 2 casas e +2 peças; o **Moinho d'água** (30 interações) vale +20 por vizinha com plantação e +1 peça; o **Farol** (6 sítios descobertos) vale +10 por peça com rio a até 2 casas e mostra as próximas peças por 5 jogadas. O fim da partida mostra quanto falta para a próxima.
 
-**Almanaque:** a aba Almanaque da ajuda (`H`, ou o botão no fim da partida) soma tudo o que já se fez entre as partidas: peças, missões, interações, sítios por tipo, peças especiais (liberadas e quanto falta para as outras) e, por tema, partidas, maior era, maravilha e recorde.
+**Almanaque:** a aba Almanaque da ajuda (`H`, a tecla `I`, ou o botão no fim da partida) soma tudo o que já se fez entre as partidas: peças, missões, interações, sítios por tipo, peças especiais (liberadas e quanto falta para as outras) e, por tema, partidas, maior era, maravilha e recorde.
 
 **Bônus de cada tema:** cada época tem uma regra curta, como a Dádiva do Nilo (borda de rio encaixada vale +5) no Egito ou os Moinhos de pôlder (+5 por moinho) na Holanda. Aparece no menu de temas.
 
@@ -70,9 +70,10 @@ O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Re
 |---|---|
 | Clássico | missões, eras e sítios; acaba quando a pilha esvazia |
 | Zen | peças sem fim; pontos e eras por gosto |
-| Desafio do dia | semente do dia e regras padrão, iguais para todo mundo; sem desfazer |
-| Exploradores | 10 sítios e 60 peças; achar o último encerra, e cada peça que sobrou vale 20 pontos |
-| Estrada Real | mais trilhos; mercados (estação, trilho de uma borda ou vila no trilho) e portos (vila no rio) da mesma rede rendem pela distância, uma vez por par. A 2 casas são 22 pontos, a 4 são 54, a 6 são 96 e uma peça, e assim por diante. As etiquetas marcam mercados e portos, e a prévia mostra o valor antes de colocar. Quatro postos aparecem no mapa |
+| Desafio do dia | semente do dia e **regra do dia**, iguais para todo mundo; sem desfazer. A regra (uma de oito, como interações em dobro, rios valorizados ou pilha curta) sai da data local AAAA-MM-DD e aparece ao começar e no topo da tela. No fim, **Compartilhar** copia `Retalhos 14/10 · 1.240 · 🌲🌾🏘` (os três terrenos com mais pontos de encaixe) e um link `?mode=diario&seed=AAAAMMDD` que reproduz o mesmo desafio |
+| Exploradores | 10 sítios (a metade da distância do Clássico, no máximo 8 casas do Centro) e 60 peças; achar o último encerra, e cada peça que sobrou vale 20 pontos |
+| Estrada Real (em teste, em "Mais modos") | mais trilhos; mercados (estação, trilho de uma borda ou vila no trilho) e portos (vila no rio) da mesma rede rendem pela distância, uma vez por par. A 2 casas são 22 pontos, a 4 são 54, a 6 são 96 e uma peça, e assim por diante. As etiquetas marcam mercados e portos, e a prévia mostra o valor antes de colocar. Quatro postos aparecem no mapa |
+| Partida rápida | 30 peças e nada mais: sem missões, sítios, maravilha nem cartas, e nenhuma jogada devolve peças. Uma partida inteira em 10 a 12 minutos, com recorde próprio |
 
 **Interações:** algumas bordas diferentes também "conversam". Quando se encostam, rendem +5 e erguem uma construção na borda. A prévia acende em dourado antes de você colocar a peça.
 
@@ -94,20 +95,33 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 | Girar câmera | `Q` / `E`, ou arrastar com o botão direito | torcer dois dedos |
 | Inclinar câmera (do horizonte à vista de mapa) | arrastar com o botão direito para cima ou para baixo, `PgUp` / `PgDn`; `Home` volta ao ângulo padrão | dois dedos para cima ou para baixo |
 | Amanhecer, dia, hora dourada, entardecer e noite | `L` ou botão ☀ | botão ☀ |
+| Clima passageiro: chuva, neve e sol por 30 s, um depois do outro | botão Clima, ou clique no céu (fora do chão) | botão Clima (no ⋯), ou toque no céu |
 | Som: música e efeitos, só efeitos, mudo | botão Som (cada clique alterna) | botão ♫ |
-| Minimapa | `M` abre ou fecha; clique leva a câmera | o mesmo; começa fechado |
+| Onde encaixa: as 3 melhores casas da peça, com os pontos e o giro | `O` ou botão "Onde encaixa" (a ajuda já usa `H` e `?`); some ao girar ou colocar | botão no menu ⋯ |
+| Minimapa | `M` abre ou fecha; clique leva a câmera | o mesmo; começa fechado (também no computador, com a interface mínima) |
+| Almanaque | `I`, ou a aba Almanaque da ajuda | menu ⋯ |
+| Missões | cartão "N missões ›" no canto: abre a lista; clicar numa missão leva a câmera até ela | o mesmo |
+| Interface mínima (ligada por padrão) | Aa, "Interface mínima": esconde o brasão do placar, começa com o minimapa fechado e apaga a faixa de dicas depois da 1ª jogada | o mesmo |
 | Ajuda, nova partida, estatísticas | `H`, `N`, `F` | botões no topo |
 | Cor da casa e brasão | menu de temas, seção "Sua casa" | o mesmo |
 | Foto sem a interface | `P` (Espaço pausa, `L` muda a hora, Enter salva, Esc sai) | botão Câmera |
 | Gravar vídeo (até 2 minutos) | `V` começa e para | botão Câmera |
 
+**Clima tocável:** o botão Clima (☂, ❄, ☀) ou um clique no céu, acima do horizonte do tabuleiro, faz passar chuva, neve ou sol por 30 segundos, sempre o próximo da fila. A chuva e a neve fecham o céu e esfriam a luz; o sol limpa as nuvens e esquenta tudo. Entra e sai devagar, com som sintetizado (chiado de chuva, vento suave, acorde curto). É só enfeite: não entra no save e funciona em todos os temas.
+
 **Som de ambiente:** vem da paisagem em volta do foco da câmera: vento nos campos abertos (mais forte de longe), água correndo perto dos rios, pássaros nas florestas de dia, grilos e coruja à noite, sinos da vila e apito de trem. Colocar a peça também soa pelo terreno (respingo, folhas, trilho), e sítios, peças especiais e o desfazer têm som próprio. Fica ligado em "só efeitos".
+
+## Instalar e guardar o progresso
+
+- **Instalar:** na versão publicada (https), o Chrome e o Edge mostram "Instalar" na barra de endereço, e no celular o menu oferece "Adicionar à tela inicial". Depois da primeira visita o jogo abre também sem internet (um service worker guarda a página; com rede, ele sempre busca a versão mais nova primeiro). O build gera `manifest.webmanifest`, os ícones e `sw.js` ao lado do `index.html`, então publique a pasta `dist/` inteira. Aberto de um arquivo avulso ou em outra página, o jogo funciona igual, só sem a instalação.
+- **Não perder nada:** depois da primeira partida acabada, o jogo pede ao navegador armazenamento persistente (para o progresso não ser apagado quando faltar espaço).
+- **Exportar e importar:** no Almanaque (ajuda, aba "Almanaque"), "Exportar progresso" baixa `retalhos-AAAA-MM-DD.json` com a partida salva, o progresso e as preferências; "Importar progresso" lê esse arquivo em outro aparelho ou navegador, confere tudo campo a campo, pede confirmação e recarrega. Arquivo com qualquer dado inválido é recusado sem gravar nada.
 
 ## Foto e vídeo
 
 O botão **Câmera** abre três opções:
 
-- **Foto** (`P`): a interface some, o mundo pode ficar parado ou continuar animado, e a imagem sai em PNG no tamanho da tela, em 4K ou em 8K.
+- **Foto** (`P`): a interface some, o mundo pode ficar parado ou continuar animado, e a imagem sai em PNG no tamanho da tela, em 4K ou em 8K. A foto sempre sai em qualidade Cinema, mesmo com o jogo na Alta: o jogo liga o Cinema só para tirar, desenha 1,5× acima do tamanho final, reduz e volta ao nível anterior (a troca leva alguns segundos).
 - **Gravar vídeo** (`V`): grava até 2 minutos do que você fizer. Ao parar, você escolhe o tamanho (1080p, 1440p ou 4K), a qualidade (Cinema, Ultra ou Alta) e a câmera: como foi gravada, suave ou cinematográfica.
 - **Filme da partida**: a partida inteira refeita peça por peça, com a câmera se afastando conforme o mapa cresce, na hora do dia que você escolher.
 
@@ -115,12 +129,12 @@ Durante a gravação, o jogo anota só a câmera e as jogadas, então não fica 
 
 ## Qualidade gráfica
 
-O botão de qualidade abre a lista: **Auto**, **Cinema**, **Ultra**, **Alta**, **Média** e **Baixa**, cada uma com uma linha dizendo para que placa serve.
+O botão de qualidade abre a lista: **Auto**, **Ultra**, **Alta**, **Média** e **Baixa**, cada uma com uma linha dizendo para que placa serve.
 
-- **Auto** escolhe o começo pelo nome da placa de vídeo (por exemplo, Alta numa RX 580 e Ultra numa RTX 3060). Se o quadro ficar lento, primeiro baixa a resolução interna, em degraus até 60%, e só depois desce de nível. O nome da placa e o nível escolhido aparecem no título do botão.
-- **Celular e tablet:** com a tela parada (sem toque e sem peça caindo), o jogo desenha a 30 quadros e, depois de 15 s, a 20, para poupar bateria; o mundo continua animado. No computador nada muda. No toque, o topo fica com o tema, o desfazer e o menu ⋯, e as missões cabem num botão que abre a lista. Torcer dois dedos gira a câmera. O botão Aa (dentro do ⋯) muda o tamanho do texto, liga cores que se separam para quem não distingue verde de vermelho, e o "menos movimento", que também para a onda dourada, os voos da câmera e o quique da peça. Uma vibração curta ao encaixar só acontece nos navegadores que aceitam.
-- **Cinema** é para placas de topo e para fotos e vídeos: desenha 1,5× acima da tela, com mais amostras de luz e de reflexo, sombras mais finas e mais vegetação. O Auto nunca escolhe o Cinema.
-- **Ultra** e **Alta** usam o mesmo grão de filme e a mesma aberração de lente do Cinema. O que não desce de nível é o que pesa: no Ultra ficam a luz indireta, o reflexo na água, os raios de sol, as três cascatas de sombra e a vegetação extra; na Alta ficam a oclusão em meia resolução, o bloom, o desfoque e uma sombra só.
+- **Auto** escolhe o começo pelo nome da placa de vídeo (por exemplo, Alta numa RX 580 e Ultra numa RTX 3060; gráficos integrados Intel e Ryzen começam na Média, e uma placa desconhecida no computador começa na Alta, enquanto as telas de toque começam na Média). Se o quadro ficar lento, primeiro baixa a resolução interna, em degraus até 60%, e só depois desce de nível. O nome da placa e o nível escolhido aparecem no título do botão.
+- **Celular e tablet:** com a tela parada (sem toque e sem peça caindo), o jogo desenha a 30 quadros e, depois de 15 s, a 20, para poupar bateria; o mundo continua animado. No computador nada muda. No toque, o topo fica com o tema, o desfazer e o menu ⋯, e as missões cabem num botão que abre a lista (no computador também). Torcer dois dedos gira a câmera. O botão Aa (dentro do ⋯) muda o tamanho do texto, liga cores que se separam para quem não distingue verde de vermelho, e o "menos movimento", que também para a onda dourada, os voos da câmera e o quique da peça. Uma vibração curta ao encaixar só acontece nos navegadores que aceitam.
+- **Cinema** não está na lista: é o nível das fotos e dos vídeos, que o jogo liga sozinho só na hora de tirar a foto ou desenhar o vídeo. Desenha 1,5× acima da tela, com mais amostras de luz e de reflexo, sombras mais finas e mais vegetação. O Auto nunca escolhe o Cinema.
+- **Ultra** e **Alta** usam o mesmo grão de filme e a mesma aberração de lente do Cinema. O que não desce de nível é o que pesa: no Ultra ficam a oclusão com mais amostras e a luz rebatida reforçada, as três cascatas de sombra e a vegetação extra (a luz indireta SSGI, o reflexo na água e os raios de sol são só do Cinema, nas fotos e nos vídeos); na Alta ficam a oclusão em meia resolução, o bloom, o desfoque e uma sombra só.
 
 ## Temas
 
@@ -140,7 +154,7 @@ O botão de qualidade abre a lista: **Auto**, **Cinema**, **Ultra**, **Alta**, *
 | `?theme=toscana` | tema inicial (ids em `src/themes/themes.ts` e `eras.ts`) |
 | `?seed=123` | partida reproduzível: a mesma semente dá a mesma sequência de peças |
 | `?time=night` | `dawn`, `aurora`, `day`, `golden`, `dusk` ou `night` |
-| `?quality=high` | `auto`, `cinema`, `ultra`, `high`, `medium` ou `low` |
+| `?quality=high` | `auto`, `ultra`, `high`, `medium` ou `low` (`cinema` vira `ultra`; só vale junto de `?debug`, `?perf`, `?stress`, `?auto` ou `?demo`, para medir) |
 | `?webgl` | força o WebGL2 em vez do WebGPU |
 | `?mode=zen` | modo inicial: `classico`, `zen`, `diario`, `exploradores` ou `rotas` |
 | `?debug` | mostra FPS, draw calls, triângulos e instâncias |
@@ -161,7 +175,7 @@ src/themes/    temas como dados: types.ts (esquema), themes.ts (base), eras.ts (
 src/render/    lib.ts (kits e shaders), tileBuilder.ts (peça procedural), world.ts (cena, luz,
                blocos estáticos, fantasma), life.ts (barcos, veículos, animais, moinhos, pássaros)
 src/video/     gravação, filme da partida e exportação em MP4 (WebCodecs)
-src/ui/        HUD em HTML/CSS
+src/ui/        HUD em HTML/CSS; storage.ts: armazenamento persistente e exportar/importar (isolado)
 src/main.ts    entrada, fluxo da partida, salvamento, modos de teste
 scripts/       capturas de tela e teste de carga com Playwright
 tests/         simulação de partidas com oráculos independentes
