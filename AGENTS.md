@@ -21,6 +21,7 @@ Este arquivo existe para que qualquer agente (Claude Code, Codex, Cursor, Copilo
 | `README.md` | regras do jogo, controles, temas, parâmetros de URL |
 | `docs/VIABILIDADE.md` | decisões de arquitetura, medições de desempenho, histórico das revisões de código, riscos |
 | `docs/TEMAS.md` | pesquisa histórica dos 8 temas de época e a **lista priorizada de kits a adicionar** |
+| `docs/DIVIDAS.md` | dívidas técnicas: plano para quebrar o `main.ts`, arquivos grandes, exports sem uso, branches antigas |
 | `docs/PESQUISA.md` | mecânicas do original, stacks, mercado e aspectos legais |
 | `docs/screens/*.png` | capturas de referência, uma por tema e por situação |
 
@@ -38,7 +39,7 @@ npm install          # Node >= 22.12 (ver .nvmrc)
 npm run dev          # servidor de desenvolvimento (Vite)
 npm run check        # typecheck + testes + build: rode antes de todo commit
 npm run typecheck    # tsc --noEmit
-npm test             # 600 partidas simuladas com oráculos independentes, cenários sintéticos e legibilidade das cores (tests/legibility.ts)
+npm test             # 600 partidas simuladas com oráculos independentes, cenários sintéticos, legibilidade das cores (tests/legibility.ts) e vídeo/câmera/nível por placa (tests/video.ts)
 npm run balance      # painel de equilíbrio (tests/balance.ts): média, p10/p50/p90 e origem dos pontos, por modo e por tema. Não entra no check. `npm run balance -- 40` muda o tamanho da amostra (padrão 80). Meta dos Exploradores: o jogador "caça sítios" acha os 10 em pelo menos 50% das partidas (linha "todos os sítios"); o guloso puro não mira sítios e fica bem abaixo, de propósito
 npm run build        # dist/index.html (arquivo único)
 npm run smoke        # depois do build: abre o jogo em WebGPU e WebGL2 e falha com erro no console
@@ -88,7 +89,8 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?focus=4` | centraliza a câmera na peça com mais bordas do terreno (4 = rio); `window.__focus(t, zoom)` |
 | `?economia=0` | desliga a economia de quadros (ver Orçamento de desempenho) |
 | `?webgl` | força o backend WebGL2 (o padrão é WebGPU quando o navegador oferece) |
-| `?fx=ao.gi.ssr.rays.traa.bloom.dof.tilt.ink.finish.film` | liga os efeitos de pós um a um (medir custo; `dof` é a profundidade de campo, só do Cinema; `tilt` é o desfoque de miniatura da Alta e do Ultra; `finish` é só o grão e a lente, `film` soma as amostras a mais do Cinema); `?fx=` desliga todos |
+| `?demo` | a IA joga sozinha, com animação |
+| `?fx=ao.gi.ssr.rays.traa.msaa.bloom.dof.tilt.ink.finish.film` | liga os efeitos de pós um a um (medir custo; `dof` é a profundidade de campo, só do Cinema; `tilt` é o desfoque de miniatura da Alta e do Ultra; `finish` é só o grão e a lente, `film` soma as amostras a mais do Cinema); `?fx=` desliga todos |
 | `?timescale=0.05` | desacelera o mundo (animações nas capturas por software) |
 | `?silhueta` | decorações pretas sobre chão branco: confere se vilas, construções e marcos leem de longe |
 | `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
@@ -99,6 +101,9 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__plaza(zoom?)` | mostra os três monumentos na praça do Centro (só a imagem) |
 | `window.__mark(zoom?)` | centraliza a câmera no último marco de era erguido |
 | `window.__river(zoom?, lago?)` | põe fora do mapa um rio reto de 7 peças e cinco peças de lago e centraliza no rio (ou na peça de lago `lago`, 0 a 4): confere meandros, emendas, enseadas e ilhotas |
+| `window.__over()` | abre a tela de fim de partida |
+| `window.__spur()` | monta uma linha reta de ferrovia fora do mapa (captura da carga e da moeda) |
+| `window.__trade(moeda?, zoom?)` / `window.__holdTrade(zoom?)` | centraliza no veículo da rota (com `moeda`, só com a moeda no ar); `__holdTrade` segura o trem na parada |
 | `window.__boat(zoom?)` | centraliza a câmera num barco andando (esteiras na água) |
 | `window.__fishing(i?, cais?, zoom?)` | centraliza no i-ésimo cardume de peixes; com `cais = true`, no i-ésimo cais de pescador |
 | `window.__folk(i?, zoom?)` | centraliza a câmera no i-ésimo aldeão de construção |
@@ -126,6 +131,8 @@ src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em
   sites.ts       sítios escondidos (ruína, tesouro, relíquia, mirante), da semente por um gerador à parte
   modes.ts       modos: Clássico, Zen, Desafio do dia, Exploradores, Estrada Real, Partida rápida (regras + desfazer; `fixedStack` = pilha de 30 sem peças de volta; `more: true` manda o modo para "Mais modos" no menu, até ser equilibrado). O recorde é por modo e tema (`best.<modo>.<tema>`). `DAILY_RULES`/`dailyRule(seed)`: a regra do dia sai só da semente AAAAMMDD (data local), por dias seguidos em rodízio; `modeRules(modo, semente)` soma o modo e a regra do dia
   share.ts       texto de compartilhar do desafio (`shareLine`, `shareUrl`, `terrainPoints`): puro
+  routes.ts      rotas de comércio do modo Estrada Real: mercados e portos ligados pela mesma rede rendem pela distância
+  seasons.ts     estações da partida (a cada 20 jogadas), derivadas do índice da peça: o replay não guarda nada
   specials.ts    peças especiais (estação, moinho d'água, farol): bordas, pontos e posições na pilha
   rng.ts         mulberry32 e utilitários de sorteio
 src/themes/      temas como DADOS
@@ -157,6 +164,7 @@ src/render/
   life.ts        Life: barcos, veículos, animais, aldeões, moinhos, peixes e pássaros que se movem
   cameraRig.ts   câmera orbital: inclinação baixa pela curva do zoom mais o ajuste de quem joga (`tilt`);
                  lente de 40° com `rig.eye` = distância real (`rig.dist` é o enquadramento)
+  nightLight.ts  luz da noite (luar e céu) sem three.js: o `skyFor` e o teste de legibilidade leem a mesma tabela
   gpuTier.ts     nível inicial do Auto pelo nome da placa de vídeo (puro)
   dynres.ts      resolução dinâmica do Auto: degraus de resolução antes de descer o nível (puro)
 src/video/       foto e vídeo (o modo foto e a exportação ficam em src/ui/capture.ts)
@@ -166,7 +174,7 @@ src/video/       foto e vídeo (o modo foto e a exportação ficam em src/ui/cap
   render.ts      desenha o vídeo quadro a quadro, com world.tick(1/60), e entrega ao codificador
   encoder.ts     WebCodecs: escolhe H.264 ou VP9 e guarda os quadros codificados em Blobs
   mp4.ts         cabeçalho MP4 (ftyp, moov, mdat) escrito à mão, sem biblioteca
-src/ui/          HUD em HTML/CSS (hud.ts, style.css); eraChoice.ts: nomes e diálogo das cartas da era; banner.ts: cor da casa e brasão (troca o `ui.accent` do tema); tutorial.ts: dicas das primeiras partidas; progress.ts: progresso entre partidas e liberação das peças especiais; capture.ts: modo foto, gravação, filme da partida e exportação (`Capture`, com o estado da tela em `stage`); input.ts: mouse, toque e teclado no tabuleiro (`bindInput`); a página é o index.html; storage.ts: `persist()` depois da primeira partida acabada, `exportKeys` e `importKeys` (módulo isolado, sem dependência do jogo, para outros jogos copiarem)
+src/ui/          HUD em HTML/CSS (hud.ts, style.css); eraChoice.ts: nomes e diálogo das cartas da era; banner.ts: cor da casa e brasão (troca o `ui.accent` do tema); tutorial.ts: dicas das primeiras partidas; progress.ts: progresso entre partidas e liberação das peças especiais; capture.ts: modo foto, gravação, filme da partida e exportação (`Capture`, com o estado da tela em `stage`); input.ts: mouse, toque e teclado no tabuleiro (`bindInput`); minimap.ts: minimapa e linha do tempo do fim da partida; frames.ts: moldura e emblema do tema em CSS e SVG; a11y.ts: paleta para daltonismo; a página é o index.html; storage.ts: `persist()` depois da primeira partida acabada, `exportKeys` e `importKeys` (módulo isolado, sem dependência do jogo, para outros jogos copiarem)
 src/audio.ts     sons sintetizados com WebAudio: música, efeitos e ambiente (paisagem perto do foco da câmera, `setAmbience`)
 src/main.ts      entrada: fluxo da partida, telas e botões, qualidade, salvamento, parâmetros de URL, ganchos de depuração
 tests/logic.ts      simulação de partidas contra oráculos independentes (grupos por BFS, pontuação recalculada, replay)
@@ -298,7 +306,7 @@ São opcionais no tema (`gate`, `bridge`) e não pontuam. O `buildTile` decide o
 ## Estado atual e próximos passos
 
 - **Feito (outubro de 2026, depois da v4):** água física (leito visível, cáusticas, esteiras); acabamento (oclusão só na luz indireta, nitidez, cor por hora, sombra firme); luz e céu (amanhecer e hora dourada, névoa por altura, lampiões, luz rebatida do chão, nuvens volumétricas); cinema e vídeo (nível Cinema, Auto pela placa com resolução dinâmica, modo foto, gravação e filme da partida em MP4). Detalhes em `docs/VIABILIDADE.md`.
-- **Feito (v4, outubro de 2026):** renderização WebGPU/TSL com GTAO, TRAA, bloom e profundidade de campo; rios escavados com correnteza; céu procedural (IBL); chão com detalhe por terreno; clima por tema; vilas com trilhas; eras da vila, sítios, bônus por tema, desfazer e 4 modos. O andamento do plano de Age of Empires está no topo de `docs/IDEIAS_AOE.md`; faltam a regra das rotas num modo próprio, interface por tema, atmosferas e estações, e monumentos por conquista. O minimapa e a linha do tempo da partida já existem (proposta 16).
+- **Feito (v4, outubro de 2026):** renderização WebGPU/TSL com GTAO, TRAA, bloom e profundidade de campo; rios escavados com correnteza; céu procedural (IBL); chão com detalhe por terreno; clima por tema; vilas com trilhas; eras da vila, sítios, bônus por tema, desfazer e 6 modos (o Estrada Real tem a regra das rotas). O andamento do plano de Age of Empires está no topo de `docs/IDEIAS_AOE.md`; as vinte propostas estão feitas, inclusive minimapa e linha do tempo, interface por tema, estações e monumentos.
 - **Feito (v3):** 14 temas, kits detalhados, 4 interações com prévia em dourado, mundo animado, dia/entardecer/noite, qualidade adaptativa, save v3 com replay, duas rodadas de revisão de código com correções. O histórico está em `docs/VIABILIDADE.md`, Apêndice A.
 - **Pendente:**
   - medir o FPS numa GPU real (`?stress=1000&quality=high&perf`, ou `window.__perf(5)` com a tecla `F`) no PC e no celular;
