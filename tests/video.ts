@@ -1,7 +1,7 @@
 // Testes do vídeo, da resolução dinâmica e do nível pela placa de vídeo (lógica pura, em Node).
 // O MP4 é conferido por um leitor de caixas escrito aqui, independente do gravador.
 import { DynRes, RES_STEPS } from '../src/render/dynres';
-import { gpuName, tierForGpu } from '../src/render/gpuTier';
+import { autoStartTier, gpuName, tierForGpu } from '../src/render/gpuTier';
 import { fitDist, planFilm } from '../src/video/film';
 import { mp4Header, type Mp4Sample } from '../src/video/mp4';
 import { resample, smooth, type Pose } from '../src/video/path';
@@ -199,11 +199,12 @@ console.log('Nível pela placa de vídeo');
     ['ANGLE (AMD, AMD Radeon RX 5500 XT (0x00007340) Direct3D11 vs_5_0 ps_5_0, D3D11)', 'high', 'Radeon RX 5500 XT'],
     ['ANGLE (AMD, Radeon RX Vega (0x0000687F) Direct3D11 vs_5_0 ps_5_0, D3D11)', 'high', 'Radeon RX Vega'],
     ['ANGLE (AMD, AMD Radeon(TM) Graphics (0x00001681) Direct3D11 vs_5_0 ps_5_0, D3D11)', 'medium', 'Radeon Graphics'],
-    ['ANGLE (Intel, Intel(R) UHD Graphics 620 (0x00005917) Direct3D11 vs_5_0 ps_5_0, D3D11)', 'low', 'UHD Graphics 620'],
+    ['ANGLE (Intel, Intel(R) UHD Graphics 620 (0x00005917) Direct3D11 vs_5_0 ps_5_0, D3D11)', 'medium', 'UHD Graphics 620'],
     ['ANGLE (Intel, Intel(R) Iris(R) Xe Graphics (0x00009A49) Direct3D11 vs_5_0 ps_5_0, D3D11)', 'medium', 'Iris Xe Graphics'],
     ['ANGLE (Intel, Intel(R) Arc(TM) A770 Graphics (0x000056A0) Direct3D11 vs_5_0 ps_5_0, D3D11)', 'ultra', 'Arc A770 Graphics'],
     ['ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)', 'ultra', 'Apple M2 Pro'],
     ['ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)', 'high', 'Apple M1'],
+    ['ANGLE (Intel, Intel(R) HD Graphics 4000 (0x00000166) Direct3D11 vs_5_0 ps_5_0, D3D11)', 'medium', 'HD Graphics 4000'],
     ['Apple GPU', 'medium', 'Apple GPU'],
     ['Adreno (TM) 740', 'medium', 'Adreno 740'],
     ['ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)', 'low', 'SwiftShader'],
@@ -215,6 +216,11 @@ console.log('Nível pela placa de vídeo');
   }
   ok(tierForGpu({ vendor: 'amd', architecture: 'gcn-4' }) === 'high', 'só WebGPU: AMD GCN 4 na Alta');
   ok(tierForGpu({ vendor: 'nvidia', architecture: 'ampere' }) === 'ultra', 'só WebGPU: NVIDIA Ampere no Ultra');
+  ok(autoStartTier({}, false) === 'high', 'placa desconhecida no computador: Alta');
+  ok(autoStartTier({ renderer: '' }, false) === 'high', 'nome vazio no computador: Alta');
+  ok(autoStartTier({}, true) === 'medium', 'placa desconhecida na tela de toque: Média');
+  ok(autoStartTier({ renderer: 'ANGLE (Intel, Intel(R) UHD Graphics 620 (0x00005917) Direct3D11 vs_5_0 ps_5_0, D3D11)' }, false) === 'medium', 'Intel UHD no computador: Média');
+  ok(autoStartTier({ renderer: 'ANGLE (AMD, AMD Radeon RX 6700 XT (0x000073DF) Direct3D11 vs_5_0 ps_5_0, D3D11)' }, false) === 'ultra', 'placa conhecida ignora o padrão');
   ok(tierForGpu({}) === null && gpuName({ vendor: 'amd', architecture: 'rdna-3' }) === 'AMD rdna-3', 'sem nada: sem palpite; nome pelo fabricante');
 }
 

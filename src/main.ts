@@ -14,7 +14,7 @@ import type { Quality, TimeOfDay } from './render/world';
 import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
 import { DynRes } from './render/dynres';
 import { readGpuInfo } from './render/gpu';
-import { gpuName, tierForGpu } from './render/gpuTier';
+import { autoStartTier, gpuName } from './render/gpuTier';
 import { FX_FLAGS } from './render/post';
 import { U } from './render/materials';
 import { World } from './render/world';
@@ -1037,11 +1037,11 @@ const QUALITY_NOTE: Record<Quality, string> = {
 const qualityBtn = document.getElementById('btn-quality')!;
 
 // O modo Auto começa pelo nome da placa de vídeo (gpuTier.ts). Sem um nome conhecido, começa em
-// Média nas telas de toque (celular, tablet) e em Ultra no computador.
+// Média nas telas de toque (celular, tablet) e em Alta no computador.
 const gpu = readGpuInfo(world.renderer);
 const gpuLabel = gpuName(gpu);
 const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-const autoStart: Quality = tierForGpu(gpu) ?? (coarsePointer ? 'medium' : 'ultra');
+const autoStart: Quality = autoStartTier(gpu, coarsePointer);
 const LOWER: Record<Quality, Quality> = { cinema: 'ultra', ultra: 'high', high: 'medium', medium: 'low', low: 'low' };
 let autoLevel: Quality = autoStart;
 /** Resolução dinâmica do Auto: cede antes de o nível descer. */
