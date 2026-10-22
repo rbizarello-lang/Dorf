@@ -221,9 +221,13 @@ const BENCH_SEED = 7;
 const BENCH_TILES = 60;
 const BENCH_SECONDS = 15;
 const BENCH_LEVELS: Quality[] = ['low', 'medium', 'high', 'ultra'];
-const QUALITIES: QualityMode[] = ['auto', 'cinema', 'ultra', 'high', 'medium', 'low'];
-const pickQ = (v: string | null) => (v && (QUALITIES as string[]).includes(v) ? (v as QualityMode) : null);
-let qualityMode: QualityMode = pickQ(params.get('quality')) ?? pickQ(store.get('quality')) ?? 'auto';
+// O seletor em tempo real vai até o Ultra. O Cinema só existe na foto e no vídeo; para medir o Cinema ao
+// vivo, `?quality=cinema` vale junto de um gancho de depuração (debug, perf, stress, auto ou demo).
+const QUALITIES: QualityMode[] = ['auto', 'ultra', 'high', 'medium', 'low'];
+const pickQ = (v: string | null) => (v && (QUALITIES as string[]).includes(v) ? (v as QualityMode) : v === 'cinema' ? 'ultra' : null);
+const urlQuality = params.get('quality');
+const debugCinema = urlQuality === 'cinema' && ['debug', 'perf', 'stress', 'auto', 'demo'].some((k) => params.has(k));
+let qualityMode: QualityMode = debugCinema ? 'cinema' : pickQ(urlQuality) ?? pickQ(store.get('quality')) ?? 'auto';
 let gameOverShown = false;
 let overTimer = 0;
 let bestAtStart = 0;
@@ -1029,7 +1033,7 @@ function pickTheme(t: Theme) {
 
 const qualityLabel: Record<QualityMode, string> = { auto: 'Auto', cinema: 'Cinema', ultra: 'Ultra', high: 'Alta', medium: 'Média', low: 'Baixa' };
 const QUALITY_NOTE: Record<Quality, string> = {
-  cinema: 'Desenha 1,5× acima da tela, com mais luz, sombra e vegetação, grão e lente. Para placas de topo (classe RTX 4080)',
+  cinema: 'Desenha 1,5× acima da tela, com mais luz, sombra e vegetação, grão e lente. Só na foto e no vídeo',
   ultra: 'Luz indireta, reflexos, raios de sol, desfoque de miniatura, grão de filme e lente. Para placas acima da RX 580',
   high: 'Oclusão, bloom, desfoque de miniatura, grão de filme e lente',
   medium: 'Leve, para notebooks e celulares',
@@ -1161,7 +1165,7 @@ qualityBtn.addEventListener('click', () => {
     if (!next) return;
     applyQuality(next);
     store.set('quality', next);
-    hud.toast(`Qualidade: ${qualityLabel[next]}${next === 'cinema' ? ' · pede uma placa de vídeo de topo' : ''}`);
+    hud.toast(`Qualidade: ${qualityLabel[next]}`);
   });
 });
 const setTimeLabel = (t: TimeOfDay) => {
@@ -1844,6 +1848,20 @@ function start(data: unknown) {
   let bin = '';
   for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
   return { bytes: blob.size, ms: performance.now() - t0, b64: btoa(bin) };
+};
+
+// Tira a foto sem o diálogo (teste no contêiner): entra no modo foto se preciso, usa o tamanho salvo
+// e devolve o nível antes e depois, a resolução desenhada e a final, e o PNG em base64.
+(window as unknown as { __photo: (o?: { size?: string }) => Promise<unknown> }).__photo = async (o = {}) => {
+  if (capture.stage === 'play') capture.enterPhoto();
+  if (capture.stage !== 'photo') return null;
+  const before = world.quality;
+  const r = await capture.renderPhoto(o.size);
+  world.timeScale = 1;
+  const buf = new Uint8Array(await r.blob.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  return { before, during: r.quality, after: world.quality, width: r.width, height: r.height, drawn: r.drawn, ms: r.ms, bytes: r.blob.size, b64: btoa(bin) };
 };
 
 const hot = (window as unknown as { claude?: { hot?: Hot } }).claude?.hot;
