@@ -2087,7 +2087,8 @@ else start(hot?.data);
 // Service worker: jogar sem internet e instalar no celular. Só em https/localhost, nunca nos modos
 // de medida e de captura, e em silêncio quando a página roda sem os arquivos vizinhos (artifact).
 if ('serviceWorker' in navigator && isSecureContext && /^https?:$/.test(location.protocol) && !special && !params.has('bench')) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
-  });
+  // O `await createWorld()` do topo faz este trecho rodar depois do `load`: sem a checagem o callback nunca dispara.
+  const registerSw = () => void navigator.serviceWorker.register('./sw.js').catch(() => {});
+  if (document.readyState === 'complete') registerSw();
+  else window.addEventListener('load', registerSw, { once: true });
 }
