@@ -95,6 +95,7 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 | Inclinar câmera (do horizonte à vista de mapa) | arrastar com o botão direito para cima ou para baixo, `PgUp` / `PgDn`; `Home` volta ao ângulo padrão | dois dedos para cima ou para baixo |
 | Amanhecer, dia, hora dourada, entardecer e noite | `L` ou botão ☀ | botão ☀ |
 | Som: música e efeitos, só efeitos, mudo | botão Som (cada clique alterna) | botão ♫ |
+| Onde encaixa: as 3 melhores casas da peça, com os pontos e o giro | `O` ou botão "Onde encaixa" (a ajuda já usa `H` e `?`); some ao girar ou colocar | botão no menu ⋯ |
 | Minimapa | `M` abre ou fecha; clique leva a câmera | o mesmo; começa fechado (também no computador, com a interface mínima) |
 | Almanaque | `I`, ou a aba Almanaque da ajuda | menu ⋯ |
 | Missões | cartão "N missões ›" no canto: abre a lista; clicar numa missão leva a câmera até ela | o mesmo |
