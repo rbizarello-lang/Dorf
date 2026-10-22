@@ -25,7 +25,8 @@ import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor
 import { Capture, VIDEO_QUALITIES } from './ui/capture';
 import { Hud, TIME_ICON, TIME_LABEL, TIME_ORDER, glyph, questLabel, questMarker } from './ui/hud';
 import { bindInput } from './ui/input';
-import { MONUMENT_KINDS, MONUMENT_NAME, Progress, SPECIAL_NAME, UNLOCKS, type MonumentKind } from './ui/progress';
+import { persist as requestPersistence, exportKeys, importKeys } from './ui/storage';
+import { MONUMENT_KINDS, MONUMENT_NAME, Progress, cleanProgress, SPECIAL_NAME, UNLOCKS, type MonumentKind } from './ui/progress';
 import { Tutorial } from './ui/tutorial';
 import { blessingName, blessingRule, choiceHtml } from './ui/eraChoice';
 import { Minimap, timelineSvg, type TurnNote } from './ui/minimap';
@@ -612,7 +613,70 @@ function commitProgress() {
   committed = true;
   const w = game.board.wonder;
   for (const k of progress.commit(game.board, rulesTheme.id, !!w && w.stage >= game.rules.wonderStages)) unlockedToast(k);
+  // Depois da primeira partida acabada já há o que perder: pede ao navegador que não apague.
+  if (game.over) void requestPersistence();
 }
+
+/** Baixa um .json com tudo o que o jogo guarda no navegador (partida, progresso, preferências). */
+function exportProgress() {
+  const blob = new Blob([JSON.stringify(exportKeys('retalhos.'), null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `retalhos-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  hud.toast('Progresso exportado.');
+}
+
+let pendingImport: (() => void) | null = null;
+function safeParse(v: string): unknown {
+  try {
+    return JSON.parse(v);
+  } catch {
+    return null;
+  }
+}
+
+/** Lê o arquivo escolhido, confere campo a campo e, se tudo estiver certo, pergunta, grava e recarrega. */
+function importProgress(file: File) {
+  if (file.size > 3_000_000) return hud.toast('O arquivo é grande demais para ser um backup.');
+  void file.text().then((text) => {
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      return hud.toast('O arquivo não é um JSON válido.');
+    }
+    const themeIds = THEMES.map((t) => t.id);
+    // Confere sem gravar (armazenamento falso) para só então perguntar; a gravação real repete a mesma conferência.
+    const mem = new Map<string, string>();
+    const fake = { get length() { return mem.size; }, key: (i: number) => [...mem.keys()][i] ?? null, getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v) };
+    const check = (k: string, v: string) => (k === 'save' ? (validSave(safeParse(v)) ? v : null) : k === 'progress' ? cleanProgress(v, themeIds) : v);
+    const dry = importKeys(json, 'retalhos.', check, fake);
+    if (!dry.ok) return hud.toast(dry.error);
+    hud.showModal(`
+      <h2 id="modal-title">Importar progresso</h2>
+      <p>O arquivo tem ${dry.count} itens. Importar <b>substitui</b> a partida salva e o progresso deste navegador por eles. Não dá para desfazer.</p>
+      <div class="row"><button class="primary" type="button" data-act="import-go">Importar e recarregar</button><button class="secondary" type="button" data-act="close">Cancelar</button></div>`);
+    pendingImport = () => {
+      const r = importKeys(json, 'retalhos.', check);
+      if (!r.ok) return hud.toast(r.error);
+      location.reload();
+    };
+  });
+}
+const importInput = document.createElement('input');
+importInput.type = 'file';
+importInput.accept = 'application/json,.json';
+importInput.hidden = true;
+importInput.addEventListener('change', () => {
+  const f = importInput.files?.[0];
+  importInput.value = '';
+  if (f) importProgress(f);
+});
+document.body.appendChild(importInput);
 
 /** Fim de partida: as peças especiais que faltam liberar e quanto falta para cada uma. */
 function specialsLine() {
@@ -890,7 +954,10 @@ function almanac() {
       return on ? `<li><b>${MONUMENT_NAME[k]}</b>: na praça do Centro.</li>` : `<li class="locked"><b>${MONUMENT_NAME[k]}</b>: preso, ${how}.</li>`;
     }).join('')}</ul>
     <h3>Temas</h3>
-    <table class="almanac"><thead><tr><th>Tema</th><th>Partidas</th><th>Maior era</th><th>Recorde</th></tr></thead><tbody>${rows}</tbody></table>`;
+    <table class="almanac"><thead><tr><th>Tema</th><th>Partidas</th><th>Maior era</th><th>Recorde</th></tr></thead><tbody>${rows}</tbody></table>
+    <h3>Guardar o progresso</h3>
+    <p class="muted">O progresso fica só neste navegador. Exporte para um arquivo como cópia de segurança ou para levar a outro aparelho.</p>
+    <div class="row"><button class="secondary" type="button" data-act="export">Exportar progresso</button><button class="secondary" type="button" data-act="import">Importar progresso</button></div>`;
 }
 
 function synergyLegend() {
@@ -952,6 +1019,18 @@ hud.modal.addEventListener('click', (e) => {
   }
   if (act === 'almanac') {
     showHelp('almanaque');
+    return;
+  }
+  if (act === 'export') {
+    exportProgress();
+    return;
+  }
+  if (act === 'import') {
+    importInput.click();
+    return;
+  }
+  if (act === 'import-go') {
+    pendingImport?.();
     return;
   }
   if (act === 'tips') {
@@ -1868,3 +1947,11 @@ const hot = (window as unknown as { claude?: { hot?: Hot } }).claude?.hot;
 hot?.snapshot?.(() => ({ ...snapshot(), theme: theme.id }));
 if (hot?.ready) hot.ready(start);
 else start(hot?.data);
+
+// Service worker: jogar sem internet e instalar no celular. Só em https/localhost, nunca nos modos
+// de medida e de captura, e em silêncio quando a página roda sem os arquivos vizinhos (artifact).
+if ('serviceWorker' in navigator && isSecureContext && /^https?:$/.test(location.protocol) && !special && !params.has('bench')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
+}

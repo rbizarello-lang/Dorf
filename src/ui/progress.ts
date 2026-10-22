@@ -102,6 +102,17 @@ function sanitize(raw: unknown, themeIds: readonly string[]): ProgressData {
   return d;
 }
 
+/** Para importar: só aceita um objeto JSON e devolve a versão limpa (campo a campo); null se não for progresso. */
+export function cleanProgress(text: string, themeIds: readonly string[]): string | null {
+  try {
+    const raw = JSON.parse(text) as unknown;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    return JSON.stringify(sanitize(raw, themeIds));
+  } catch {
+    return null;
+  }
+}
+
 /** Contagens de uma partida, tiradas do tabuleiro (a peça inicial não conta). */
 function countBoard(b: Board, wonderDone: boolean) {
   const siteKinds = zero(SITE_KINDS);

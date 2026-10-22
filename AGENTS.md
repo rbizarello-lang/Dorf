@@ -13,7 +13,7 @@ Este arquivo existe para que qualquer agente (Claude Code, Codex, Cursor, Copilo
   - mundo animado: trigo ao vento, barcos, trens, moinhos, animais;
   - ciclo de dia, entardecer e noite.
 - **Sem arquivos de arte:** casas, árvores, plantações, animais, barcos e sons são gerados em código. Não existe pasta de assets e não deve passar a existir sem uma decisão explícita.
-- **Saída:** `npm run build` gera `dist/index.html`, um arquivo único com JS e CSS embutidos.
+- **Saída:** `npm run build` gera `dist/index.html`, um arquivo único com JS e CSS embutidos, mais `manifest.webmanifest`, ícones e `sw.js` (instalação e modo sem internet; o SW é rede primeiro, cache se estiver offline, e só se registra em https/localhost e fora de `?stress`/`?auto`/`?demo`/`?bench`).
 - **Documentos:**
 
 | Arquivo | Para que serve |
@@ -42,6 +42,7 @@ npm test             # 600 partidas simuladas com oráculos independentes, cená
 npm run balance      # painel de equilíbrio (tests/balance.ts): média, p10/p50/p90 e origem dos pontos, por modo e por tema. Não entra no check. `npm run balance -- 40` muda o tamanho da amostra (padrão 80)
 npm run build        # dist/index.html (arquivo único)
 npm run smoke        # depois do build: abre o jogo em WebGPU e WebGL2 e falha com erro no console
+node scripts/pwa.mjs http://127.0.0.1:4173/   # depois do build e com o dist servido: service worker, offline, manifesto, exportar/importar
 node scripts/artifact.mjs   # depois do build: dist/artifact/retalhos.html (formato de página publicável)
 ```
 
@@ -163,14 +164,15 @@ src/video/       foto e vídeo (o modo foto e a exportação ficam em src/ui/cap
   render.ts      desenha o vídeo quadro a quadro, com world.tick(1/60), e entrega ao codificador
   encoder.ts     WebCodecs: escolhe H.264 ou VP9 e guarda os quadros codificados em Blobs
   mp4.ts         cabeçalho MP4 (ftyp, moov, mdat) escrito à mão, sem biblioteca
-src/ui/          HUD em HTML/CSS (hud.ts, style.css); eraChoice.ts: nomes e diálogo das cartas da era; banner.ts: cor da casa e brasão (troca o `ui.accent` do tema); tutorial.ts: dicas das primeiras partidas; progress.ts: progresso entre partidas e liberação das peças especiais; capture.ts: modo foto, gravação, filme da partida e exportação (`Capture`, com o estado da tela em `stage`); input.ts: mouse, toque e teclado no tabuleiro (`bindInput`); a página é o index.html
+src/ui/          HUD em HTML/CSS (hud.ts, style.css); eraChoice.ts: nomes e diálogo das cartas da era; banner.ts: cor da casa e brasão (troca o `ui.accent` do tema); tutorial.ts: dicas das primeiras partidas; progress.ts: progresso entre partidas e liberação das peças especiais; capture.ts: modo foto, gravação, filme da partida e exportação (`Capture`, com o estado da tela em `stage`); input.ts: mouse, toque e teclado no tabuleiro (`bindInput`); a página é o index.html; storage.ts: `persist()` depois da primeira partida acabada, `exportKeys` e `importKeys` (módulo isolado, sem dependência do jogo, para outros jogos copiarem)
 src/audio.ts     sons sintetizados com WebAudio: música, efeitos e ambiente (paisagem perto do foco da câmera, `setAmbience`)
 src/main.ts      entrada: fluxo da partida, telas e botões, qualidade, salvamento, parâmetros de URL, ganchos de depuração
 tests/logic.ts      simulação de partidas contra oráculos independentes (grupos por BFS, pontuação recalculada, replay)
 tests/synthetic.ts  cenários montados à mão (peça travada, descarte, fim de jogo, semente → sequência)
 tests/legibility.ts telhados e paredes contra o chão da vila (ΔE em CIELAB, ponderado pelo peso das casas)
+tests/storage.ts    ida e volta do backup com armazenamento falso e recusas sem gravar
 tests/video.ts      MP4 conferido por um leitor de caixas próprio, resolução dinâmica, nível por placa, câmera e filme
-scripts/         capturas, teste de carga, conversão para página publicável
+scripts/         capturas, teste de carga, conversão para página publicável; pwa-plugin.mjs (plugin do Vite: manifesto, ícones PNG desenhados em código e sw.js no dist); pwa.mjs (confere SW, offline, manifesto e backup)
 ```
 
 **Fluxo de uma jogada:**
@@ -195,7 +197,8 @@ scripts/         capturas, teste de carga, conversão para página publicável
 6. **Saves:**
    - o formato é `{ v, seed, rulesId, mode, moves, undone, score, specials }` (v11), guardado em `localStorage` com o prefixo `retalhos.`; cada jogada é `[q, r, giro, ...escolhas]`, com as cartas da era (0 ou 1) escolhidas logo depois dela;
    - o progresso entre partidas (totais, registro por tema e peças especiais liberadas) fica em `retalhos.progress` (`src/ui/progress.ts`), validado campo a campo ao ler;
-   - ao carregar, a partida é **reconstruída pelo replay** das jogadas e conferida contra a pontuação.
+   - **exportar e importar** (`src/ui/storage.ts`, botões no Almanaque): o arquivo `{ app, v, at, data }` leva todas as chaves `retalhos.*`; ao importar, `save` passa por `validSave` (main.ts) e `progress` por `cleanProgress` (progress.ts), os outros valores só por tipo e tamanho, e nada é gravado se algo falhar. Chave nova de preferência entra no backup sozinha; chave com formato próprio que importe validar ganha um caso em `check` (`importProgress`, main.ts). Se mudar `SAVE_VERSION`, backups antigos trazem um save recusado: o jogador vê o aviso de dado inválido;
+  - ao carregar, a partida é **reconstruída pelo replay** das jogadas e conferida contra a pontuação.
    - Se você mudar regras, pontuação ou geração de peças de um jeito que altere o replay, **aumente `SAVE_VERSION` em `main.ts`**. Saves antigos mostram um aviso e são descartados.
 7. **Os testes têm oráculos independentes.** Ao mudar a pontuação, atualize o oráculo em `tests/logic.ts` reimplementando a regra. Nunca faça o oráculo chamar o código que ele testa.
 8. **Tema é só dado.** O renderizador sabe desenhar cada kit; o tema escolhe e colore. Não ponha `if (theme.id === '...')` no render. Crie ou parametrize um kit.

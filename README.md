@@ -103,6 +103,12 @@ Algumas construções aparecem sozinhas dentro das peças, sem pontuar: vila à 
 
 **Som de ambiente:** vem da paisagem em volta do foco da câmera: vento nos campos abertos (mais forte de longe), água correndo perto dos rios, pássaros nas florestas de dia, grilos e coruja à noite, sinos da vila e apito de trem. Colocar a peça também soa pelo terreno (respingo, folhas, trilho), e sítios, peças especiais e o desfazer têm som próprio. Fica ligado em "só efeitos".
 
+## Instalar e guardar o progresso
+
+- **Instalar:** na versão publicada (https), o Chrome e o Edge mostram "Instalar" na barra de endereço, e no celular o menu oferece "Adicionar à tela inicial". Depois da primeira visita o jogo abre também sem internet (um service worker guarda a página; com rede, ele sempre busca a versão mais nova primeiro). O build gera `manifest.webmanifest`, os ícones e `sw.js` ao lado do `index.html`, então publique a pasta `dist/` inteira. Aberto de um arquivo avulso ou em outra página, o jogo funciona igual, só sem a instalação.
+- **Não perder nada:** depois da primeira partida acabada, o jogo pede ao navegador armazenamento persistente (para o progresso não ser apagado quando faltar espaço).
+- **Exportar e importar:** no Almanaque (ajuda, aba "Almanaque"), "Exportar progresso" baixa `retalhos-AAAA-MM-DD.json` com a partida salva, o progresso e as preferências; "Importar progresso" lê esse arquivo em outro aparelho ou navegador, confere tudo campo a campo, pede confirmação e recarrega. Arquivo com qualquer dado inválido é recusado sem gravar nada.
+
 ## Foto e vídeo
 
 O botão **Câmera** abre três opções:
@@ -161,7 +167,7 @@ src/themes/    temas como dados: types.ts (esquema), themes.ts (base), eras.ts (
 src/render/    lib.ts (kits e shaders), tileBuilder.ts (peça procedural), world.ts (cena, luz,
                blocos estáticos, fantasma), life.ts (barcos, veículos, animais, moinhos, pássaros)
 src/video/     gravação, filme da partida e exportação em MP4 (WebCodecs)
-src/ui/        HUD em HTML/CSS
+src/ui/        HUD em HTML/CSS; storage.ts: armazenamento persistente e exportar/importar (isolado)
 src/main.ts    entrada, fluxo da partida, salvamento, modos de teste
 scripts/       capturas de tela e teste de carga com Playwright
 tests/         simulação de partidas com oráculos independentes
