@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { Sfx } from './audio';
 import { SEASON_KIND, SEASON_NAME, seasonAt } from './core/seasons';
 import { DEFAULT_RULES, type PlaceResult, type Rules } from './core/board';
+import { clockEggs } from './core/eggs';
 import { Game } from './core/game';
 import { MODES, dailyRule, dailySeed, modeById, modeRules, type Mode, type ModeId } from './core/modes';
 import { shareLine, shareUrl, terrainPoints } from './core/share';
@@ -109,6 +110,11 @@ const world = await createWorld();
   if (fx !== null) world.fx = fx.split('.').filter((f) => (FX_FLAGS as readonly string[]).includes(f));
 }
 hud.preview.appendChild(world.preview.canvas);
+// Easter eggs do tema (src/core/eggs.ts): o World os dispara; o jogo mostra o aviso e toca o som.
+world.onEgg = (egg, sounds, announce) => {
+  for (const s of sounds) sfx.egg(s);
+  if (announce && egg.note) hud.toast(egg.note, 'good');
+};
 
 // Minimapa (proposta 16): o clique leva a câmera; M abre e fecha.
 const minimap = new Minimap(document.getElementById('minimap')!, store, (x, z) => world.rig.goal.set(x, 0, z), store.get('minimal') !== '0');
@@ -342,6 +348,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   world.setTheme(shownTheme(), game.board);
   world.setMonuments(progress.monuments);
   sfx.setStyle(theme.music, game.board.era);
+  sfx.setThemeAmbience(theme.ambience);
   hud.applyTheme(shownTheme());
   showCrest();
   hud.renderQuests(game.board.quests, shownTheme());
@@ -1183,6 +1190,7 @@ function pickTheme(t: Theme) {
   showCrest();
   world.setTheme(shownTheme(), game.board);
   sfx.setStyle(t.music, game.board.era);
+  sfx.setThemeAmbience(t.ambience);
   hud.renderQuests(game.board.quests, shownTheme());
   minimap.rebuild(game.board.list, shownTheme().terrainColors);
   refreshHud(true);
@@ -1643,6 +1651,29 @@ function frame(now: number) {
   }
 }
 
+// Easter eggs de relógio (hora e data): só cosméticos, fora do save e do replay. Reavalia a cada 5 s;
+// ao entrar em vigor o ovo dispara com aviso, e enquanto vale repete o efeito a cada 2 minutos.
+const clockOn = new Map<string, number>();
+let eggClockAt = 0;
+function eggClock(now: number) {
+  if (now - eggClockAt < 5000) return;
+  eggClockAt = now;
+  const eggs = shownTheme().eggs;
+  if (!eggs?.length || params.has('stress') || params.has('bench') || params.has('perf')) return;
+  const active = new Set(clockEggs(eggs, new Date(), game.board.list.length).map((e) => e.id));
+  for (const e of eggs) {
+    const since = clockOn.get(e.id);
+    if (active.has(e.id)) {
+      if (since !== undefined && now - since < 120000) continue;
+      world.playEgg(e, world.rig.target.x, world.rig.target.z, since === undefined);
+      clockOn.set(e.id, now);
+    } else if (since !== undefined) {
+      clockOn.delete(e.id);
+      if (e.effect.some((f) => f.kind === 'ceu')) world.clearEggSky();
+    }
+  }
+}
+
 // ?timescale=0.05 desacelera o mundo (depuração de animações nas capturas por software).
 const timeScale = THREE.MathUtils.clamp(Number(params.get('timescale')) || 1, 0.01, 4);
 
@@ -1661,6 +1692,7 @@ function step(now: number) {
     world.scout(game.board);
   }
   world.tick(dt);
+  eggClock(now);
   if (world.passingWeather !== weatherShown) syncWeatherBtn();
   mapFrame();
   updateAmbience(now);
@@ -1873,6 +1905,13 @@ function start(data: unknown) {
   world.halo(world.rig.target.x, world.rig.target.z, 2);
   world.flushBirds(world.rig.target.x, world.rig.target.z);
 };
+// Toca os efeitos de evento, céu e som de um easter egg do tema no foco da câmera (o kit na peça só nasce numa jogada).
+(window as unknown as { __egg: (id: string) => string | null }).__egg = (id) => {
+  const egg = shownTheme().eggs?.find((e) => e.id === id);
+  if (!egg) return null;
+  world.playEgg(egg, world.rig.target.x, world.rig.target.z);
+  return egg.name;
+};
 (window as unknown as { __weather: (kind: PassingWeather | null, age?: number) => void }).__weather = (kind, age = 0) => {
   if (kind !== null && !WEATHER_ORDER.includes(kind)) return;
   setWeather(kind, age);
@@ -1957,6 +1996,24 @@ function start(data: unknown) {
   world.rig.target.set(f.x, 0, f.z);
   if (zoom) world.rig.dist = world.rig.goalDist = zoom;
   return true;
+};
+// Centraliza na i-ésima instância dos kits cuja chave começa com `prefix` (`gate`, `egg:`, `wall:`...) e devolve a chave.
+(window as unknown as { __deco: (prefix: string, i?: number, zoom?: number) => string | null }).__deco = (prefix, i = 0, zoom) => {
+  const f = world.decoPos(String(prefix), i);
+  if (!f) return null;
+  world.rig.goal.set(f.x, 0, f.z);
+  world.rig.target.set(f.x, 0, f.z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return f.key;
+};
+// Centraliza no i-ésimo bicho da fauna do tema à vista e devolve o kit dele (capturas da fauna).
+(window as unknown as { __fauna: (i?: number, zoom?: number) => string | null }).__fauna = (i = 0, zoom) => {
+  const f = world.life.faunaPos(i);
+  if (!f) return null;
+  world.rig.goal.set(f.x, 0, f.z);
+  world.rig.target.set(f.x, 0, f.z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return f.key;
 };
 // Linha reta de ferrovia, fora do mapa, para a captura da carga e da moeda.
 (window as unknown as { __spur: () => boolean }).__spur = () => {

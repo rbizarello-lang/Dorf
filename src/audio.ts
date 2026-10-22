@@ -1,6 +1,9 @@
 // Sons sintetizados com WebAudio: nenhum arquivo, alguns KB.
 // Só inicia depois do primeiro gesto do jogador (exigência dos navegadores).
 
+import type { EggSound } from './core/eggs';
+import type { AmbienceSpec } from './themes/types';
+
 const PENTA = [0, 2, 4, 7, 9, 12, 14, 16];
 
 export type Mood = 'dawn' | 'day' | 'golden' | 'dusk' | 'night';
@@ -60,6 +63,8 @@ export class Sfx {
   private noise: AudioBuffer | null = null;
   private mix: Ambience = { open: 0, forest: 0, water: 0, village: 0, rail: 0, near: 0 };
   private nextGust = 0;
+  /** Sons de ambiente que o tema pede (Theme.ambience), somados ao ambiente por proximidade. */
+  private themeAmb: readonly AmbienceSpec[] = [];
   enabled = true;
   /** Música ambiente ligada (só toca com `enabled`). */
   music = true;
@@ -115,6 +120,11 @@ export class Sfx {
   /** Paisagem perto do foco da câmera (o jogo chama algumas vezes por segundo). */
   setAmbience(m: Ambience) {
     this.mix = m;
+  }
+
+  /** Sons de ambiente do tema (aves, sapos, grilos, cigarras, vento, gelo, sinos, água); sem lista, só o ambiente de sempre. */
+  setThemeAmbience(list: readonly AmbienceSpec[] | undefined) {
+    this.themeAmb = list ?? [];
   }
 
   /** Ruído branco de 2 s em laço, a matéria do vento, da água e dos respingos. */
@@ -194,6 +204,163 @@ export class Sfx {
       if (Math.random() < 0.02 * m.village * near) this.villageBell();
     }
     if (Math.random() < 0.004 * m.rail * near) this.whistle(0.35, a.bus, 0.012);
+    for (const s of this.themeAmb) this.themeSound(s, m, this.mood, near);
+  }
+
+  /** Sorteia, nesta fração de segundo, o som solto de um item de `Theme.ambience` (o peso escala a chance e o volume). */
+  private themeSound(s: AmbienceSpec, m: Ambience, mood: Mood, near: number) {
+    const w = s.weight, night = mood === 'night', dusk = mood === 'dusk' || mood === 'night', rnd = Math.random();
+    switch (s.kind) {
+      case 'aves':
+        if (!night && rnd < 0.1 * w * (0.5 * m.forest + 0.4 * m.open + 0.12) * near) this.chirp();
+        break;
+      case 'sapos':
+        if (dusk && rnd < 0.2 * w * (m.water + 0.08) * near) this.frog();
+        break;
+      case 'grilos':
+        if (night && rnd < 0.2 * w * (m.open + 0.5 * m.forest + 0.15) * near) this.crickets();
+        break;
+      case 'cigarras':
+        if (!night && mood !== 'dawn' && rnd < 0.07 * w * (m.open + 0.7 * m.forest + 0.1) * near) this.cicada();
+        break;
+      case 'vento':
+        if (rnd < 0.025 * w) this.howl(w);
+        break;
+      case 'gelo':
+        if (rnd < 0.03 * w * (m.water + 0.4 * m.open + 0.1) * near) this.iceCrack();
+        break;
+      case 'sinos':
+        if (rnd < 0.035 * w * (m.village + 0.12) * near) this.villageBell();
+        break;
+      case 'agua':
+        if (rnd < 0.25 * w * m.water * near) this.drip();
+        break;
+    }
+  }
+
+  /** Sapo: dois a quatro "croacs" graves e roucos (quadrada abafada com o tom caindo). */
+  private frog() {
+    const ctx = this.ctx!;
+    const out = this.ambOut(0.7);
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 900;
+    f.connect(out);
+    const f0 = 190 + Math.random() * 110;
+    let t = ctx.currentTime + Math.random() * 0.2;
+    for (let i = 0, n = 2 + Math.floor(Math.random() * 3); i < n; i++, t += 0.13 + Math.random() * 0.05) {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.setValueAtTime(f0, t);
+      o.frequency.exponentialRampToValueAtTime(f0 * 0.62, t + 0.1);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.02, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+      o.connect(g).connect(f);
+      o.start(t);
+      o.stop(t + 0.13);
+    }
+  }
+
+  /** Cigarra: um zumbido agudo e áspero (ruído estreito) que pulsa rápido por ~1,5 s. */
+  private cicada() {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime + Math.random() * 0.2, dur = 1 + Math.random() * 1.1;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true; // o ruído tem 2 s; o zumbido pode passar disso
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 5200 + Math.random() * 1400;
+    bp.Q.value = 6;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.5, t + 0.25);
+    g.gain.setValueAtTime(0.5, t + dur - 0.3);
+    g.gain.linearRampToValueAtTime(0.0001, t + dur);
+    const pulse = ctx.createGain();
+    pulse.gain.value = 0.5;
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 38 + Math.random() * 10;
+    const depth = ctx.createGain();
+    depth.gain.value = 0.5;
+    lfo.connect(depth).connect(pulse.gain);
+    src.connect(bp).connect(pulse).connect(g).connect(this.ambOut(0.45));
+    src.start(t, Math.random() * 1.5);
+    lfo.start(t);
+    src.stop(t + dur + 0.05);
+    lfo.stop(t + dur + 0.05);
+  }
+
+  /** Vento que uiva: ruído passa-banda que sobe e desce devagar, por 2 a 4 s. */
+  private howl(w: number) {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime, dur = 2 + Math.random() * 2;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 5;
+    const f0 = 320 + Math.random() * 220;
+    bp.frequency.setValueAtTime(f0, t);
+    bp.frequency.linearRampToValueAtTime(f0 * 1.5, t + dur * 0.5);
+    bp.frequency.linearRampToValueAtTime(f0 * 0.9, t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.16 * Math.min(1.5, w), t + dur * 0.45);
+    g.gain.linearRampToValueAtTime(0.0001, t + dur);
+    src.connect(bp).connect(g).connect(this.ambOut(1));
+    src.start(t, Math.random() * 1.5);
+    src.stop(t + dur + 0.05);
+  }
+
+  /** Gelo estalando: um estalo seco que desce, seguido de um "ping" agudo que vibra no lago. */
+  private iceCrack() {
+    const ctx = this.ctx!;
+    const out = this.ambOut(0.9);
+    this.burst(0, 0.18, 'highpass', 4200, 900, 0.5, out);
+    const t = ctx.currentTime + 0.03;
+    const f = 1500 + Math.random() * 900;
+    this.voice(f, t, 0.5, 'sine', 0.03, out, 0.002, false);
+    this.voice(f * 1.5, t, 0.28, 'sine', 0.014, out, 0.002, false);
+  }
+
+  /** Gota na água: um pingo curto que sobe de tom. */
+  private drip() {
+    const ctx = this.ctx!;
+    const out = this.ambOut(0.6);
+    const t = ctx.currentTime + Math.random() * 0.1, f = 700 + Math.random() * 600;
+    const o = ctx.createOscillator();
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.exponentialRampToValueAtTime(f * 2.1, t + 0.06);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.03, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 0.14);
+  }
+
+  /** Som de um easter egg (Theme.eggs): sinos, brilho (arpejo agudo) ou coro (acorde de vidro). */
+  egg(kind: EggSound) {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const t = ctx.currentTime + 0.05;
+    if (kind === 'sinos') {
+      [0, 7, 12, 16].forEach((s, i) => this.bell(523.25 * Math.pow(2, s / 12), t + i * 0.32, 3, 0.05, this.master!));
+    } else if (kind === 'brilho') {
+      [12, 16, 19, 24, 28, 31].forEach((s, i) => this.voice(523.25 * Math.pow(2, s / 12), t + i * 0.07, 0.9, 'sine', 0.05, this.master!, 0.006, true));
+    } else {
+      // Coro: acorde aberto de vidro (senos com parcial aguda), de entrada lenta.
+      [0, 7, 12, 16, 19].forEach((s, i) => {
+        const f = 261.63 * Math.pow(2, s / 12);
+        this.voice(f, t + i * 0.05, 3.6, 'sine', 0.04, this.master!, 0.6, true);
+        this.voice(f * 4.02, t + i * 0.05, 2.2, 'sine', 0.008, this.master!, 0.5, true);
+      });
+    }
   }
 
   /** Som solto do ambiente: um panorama aleatório e o volume do ambiente. */

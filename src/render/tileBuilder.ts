@@ -1,11 +1,12 @@
 import * as THREE from 'three/webgpu';
 import { corner, edgeMid, INR } from '../core/hex';
+import type { DayPhase, EggKit } from '../core/eggs';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
 import type { SynKind } from '../core/synergy';
 import type { SiteKind } from '../core/sites';
 import type { SpecialKind } from '../core/specials';
 import { isStrict, T } from '../core/tiles';
-import type { CropKind, Theme } from '../themes/types';
+import { gatesOf, type CropKind, type Theme } from '../themes/types';
 import { CROP_LAYOUT, type HouseMeta } from './lib';
 
 // Gera a peça na orientação de origem (rotação 0), em coordenadas locais.
@@ -62,6 +63,8 @@ export interface Deco {
   orbit?: number;
   /** Só existe na peça viva (andaime de obra): o World não o grava nos blocos. */
   transient?: boolean;
+  /** Bicho da fauna do tema: só aparece nesta fase do dia (`Theme.fauna[].time`). */
+  when?: DayPhase;
 }
 
 export interface TileBuild {
@@ -108,6 +111,8 @@ export interface BuildOpts {
   special?: SpecialKind;
   /** Canteiro da maravilha: o meio da peça fica livre (a maravilha é um objeto à parte, no World). */
   wonder?: boolean;
+  /** Easter eggs de kit desta peça (`Theme.eggs`, efeito 'kit'): decididos pelo jogo, pela partida, nunca pelo relógio. */
+  eggs?: { id: string; kit: EggKit; scale?: number; color?: string }[];
 }
 
 type V2 = [number, number];
@@ -155,6 +160,11 @@ class Buf {
 
 const UP: V3 = [0, 1, 0];
 const WHITE = new THREE.Color(1, 1, 1);
+/** Terraços (Theme.terraces): altura de cada patamar, altura do beiral sobre ele e o tamanho de cada patamar de cima em relação à parcela (2 e 3 patamares). */
+const TERRACE_H = 0.012;
+const TERRACE_LIP = 0.004;
+const TERRACE_SCALE: readonly (readonly number[])[] = [[0.62], [0.76, 0.5]];
+const SPLAT_WALL: Splat = [0, 0, 0.2, 0];
 /**
  * Árvores do tamanho de uma casa (no máximo ~1,3× a altura dela), como na referência: a mata lê como
  * massa fechada de muitas copas pequenas, não como árvores soltas sobre grama, e a vila não some
@@ -965,11 +975,14 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       reserved.push([sx, sz, 0.15]);
     }
     // Portal sobre a via, na primeira borda de linha que encosta num setor de vila.
-    const gi = theme.gate ? road.idx.find((i) => edges[(i + 1) % 6] === T.Village || edges[(i + 5) % 6] === T.Village) : undefined;
+    const gates = gatesOf(theme);
+    const gi = gates.length ? road.idx.find((i) => edges[(i + 1) % 6] === T.Village || edges[(i + 5) % 6] === T.Village) : undefined;
     if (gi !== undefined) {
       const [mx, mz] = edgeMid(gi);
       const n = nearestOnPaths(mx * 0.7, mz * 0.7, road.paths);
-      D('gate', n.p[0], BED_Y, n.p[1], yawTo(-n.t[1], n.t[0]), 1, WHITE);
+      // Vários estilos: a semente da peça escolhe (gerador à parte; com um só, nada é sorteado).
+      const gk = gates.length > 1 ? Math.floor(mulberry32((seed ^ 0x6a7e5) >>> 0)() * gates.length) : 0;
+      D(`gate:${gk}`, n.p[0], BED_Y, n.p[1], yawTo(-n.t[1], n.t[0]), 1, WHITE);
       reserved.push([n.p[0], n.p[1], 0.17]);
     }
   }
@@ -1279,6 +1292,36 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         g.tri([a[0], h, a[1]], [ao[0], 0.001, ao[1]], [bo[0], 0.001, bo[1]], sc, edge, edge, UP, spIn, spOut, spOut);
         g.tri([a[0], h, a[1]], [bo[0], 0.001, bo[1]], [b[0], h, b[1]], sc, edge, sc, UP, spIn, spOut, spIn);
       }
+      // Terraços (Theme.terraces): patamares concêntricos sobre a parcela, cada um um pouco mais alto e menor,
+      // com um riser de muro (mureta de pedra) e um beiral de 4 mm que guarda a água do arrozal. Só a geometria
+      // do chão muda: a borda externa da parcela continua na altura 0 e o rng da peça não gasta nada.
+      const terr = theme.terraces && (!theme.terraces.styles || theme.terraces.styles.includes(crop.style)) ? Math.max(1, Math.min(3, Math.round(theme.terraces.levels))) : 1;
+      const rings: V2[][] = [pts];
+      if (terr > 1) {
+        const wall = shade(tc(theme.rock).clone().lerp(sc, 0.3), 0.82);
+        for (let j = 1; j < terr; j++) {
+          const f = TERRACE_SCALE[terr - 2][j - 1];
+          const poly = pts.map(([x, z]) => [cx + (x - cx) * f, cz + (z - cz) * f] as V2);
+          rings.push(poly);
+          const yLow = h + (j - 1) * TERRACE_H, yHigh = h + j * TERRACE_H;
+          const tread = shade(sc, 1 + 0.05 * j);
+          for (let t = 0; t < sides; t++) {
+            const a = poly[t], b = poly[(t + 1) % sides];
+            g.tri([cx, yHigh, cz], [a[0], yHigh, a[1]], [b[0], yHigh, b[1]], tread, tread, tread, UP, spIn);
+            // Riser: do patamar de baixo até o beiral, de frente para fora.
+            const mx = (a[0] + b[0]) / 2 - cx, mz = (a[1] + b[1]) / 2 - cz;
+            g.quad([a[0], yLow, a[1]], [b[0], yLow, b[1]], [b[0], yHigh + TERRACE_LIP, b[1]], [a[0], yHigh + TERRACE_LIP, a[1]], shade(wall, 0.85), shade(wall, 0.85), wall, wall, [mx, 0, mz], SPLAT_WALL);
+            // Beiral: faixa fina no alto do muro.
+            const ai: V2 = [cx + (a[0] - cx) * 0.93, cz + (a[1] - cz) * 0.93], bi: V2 = [cx + (b[0] - cx) * 0.93, cz + (b[1] - cz) * 0.93];
+            g.quad([a[0], yHigh + TERRACE_LIP, a[1]], [b[0], yHigh + TERRACE_LIP, b[1]], [bi[0], yHigh + TERRACE_LIP, bi[1]], [ai[0], yHigh + TERRACE_LIP, ai[1]], wall, wall, wall, wall, UP, SPLAT_WALL);
+          }
+        }
+      }
+      const levelAt = (x: number, z: number) => {
+        let lv = 0;
+        for (let j = 1; j < rings.length; j++) if (insidePoly(x, z, rings[j])) lv = j;
+        return lv;
+      };
       // Fileiras: direção aleatória por parcela; densidade cai com a qualidade.
       const inner = pts; // 100% do polígono: a escala e o descarte nas plantas fazem o recuo
       const old = pts.map(([x, z]) => [cx + (x - cx) * 0.86, cz + (z - cz) * 0.86] as V2);
@@ -1310,7 +1353,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           if (fr() < (1 - edgeT) * 0.55) continue;
           const s = s0 * (isLush ? 1.12 : 1) * (0.45 + 0.55 * edgeT);
           if (isLush && !rowCol) c = c.lerp(LUSH, 0.22);
-          D(`crop:${crop.style}`, x, h, z, yaw, s, c);
+          D(`crop:${crop.style}`, x, h + levelAt(x, z) * TERRACE_H, z, yaw, s, c);
         }
       }
     }
@@ -1739,6 +1782,63 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         D('berry', b[0], 0, b[1], r2() * Math.PI * 2, randRange(r2, 1.1, 1.5), tc(theme.berry));
         taken.push(b);
       }
+    }
+  }
+
+  // --- Fauna do tema (Theme.fauna): uma espécie por lugar (prado, mata, campo, beira ou água), sorteada
+  // por um gerador à parte e por último, como a paisagem trabalhada. Temas sem `fauna` não gastam nada.
+  if (theme.fauna?.length) {
+    const fr2 = mulberry32((seed ^ 0xfa07a) >>> 0);
+    const sectorsOf = (t: T) => [0, 1, 2, 3, 4, 5].filter((i) => edges[i] === t);
+    for (const where of ['prado', 'floresta', 'campo', 'margem', 'agua'] as const) {
+      const specs = theme.fauna.filter((f) => (f.where ?? 'prado') === where);
+      if (!specs.length) continue;
+      const chance = Math.max(...specs.map((f) => f.chance ?? 0.25));
+      const roll = fr2(), count = 1 + (fr2() < 0.4 ? 1 : 0);
+      const spec = weighted(fr2, specs.map((f) => [f, f.weight] as const));
+      if (roll >= chance) continue;
+      // Um ponto livre do lugar: setor do terreno (prado, mata, campo), faixa logo fora da água (margem) ou água funda.
+      let at: V2 | null = null;
+      for (let tries = 0; tries < 24 && !at; tries++) {
+        let p: V2 | null = null;
+        if (where === 'margem' || where === 'agua') {
+          if (!field) break;
+          const x = (fr2() - 0.5) * 2, z = (fr2() - 0.5) * 2;
+          const d = field.e(x, z);
+          if (Math.hypot(x, z) > INR - 0.12) continue;
+          if (where === 'margem' ? d > 0.012 && d < 0.05 : d < -0.08) p = [x, z];
+        } else {
+          const secs = sectorsOf(where === 'prado' ? T.Grass : where === 'floresta' ? T.Forest : T.Field);
+          if (secs.length) p = samplePoint(fr2, secs[Math.floor(fr2() * secs.length)], 0.18, 0.14);
+          if (p && !(free(p[0], p[1], 0.08) && clear(p[0], p[1]) > 0.06)) p = null;
+        }
+        at = p;
+      }
+      if (!at) continue;
+      for (let a = 0; a < count; a++) {
+        const x = at[0] + (fr2() - 0.5) * 0.06, z = at[1] + (fr2() - 0.5) * 0.06;
+        const c = vary(fr2, tc(pick(fr2, spec.colors)), 0.05);
+        D(`fauna:${spec.kind}`, x, where === 'agua' ? WATER_Y - 0.008 : 0, z, fr2() * 6, randRange(fr2, 0.9, 1.15), c, 'wander');
+        if (spec.time) decos[decos.length - 1].when = spec.time;
+      }
+      taken.push(at);
+    }
+  }
+
+  // --- Easter eggs de peça (Theme.eggs, efeito 'kit'): o kit especial num ponto livre perto do meio da peça.
+  // Quem decide é a partida (core/eggs.ts), nunca o relógio; a posição sai da semente da peça.
+  if (opts.eggs?.length) {
+    const er = mulberry32((seed ^ 0xe66e66) >>> 0);
+    for (const e of opts.eggs) {
+      let at: V2 = [0, 0];
+      for (let tries = 0; tries < 40; tries++) {
+        const a = er() * Math.PI * 2, rr = Math.sqrt(er()) * 0.5;
+        const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
+        at = [x, z];
+        if (free(x, z, 0.08) && clear(x, z) > 0.06) break;
+      }
+      D(`egg:${e.kit}`, at[0], 0, at[1], er() * 6, e.scale ?? 1, e.color ? tc(e.color) : WHITE);
+      taken.push(at);
     }
   }
 

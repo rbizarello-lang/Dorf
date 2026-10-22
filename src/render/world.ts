@@ -3,6 +3,7 @@ import { mrt, vec3, vec4 } from 'three/tsl';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Board, Check, PlaceResult, Placed } from '../core/board';
+import { EggTracker, phaseOfTod, type EggSpec } from '../core/eggs';
 import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey } from '../core/hex';
 import { seasonAt } from '../core/seasons';
 import type { SiteKind } from '../core/sites';
@@ -17,13 +18,15 @@ import { CLOUD_TOP, U, makeVoidMaterial, softShadowFilter } from './materials';
 import { A, fogNode } from './atmosphere';
 import { CL, makeCloudMesh } from './clouds';
 import { seaMap } from './seaMap';
+import { riverMap } from './riverMap';
+import { makeAuroraDome } from './aurora';
 import { groundMap } from './groundMap';
 import { P, buildPost, type Post, type Quality } from './post';
 import { SkyEnv } from './sky';
 import { FX, Fireflies, Sprites, Weather } from './fx';
 import { LiveTile } from './liveTile';
 import { PreviewView } from './preview';
-import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type TileBuild } from './tileBuilder';
+import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type BuildOpts, type TileBuild } from './tileBuilder';
 import { NIGHT_LIGHT } from './nightLight';
 
 export type { Quality };
@@ -580,6 +583,8 @@ export class World {
   /** Nuvens volumétricas (clouds.ts): só com a câmera longe, numa cena que o pós compõe por cima. */
   private clouds = makeCloudMesh();
   private cloudScene = new THREE.Scene();
+  /** Cúpula da aurora boreal (Theme.skyFx), na mesma cena das nuvens: só aparece à noite e quando o tema a pede. */
+  private auroraDome = makeAuroraDome();
   private size = new THREE.Vector2(1, 1);
   /** Resolução dinâmica do modo Auto (dynres.ts): fração do lado da imagem do nível. */
   private resScale = 1;
@@ -700,7 +705,7 @@ export class World {
 
     this.precip.mesh.visible = false;
     this.scene.add(this.sprites.group, this.weather.mesh, this.precip.mesh, this.fireflies.mesh);
-    this.cloudScene.add(this.clouds);
+    this.cloudScene.add(this.clouds, this.auroraDome);
     (this.cloudScene as THREE.Scene & { fogNode?: THREE.Node }).fogNode = fogNode;
   }
 
@@ -726,6 +731,13 @@ export class World {
     this.waterColor.set(theme.water);
     this.cloudsBase = theme.period === 'futuro' ? 0.08 : 0.16;
     U.clouds.value = this.cloudsBase;
+    // Várzea (Theme.floodplain): a cor fértil perto do rio; sem ela o chão sai como sempre.
+    U.flood.value = theme.floodplain ? 1 : 0;
+    if (theme.floodplain) {
+      U.floodReach.value = theme.floodplain.reach;
+      U.floodColor.value.set(theme.floodplain.color);
+    }
+    this.eggClear();
     this.setSurround(theme);
     this.skyTarget = skyFor(theme, this.timeOfDay);
     this.sky = skyFor(theme, this.timeOfDay);
@@ -744,6 +756,7 @@ export class World {
   /** Troca a hora do dia: a luz passa devagar para a nova, ou na hora com `instant` (vídeo). */
   setTimeOfDay(tod: TimeOfDay, instant = false) {
     this.timeOfDay = tod;
+    if (instant) this.life.phase = phaseOfTod(tod);
     if (!this.theme) return;
     this.skyTarget = skyFor(this.theme, tod);
     if (instant) {
@@ -806,7 +819,8 @@ export class World {
   private weatherSky(): Sky {
     const s = this.sky, k = this.wxKind ? WX[this.wxKind] : null;
     const e = this.wxAmt * this.wxAmt * (3 - 2 * this.wxAmt);
-    if (!k || e < 1e-3) return s;
+    if ((!k || e < 1e-3) && this.eggSky.k < 1e-3) return s;
+    if (!k || e < 1e-3) return this.eggSkyOver(s);
     const o = (this.wxSkyBuf ??= { ...s, bg: s.bg.clone(), fill: s.fill.clone(), line: s.line.clone(), sun: s.sun.clone(), sunDir: s.sunDir.clone(), hemiSky: s.hemiSky.clone(), hemiGround: s.hemiGround.clone() });
     const t = tmpColor2.set(k.tint);
     const f = e * k.tintK;
@@ -845,6 +859,7 @@ export class World {
     const bounceK = this.quality === 'ultra' ? BOUNCE_ULTRA + (BOUNCE_ULTRA_NIGHT - BOUNCE_ULTRA) * nightK : BOUNCE;
     U.bounce.value.copy(s.sun).multiplyScalar(s.sunI * up).add(tmpColor.copy(s.hemiSky).multiplyScalar(s.hemiI)).multiplyScalar(bounceK);
     U.lamps.value = nightK * (this.quality === 'ultra' ? LAMPS_ULTRA : LAMPS);
+    U.aurora.value = this.theme?.skyFx === 'aurora' ? nightK : 0;
     U.halo.value = this.quality === 'ultra' ? nightK * HALO_ULTRA : 0;
     if (this.quality === 'ultra') U.bounce.value.add(tmpColor.copy(WARM_ULTRA).multiplyScalar(nightK));
     // Nuvens: o topo ao sol um pouco mais claro que o fundo do tema, a base na cor do chão.
@@ -1031,13 +1046,13 @@ export class World {
 
   // ---------------------------------------------------------------- mapa
 
-  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[] }) {
+  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; eggs?: BuildOpts['eggs'] }) {
     return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, special: def.special, ...extra });
   }
 
   /** Peça do mapa já colocada: a inicial reserva o Centro, e a do marco o ergue. */
   private buildPlaced(p: Placed) {
-    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths: this.settleWidths(p) });
+    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths: this.settleWidths(p), eggs: this.eggKits.get(p.key) });
   }
 
   /**
@@ -1101,11 +1116,16 @@ export class World {
     this.chimneys = [];
     this.sprites.clear();
     this.life.reset(this.theme);
+    this.life.phase = phaseOfTod(this.timeOfDay);
     this.flows.clear();
     this.widths.clear();
     groundMap.clear();
     seaMap.clear();
+    riverMap.clear();
     this.lib.setEra(board.era);
+    // Easter eggs de peça: reavaliados na ordem das peças (em silêncio), então o replay mostra os mesmos kits.
+    this.eggReset();
+    this.feedEggs(board.list);
     for (const p of board.list) this.bake(p, this.buildPlaced(p), false);
     for (const pool of this.pools.values()) pool.flush();
     this.updateFrontier(board);
@@ -1392,6 +1412,7 @@ export class World {
     this.chunkFor(p.q, p.r).append(b, m);
     groundMap.add(b, m, this.waterColor);
     seaMap.add(p.q, p.r);
+    if (this.theme.floodplain && b.water.length) riverMap.add(b.water, m, this.theme.floodplain.reach);
     for (const d of b.decos) {
       if (d.transient) continue;
       decoMatrix(d, tmpM);
@@ -1403,7 +1424,7 @@ export class World {
         groundMap.lantern(x, z, 0.28 + 0.2 * h);
       }
       if (d.anim === 'spin-z' || d.anim === 'spin-x') this.life.addSpinner(d.key, tmpM, d.anim === 'spin-x' ? 'x' : 'z');
-      else if (d.anim === 'wander') this.life.addAnimal(tmpM, d.color);
+      else if (d.anim === 'wander') this.life.addAnimal(d.key, tmpM, d.color, d.when);
       else if (d.anim === 'chop' || d.anim === 'tend' || d.anim === 'carry') this.life.addWorker(d.key, tmpM, d.color, d.anim);
       else if (d.anim === 'swim') this.life.addFish(tmpM, d.color, d.orbit ?? 0);
       else if (d.anim === 'bob') this.life.addBobber(tmpM, d.color);
@@ -1487,7 +1508,10 @@ export class World {
     const syn = synBase(p.synergies, p.rot);
     const flow = this.settleFlow(p);
     const widths = this.settleWidths(p);
-    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}`;
+    // Ovos de peça desta jogada: o kit entra na peça; o resto (evento, céu, som) dispara quando ela assenta.
+    if (this.board) this.feedEggs(this.board.list, p.index + 1, true);
+    const eggs = this.eggKits.get(p.key);
+    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${eggs?.map((e) => e.kit).join('+') ?? ''}`;
     let live: LiveTile;
     let y0 = 1.2;
     if (this.ghost && this.ghost.def === p.def && this.ghost.sig === sig) {
@@ -1496,7 +1520,7 @@ export class World {
       this.ghost = null;
       this.ghostKey = '';
     } else {
-      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths }), sig, this.lib, this.quality !== 'low');
+      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths, eggs }), sig, this.lib, this.quality !== 'low');
       this.scene.add(live.group);
       this.dropGhost();
     }
@@ -1510,12 +1534,141 @@ export class World {
 
   /** Coloca várias peças de uma vez, sem animação (modo automático / teste de carga). */
   placeInstant(list: Placed[], board: Board) {
+    this.feedEggs(board.list);
     for (const p of list) this.bake(p, this.buildPlaced(p), false);
     for (const pool of this.pools.values()) pool.flush();
     this.updateFrontier(board);
     this.life.sync(board);
     this.fireflies.sync(board);
     this.syncWonder(board, false);
+  }
+
+  // ---------------------------------------------------------------- easter eggs
+
+  private eggs: EggTracker | null = null;
+  /** Kits de ovo por peça (chave da peça): decididos pela partida, então o replay os reconstrói. */
+  private eggKits = new Map<number, NonNullable<BuildOpts['eggs']>>();
+  /** Ovos de uma jogada ao vivo, esperando a peça assentar para dispararem. */
+  private eggPending = new Map<number, EggSpec[]>();
+  /** Um ovo disparou numa jogada ao vivo (ou pelo relógio): o jogo mostra o aviso e toca os sons. */
+  onEgg?: (egg: EggSpec, sounds: ('sinos' | 'brilho' | 'coro')[], announce: boolean) => void;
+  /** Tom de céu de um ovo: `k` vai ao `target` aos poucos; `left` > 0 conta os segundos até soltar. */
+  private eggSky = { tint: new THREE.Color(), strength: 0.5, k: 0, target: 0, left: 0 };
+  private eggSkyBuf: Sky | null = null;
+
+  private eggReset() {
+    this.eggs = null;
+    this.eggKits.clear();
+    this.eggPending.clear();
+  }
+
+  private eggClear() {
+    this.eggReset();
+    this.eggSky.k = this.eggSky.target = 0;
+  }
+
+  /**
+   * Alimenta o rastreador com as peças que faltam, na ordem (até `upto`), e guarda os kits. Com `live`, os ovos
+   * da jogada ficam pendentes para disparar quando a peça pousar; sem ele (replay, desfazer) só os kits entram.
+   */
+  private feedEggs(list: readonly Placed[], upto = list.length, live = false) {
+    const specs = this.theme?.eggs;
+    if (!specs?.length) return;
+    const tr = (this.eggs ??= new EggTracker(specs));
+    if (tr.count > list.length) {
+      tr.reset();
+      this.eggKits.clear();
+      this.eggPending.clear();
+    }
+    while (tr.count < Math.min(upto, list.length)) {
+      const p = list[tr.count];
+      for (const h of tr.add({ q: p.q, r: p.r, index: p.index, edges: p.edges, seed: p.def.seed })) {
+        for (const x of h.egg.effect) {
+          if (x.kind !== 'kit') continue;
+          const kits = this.eggKits.get(p.key) ?? [];
+          kits.push({ id: h.egg.id, kit: x.kit, scale: x.scale, color: x.color });
+          this.eggKits.set(p.key, kits);
+        }
+        if (live) this.eggPending.set(p.key, [...(this.eggPending.get(p.key) ?? []), h.egg]);
+      }
+    }
+  }
+
+  /** A peça acabou de pousar: dispara os ovos dela. */
+  private fireEggs(p: Placed) {
+    const eggs = this.eggPending.get(p.key);
+    if (!eggs) return;
+    this.eggPending.delete(p.key);
+    const { x, z } = hexToWorld(p.q, p.r);
+    for (const e of eggs) {
+      if (e.effect.some((f) => f.kind === 'kit')) {
+        this.burst(x, z, 'sparkle', 30, 0.1);
+        this.halo(x, z, 1.4);
+      }
+      this.playEgg(e, x, z);
+    }
+  }
+
+  /** Executa os efeitos visuais de um ovo (evento e céu) em (x, z) e entrega os sons ao jogo. Só cosmético. */
+  playEgg(egg: EggSpec, x: number, z: number, announce = true) {
+    const sounds: ('sinos' | 'brilho' | 'coro')[] = [];
+    for (const f of egg.effect) {
+      if (f.kind === 'som') sounds.push(f.sound);
+      else if (f.kind === 'ceu') this.setEggSky(f.tint, f.strength ?? 0.5, f.seconds ?? 20);
+      else if (f.kind === 'evento' && !this.reducedMotion) {
+        if (f.event === 'bando-dourado') this.life.flush(x, z, true);
+        else if (f.event === 'procissao') {
+          // Cinco aldeões com lanterna cruzam a peça numa direção qualquer (cosmético: o sorteio não é da semente).
+          const a = Math.random() * Math.PI * 2, ux = Math.cos(a), uz = Math.sin(a);
+          this.life.passage('egg:folk', 5, [x - ux * 1.2, z - uz * 1.2], [x + ux * 1.2, z + uz * 1.2], 0.07, 0.075, 0, tc(f.color ?? this.theme.ui.accent), 0.004);
+        }
+      }
+    }
+    this.onEgg?.(egg, sounds, announce);
+  }
+
+  /** Tom de céu por cima da hora do dia; `seconds` 0 segura até `clearEggSky`. */
+  setEggSky(tint: string, strength: number, seconds: number) {
+    this.eggSky.tint.set(tint);
+    this.eggSky.strength = strength;
+    this.eggSky.target = 1;
+    this.eggSky.left = seconds;
+  }
+
+  clearEggSky() {
+    this.eggSky.target = 0;
+    this.eggSky.left = 0;
+  }
+
+  private stepEggSky(dt: number) {
+    const e = this.eggSky;
+    if (e.left > 0) {
+      e.left -= dt;
+      if (e.left <= 0) e.target = 0;
+    }
+    if (e.k === e.target) return;
+    e.k += Math.max(-dt * 0.5, Math.min(dt * 0.5, e.target - e.k));
+    this.applySky();
+  }
+
+  /** O céu do tema com o tom do ovo por cima (mais fraco que o clima tocável, que tem a vez quando está ativo). */
+  private eggSkyOver(s: Sky): Sky {
+    const o = (this.eggSkyBuf ??= { ...s, bg: s.bg.clone(), fill: s.fill.clone(), line: s.line.clone(), sun: s.sun.clone(), sunDir: s.sunDir.clone(), hemiSky: s.hemiSky.clone(), hemiGround: s.hemiGround.clone() });
+    const k = this.eggSky.k * this.eggSky.k * (3 - 2 * this.eggSky.k);
+    const f = k * this.eggSky.strength;
+    o.bg.copy(s.bg).lerp(this.eggSky.tint, f * 0.6);
+    o.fill.copy(s.fill).lerp(this.eggSky.tint, f * 0.45);
+    o.line.copy(s.line).lerp(this.eggSky.tint, f * 0.4);
+    o.sun.copy(s.sun).lerp(this.eggSky.tint, f * 0.8);
+    o.hemiSky.copy(s.hemiSky).lerp(this.eggSky.tint, f);
+    o.hemiGround.copy(s.hemiGround).lerp(this.eggSky.tint, f * 0.3);
+    o.sunDir.copy(s.sunDir);
+    o.sunI = s.sunI;
+    o.hemiI = s.hemiI;
+    o.night = s.night;
+    o.haze = s.haze;
+    o.mist = s.mist;
+    return o;
   }
 
   // ---------------------------------------------------------------- fantasma
@@ -1754,6 +1907,21 @@ export class World {
   }
 
   /** Custo por kit: instâncias e triângulos (para achar o que pesa). */
+  /** Posição da i-ésima instância dos kits cuja chave começa com `prefix` (`gate`, `egg:`, `fauna:`...), ou null (capturas). */
+  decoPos(prefix: string, i: number): { x: number; z: number; key: string } | null {
+    let n = 0;
+    for (const [id, p] of this.pools) {
+      const key = poolKey(id);
+      if (!key.startsWith(prefix)) continue;
+      if (i - n < p.count) {
+        const e = p.mesh.instanceMatrix.array as Float32Array;
+        return { x: e[(i - n) * 16 + 12], z: e[(i - n) * 16 + 14], key };
+      }
+      n += p.count;
+    }
+    return null;
+  }
+
   poolReport() {
     return [...this.pools.entries()]
       .map(([k, p]) => {
@@ -1793,7 +1961,7 @@ export class World {
     for (const c of this.chunks.values()) tris += c.triangles();
     let inst = 0;
     for (const p of this.pools.values()) inst += p.count;
-    return { calls: info.render.drawCalls, triangles: info.render.triangles, chunks: this.chunks.size, pools: this.pools.size, instances: inst, groundTris: tris, life: this.life.counts(), backend: this.backend, shadowDraws: shadowCount.draws, shadowPasses: shadowCount.passes };
+    return { calls: info.render.drawCalls, triangles: info.render.triangles, chunks: this.chunks.size, pools: this.pools.size, instances: inst, groundTris: tris, life: this.life.counts(), eggSky: this.eggSky.k, backend: this.backend, shadowDraws: shadowCount.draws, shadowPasses: shadowCount.passes };
   }
 
   setPreview(def: TileDef | null, angle: number, stack: number) {
@@ -1884,6 +2052,11 @@ export class World {
     A.far.value = near + eye * 2.7;
     groundMap.flush();
     seaMap.flush();
+    riverMap.flush();
+    // Aurora boreal: a cúpula acompanha a câmera e só existe à noite, quando o tema a pede.
+    this.auroraDome.visible = this.quality !== 'low' && U.aurora.value > 0.01;
+    this.auroraDome.position.copy(this.camera.position);
+    this.stepEggSky(dt);
     // As nuvens aparecem quando a câmera sobe bem acima delas (não no nível Baixo).
     // A laje é marchada de cima: com a câmera inclinada até perto dela, as nuvens somem.
     const cloudHigh = THREE.MathUtils.smoothstep(this.camera.position.y, CLOUD_TOP + 1.5, CLOUD_TOP + 4);
@@ -2053,6 +2226,7 @@ export class World {
           d.landed = true;
           this.burst(g.position.x, g.position.z, 'dust', 22);
           this.ripple(g.position.x, g.position.z);
+          this.fireEggs(d.placed);
         }
         const u = (d.t - fall) / 0.32;
         const squash = this.reducedMotion ? 0 : Math.sin(Math.min(1, u) * Math.PI);
@@ -2111,6 +2285,7 @@ export class World {
     // Aldeões só de perto, com o mesmo limiar da metade fina das plantas.
     this.life.folkNear = this.rig.dist < 13 * reach;
     this.life.night = U.night.value;
+    this.life.phase = phaseOfTod(this.timeOfDay);
     this.life.update(dt);
     this.life.wakes(this.rig.target.x, this.rig.target.z);
     this.spawnSmoke(dt);

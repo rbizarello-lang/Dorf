@@ -81,5 +81,15 @@ export const holanda: Theme = {
   wonder: { name: 'Paço Municipal', core: 'civic', colors: ['#e9dcc4', '#4a4f5a', '#b8923f'] },
   eras: ['Aldeia de pôlder', 'Vila mercante', 'Cidade das guildas', 'Século de Ouro'],
   rules: { synergyBonus: { mill: 5 } },
+  // Easter egg de exemplo do mecanismo genérico (src/core/eggs.ts): a milésima peça solta um bando dourado.
+  eggs: [
+    {
+      id: 'mil-pecas',
+      name: 'Mil peças',
+      note: 'Mil peças: um bando dourado levanta voo sobre o Século de Ouro.',
+      when: [{ kind: 'pecas', n: 1000 }],
+      effect: [{ kind: 'evento', event: 'bando-dourado' }, { kind: 'som', sound: 'sinos' }],
+    },
+  ],
   ruleNote: 'Moinhos de pôlder: cada moinho de vento (aldeia + tulipas) vale 5 pontos a mais.',
 };

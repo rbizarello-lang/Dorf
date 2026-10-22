@@ -3,7 +3,8 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { housesAtEra } from '../themes/progress';
 import type { SiteKind } from '../core/sites';
 import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
-import type { AnimalKind, BoatKind, BodyStyle, BridgeStyle, CenterCrown, CropStyle, GateStyle, HatStyle, HouseKind, Landmark, RoofStyle, Theme, TreeGeo, VehicleKind } from '../themes/types';
+import type { EggKit } from '../core/eggs';
+import { gatesOf, type AnimalKind, type BoatKind, type BodyStyle, type BridgeStyle, type CenterCrown, type CropStyle, type GateStyle, type HatStyle, type HouseKind, type Landmark, type RoofStyle, type Theme, type TreeGeo, type VehicleKind } from '../themes/types';
 
 // Biblioteca de "kits": geometrias low-poly com cor por vértice, montadas por tema.
 // Cada chave vira um InstancedMesh (1 draw call para milhares de cópias).
@@ -1400,13 +1401,50 @@ function vehicleGeometry(kind: VehicleKind, [body, det]: [string, string], anima
   }
 }
 
-function birdGeometry() {
+function birdGeometry(color = '#3a3634', glow = 0) {
   return kit([
-    { geo: tri([0, 0, 0], [-0.01, 0.004, 0.03], [0.012, 0, 0]), color: '#3a3634' },
-    { geo: tri([0, 0, 0], [0.012, 0, 0], [-0.01, 0.004, -0.03]), color: '#3a3634' },
-    { geo: tri([-0.01, 0.004, 0.03], [0, 0, 0], [0.012, 0, 0]), color: '#3a3634' },
-    { geo: tri([0.012, 0, 0], [0, 0, 0], [-0.01, 0.004, -0.03]), color: '#3a3634' },
+    { geo: tri([0, 0, 0], [-0.01, 0.004, 0.03], [0.012, 0, 0]), color, glow },
+    { geo: tri([0, 0, 0], [0.012, 0, 0], [-0.01, 0.004, -0.03]), color, glow },
+    { geo: tri([-0.01, 0.004, 0.03], [0, 0, 0], [0.012, 0, 0]), color, glow },
+    { geo: tri([0.012, 0, 0], [0, 0, 0], [-0.01, 0.004, -0.03]), color, glow },
   ]);
+}
+
+/**
+ * Kits decorativos dos easter eggs de peça (Theme.eggs, efeito 'kit'), chave `egg:<kit>`. Um kit novo entra
+ * no tipo `EggKit` (core/eggs.ts) e ganha o seu `case` aqui. A cor da instância tinge as partes com `tint`.
+ */
+function eggGeometry(kit_: EggKit): THREE.BufferGeometry {
+  switch (kit_) {
+    case 'bulbo-dourado':
+      // Uma tulipa grande de ouro com folhas: o caule e as pétalas brilham de leve.
+      return kit([
+        { geo: cyl(0.004, 0.005, 0.07, 5), color: '#4f8a3a' },
+        { geo: cone(0.022, 0.05, 5, 0, 0.06), color: '#fff', tint: 1, glow: 0.5, grad: [0.85, 1.1, 0.06, 0.11] },
+        { geo: cone(0.012, 0.04, 4, 0.016, 0.062).rotateZ(-0.35), color: '#fff', tint: 1, glow: 0.4 },
+        { geo: cone(0.012, 0.04, 4, -0.016, 0.062).rotateZ(0.35), color: '#fff', tint: 1, glow: 0.4 },
+        { geo: box(0.05, 0.004, 0.012, 0.022, 0.02).rotateZ(0.5), color: '#4f8a3a' },
+        { geo: box(0.05, 0.004, 0.012, -0.022, 0.016).rotateZ(-0.5), color: '#4f8a3a' },
+      ]);
+    case 'estela':
+      // Pedra erguida com um anel dourado no alto.
+      return kit([
+        { geo: box(0.05, 0.012, 0.04), color: '#8a8478', grad: [0.8, 1, 0, 0.012] },
+        { geo: box(0.032, 0.11, 0.02, 0, 0.012), color: '#a8a296', grad: [0.85, 1.05, 0.012, 0.12] },
+        { geo: cone(0.022, 0.03, 4, 0, 0.122).rotateY(Math.PI / 4), color: '#a8a296' },
+        { geo: cyl(0.014, 0.014, 0.004, 8, 0, 0.08).rotateX(Math.PI / 2).translate(0, 0, 0.011), color: '#fff', tint: 1, glow: 0.7 },
+      ]);
+  }
+}
+
+/** Aldeão com lanterna na mão, para a procissão dos easter eggs: a cor da instância tinge a camisa. */
+function lanternFolkGeometry(folk: { skin: string; hat: HatStyle; hatColor: string }, wood: Col): THREE.BufferGeometry {
+  const f = folkGeometry('hoe', folk, wood);
+  const lamp = kit([
+    { geo: box(0.008, 0.01, 0.008, 0.018, 0.05, 0.012), color: '#ffd98a', glow: 1 },
+    { geo: box(0.0015, 0.014, 0.0015, 0.018, 0.058, 0.012), color: '#2a2622' },
+  ]);
+  return mergeGeometries([f, lamp])!;
 }
 
 // ---------------------------------------------------------------- aldeões
@@ -2272,7 +2310,7 @@ export class Lib {
     if (theme.landmark === 'windmill' || theme.mill === 'windmill') set('sails', sailsGeometry(ld, '#f3ead8'));
     set('mill', theme.mill === 'windmill' ? windmillBody(lw, lr, ld, theme.window) : theme.mill === 'windpump' ? windpumpBody(theme.trunk) : theme.mill === 'stilt' ? stiltGeometry(theme.houses[0].walls[0], theme.houses[0].roofs[0], theme.trunk) : null);
     if (theme.mill === 'windpump') set('rotor', rotorGeometry());
-    if (theme.gate) set('gate', gateGeometry(theme.gate.style, theme.gate.colors));
+    gatesOf(theme).forEach((g, i) => set(`gate:${i}`, gateGeometry(g.style, g.colors)));
     if (theme.bridge) set('bridge', bridgeGeometry(theme.bridge.style, theme.bridge.colors));
     for (const c of theme.crops) if (!this.geos.has(`crop:${c.style}`)) set(`crop:${c.style}`, cropGeometry(c.style));
     const sp = specialsFor(theme, theme.houses[0].walls[0], theme.houses[0].roofs[0]);
@@ -2288,13 +2326,17 @@ export class Lib {
     set('flower', kit([{ geo: oct(0.014).translate(0, 0.024, 0), color: '#fff', tint: 1 }, { geo: tri([-0.002, 0, 0], [0.002, 0, 0], [0, 0.02, 0]), color: '#4f7a3a' }]));
     set('lily', kit([{ geo: cyl(0.035, 0.035, 0.006, 7, 0, 0.011), color: '#fff', tint: 1 }, { geo: oct(0.008).translate(0.01, 0.02, 0.006), color: '#f7c6d8' }]));
     set('animal', animalGeometry(theme.animals.kind));
+    // Fauna extra do tema: um kit por espécie (`fauna:<kind>`), o mesmo desenho do bicho de pasto.
+    for (const f of theme.fauna ?? []) if (!this.geos.has(`fauna:${f.kind}`)) set(`fauna:${f.kind}`, animalGeometry(f.kind));
     set('boat', boatGeometry(theme.boat, theme.boatColors));
     const v = vehicleGeometry(theme.vehicle, theme.vehicleColors, theme.animals.kind);
     set('vehicle:head', v.head);
     set('vehicle:car', v.car);
     set('cargo', cargoGeometry());
+    for (const e of theme.eggs ?? []) for (const x of e.effect) if (x.kind === 'kit' && !this.geos.has(`egg:${x.kit}`)) set(`egg:${x.kit}`, eggGeometry(x.kit));
     set('coin', coinGeometry());
     set('bird', birdGeometry());
+    set('bird:gold', birdGeometry('#f4c63a', 0.5));
     for (let e = 0; e < 4; e++) set(`center:${e}`, centerGeometry(e, theme));
     set('monument:log', monumentGeometry('log', theme.trunk));
     set('monument:statue', monumentGeometry('statue', theme.trunk));
@@ -2310,6 +2352,7 @@ export class Lib {
     this.wonderSize = { h: wonder.h, w: wonder.w };
     const folk = theme.folk ?? { skin: '#c99a72', hat: 'none', hatColor: '#000' };
     for (const t of ['axe', 'hoe', 'sack'] as const) set(`folk:${t}`, folkGeometry(t, folk, theme.trunk));
+    set('egg:folk', lanternFolkGeometry(folk, theme.trunk));
     // Batedor do começo da partida: um aldeão montado no animal do tema (a instância tinge os dois).
     set('scout', mergeGeometries([animalGeometry(theme.animals.kind), folkGeometry('sack', folk, theme.trunk).translate(0, 0.022, 0)])!);
     for (const [k, g] of Object.entries(siteGeometries(theme))) set(k, g);

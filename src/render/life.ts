@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import type { Board, Placed } from '../core/board';
 import { DIRS, edgeMid, hexToWorld, hkey, opposite } from '../core/hex';
+import type { DayPhase } from '../core/eggs';
 import { isMarket, networks } from '../core/routes';
 import { T } from '../core/tiles';
 import type { Theme } from '../themes/types';
@@ -92,6 +93,11 @@ interface Spinner {
 }
 
 interface Animal {
+  /** Pool do bicho: 'animal' (o do pasto do tema) ou `fauna:<kind>` (Theme.fauna). */
+  key: string;
+  /** Só aparece nesta fase do dia; fora dela some aos poucos (`vis` vai a 0). */
+  when?: DayPhase;
+  vis: number;
   x: number;
   z: number;
   y: number;
@@ -187,6 +193,27 @@ interface Flock {
   /** Bando de passagem (levantou voo num marco): sobe com `vh` e some quando `ttl` acaba. */
   vh?: number;
   ttl?: number;
+  /** Pássaros dourados (easter egg), de outro pool. */
+  gold?: boolean;
+}
+
+/** Fila de figurantes que cruza o mapa em linha reta e some (easter eggs): `n` instâncias do kit `key`. */
+interface Passage {
+  key: string;
+  n: number;
+  x0: number;
+  z0: number;
+  dx: number;
+  dz: number;
+  len: number;
+  speed: number;
+  spacing: number;
+  y: number;
+  /** Segundos desde a saída do primeiro. */
+  t: number;
+  color: THREE.Color;
+  /** Balanço do passo (altura em unidades do mundo). */
+  bob: number;
 }
 
 export class Life {
@@ -194,9 +221,15 @@ export class Life {
   private pools = new Map<string, AnimPool>();
   private spinners: Spinner[] = [];
   private animals: Animal[] = [];
+  /** Instâncias em uso por pool de bicho neste quadro (os que sumiram da hora não entram). */
+  private animalCount = new Map<string, number>();
+  /** Fase do dia (World): a fauna do tema some fora da hora dela. */
+  phase: DayPhase = 'dia';
   private movers: Mover[] = [];
   private wakeList: Mover[] = [];
   private flocks: Flock[] = [];
+  private passages: Passage[] = [];
+  private passageKeys = new Set<string>();
   private workers: Worker[] = [];
   private fish: Fish[] = [];
   private bobbers: Bobber[] = [];
@@ -231,6 +264,9 @@ export class Life {
     this.pools.clear();
     this.spinners = [];
     this.animals = [];
+    this.animalCount.clear();
+    this.passages = [];
+    this.passageKeys.clear();
     this.movers = [];
     this.flocks = [];
     this.workers = [];
@@ -259,11 +295,11 @@ export class Life {
     this.spinners.push({ pool: key, base: world.clone(), axis: axis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1), speed: key === 'sails' ? 0.9 + Math.random() * 0.4 : key === 'rotor' ? 2.2 + Math.random() * 0.6 : 1.4, phase: Math.random() * 6 });
   }
 
-  addAnimal(world: THREE.Matrix4, color: THREE.Color) {
-    if (!this.pool('animal')) return;
+  addAnimal(key: string, world: THREE.Matrix4, color: THREE.Color, when?: DayPhase) {
+    if (!this.pool(key)) return;
     const p = new THREE.Vector3().setFromMatrixPosition(world);
     const s = new THREE.Vector3().setFromMatrixScale(world).x;
-    this.animals.push({ x: p.x, z: p.z, y: p.y, hx: p.x, hz: p.z, heading: Math.random() * Math.PI * 2, speed: 0, pause: Math.random() * 3, s, color: color.clone(), phase: Math.random() * 6 });
+    this.animals.push({ key, when, vis: !when || when === this.phase ? 1 : 0, x: p.x, z: p.z, y: p.y, hx: p.x, hz: p.z, heading: Math.random() * Math.PI * 2, speed: 0, pause: Math.random() * 3, s, color: color.clone(), phase: Math.random() * 6 });
   }
 
   addWorker(key: string, world: THREE.Matrix4, color: THREE.Color, anim: 'chop' | 'tend' | 'carry') {
@@ -376,10 +412,16 @@ export class Life {
     }
     for (const [k, c] of Object.entries(counts)) this.pools.get(k)!.commit(c + 1);
 
-    // Animais: andam um pouco, param, pastam.
-    const ap = this.pools.get('animal');
-    if (ap && this.animals.length) {
-      this.animals.forEach((a, i) => {
+    // Animais: andam um pouco, param, pastam. Os da fauna do tema só aparecem na hora deles.
+    if (this.animals.length) {
+      const used = this.animalCount;
+      for (const k of used.keys()) used.set(k, 0);
+      for (const a of this.animals) {
+        const ap = this.pools.get(a.key);
+        if (!ap) continue;
+        if (!used.has(a.key)) used.set(a.key, 0);
+        a.vis += ((!a.when || a.when === this.phase ? 1 : 0) - a.vis) * Math.min(1, dt * 1.2);
+        const i = used.get(a.key) ?? 0;
         if (a.pause > 0) {
           a.pause -= dt;
           a.speed = Math.max(0, a.speed - dt * 0.1);
@@ -394,12 +436,15 @@ export class Life {
         a.z += Math.sin(a.heading) * a.speed * dt;
         const bob = a.speed > 0.005 ? Math.abs(Math.sin(this.time * 9 + a.phase)) * 0.004 : 0;
         const graze = a.pause > 0 ? Math.sin(this.time * 1.3 + a.phase) * 0.12 - 0.08 : 0;
+        // Fora da hora o bicho já saiu de cena: não ocupa instância.
+        if (a.vis < 0.02) continue;
         q4.setFromAxisAngle(UP, -a.heading);
-        m4.compose(v3.set(a.x, a.y + bob, a.z), q4, s3.setScalar(a.s));
+        m4.compose(v3.set(a.x, a.y + bob, a.z), q4, s3.setScalar(a.s * a.vis));
         if (graze) m4.multiply(m4b.makeRotationZ(graze));
         ap.set(i, m4, a.color);
-      });
-      ap.commit(this.animals.length);
+        used.set(a.key, i + 1);
+      }
+      for (const [k, n] of used) this.pools.get(k)?.commit(n);
     }
 
     this.updateMovers(dt);
@@ -407,6 +452,7 @@ export class Life {
     this.updateFolk(dt);
     this.updateScout(dt);
     this.updateBirds(dt);
+    this.updatePassages(dt);
   }
 
   private updateFish(dt: number) {
@@ -616,6 +662,13 @@ export class Life {
     return f ? { x: f.cx, z: f.cz } : null;
   }
 
+  /** Posição do i-ésimo bicho da fauna do tema (`Theme.fauna`) à vista, com o kit dele (capturas). */
+  faunaPos(i: number): { x: number; z: number; key: string } | null {
+    const list = this.animals.filter((a) => a.key.startsWith('fauna:') && a.vis > 0.5);
+    const a = list[i];
+    return a ? { x: a.x, z: a.z, key: a.key } : null;
+  }
+
   /** Posição do i-ésimo aldeão de construção, ou null (capturas). */
   workerPos(i: number): { x: number; z: number } | null {
     const w = this.workers[i];
@@ -780,19 +833,54 @@ export class Life {
     coin?.commit(ni);
   }
 
-  /** Um bando sai do chão em espiral e vai embora; temas sem pássaros (futuro) ficam sem. */
-  flush(x: number, z: number) {
+  /** Um bando sai do chão em espiral e vai embora; temas sem pássaros (futuro) ficam sem. Dourado = easter egg. */
+  flush(x: number, z: number, gold = false) {
     if (!this.theme || this.theme.period === 'futuro') return;
     if (this.flocks.filter((f) => f.ttl !== undefined).length >= 2) return;
     const w = (Math.random() < 0.5 ? -1 : 1) * 0.9;
-    this.flocks.push({ cx: x, cz: z, tx: x + (Math.random() - 0.5) * 8, tz: z + (Math.random() - 0.5) * 8, r: 0.35, h: 0.25, w, ang: Math.random() * 6, n: 9, retarget: 99, vh: 0.55, ttl: 7 });
+    this.flocks.push({ cx: x, cz: z, tx: x + (Math.random() - 0.5) * 8, tz: z + (Math.random() - 0.5) * 8, r: 0.35, h: 0.25, w, ang: Math.random() * 6, n: gold ? 14 : 9, retarget: 99, vh: 0.55, ttl: gold ? 11 : 7, gold });
+  }
+
+  /**
+   * Fila de `n` figurantes (instâncias do kit `key`) atravessando de (x0, z0) até (x1, z1) a `speed`
+   * unidades por segundo, `spacing` um do outro, e sumindo no fim. Só visual (passa pelo `dt`).
+   */
+  passage(key: string, n: number, from: [number, number], to: [number, number], speed = 0.06, spacing = 0.07, y = 0, color = WHITE, bob = 0.004) {
+    if (!this.pool(key)) return;
+    const len = Math.hypot(to[0] - from[0], to[1] - from[1]) || 1;
+    this.passages.push({ key, n, x0: from[0], z0: from[1], dx: (to[0] - from[0]) / len, dz: (to[1] - from[1]) / len, len, speed, spacing, y, t: 0, color: color.clone(), bob });
+  }
+
+  private updatePassages(dt: number) {
+    if (!this.passages.length && !this.passageKeys.size) return;
+    const idx = new Map<string, number>();
+    for (const p of this.passages) {
+      p.t += dt;
+      const pool = this.pool(p.key);
+      if (!pool) continue;
+      this.passageKeys.add(p.key);
+      const heading = Math.atan2(p.dz, p.dx);
+      for (let k = 0; k < p.n; k++) {
+        const d = p.t * p.speed - k * p.spacing;
+        if (d < 0 || d > p.len) continue;
+        const i = idx.get(p.key) ?? 0;
+        idx.set(p.key, i + 1);
+        q4.setFromAxisAngle(UP, -heading);
+        m4.compose(v3.set(p.x0 + p.dx * d, p.y + Math.abs(Math.sin(this.time * 6 + k)) * p.bob, p.z0 + p.dz * d), q4, s3.setScalar(1));
+        pool.set(i, m4, p.color);
+      }
+    }
+    this.passages = this.passages.filter((p) => p.t * p.speed - (p.n - 1) * p.spacing <= p.len);
+    for (const k of this.passageKeys) this.pools.get(k)?.commit(idx.get(k) ?? 0);
+    if (!this.passages.length) this.passageKeys.clear();
   }
 
   private updateBirds(dt: number) {
     const bp = this.flocks.length ? this.pool('bird', false) : null;
     if (!bp) return;
+    const gp = this.flocks.some((f) => f.gold) ? this.pool('bird:gold', false) : this.pools.get('bird:gold') ?? null;
     this.flocks = this.flocks.filter((f) => f.ttl === undefined || f.ttl > 0);
-    let i = 0;
+    let i = 0, gi = 0;
     for (const f of this.flocks) {
       if (f.ttl !== undefined) {
         f.ttl -= dt;
@@ -822,11 +910,13 @@ export class Life {
         const bz = z - hz * row * 0.07 + hx * side * row * 0.06;
         const flap = 0.35 + 0.65 * Math.abs(Math.sin(this.time * 7 + k * 1.3));
         q4.setFromAxisAngle(UP, -heading);
-        m4.compose(v3.set(bx, f.h + Math.sin(this.time * 1.5 + k) * 0.03, bz), q4, s3.set(1, 1, flap));
-        bp.set(i++, m4, WHITE);
+        m4.compose(v3.set(bx, f.h + Math.sin(this.time * 1.5 + k) * 0.03, bz), q4, s3.set(f.gold ? 1.9 : 1, f.gold ? 1.9 : 1, (f.gold ? 1.9 : 1) * flap));
+        if (f.gold && gp) gp.set(gi++, m4, WHITE);
+        else bp.set(i++, m4, WHITE);
       }
     }
     bp.commit(i);
+    gp?.commit(gi);
   }
 
   counts() {
@@ -836,6 +926,10 @@ export class Life {
       folk: this.folkCount(),
       scout: this.scoutRide ? 1 : 0,
       animals: this.animals.length,
+      passages: this.passages.length,
+      /** Da fauna do tema (`fauna:*`), quantos estão à vista na hora do dia de agora. */
+      fauna: this.animals.filter((a) => a.key.startsWith('fauna:') && a.vis > 0.5).length,
+      faunaKinds: Object.fromEntries([...new Set(this.animals.filter((a) => a.key.startsWith('fauna:')).map((a) => a.key.slice(6)))].map((k) => [k, this.animals.filter((a) => a.key === `fauna:${k}` && a.vis > 0.5).length])),
       spinners: this.spinners.length,
       birds: this.flocks.reduce((a, f) => a + f.n, 0),
     };

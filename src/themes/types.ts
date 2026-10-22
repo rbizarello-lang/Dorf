@@ -1,5 +1,6 @@
 import type { BlessingId } from '../core/blessings';
 import type { Rules } from '../core/board';
+import type { DayPhase, EggSpec } from '../core/eggs';
 
 // Esquema de tema. Um tema é só dado: paleta, nomes e a escolha de "kits"
 // (formas de árvore, casa, plantação, animal, barco, estrada e veículo).
@@ -163,7 +164,38 @@ export interface CropKind {
   soil: string;
 }
 
+/**
+ * Bichos do pasto. Um tipo novo (renas, ema, crocodilo...) entra só com um `case` em `animalGeometry` (render/lib.ts):
+ * o compilador cobra a entrada, e `Theme.animals` e `Theme.fauna` já o aceitam.
+ */
 export type AnimalKind = 'sheep' | 'cow' | 'goat' | 'horse' | 'donkey' | 'buffalo' | 'llama' | 'camel' | 'deer' | 'rover';
+
+/** Onde uma espécie de `Theme.fauna` aparece: no prado, na mata, no campo de cultivo, na beira do rio ou dentro da água. */
+export type FaunaWhere = 'prado' | 'floresta' | 'campo' | 'margem' | 'agua';
+
+/** Uma espécie extra do tema (além de `animals`, que fica como o bicho de pasto da vila e das cercas). */
+export interface FaunaSpec {
+  kind: AnimalKind;
+  /** Peso no sorteio entre as espécies do tema (a espécie sorteada vira o bicho da peça). */
+  weight: number;
+  /** Cores do corpo (sorteadas por bicho). */
+  colors: string[];
+  /** Quando aparece: 'dia' (amanhecer ao pleno dia), 'tarde' (hora dourada e entardecer) ou 'noite'. Omitir = sempre. Fora da hora o bicho some (escala 0) e volta sozinho. */
+  time?: DayPhase;
+  /** Onde aparece. Padrão: 'prado'. */
+  where?: FaunaWhere;
+  /** Chance de a peça elegível ganhar a espécie (0 a 1; padrão 0,25). */
+  chance?: number;
+}
+
+/** Sons de ambiente sintetizados que um tema pode pedir (audio.ts, `Sfx.setThemeAmbience`). */
+export type AmbienceKind = 'aves' | 'sapos' | 'grilos' | 'cigarras' | 'vento' | 'gelo' | 'sinos' | 'agua';
+
+export interface AmbienceSpec {
+  kind: AmbienceKind;
+  /** Quanto o som pesa (1 = o volume de referência; 0,5 = metade). Soma-se ao ambiente por proximidade que já existe. */
+  weight: number;
+}
 export type BoatKind =
   | 'rowboat'
   | 'sailboat'
@@ -296,8 +328,13 @@ export interface Theme {
   /** Cor das janelas (de dia) e do brilho à noite. */
   window: string;
   mill: MillStyle;
-  /** Portal sobre a estrada onde ela encosta na vila: [estrutura, topo]. Omitir = sem portal. */
+  /** Portal sobre a estrada onde ela encosta na vila: [estrutura, topo]. Omitir = sem portal. Atalho de `gates` com um estilo só. */
   gate?: { style: GateStyle; colors: [string, string] };
+  /**
+   * Vários estilos de portal no mesmo tema (torii e paifang convivem): cada peça com portal sorteia um pela semente dela
+   * (sem gastar o gerador da peça). Omitir = vale `gate`.
+   */
+  gates?: { style: GateStyle; colors: [string, string] }[];
   /** Ponte sobre rio de 2 bordas com vila numa margem: [estrutura, detalhe]. Omitir = sem ponte. */
   bridge?: { style: BridgeStyle; colors: [string, string] };
 
@@ -312,7 +349,29 @@ export interface Theme {
   /** Cor das frutas dos arbustos do prado (6% por setor). Omitir = sem frutas. */
   berry?: string;
   animals: { kind: AnimalKind; colors: string[] };
-
+  /**
+   * Fauna extra: 2 a 3 espécies que aparecem por peça (gerador à parte da semente, então as peças dos temas sem `fauna`
+   * ficam como sempre foram), andam pelo mesmo passeio dos `animals` e respeitam a hora do dia e o lugar (`FaunaSpec`).
+   */
+  fauna?: FaunaSpec[];
+  /**
+   * Degraus nas parcelas de plantação: cada parcela vira 2 ou 3 patamares concêntricos baixos, com mureta, e as plantas
+   * sobem com eles. A borda da peça fica na altura 0 (a emenda com a vizinha não muda). `styles` limita às culturas
+   * listadas (omitir = todas). A parcela cresce em altura até `levels` × 0,012.
+   */
+  terraces?: { levels: number; styles?: CropStyle[] };
+  /**
+   * Chão pela distância ao rio (várzea): o prado e a plantação perto da água ganham a cor `color`, e a cor volta ao normal
+   * a `reach` unidades do rio (1,7 ≈ uma peça de ponta a ponta). Vem de um mapa de distância (render/riverMap.ts) lido pelo
+   * shader do chão, então não importa a ordem das peças: um rio posto depois também fertiliza o campo que já estava lá.
+   */
+  floodplain?: { reach: number; color: string };
+  /** Efeito de céu: 'aurora' = cortina boreal verde e violeta animada por `U.time`, só à noite: refletida no mar (`surround: 'mar'`), como brilho no fundo da névoa e na cúpula do céu quando o horizonte entra na tela (câmera baixa). O nível Baixo não a desenha. */
+  skyFx?: 'aurora';
+  /** Sons de ambiente do tema (aves, sapos, grilos, cigarras, vento, gelo, sinos, água), sintetizados. */
+  ambience?: AmbienceSpec[];
+  /** Easter eggs do tema (src/core/eggs.ts): gatilhos puros (peças, grupo, bordas, sorte, hora, data) e efeitos (kit, evento, céu, som). */
+  eggs?: EggSpec[];
   // --- água
   boat: BoatKind;
   /** [casco, vela/detalhe]. */
@@ -352,3 +411,6 @@ export interface Theme {
   folk?: { skin: string; hat: HatStyle; hatColor: string };
   ruleNote?: string;
 }
+
+/** Portais do tema: `gates` se houver, senão o `gate` sozinho, senão nenhum. */
+export const gatesOf = (t: Pick<Theme, 'gate' | 'gates'>) => t.gates ?? (t.gate ? [t.gate] : []);

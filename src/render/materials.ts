@@ -61,6 +61,8 @@ import {
   vertexColor,
 } from 'three/tsl';
 import { GROUND_EXTENT, GROUND_SIZE, groundMap } from './groundMap';
+import { auroraSky } from './aurora';
+import { RIVER_DMAX, riverMap } from './riverMap';
 import { SEA_DMAX, seaMap } from './seaMap';
 import { CAUSTIC_FRAMES, CAUSTIC_SIZE, makeBrushTexture, makeCausticTexture, makeNoiseTexture, makeWaterTexture } from './noise';
 
@@ -106,6 +108,12 @@ export const U = {
   snow: uniform(0),
   /** Força do vento do tema (1 = o balanço de sempre). */
   gust: uniform(1),
+  /** Várzea (Theme.floodplain): 1 liga a cor fértil perto do rio (0 na pilha e nos temas sem ela), alcance em unidades do mundo e a cor. */
+  flood: uniform(0),
+  floodReach: uniform(2),
+  floodColor: uniform(new THREE.Color('#4a3a28')),
+  /** Aurora boreal (Theme.skyFx): 0 a 1, sobe à noite (aurora.ts). */
+  aurora: uniform(0),
 };
 
 export const noiseTex = makeNoiseTexture();
@@ -524,7 +532,12 @@ export function makeGroundMaterial() {
   const sideF = vec3(strata.mul(0.32).add(0.8)).mul(mix(vec3(1), vec3(1.22, 1.18, 1.1), stones.mul(0.8)));
   // Costura de cor com a peça vizinha, só no topo (a lateral fica com a cor do vértice).
   const seam = seamAt();
-  const base = mix(vertexColor().rgb, seam.rgb, seam.a.mul(top));
+  const base0 = mix(vertexColor().rgb, seam.rgb, seam.a.mul(top));
+  // Várzea: o prado e a plantação perto da água puxam para a cor fértil do tema (mapa de distância ao rio).
+  const riverD = texture(riverMap.texture, positionWorld.xz.div(GROUND_EXTENT * 2).add(0.5)).r.mul(RIVER_DMAX);
+  const nearRiver = float(1).sub(smoothstep(U.floodReach.mul(0.3), U.floodReach, riverD));
+  const fertile = nearRiver.mul(U.flood).mul(sp.x.add(sp.z).mul(1.4).min(1)).mul(top).mul(0.92);
+  const base = mix(base0, U.floodColor, fertile);
   const ground = snowOn(base.mul(mix(sideF, detail, top)), 0.85);
   m.colorNode = mix(ground, vec3(1), U.silhouette);
   // Relevo fino do prado e da mata: inclina a normal com o mapa de declive da água.
@@ -904,6 +917,8 @@ export function makeVoidMaterial() {
     const view = cameraPosition.sub(positionWorld).normalize();
     const fres = float(1).sub(dot(view, nW).max(0)).pow(4).mul(0.85).add(0.04);
     water = mix(water, u.sky, fres.mul(float(1).sub(far)).mul(0.45));
+    // Aurora boreal (Theme.skyFx): a cortina refletida no mar; some com `U.aurora` em 0.
+    water = water.add(auroraSky(vec3(view.x.negate(), view.y, view.z.negate())).mul(float(1).sub(far)).mul(fres.mul(1.2).add(0.35)));
     // Espuma: a faixa que avança e recua sobre a areia, mais a renda de dois ruídos.
     const lap = sin(t.mul(1.05).add(big.b.mul(10))).mul(0.06).add(0.3);
     const foamEdge = smoothstep(lap.sub(0.15), lap.sub(0.03), dd).mul(float(1).sub(smoothstep(lap, lap.add(0.17), dd)));
