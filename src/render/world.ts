@@ -16,6 +16,7 @@ import { Life } from './life';
 import { CLOUD_TOP, U, makeVoidMaterial, softShadowFilter } from './materials';
 import { A, fogNode } from './atmosphere';
 import { CL, makeCloudMesh } from './clouds';
+import { seaMap } from './seaMap';
 import { groundMap } from './groundMap';
 import { P, buildPost, type Post, type Quality } from './post';
 import { SkyEnv } from './sky';
@@ -595,7 +596,7 @@ export class World {
     this.voidU = voidM.u;
     this.voidMat = voidM.material;
     const voidMesh = new THREE.Mesh(new THREE.PlaneGeometry(600, 600).rotateX(-Math.PI / 2), voidM.material);
-    voidMesh.position.y = -TILE_T - 0.03;
+    voidMesh.position.y = -TILE_T - 0.1; // um palmo abaixo do fundo das peças: elas pousam no entorno, não flutuam
     voidMesh.renderOrder = -1;
     voidMesh.receiveShadow = true;
     this.scene.add(voidMesh);
@@ -652,11 +653,26 @@ export class World {
 
   // ---------------------------------------------------------------- tema, luz, qualidade
 
+  /** Entorno do tabuleiro (`surround`): o vazio vira mar, areia ou fica pergaminho; as cores saem da água e do chão do tema. */
+  private setSurround(theme: Theme) {
+    const mode = theme.surround ?? 'pergaminho';
+    this.voidU.sea.value = mode === 'mar' ? 1 : 0;
+    this.voidU.sand.value = mode === 'areia' ? 1 : 0;
+    const hsl = { h: 0, s: 0, l: 0 };
+    tmpColor.set(theme.water).getHSL(hsl);
+    // Raso: a cor da água, mais clara; fundo: o azul que o tema puxa, saturado e escuro.
+    this.voidU.shallow.value.setHSL(hsl.h, Math.min(0.85, hsl.s * 1.1 + 0.1), Math.min(0.62, hsl.l + 0.1));
+    this.voidU.deep.value.setHSL(THREE.MathUtils.lerp(hsl.h, 0.6, 0.65), 0.9, 0.27);
+    this.voidU.sandCol.value.set(mode === 'areia' ? theme.ground[0] : '#e9d8aa');
+    if (mode === 'areia') this.voidU.sandCol.value.lerp(tmpColor.set('#ead9b0'), 0.4);
+  }
+
   setTheme(theme: Theme, board: Board) {
     this.theme = theme;
     this.lib.applyTheme(theme);
     this.waterColor.set(theme.water);
     U.clouds.value = theme.period === 'futuro' ? 0.08 : 0.16;
+    this.setSurround(theme);
     this.skyTarget = skyFor(theme, this.timeOfDay);
     this.sky = skyFor(theme, this.timeOfDay);
     this.applySky();
@@ -715,12 +731,14 @@ export class World {
     CL.sky.value.copy(s.hemiSky).multiplyScalar(s.hemiI * 0.35);
     CL.ground.value.copy(s.hemiGround).multiplyScalar(s.hemiI * 0.18);
     this.voidU.bg.value.copy(s.bg);
+    this.voidU.sky.value.copy(s.hemiSky).multiplyScalar(Math.min(1, s.hemiI * 0.75));
     this.voidU.fill.value.copy(s.fill);
     this.voidU.line.value.copy(s.line);
     this.slotMat.color.copy(s.line);
     // Nanquim dos carimbos: a tinta do tema diluída no papel.
     if (this.theme) this.stampMat.color.set(this.theme.ui.ink).lerp(s.fill, 0.5);
-    this.slotMat.opacity = 0.55 - s.night * 0.3;
+    // Sobre o mar e a areia as casas livres são só uma sombra leve: o fundo já é cenário, não papel.
+    this.slotMat.opacity = (0.55 - s.night * 0.3) * (this.voidU.sea.value ? 0.4 : this.voidU.sand.value ? 0.65 : 1);
     this.inflMat.color.set('#e0981c');
     this.sun.color.copy(s.sun);
     this.sun.intensity = s.sunI;
@@ -960,6 +978,7 @@ export class World {
     this.flows.clear();
     this.widths.clear();
     groundMap.clear();
+    seaMap.clear();
     this.lib.setEra(board.era);
     for (const p of board.list) this.bake(p, this.buildPlaced(p), false);
     for (const pool of this.pools.values()) pool.flush();
@@ -1218,12 +1237,23 @@ export class World {
       // Chave com "~" = metade "fina" de plantas e capim, escondida de longe (nível de detalhe).
       const fine = key.endsWith('~');
       const base = fine ? key.slice(0, -1) : key;
-      const geo = this.lib.geo(base);
+      const geo = (this.farTrees && !fine && this.lib.farGeo(base)) || this.lib.geo(base);
       if (!geo) return null;
       p = new Pool(geo, fine ? this.lib.fineMaterial(base) : this.lib.material(base), this.staticRoot, this.lib.castsShadow(base));
       this.pools.set(id, p);
     }
     return p;
+  }
+
+  /** Árvores, arbustos e pedras de longe: os lotes com versão leve (`Lib.farGeo`) trocam para a geometria leve (mesmas instâncias e cores, `Pool.retarget`). */
+  private farTrees = false;
+  private setFarTrees(on: boolean) {
+    if (on === this.farTrees) return;
+    this.farTrees = on;
+    for (const [id, pool] of this.pools) {
+      const k = poolKey(id);
+      if (this.lib.farGeo(k)) pool.retarget((on ? this.lib.farGeo(k) : this.lib.geo(k))!);
+    }
   }
 
   private lodFlip = 0;
@@ -1235,6 +1265,7 @@ export class World {
     const m = tileMatrix(p.q, p.r, p.rot);
     this.chunkFor(p.q, p.r).append(b, m);
     groundMap.add(b, m, this.waterColor);
+    seaMap.add(p.q, p.r);
     for (const d of b.decos) {
       if (d.transient) continue;
       decoMatrix(d, tmpM);
@@ -1602,7 +1633,7 @@ export class World {
       .map(([k, p]) => {
         const kit = poolKey(k);
         const base = kit.endsWith('~') ? kit.slice(0, -1) : kit;
-        return { k, n: p.count, tris: (p.count * (this.lib.geo(base)?.attributes.position.count ?? 0)) / 3, shadow: p.mesh.castShadow };
+        return { k, n: p.count, tris: (p.count * (((this.farTrees && this.lib.farGeo(base)) || this.lib.geo(base))?.attributes.position.count ?? 0)) / 3, shadow: p.mesh.castShadow };
       })
       .sort((a, b) => b.tris - a.tris);
   }
@@ -1621,18 +1652,23 @@ export class World {
   }
 
   /** Depuração visual: todos os kits do tema lado a lado (?gallery). */
-  showGallery() {
-    const keys = [...this.lib.geos.keys()];
+  showGallery(only?: string) {
+    // `?gallery=casas` mostra só as casas (parede + telhado de cada tipo), maiores.
+    const keys = [...this.lib.geos.keys()].filter((k) => !k.startsWith('roof:') && (only !== 'casas' || k.startsWith('wall:')));
     const cols = Math.ceil(Math.sqrt(keys.length));
     const root = new THREE.Group();
     keys.forEach((k, i) => {
       const geo = this.lib.geo(k)!;
-      const mesh = new THREE.InstancedMesh(instGeometry(geo, 1), this.lib.material(k), 1);
+      // Parede e telhado da mesma casa (`wall:i` e `roof:i`) vão juntos, na posição da parede.
+      const roof = k.startsWith('wall:') ? this.lib.geo(`roof:${k.slice(5)}`) : null;
       const x = (i % cols) * 0.45, z = Math.floor(i / cols) * 0.45;
-      const s = k.startsWith('crop:') || k === 'grass' || k === 'flower' ? 2.2 : 1.4;
-      mesh.setMatrixAt(0, tmpM.makeScale(s, s, s).setPosition(x - (cols * 0.45) / 2, 0, z - (cols * 0.45) / 2));
-      mesh.castShadow = true;
-      root.add(mesh);
+      const s = k.startsWith('crop:') || k === 'grass' || k === 'flower' || only === 'casas' ? 2.2 : 1.4;
+      for (const [kk, gg] of roof ? ([[k, geo], [`roof:${k.slice(5)}`, roof]] as const) : ([[k, geo]] as const)) {
+        const mesh = new THREE.InstancedMesh(instGeometry(gg, 1), this.lib.material(kk), 1);
+        mesh.setMatrixAt(0, tmpM.makeScale(s, s, s).setPosition(x - (cols * 0.45) / 2, 0, z - (cols * 0.45) / 2));
+        mesh.castShadow = true;
+        root.add(mesh);
+      }
     });
     const floorMat = new THREE.MeshStandardNodeMaterial({ roughness: 0.9 });
     floorMat.colorNode = vec3(0.48, 0.58, 0.28);
@@ -1643,7 +1679,7 @@ export class World {
     this.staticRoot.visible = false;
     this.rig.goal.set(0, 0, 0);
     this.rig.target.set(0, 0, 0);
-    this.rig.dist = this.rig.goalDist = cols * 0.62;
+    this.rig.dist = this.rig.goalDist = cols * (only === 'casas' ? 1.0 : 0.62);
     return keys;
   }
 
@@ -1687,9 +1723,16 @@ export class World {
 
     // Distâncias de verdade até a câmera (rig.eye), não o enquadramento (rig.dist).
     const eye = this.rig.eye;
-    A.near.value = eye * 1.5;
-    A.far.value = eye * 4.2;
+    // Com o zoom aberto o tabuleiro inteiro cabe na névoa de alcance (que só media a distância do
+    // olho): ela começa depois da borda da região explorada, e só o entorno distante desbota.
+    // A faixa mantém a largura de antes (2,7×eye); perto (rig.dist <= 14) nada muda.
+    const open = THREE.MathUtils.smoothstep(this.rig.dist, 14, 24);
+    const near0 = eye * 1.5;
+    const near = THREE.MathUtils.lerp(near0, Math.max(near0, eye + this.voidU.radius.value * 2.2), open);
+    A.near.value = near;
+    A.far.value = near + eye * 2.7;
     groundMap.flush();
+    seaMap.flush();
     // As nuvens aparecem quando a câmera sobe bem acima delas (não no nível Baixo).
     // A laje é marchada de cima: com a câmera inclinada até perto dela, as nuvens somem.
     const cloudHigh = THREE.MathUtils.smoothstep(this.camera.position.y, CLOUD_TOP + 1.5, CLOUD_TOP + 4);
@@ -1701,6 +1744,10 @@ export class World {
     P.focus.value = eye;
     // De longe a faixa nítida estreita: o mapa inteiro vira maquete (tilt-shift).
     P.focalLength.value = eye * THREE.MathUtils.lerp(0.42, 0.16, THREE.MathUtils.smoothstep(this.rig.dist, 10, 30));
+    // Desfoque de miniatura (Alta e Ultra): quase some de perto, é pleno no zoom médio e recua no aberto.
+    // Sobe do perto ao zoom médio (pico em rig.dist ~14) e cai de novo no zoom aberto (0,25 a partir de 26):
+    // de longe o tabuleiro inteiro tem de continuar legível.
+    P.tilt.value = THREE.MathUtils.lerp(0.12, 1, THREE.MathUtils.smoothstep(this.rig.dist, 6, 14)) * THREE.MathUtils.lerp(1, 0.25, THREE.MathUtils.smoothstep(this.rig.dist, 16, 26));
     // O traço é pleno em volta do foco e some antes da névoa, senão o fundo vira hachura.
     // Com a câmera baixa o fundo fica longe: o traço vai até perto de onde a névoa fecha (4,2×).
     P.inkNear.value = eye * 2;
@@ -1713,7 +1760,8 @@ export class World {
     const g = this.theme.grade, gk = 0.55 + 0.45 * day;
     P.shade.value.multiply(tintOf(tmpColor.set(g.shadow), 0.16 * gk, tmpGrade));
     P.light.value.multiply(tintOf(tmpColor.set(g.light), 0.09 * gk, tmpGrade));
-    P.saturation.value = 1.06 * g.saturation;
+    // De longe as cores perdem força na distância: um pouco mais de saturação devolve a leitura.
+    P.saturation.value = THREE.MathUtils.lerp(1.06, 1.12, open) * g.saturation;
     const filt = this.theme.atmos?.filter;
     P.filter.value.set(filt?.[0] ?? 1, filt?.[1] ?? 1, filt?.[2] ?? 1);
 
@@ -1872,6 +1920,10 @@ export class World {
     const fine = 1 - THREE.MathUtils.smoothstep(this.rig.dist, 11.5 * reach * spring, 14.5 * reach * spring);
     U.fine.value = fine;
     for (const [k, p] of this.pools) if (poolKey(k).endsWith('~')) p.mesh.visible = fine > 0;
+    // Árvores leves: bem depois de a metade fina sumir, quando a copa já é uma mancha de poucos pixels
+    // (com folga de ±0,4, para não piscar no limite).
+    const treeEdge = 18 * reach * spring;
+    this.setFarTrees(this.rig.dist > treeEdge + (this.farTrees ? -0.4 : 0.4));
 
     // Aldeões só de perto, com o mesmo limiar da metade fina das plantas.
     this.life.folkNear = this.rig.dist < 13 * reach;

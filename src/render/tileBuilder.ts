@@ -155,8 +155,15 @@ class Buf {
 
 const UP: V3 = [0, 1, 0];
 const WHITE = new THREE.Color(1, 1, 1);
-/** Árvores e marcos maiores que a escala natural: com a câmera baixa, o que conta a história da peça precisa ler de longe. */
-const TREE_SCALE = 1.3;
+/**
+ * Árvores do tamanho de uma casa (no máximo ~1,3× a altura dela), como na referência: a mata lê como
+ * massa fechada de muitas copas pequenas, não como árvores soltas sobre grama, e a vila não some
+ * atrás de uma copa. A leitura de longe vem da mancha escura da mata inteira (valor e quantidade),
+ * não do tamanho de cada árvore. Os marcos seguem maiores que o natural (`LANDMARK_SCALE`).
+ */
+const TREE_SCALE = 0.85;
+/** Mistura no `mulberry32(seed ^ …)` que sorteia as árvores das peças de mata, para o resto da peça não depender da quantidade delas. */
+const FOREST_SEED = 0x5f0e5;
 /** Chance de um arbusto de frutas por setor de prado (nos temas com `berry`). */
 const BERRY_CHANCE = 0.06;
 const LANDMARK_SCALE = 1.25;
@@ -344,6 +351,33 @@ const smooth = (a: number, b: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
+/** Ruído de valor em (x, z), determinístico pela semente (sem Math.random): 0..1, célula ~0,3. */
+function bNoise(seed: number, x: number, z: number): number {
+  const h = (ix: number, iz: number) => {
+    let n = (Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + Math.imul(seed | 0, 2246822519)) | 0;
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+  };
+  const fx = Math.floor(x / 0.3), fz = Math.floor(z / 0.3);
+  const u = x / 0.3 - fx, v = z / 0.3 - fz;
+  const su = u * u * (3 - 2 * u), sv = v * v * (3 - 2 * v);
+  const a = h(fx, fz) + (h(fx + 1, fz) - h(fx, fz)) * su;
+  const b = h(fx, fz + 1) + (h(fx + 1, fz + 1) - h(fx, fz + 1)) * su;
+  return a + (b - a) * sv;
+}
+
+/** Distância de (x, z) à aresta mais próxima do polígono. */
+function polyEdgeDist(x: number, z: number, pts: V2[]) {
+  let best = Infinity;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, zi] = pts[i], [xj, zj] = pts[j];
+    const dx = xj - xi, dz = zj - zi;
+    const t = Math.max(0, Math.min(1, ((x - xi) * dx + (z - zi) * dz) / (dx * dx + dz * dz || 1)));
+    best = Math.min(best, Math.hypot(x - xi - dx * t, z - zi - dz * t));
+  }
+  return best;
+}
+
 export interface WaterShape {
   /** Bordas de água. */
   idx: number[];
@@ -389,13 +423,37 @@ export function waterShape(edges: readonly T[], seed: number): WaterShape {
   return { idx, widths, lake };
 }
 
+/**
+ * Meandro: desloca o rio de lado por um ruído de baixa frequência (gerador à parte, derivado da
+ * semente). O envelope sin² zera o deslocamento e a inclinação nas duas pontas, então a posição
+ * do rio na borda não muda e a emenda com a peça vizinha continua casando. A amplitude é limitada
+ * para o raio da curva ficar maior que a largura do rio (sem dobra nem estrangulamento).
+ */
+function meander(pts: V2[], seed: number): V2[] {
+  const r = mulberry32(seed ^ 0x3ea4d);
+  const n = pts.length - 1;
+  const f1 = 0.9 + r() * 0.5, f2 = 1.8 + r() * 0.8;
+  const p1 = r() * 6.3, p2 = r() * 6.3;
+  const a1 = (0.15 + r() * 0.1) * (r() < 0.5 ? 1 : -1), a2 = 0.05 + r() * 0.04;
+  const off = pts.map((_, k) => {
+    const t = k / n;
+    const env = Math.sin(Math.PI * t) ** 2;
+    return env * (a1 * Math.sin(2 * Math.PI * f1 * t + p1) + a2 * Math.sin(2 * Math.PI * f2 * t + p2));
+  });
+  return pts.map(([x, z], k) => {
+    const [ax, az] = pts[Math.max(0, k - 1)], [bx, bz] = pts[Math.min(n, k + 1)];
+    const l = Math.hypot(bx - ax, bz - az) || 1;
+    return [x - ((bz - az) / l) * off[k], z + ((bx - ax) / l) * off[k]] as V2;
+  });
+}
+
 /** Caminhos da água: rio de 2 bordas em curva; lago, nascente e junção com raios até o meio. */
 function waterPaths(shape: WaterShape, widths: readonly number[], seed: number): Path[] {
   const { idx, lake } = shape;
   const r = mulberry32(seed ^ 0x77a1);
   if (idx.length === 2 && !lake) {
     const [a, b] = idx;
-    const pts = bezier(edgeMid(a), [0, 0], edgeMid(b), 16);
+    const pts = meander(bezier(edgeMid(a), [0, 0], edgeMid(b), 24), seed);
     // Remanso ou estreito no meio da peça: a largura das bordas fica igual à da vizinha.
     const bulge = -0.25 + r() * 0.7;
     const hws = pts.map((_, k) => {
@@ -428,6 +486,19 @@ function waterField(shape: WaterShape, paths: Path[], widths: readonly number[],
   // Margem orgânica: ondula no interior da peça; lagos ganham lóbulos.
   const r = mulberry32(seed ^ 0x51ed);
   const o = [r() * 6.3, r() * 6.3, r() * 6.3, r() * 6.3, r() * 6.3, r() * 6.3];
+  // Enseadas e ilhota do lago: gerador à parte, que não mexe nas demais ondulações.
+  const rl = mulberry32(seed ^ 0x6c4b7);
+  const inlets: { a: number; w: number; k: number }[] = [];
+  let islet: { x: number; z: number; r: number } | null = null;
+  if (lake) {
+    const nb = lake.r > 0.33 ? 1 + (rl() < 0.5 ? 1 : 0) : rl() < 0.6 ? 1 : 0;
+    for (let k = 0; k < nb; k++) inlets.push({ a: rl() * 6.283, w: 0.3 + rl() * 0.2, k: 0.3 + rl() * 0.25 });
+    // Só em lago grande, longe das bocas (que emendam com os vizinhos), e em 1 de cada 3.
+    if (lake.r >= 0.38 && n >= 2 && rl() < 0.34) {
+      const ia = rl() * 6.283, off = lake.r * (0.1 + rl() * 0.2);
+      islet = { x: lake.x + Math.cos(ia) * off, z: lake.z + Math.sin(ia) * off, r: 0.13 + rl() * 0.05 };
+    }
+  }
   const wiggle = (x: number, z: number) => {
     const w = Math.sin(x * 9.1 + o[0]) * Math.sin(z * 8.3 + o[1]) + Math.sin((x - z) * 15.7 + o[2]) * 0.45 + Math.sin((x + z) * 23 + o[3]) * 0.2;
     return w * 0.026;
@@ -438,7 +509,15 @@ function waterField(shape: WaterShape, paths: Path[], widths: readonly number[],
     if (lake) {
       const a = Math.atan2(z - lake.z, x - lake.x);
       const lobes = 1 + 0.1 * Math.sin(3 * a + o[4]) + 0.06 * Math.sin(5 * a + o[5]);
-      d = Math.min(d, Math.hypot(x - lake.x, z - lake.z) - lake.r * lobes);
+      // Enseadas: uma ou duas línguas de água que avançam além do lóbulo, com a ponta arredondada.
+      let bays = 0;
+      for (const b of inlets) bays += b.k * Math.exp(-((Math.atan2(Math.sin(a - b.a), Math.cos(a - b.a)) / b.w) ** 2));
+      d = Math.min(d, Math.hypot(x - lake.x, z - lake.z) - Math.min(lake.r * (lobes + bays), INR - 0.1));
+      // Ilhota: terra firme dentro do lago, de contorno irregular.
+      if (islet) {
+        const ia = Math.atan2(z - islet.z, x - islet.x);
+        d = Math.max(d, islet.r * (1 + 0.18 * Math.sin(3 * ia + o[2]) + 0.1 * Math.sin(2 * ia + o[3])) - Math.hypot(x - islet.x, z - islet.z));
+      }
     }
     if (junction) d = Math.min(d, Math.hypot(x, z) - junction);
     return d + wiggle(x, z);
@@ -648,11 +727,22 @@ function shoreFrom(field: { e: (x: number, z: number) => number }, x: number, z:
 
 export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts: BuildOpts): TileBuild {
   const rng = mulberry32(seed);
+  const frng = mulberry32((seed ^ FOREST_SEED) >>> 0);
   const detail = opts.detail;
   const g = new Buf(true);
     const decos: Deco[] = [];
   const chimneys: number[] = [];
-  const groundCols = edges.map((t) => tc(theme.ground[t]));
+  // Cada peça desloca valor e matiz do prado pela semente (gerador à parte, para não mexer no resto da
+  // peça): o prado grande ganha degraus de tom entre as peças, como no original.
+  const tone = mulberry32((seed ^ 0x5bd1e995) >>> 0);
+  const dL = (tone() - 0.5) * 0.12, dH = ((tone() - 0.5) * 16) / 360;
+  const groundCols = edges.map((t) => {
+    const c = tc(theme.ground[t]);
+    if (t !== T.Grass) return c;
+    const hsl = { h: 0, s: 0, l: 0 };
+    c.getHSL(hsl);
+    return new THREE.Color().setHSL((hsl.h + dH + 1) % 1, hsl.s, Math.min(0.95, Math.max(0.05, hsl.l + dL)));
+  });
   // y = 0 quer dizer "no chão": acompanha o leito e as margens dos rios.
   const D = (key: string, x: number, y: number, z: number, ry: number, s: number | V3, color: THREE.Color, anim?: Anim) => {
     const [sx, sy, sz] = typeof s === 'number' ? [s, s, s] : s;
@@ -700,8 +790,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const mixS = (o: number[], t: number) => (sp = sp.map((v, k) => v + (o[k] - v) * t));
     const sum = a + b;
     if (sum > 0) {
-      const sAng = b / sum; // 0 no lado do canto i, 1 no lado do canto i+1
-      const tA = 0.5 * (1 - smooth(0, 0.3, sAng)), tB = 0.5 * (1 - smooth(0, 0.3, 1 - sAng));
+      // Faixa de mistura larga (0,6 do arco) com o limite torcido por ruído da semente e da
+      // posição: a fronteira entre terrenos vira lóbulos, não uma reta.
+      const sAng = Math.max(0, Math.min(1, b / sum + (bNoise(seed ^ 0x3b0d, x, z) - 0.5) * 0.3)); // 0 no lado do canto i, 1 no lado do canto i+1
+      const tA = 0.5 * (1 - smooth(0, 0.6, sAng)), tB = 0.5 * (1 - smooth(0, 0.6, 1 - sAng));
       c.lerp(groundCols[(i + 5) % 6], tA);
       mixS(oneHot(edges[(i + 5) % 6]), tA);
       c.lerp(groundCols[(i + 1) % 6], tB);
@@ -752,14 +844,26 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const side = tc(theme.side);
     const sideDark = tc(theme.sideDark);
     const midC = side.clone().lerp(sideDark, 0.35);
+    // Camadas de baixo (solo e rocha): cores e fronteira sorteadas por um gerador derivado da semente
+    // (não mexe no `rng` da peça). Onde o entorno é mar, a rocha é bem escura, como falésia na água.
+    const rs = mulberry32(((seed ^ 0x51de7a1) + i * 977) >>> 0);
+    const jit = (a: number) => 1 + (rs() - 0.5) * 2 * a;
+    const soilC = midC.clone().lerp(sideDark, 0.55).multiplyScalar(jit(0.14));
+    const rockBase = new THREE.Color(0.16, 0.15, 0.15).lerp(sideDark, theme.surround === 'mar' ? 0.15 : 0.35);
+    const rockTop = rockBase.clone().multiplyScalar(jit(0.2));
+    const rockBot = rockTop.clone().multiplyScalar(0.7);
+    const rockY: number[] = [];
+    for (let k = 0; k <= N; k++) rockY.push(-0.16 - rs() * 0.05);
     for (let k = 0; k < N; k++) {
       const v0 = V(N - k, k), v1 = V(N - k - 1, k + 1);
       const [x0, y0, z0] = v0.p, [x1, y1, z1] = v1.p;
       const l0 = shade(v0.c, 0.72), l1 = shade(v1.c, 0.72);
       const b0 = Math.min(y0 - 0.05, -0.05), b1 = Math.min(y1 - 0.05, -0.05);
       g.quad([x0, y0, z0], [x1, y1, z1], [x1, b1, z1], [x0, b0, z0], l0, l1, l1, l0, nrm);
-      g.quad([x0, b0, z0], [x1, b1, z1], [x1, -0.15, z1], [x0, -0.15, z0], side, side, midC, midC, nrm);
-      g.quad([x0, -0.15, z0], [x1, -0.15, z1], [x1, -TILE_T, z1], [x0, -TILE_T, z0], midC, midC, sideDark, sideDark, nrm);
+      g.quad([x0, b0, z0], [x1, b1, z1], [x1, -0.11, z1], [x0, -0.11, z0], side, side, midC, midC, nrm);
+      const r0 = rockY[k], r1 = rockY[k + 1];
+      g.quad([x0, -0.11, z0], [x1, -0.11, z1], [x1, r1, z1], [x0, r0, z0], midC, midC, soilC, soilC, nrm);
+      g.quad([x0, r0, z0], [x1, r1, z1], [x1, -TILE_T, z1], [x0, -TILE_T, z0], rockTop, rockTop, rockBot, rockBot, nrm);
       // Corte da água na lateral (só aparece na beira aberta do mapa, como num aquário).
       if (y0 < WATER_Y - 0.001 || y1 < WATER_Y - 0.001) {
         const c0 = Math.min(y0, WATER_Y), c1 = Math.min(y1, WATER_Y);
@@ -1069,7 +1173,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // --- Ponte: rio de duas bordas com vila numa margem e terra na outra. Sem sorteio,
   // para não mudar o resto da peça.
   // Rio largo demais para o vão da ponte (ou que vira lago) fica sem ela.
-  if (theme.bridge && water.idx.length === 2 && !shape.lake && (water.paths[0].hws?.[8] ?? RIVER_HW) <= 0.215) {
+  if (theme.bridge && water.idx.length === 2 && !shape.lake && (water.paths[0].hws?.[water.paths[0].pts.length >> 1] ?? RIVER_HW) <= 0.215) {
     const [a, b] = water.idx;
     const sideA = edges.slice(a + 1, b), sideB = [...edges.slice(b + 1), ...edges.slice(0, a)];
     if (sideA.length && sideB.length && (sideA.includes(T.Village) || sideB.includes(T.Village))) {
@@ -1104,9 +1208,13 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
 
   // --- Plantações: parcelas de terra com fileiras de plantas.
   const cropKinds = theme.crops.map((c) => [c, c.weight] as const);
+  // Cultura e parcelas de cada borda de plantação, para a aba da emenda (mais abaixo).
+  const abaCrops: (CropKind | null)[] = [null, null, null, null, null, null];
+  const abaPlots: V2[][][] = [[], [], [], [], [], []];
   for (let i = 0; i < 6; i++) {
     if (edges[i] !== T.Field) continue;
     const crop: CropKind = weighted(rng, cropKinds);
+    abaCrops[i] = crop;
     const L = CROP_LAYOUT[crop.style];
     const soil = tc(crop.soil);
     const isLush = lush.has(i);
@@ -1145,14 +1253,38 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       // De longe a parcela precisa "ler" como a cultura: a terra puxa a cor da planta.
       const tintAmt = crop.style === 'rice' ? 0.2 : crop.style === 'tulip' ? 0.1 : 0.42;
       const sc = vary(rng, soil.clone().lerp(tc(crop.colors[0]), tintAmt), 0.08);
-      const dark = shade(sc, 0.72);
+      // Sem parede lateral: o leque tem dois anéis, o interno na cor da terra e o externo
+      // (bisel de ~0,04, altura 0) misturado ao chão, para a parcela se fundir ao prado.
+      const gc = groundCols[i];
+      const edge = sc.clone().lerp(gc, 0.6);
+      const clampIn = (x: number, z: number): V2 => {
+        for (let e = 0; e < 6; e++) {
+          const [mx, mz] = edgeMid(e);
+          const proj = (x * mx + z * mz) / INR;
+          const lim = INR - 0.02;
+          if (proj > lim) {
+            x -= (mx / INR) * (proj - lim);
+            z -= (mz / INR) * (proj - lim);
+          }
+        }
+        return [x, z];
+      };
+      abaPlots[i].push(pts);
+      const outer = pts.map(([x, z]) => clampIn(cx + (x - cx) * 1.2, cz + (z - cz) * 1.2));
+      const spIn: Splat = [0, 0, 0.6, 0], spOut: Splat = [0, 0, 0.25, 0];
       for (let j = 0; j < sides; j++) {
-        const a = pts[j], b = pts[(j + 1) % sides];
-        g.tri([cx, h, cz], [a[0], h, a[1]], [b[0], h, b[1]], sc, sc, sc, UP);
-        g.quad([a[0], h, a[1]], [b[0], h, b[1]], [b[0], 0, b[1]], [a[0], 0, a[1]], dark, dark, dark, dark, [(a[0] + b[0]) / 2 - cx, 0, (a[1] + b[1]) / 2 - cz]);
+        const j2 = (j + 1) % sides;
+        const a = pts[j], b = pts[j2], ao = outer[j], bo = outer[j2];
+        g.tri([cx, h, cz], [a[0], h, a[1]], [b[0], h, b[1]], sc, sc, sc, UP, spIn);
+        g.tri([a[0], h, a[1]], [ao[0], 0.001, ao[1]], [bo[0], 0.001, bo[1]], sc, edge, edge, UP, spIn, spOut, spOut);
+        g.tri([a[0], h, a[1]], [bo[0], 0.001, bo[1]], [b[0], h, b[1]], sc, edge, sc, UP, spIn, spOut, spIn);
       }
       // Fileiras: direção aleatória por parcela; densidade cai com a qualidade.
-      const inner = pts.map(([x, z]) => [cx + (x - cx) * 0.86, cz + (z - cz) * 0.86] as V2);
+      const inner = pts; // 100% do polígono: a escala e o descarte nas plantas fazem o recuo
+      const old = pts.map(([x, z]) => [cx + (x - cx) * 0.86, cz + (z - cz) * 0.86] as V2);
+      // Geradores derivados (descarte e plantas da faixa nova): o rng da peça não muda com eles.
+      const pr = mulberry32((seed ^ 0x5ca1ed) + i * 131 + k * 17);
+      const fr = mulberry32((seed ^ 0x7d15c4) + i * 131 + k * 17);
       const dens = 1 / Math.sqrt(Math.max(0.3, detail));
       const gap = L.rowGap * dens, step = L.step * dens;
       const dir = rng() * Math.PI;
@@ -1165,12 +1297,20 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           const x = cx + ux * t - uz * o + (rng() - 0.5) * step * 0.25;
           const z = cz + uz * t + ux * o + (rng() - 0.5) * step * 0.25;
           if (!insidePoly(x, z, inner) || !free(x, z, 0)) continue; // não planta dentro de construções
-          const s = randRange(rng, L.scale[0], L.scale[1]) * (isLush ? 1.12 : 1);
-          let c = rowCol ?? (rng() < 0.7 ? base : tc(pick(rng, crop.colors)));
-          c = vary(rng, c, 0.06);
-          if (isLush && !rowCol) c = c.lerp(LUSH, 0.22);
+          // Dentro do polígono antigo (86%) os sorteios saem do rng da peça, na mesma ordem de
+          // antes: cultura e cor das parcelas não mudam. Só a faixa nova de borda usa o derivado.
           const hedge = crop.style === 'tea' || crop.style === 'vineyard' || crop.style === 'lavender';
-          D(`crop:${crop.style}`, x, h, z, hedge ? yawTo(ux, uz) : rng() * Math.PI * 2, s, c);
+          const R = insidePoly(x, z, old) ? rng : pr;
+          // Perto da borda da parcela as plantas diminuem e rareiam (degradê até o prado).
+          const edgeT = smooth(0, 0.08, polyEdgeDist(x, z, pts));
+          const s0 = randRange(R, L.scale[0], L.scale[1]);
+          let c = rowCol ?? (R() < 0.7 ? base : tc(pick(R, crop.colors)));
+          c = vary(R, c, 0.06);
+          const yaw = hedge ? yawTo(ux, uz) : R() * Math.PI * 2;
+          if (fr() < (1 - edgeT) * 0.55) continue;
+          const s = s0 * (isLush ? 1.12 : 1) * (0.45 + 0.55 * edgeT);
+          if (isLush && !rowCol) c = c.lerp(LUSH, 0.22);
+          D(`crop:${crop.style}`, x, h, z, yaw, s, c);
         }
       }
     }
@@ -1181,12 +1321,12 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // Clareira da serraria: as árvores perto dela viram tocos (sem sorteio a mais, para o resto
   // da peça sair igual).
   const clearings = (opts.synergies ?? []).filter((h) => h.kind === 'lumber').map((h) => edgeMid(h.sector));
-  const addTree = (x: number, z: number) => {
-    const kind = weighted(rng, forestKinds);
-    const s = randRange(rng, 0.9, 1.4) * TREE_SCALE * (kind.geo === 'crystal' ? 1.4 : kind.geo === 'cactus' ? 1.1 : 1);
-    const ry = rng() * Math.PI * 2;
-    const sy = s * randRange(rng, 0.9, 1.15);
-    const color = vary(rng, tc(pick(rng, kind.colors)));
+  const addTree = (x: number, z: number, r: Rng = rng, small = 1) => {
+    const kind = weighted(r, forestKinds);
+    const s = randRange(r, 0.85, 1.25) * TREE_SCALE * small * (kind.geo === 'crystal' ? 1.4 : kind.geo === 'cactus' ? 1.1 : 1);
+    const ry = r() * Math.PI * 2;
+    const sy = s * randRange(r, 0.9, 1.15);
+    const color = vary(r, tc(pick(r, kind.colors)), 0.1);
     taken.push([x, z]);
     if (kind.geo !== 'crystal' && clearings.some(([mx, mz]) => Math.hypot(x - mx * 0.64, z - mz * 0.64) < 0.34)) {
       D('stump', x, 0, z, ry, 1.2, tc(theme.trunk));
@@ -1197,30 +1337,55 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   };
   const trees: [number, number, number][] = [];
   const houseKinds = theme.houses.map((h, i) => [i, h.weight] as const);
-  const houses: { x: number; z: number; s: number; sector: number }[] = [];
-  // Cor do telhado por peça (uma por tipo de casa), com uma ou outra exceção: de longe a vila lê
-  // como um bloco de cor, não como confete de telhados vermelhos, azuis e amarelos misturados.
+  const houses: { x: number; z: number; s: number; sector: number; door?: V2 }[] = [];
+  // Cor por casa, com viés: ~60% das casas usam a cor de telhado da peça (uma por tipo de casa) e o resto
+  // sorteia da paleta do tipo, para a vila ler como confete de telhados e de paredes claras e escuras.
+  // O sorteio extra vem de um gerador à parte (consome sempre o mesmo tanto), então o resto da peça
+  // não muda; as chamadas ao `rng` abaixo seguem a ordem antiga.
+  const crng = mulberry32((seed ^ 0x5c0105) >>> 0);
+  // Proporção por casa (largura e profundidade 0,8 a 1,3): também de um gerador à parte, para a
+  // peça não mudar em mais nada. Parede e telhado recebem a mesma tripla de escala.
+  const prng = mulberry32((seed ^ 0x27d0a5) >>> 0);
   const tileRoof = new Map<number, string>();
-  const addHouse = (x: number, z: number, baseAng: number, sector = -1) => {
-    const i = weighted(rng, houseKinds);
+  // D29: sorteios novos (giro das casas, lotes extras, anexos) saem de geradores à parte, para o
+  // resto da peça sair igual ao que já era.
+  const rv = mulberry32((seed ^ 0xd29d29) >>> 0);
+  const r4 = mulberry32((seed ^ 0x0d29a77) >>> 0);
+  // Raio aproximado da casa no chão, para os lotes não se tocarem.
+  const houseR = (s: number) => 0.085 * s;
+  const addHouse = (x: number, z: number, baseAng: number, sector = -1, door?: V2, small?: [number, number]) => {
+    const R = small ? r4 : rng;
+    const i = small ? weighted(R, houseKinds.filter(([k]) => theme.houses[k].body !== 'tall').length ? houseKinds.filter(([k]) => theme.houses[k].body !== 'tall') : houseKinds) : weighted(R, houseKinds);
     const kind = theme.houses[i];
     const meta = opts.houses[i];
-    // Poucas casas grandes, alinhadas à borda: de longe cada uma se lê sozinha.
-    const s = randRange(rng, 1.5, 1.8) * (kind.body === 'long' ? 0.9 : 1);
-    const sy = randRange(rng, 0.92, 1.12);
-    const ry = baseAng + (rng() < 0.5 ? 0 : Math.PI / 2) + (rng() - 0.5) * 0.12;
-    D(`wall:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(pick(rng, kind.walls)), 0.04));
+    // Uma casa dominante grande de cumeeira paralela à rua (de longe ela se lê sozinha) e, ao redor,
+    // casas médias e pequenas nos lotes extras. Escala anisotrópica (kx, kz) do D27 por cima da escala do lote.
+    const s = small ? randRange(R, small[0], small[1]) * (kind.body === 'long' ? 0.85 : 1) : randRange(R, 1.65, 1.95) * (kind.body === 'long' ? 0.9 : 1);
+    const sy = randRange(R, 0.92, 1.12);
+    let ry = sector >= 0 ? baseAng + (R() - 0.5) * 0.08 : baseAng + (R() < 0.5 ? 0 : Math.PI / 2) + (R() - 0.5) * 0.12;
+    // 25% das casas de vila giram (um quarto delas 90°, o resto ±20°) para quebrar a grade de cumeeiras.
+    if (sector >= 0) {
+      const q = rv(), sg = rv() < 0.5 ? -1 : 1;
+      if (q < 0.1) ry += Math.PI / 2;
+      else if (q < 0.25) ry += sg * 0.35;
+    }
+    const kx = randRange(prng, 0.8, kind.body === 'long' ? 1.1 : 1.3), kz = randRange(prng, 0.8, 1.3);
+    const sc: [number, number, number] = [s * kx, s * sy, s * kz];
+    D(`wall:${i}`, x, 0, z, ry, sc, vary(R, tc(pick(R, kind.walls)), 0.08));
     let roof = tileRoof.get(i);
-    if (roof === undefined) tileRoof.set(i, (roof = pick(rng, kind.roofs)));
-    else if (rng() < 0.2) roof = pick(rng, kind.roofs);
-    D(`roof:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(roof), 0.05));
-    if (meta?.chimney && rng() < 0.85) {
+    if (roof === undefined) tileRoof.set(i, (roof = pick(R, kind.roofs)));
+    else if (R() < 0.2) roof = pick(R, kind.roofs);
+    const own = pick(crng, kind.roofs);
+    if (crng() >= 0.6) roof = own;
+    D(`roof:${i}`, x, 0, z, ry, sc, vary(R, tc(roof), 0.06));
+    if (meta?.chimney && R() < 0.85) {
       const [cx, cy, cz] = meta.chimney;
       const c = Math.cos(ry), sn = Math.sin(ry);
-      chimneys.push(x + (cx * c + cz * sn) * s, cy * s * sy, z + (-cx * sn + cz * c) * s, i);
+      chimneys.push(x + (cx * kx * c + cz * kz * sn) * s, cy * s * sy, z + (-cx * kx * sn + cz * kz * c) * s, i);
     }
     taken.push([x, z]);
-    houses.push({ x, z, s, sector });
+    houses.push({ x, z, s: s * Math.max(kx, kz), sector, door });
+    return i;
   };
 
   const grassN = Math.round(randInt(rng, 9, 15) * detail);
@@ -1228,24 +1393,56 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const terr = edges[i];
     const sectorAng = -(Math.PI / 6 + (Math.PI / 3) * i);
     if (terr === T.Forest) {
-      // Árvores maiores e menos numerosas: cada copa se lê sozinha, como as casas.
-      const n = Math.max(2, Math.round(randInt(rng, theme.treesPerSector[0], theme.treesPerSector[1]) * 0.7));
-      for (let k = 0, tries = 0; k < n && tries < n * 5; tries++) {
-        const p = samplePoint(rng, i, 0.1, 0.07);
-        if (!p || !free(p[0], p[1], 0.125) || clear(p[0], p[1]) < 0.05) continue;
-        addTree(p[0], p[1]);
+      // Mata em massa: muitas copas pequenas, 2 a 3× o número antigo, num gerador derivado (o resto da peça não muda com a contagem).
+      // Cada árvore é a melhor de alguns candidatos (a mais longe das vizinhas): sem buracos nem grumos.
+      // Franja: perto de um setor vizinho que não é mata, as árvores ficam menores e mais ralas, com arbusto no meio.
+      const n = Math.max(5, Math.round(randInt(frng, theme.treesPerSector[0], theme.treesPerSector[1]) * 1.75));  // o antigo era ×0,7: aqui ≈2,5× a contagem de antes
+      const [cax, caz] = corner(i), [cbx, cbz] = corner((i + 1) % 6);
+      const fringeOf = (x: number, z: number) => {
+        // Distância até a divisa com cada setor vizinho (a reta do centro ao canto), só se o vizinho não é mata.
+        let d = Infinity;
+        if (edges[(i + 5) % 6] !== T.Forest) d = Math.min(d, Math.abs(x * caz - z * cax) / Math.hypot(cax, caz));
+        if (edges[(i + 1) % 6] !== T.Forest) d = Math.min(d, Math.abs(x * cbz - z * cbx) / Math.hypot(cbx, cbz));
+        return d < 0.16;
+      };
+      for (let k = 0, tries = 0; k < n && tries < n * 4; tries++) {
+        let best: V2 | null = null, bestD = -1;
+        for (let c = 0; c < 4; c++) {
+          const p = samplePoint(frng, i, 0.1, 0.05);
+          if (!p || !free(p[0], p[1], 0.055) || clear(p[0], p[1]) < 0.04) continue;
+          let md = Infinity;
+          for (const [tx, tz] of taken) md = Math.min(md, (tx - p[0]) ** 2 + (tz - p[1]) ** 2);
+          if (md > bestD) { bestD = md; best = p; }
+        }
+        if (!best) continue;
         k++;
+        if (fringeOf(best[0], best[1])) {
+          if (frng() < 0.4) continue;
+          if (frng() < 0.3) {
+            D('bush', best[0], 0, best[1], frng() * 6, randRange(frng, 0.9, 1.5), vary(frng, tc(pick(frng, theme.bush))));
+            taken.push(best);
+          } else addTree(best[0], best[1], frng, 0.72);
+        } else addTree(best[0], best[1], frng);
       }
       for (let k = Math.round(4 * detail); k > 0; k--) {
         const p = samplePoint(rng, i, 0.1, 0.05);
         if (p && clear(p[0], p[1]) > 0.03 && free(p[0], p[1], 0.03)) D('grass', p[0], 0, p[1], rng() * 6, randRange(rng, 0.9, 1.4), shade(tc(pick(rng, theme.grass)), 0.8));
       }
     } else if (terr === T.Village) {
-      const n = randInt(rng, 1, 2);
-      for (let k = 0, tries = 0; k < n && tries < n * 6; tries++) {
-        const p = samplePoint(rng, i, 0.15, 0.13);
-        if (!p || !free(p[0], p[1], 0.27) || clear(p[0], p[1]) < 0.16) continue;
-        addHouse(p[0], p[1], sectorAng, i);
+      // Quarteirão: a rua vai do meio da borda ao centro e os lotes ficam dos dois lados dela,
+      // de frente para ela. A primeira casa escolhe o lado pela semente; a segunda (em 30% dos
+      // setores) vem do lado oposto, um pouco mais para dentro.
+      const [mx, mz] = edgeMid(i);
+      const ux = mx / INR, uz = mz / INR;
+      const side = rng() < 0.5 ? 1 : -1;
+      const lots: [number, number][] = [[0.52, side], [0.4, -side]];
+      const n = rng() < 0.3 ? 2 : 1;
+      for (let k = 0, tries = 0; k < n && tries < 4; tries++) {
+        const [along, sd] = lots[(k + (tries > 0 ? 1 : 0)) % 2];
+        const off = 0.2 * (tries > 1 ? -sd : sd);
+        const hx = ux * INR * along - uz * off, hz = uz * INR * along + ux * off;
+        if (!free(hx, hz, 0.3) || clear(hx, hz) < 0.15 || Math.hypot(hx, hz) > INR - 0.12) continue;
+        addHouse(hx, hz, sectorAng, i, [ux * INR * along - uz * 0.03 * Math.sign(off), uz * INR * along + ux * 0.03 * Math.sign(off)]);
         k++;
       }
       for (let k = Math.round(3 * detail); k > 0; k--) {
@@ -1269,7 +1466,11 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         const p = samplePoint(rng, i, 0.15, 0.12);
         if (p && clear(p[0], p[1]) > 0.06 && free(p[0], p[1], 0.05)) {
           const c = tc(pick(rng, theme.flowers));
-          for (let f = randInt(rng, 3, 6); f > 0; f--) D('flower', p[0] + (rng() - 0.5) * 0.14, 0, p[1] + (rng() - 0.5) * 0.14, 0, randRange(rng, 0.8, 1.2), c);
+          // Manchas maiores (10 a 14): leem de longe como canteiro, não como pontinhos.
+          for (let f = randInt(rng, 10, 14); f > 0; f--) {
+            const fx = p[0] + (rng() - 0.5) * 0.3, fz = p[1] + (rng() - 0.5) * 0.3;
+            if (clear(fx, fz) > 0.03) D('flower', fx, 0, fz, 0, randRange(rng, 0.8, 1.2), c);
+          }
         }
       }
       if (rng() < 0.18) {
@@ -1285,10 +1486,177 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     }
   }
 
+  // D29: lotes extras. Depois de tudo o mais, cada setor de vila com a casa dominante ganha uma
+  // casa média e uma pequena ao longo da mesma rua (de um lado e do outro), mais anexos com os
+  // kits que já existem: galpão (uma casa pequena e escura), poço e horta de arbustos.
+  for (const dom of houses.filter((h) => h.sector >= 0)) {
+    const i = dom.sector;
+    const [mx, mz] = edgeMid(i);
+    const ux = mx / INR, uz = mz / INR;
+    const sectorAng = -(Math.PI / 6 + (Math.PI / 3) * i);
+    const lotsAt = (count: number, range: [number, number]) => {
+      for (let k = 0, tries = 0; k < count && tries < 10; tries++) {
+        const along = 0.3 + r4() * 0.46;
+        const sd = r4() < 0.5 ? -1 : 1;
+        const sc = (range[0] + range[1]) / 2;
+        const off = sd * (0.17 + r4() * 0.08 + houseR(sc) * 0.6);
+        const hx = ux * INR * along - uz * off, hz = uz * INR * along + ux * off;
+        if (!free(hx, hz, 0.06) || clear(hx, hz) < 0.1 || Math.hypot(hx, hz) > INR - 0.1) continue;
+        if (houses.some((h) => Math.hypot(h.x - hx, h.z - hz) < houseR(h.s) + houseR(sc) + 0.03)) continue;
+        if (trees.some(([tx, tz, ts]) => Math.hypot(tx - hx, tz - hz) < 0.05 * ts + houseR(sc))) continue;
+        addHouse(hx, hz, sectorAng, i, [ux * INR * along - uz * 0.03 * Math.sign(off), uz * INR * along + ux * 0.03 * Math.sign(off)], range);
+        k++;
+      }
+    };
+    lotsAt(1, [1.35, 1.55]);
+    lotsAt(r4() < 0.7 ? 1 : 0, [1.05, 1.25]);
+    // Anexos atrás da casa dominante (do lado de dentro da vila, longe da rua).
+    const back = (d: number, w: number): V2 => [dom.x - ux * d - uz * w, dom.z - uz * d + ux * w];
+    for (let a = 0; a < 2; a++) {
+      const [bx, bz] = back(0.16 * dom.s * 0.75 + 0.08, (a === 0 ? 1 : -1) * (0.08 + r4() * 0.08));
+      const roll = r4(), pick1 = r4();
+      if (roll > 0.6 || !free(bx, bz, 0.07) || clear(bx, bz) < 0.06 || Math.hypot(bx, bz) > INR - 0.1) continue;
+      if (houses.some((h) => Math.hypot(h.x - bx, h.z - bz) < houseR(h.s) + 0.06)) continue;
+      if (pick1 < 0.45) {
+        // Galpão: casa pequena de paredes e telhado escuros, sem fumaça.
+        const gi = houseKinds.find(([k]) => theme.houses[k].body !== 'tall' && theme.houses[k].body !== 'long')?.[0] ?? 0;
+        const ry = sectorAng + (r4() < 0.5 ? 0 : Math.PI / 2);
+        const gs = 0.75 + r4() * 0.15;
+        D(`wall:${gi}`, bx, 0, bz, ry, [gs, gs, gs], shade(vary(r4, tc(pick(r4, theme.houses[gi].walls)), 0.04), 0.78));
+        D(`roof:${gi}`, bx, 0, bz, ry, [gs, gs, gs], shade(tc(pick(r4, theme.houses[gi].roofs)), 0.72));
+        taken.push([bx, bz]);
+      } else if (pick1 < 0.7) {
+        // Poço.
+        D('well', bx, 0, bz, r4() * 6, 0.9, WHITE);
+        taken.push([bx, bz]);
+      } else {
+        // Horta: dois ou três arbustos e um tufo de flores.
+        for (let b = 0; b < 3; b++) D('bush', bx + (r4() - 0.5) * 0.08, 0, bz + (r4() - 0.5) * 0.08, r4() * 6, 0.7 + r4() * 0.5, vary(r4, tc(pick(r4, theme.bush))));
+        const c = tc(pick(r4, theme.flowers));
+        for (let f = 0; f < 3; f++) D('flower', bx + (r4() - 0.5) * 0.12, 0, bz + (r4() - 0.5) * 0.12, 0, 1, c);
+        taken.push([bx, bz]);
+      }
+    }
+  }
+
+  // Âncora do prado: um elemento de escala média por peça (p ~ 0,35), entre o tufo e a peça inteira.
+  // Gerador à parte (semente da peça), kits que já existem; respeita free(), clear() e reserved.
+  const grassSectors = [0, 1, 2, 3, 4, 5].filter((i) => edges[i] === T.Grass);
+  const arng = mulberry32((seed ^ 0x2c1b3c6d) >>> 0);
+  if (grassSectors.length && arng() < 0.35) {
+    const i = grassSectors[Math.floor(arng() * grassSectors.length)];
+    const p = samplePoint(arng, i, 0.25, 0.2);
+    const ok = (x: number, z: number, r: number) => free(x, z, r) && clear(x, z) > r + 0.03;
+    if (p && ok(p[0], p[1], 0.14)) {
+      const [x, z] = p;
+      const kind = Math.floor(arng() * 5);
+      if (kind === 0) {
+        // árvore solitária, com copa cheia
+        const k = weighted(arng, forestKinds);
+        const s = randRange(arng, 1.1, 1.5) * TREE_SCALE;
+        D(`tree:${k.geo}`, x, 0, z, arng() * 6.28, [s, s * randRange(arng, 0.95, 1.15), s], vary(arng, tc(pick(arng, k.colors))));
+        trees.push([x, z, s]);
+      } else if (kind === 1) {
+        // sebe curta: fileira de moitas
+        const a = arng() * Math.PI, n = randInt(arng, 4, 5);
+        for (let k = 0; k < n; k++) {
+          const t = (k - (n - 1) / 2) * 0.1;
+          const hx = x + Math.cos(a) * t, hz = z + Math.sin(a) * t;
+          if (ok(hx, hz, 0.04)) D('bush', hx, 0, hz, arng() * 6, randRange(arng, 1.5, 1.9), vary(arng, tc(pick(arng, theme.bush))));
+        }
+      } else if (kind === 2) {
+        // pedra grande com duas companheiras
+        D('rock', x, 0, z, arng() * 6, randRange(arng, 2, 2.6), vary(arng, tc(theme.rock)));
+        for (let k = 0; k < 2; k++) {
+          const a = arng() * 6.28, hx = x + Math.cos(a) * 0.1, hz = z + Math.sin(a) * 0.1;
+          if (ok(hx, hz, 0.03)) D('rock', hx, 0, hz, arng() * 6, randRange(arng, 0.9, 1.4), vary(arng, tc(theme.rock)));
+        }
+      } else if (kind === 3) {
+        // canteiro de flores
+        const c = tc(pick(arng, theme.flowers));
+        for (let f = randInt(arng, 12, 16); f > 0; f--) {
+          const a = arng() * 6.28, r = Math.sqrt(arng()) * 0.13, fx = x + Math.cos(a) * r, fz = z + Math.sin(a) * r;
+          if (clear(fx, fz) > 0.03) D('flower', fx, 0, fz, 0, randRange(arng, 0.9, 1.3), c);
+        }
+      } else {
+        // moita grande com broto ao lado
+        D('bush', x, 0, z, arng() * 6, randRange(arng, 2.1, 2.6), vary(arng, tc(pick(arng, theme.bush))));
+        const hx = x + 0.12, hz = z + 0.05;
+        if (ok(hx, hz, 0.04)) D('bush', hx, 0, hz, arng() * 6, randRange(arng, 1.2, 1.5), vary(arng, tc(pick(arng, theme.bush))));
+      }
+      taken.push([x, z]);
+    }
+  }
+
+  // --- Aba de campo na emenda: meia parcela simétrica no meio de cada borda de plantação, até o
+  // plano da borda. Forma, altura e cor dependem só de (i, tema), nunca da semente: a peça vizinha
+  // também de plantação gera a metade espelhada e as duas formam uma parcela só sobre a emenda.
+  // Fica depois de árvores e casas (free) para não sobrepor nada e não mexer nos sorteios delas.
+  const ABA_A = 0.25, ABA_D = 0.18, ABA_N = 6, ABA_H = 0.005;
+  // Espaçamento das plantas da aba em relação ao das parcelas: mais ralo, para a aba não pesar
+  // nas instâncias (a terra costura a emenda; as plantas só sugerem a continuidade).
+  const ABA_SPARSE = 2.5;
+  for (let i = 0; i < 6; i++) {
+    const crop = abaCrops[i];
+    if (!crop) continue;
+    const ang = Math.PI / 6 + (Math.PI / 3) * i;
+    const nx = Math.cos(ang), nz = Math.sin(ang), tx = -nz, tz = nx;
+    const at = (t: number, d: number): V2 => [nx * d + tx * t, nz * d + tz * t];
+    // Contorno da meia elipse (t de +A a -A, no sentido dos ângulos crescentes) e o anel externo do bisel.
+    const ring = (ka: number, kd: number): V2[] => {
+      const out: V2[] = [];
+      for (let j = 0; j <= ABA_N; j++) {
+        const th = (j / ABA_N) * Math.PI;
+        out.push(at((ABA_A + ka) * Math.cos(th), INR - (ABA_D + kd) * Math.sin(th)));
+      }
+      return out;
+    };
+    const inner = ring(0, 0), outer = ring(0.04, 0.04);
+    const c0 = theme.crops[0];
+    const sc = tc(c0.soil).clone().lerp(tc(c0.colors[0]), c0.style === 'rice' ? 0.2 : c0.style === 'tulip' ? 0.1 : 0.42);
+    const edge = sc.clone().lerp(groundCols[i], 0.6);
+    const spIn: Splat = [0, 0, 0.6, 0], spOut: Splat = [0, 0, 0.25, 0];
+    const [cx, cz] = at(0, INR - ABA_D * 0.4);
+    for (let j = 0; j < ABA_N; j++) {
+      const a = inner[j], b = inner[j + 1], ao = outer[j], bo = outer[j + 1];
+      g.tri([cx, ABA_H, cz], [a[0], ABA_H, a[1]], [b[0], ABA_H, b[1]], sc, sc, sc, UP, spIn);
+      g.tri([a[0], ABA_H, a[1]], [ao[0], 0.001, ao[1]], [bo[0], 0.001, bo[1]], sc, edge, edge, UP, spIn, spOut, spOut);
+      g.tri([a[0], ABA_H, a[1]], [bo[0], 0.001, bo[1]], [b[0], ABA_H, b[1]], sc, edge, sc, UP, spIn, spOut, spIn);
+    }
+    // Plantas: fileiras paralelas à borda, a meia distância de linha da emenda, para o espaçamento
+    // continuar o mesmo do outro lado (a vizinha escalona as fileiras ao contrário).
+    const L = CROP_LAYOUT[crop.style];
+    const dens = 1 / Math.sqrt(Math.max(0.3, detail));
+    const gap = L.rowGap * dens * ABA_SPARSE, step = L.step * dens * ABA_SPARSE;
+    const ar = mulberry32((seed ^ 0xab4c0f) + i * 131);
+    const poly = inner.concat([at(-ABA_A, INR), at(ABA_A, INR)]);
+    const hedge = crop.style === 'tea' || crop.style === 'vineyard' || crop.style === 'lavender';
+    const yawRow = yawTo(tx, tz);
+    for (let r = 0; (r + 0.5) * gap < ABA_D; r++) {
+      const d = INR - (r + 0.5) * gap;
+      const rowCol = L.rowColor ? tc(crop.colors[r % crop.colors.length]) : null;
+      const off = ((r + (i >= 3 ? 1 : 0)) % 2) * step * 0.5;
+      for (let t = -ABA_A + off + step * 0.25; t <= ABA_A; t += step) {
+        const [x, z] = at(t, d);
+        if (!insidePoly(x, z, poly) || !free(x, z, 0.03) || clear(x, z) < 0.03) continue;
+        if (abaPlots[i].some((pp) => insidePoly(x, z, pp))) continue; // a parcela sorteada já planta ali
+        // Degradê só no arco: ρ é a distância normalizada ao centro da meia elipse.
+        const rho = Math.hypot(t / ABA_A, (INR - d) / ABA_D);
+        const edgeT = smooth(1, 0.75, rho);
+        if (ar() < (1 - edgeT) * 0.55) continue;
+        let c = rowCol ?? tc(crop.colors[Math.floor(ar() * crop.colors.length)]);
+        c = vary(ar, c, 0.06);
+        const s = randRange(ar, L.scale[0], L.scale[1]) * 1.2 * (lush.has(i) ? 1.12 : 1) * (0.45 + 0.55 * edgeT);
+        D(`crop:${crop.style}`, x, ABA_H, z, hedge ? yawRow : ar() * Math.PI * 2, s, lush.has(i) && !rowCol ? c.lerp(LUSH, 0.22) : c);
+      }
+    }
+  }
+
   // Chão de mata sob cada árvore: terra escura que assenta a copa no chão (Dorfromantik).
   if (trees.length) {
-    const floor = tc(theme.ground[T.Forest]).clone().lerp(tc(theme.trunk), 0.35).multiplyScalar(0.72);
-    for (const [x, z, s] of trees) disc(g, x, z, 0.055 * s, 0.0025, floor, 7, [0, 1, 0, 0]);
+    const floor = tc(theme.ground[T.Forest]).clone().lerp(tc(theme.trunk), 0.35).multiplyScalar(0.62);
+    // Discos maiores que a copa de baixo: com a mata mais cheia eles se unem num chão escuro contínuo.
+    for (const [x, z, s] of trees) disc(g, x, z, 0.075 * s, 0.0025, floor, 5, [0, 1, 0, 0]);
   }
 
   // Centro: segue o terreno dominante, quando não há rio, estrada ou marco.
@@ -1297,7 +1665,6 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     for (const e of edges) count.set(e, (count.get(e) ?? 0) + 1);
     const [top, n] = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
     if (n >= 3 && top === T.Forest && free(0, 0, 0.09)) addTree((rng() - 0.5) * 0.05, (rng() - 0.5) * 0.05);
-    if (n >= 3 && top === T.Village && free(0, 0, 0.2)) addHouse(0, 0, rng() * 6);
   }
 
   // Praça de terra batida sob o Centro da vila.
@@ -1306,48 +1673,50 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     disc(g, 0, 0, 0.29, 0.004, vg.clone().lerp(tc(theme.roadBed), 0.35).multiplyScalar(0.92), 18, [0, 0, 0, 1]);
   }
 
-  // --- Vida na vila: pegada de terra batida sob as casas, trilhas até uma pracinha e,
-  // nas vilas com 3 ou mais casas, um poço. Sem sorteio: sai das posições das casas.
-  if (houses.length) {
+  // --- Vida na vila: lotes de terra batida sob as casas, uma rua clara do meio de cada borda de
+  // vila até o centro (ela emenda com a da peça vizinha) e, com vila em 3 ou mais bordas, uma
+  // pracinha com poço onde as ruas se encontram. Sem sorteio: sai das posições das casas.
+  const vSectors = [0, 1, 2, 3, 4, 5].filter((i) => edges[i] === T.Village);
+  if (vSectors.length) {
     const vg = tc(theme.ground[T.Village]);
     const dirt = vg.clone().lerp(tc(theme.roadBed), 0.45).multiplyScalar(0.8);
-    const trail = vg.clone().lerp(tc(theme.roadBed), 0.2).multiplyScalar(1.14);
+    // Rua e pracinha bem mais claras que o chão da vila: é a malha que faz as casas lerem em quarteirões.
+    const trail = vg.clone().lerp(tc(theme.roadBed), 0.25).lerp(WHITE, 0.38);
     const VILLAGE: Splat = [0, 0, 0, 1];
-    // Trechos contíguos de setores de vila (a casa do centro vai para o maior).
-    const runs: number[][] = [];
-    const start = edges.findIndex((e, i) => e === T.Village && edges[(i + 5) % 6] !== T.Village);
-    if (start < 0) runs.push([0, 1, 2, 3, 4, 5]);
-    else {
-      for (let k = 0; k < 6; k++) {
-        const i = (start + k) % 6;
-        if (edges[i] !== T.Village) continue;
-        if (edges[(i + 5) % 6] === T.Village && runs.length) runs[runs.length - 1].push(i);
-        else runs.push([i]);
+    const plaza = !opts.center && vSectors.length >= 3 && clear(0, 0) > 0.14 && free(0, 0, 0.12);
+    // Trechos da rua que não pisam em rio, estrada nem construção reservada.
+    const open = (x: number, z: number) => clear(x, z) > 0.035 && reserved.every(([rx, rz, rr]) => (rx - x) ** 2 + (rz - z) ** 2 > rr * rr * 0.8);
+    const lane = (a: V2, b: V2, hw: number) => {
+      let run: V2[] = [];
+      for (const p of line(a, b, 10)) {
+        if (open(p[0], p[1])) run.push(p);
+        else {
+          if (run.length > 1) strip(g, run, hw, 0.0045, trail, VILLAGE);
+          run = [];
+        }
+      }
+      if (run.length > 1) strip(g, run, hw, 0.0045, trail, VILLAGE);
+    };
+    for (const i of vSectors) {
+      const [mx, mz] = edgeMid(i);
+      const l = Math.hypot(mx, mz) || 1;
+      const end = plaza ? 0.14 : opts.center ? 0.3 : vSectors.length >= 2 || houses.some((h) => h.sector === i) ? 0 : 0.25;
+      lane([mx * 0.94, mz * 0.94], [(mx / l) * end, (mz / l) * end], 0.036);
+    }
+    for (const h of houses) {
+      disc(g, h.x, h.z, 0.075 * h.s, 0.004, dirt, 8, VILLAGE);
+      if (h.door) {
+        // Caminho curto da porta até a rua.
+        const [mx, mz] = edgeMid(h.sector);
+        const l = Math.hypot(mx, mz) || 1;
+        const t = (h.x * mx + h.z * mz) / (l * l);
+        lane([h.x, h.z], [mx * t, mz * t], 0.018);
       }
     }
-    runs.sort((a, b) => b.length - a.length);
-    for (const run of runs) {
-      const hs = houses.filter((h) => run.includes(h.sector) || (h.sector < 0 && run === runs[0]));
-      for (const h of hs) disc(g, h.x, h.z, 0.075 * h.s, 0.004, dirt, 8, VILLAGE);
-      if (hs.length < 2) continue;
-      let px = hs.reduce((a, h) => a + h.x, 0) / hs.length, pz = hs.reduce((a, h) => a + h.z, 0) / hs.length;
-      // A praça não pode cair dentro de uma casa: escorrega em direção ao centro da peça.
-      for (let k = 0; k < 6 && hs.some((h) => Math.hypot(h.x - px, h.z - pz) < 0.1); k++) {
-        px *= 0.82;
-        pz *= 0.82;
-      }
-      for (const h of hs) {
-        // Trilha com uma leve curva (para um lado ou outro, conforme a posição da casa).
-        const mx = (h.x + px) / 2, mz = (h.z + pz) / 2;
-        const dx = px - h.x, dz = pz - h.z, l = Math.hypot(dx, dz) || 1;
-        const bend = Math.sin(h.x * 37.1 + h.z * 19.7) * 0.18 * l;
-        strip(g, bezier([h.x, h.z], [mx - (dz / l) * bend, mz + (dx / l) * bend], [px, pz], 6), 0.024, 0.0045, trail, VILLAGE);
-      }
-      disc(g, px, pz, 0.065, 0.005, trail, 10, VILLAGE);
-      if (hs.length >= 3 && free(px, pz, 0.05) && clear(px, pz) > 0.08) {
-        D('well', px, 0, pz, Math.atan2(pz, px), 1, WHITE);
-        taken.push([px, pz]);
-      }
+    if (plaza) {
+      disc(g, 0, 0, 0.17, 0.005, trail, 16, VILLAGE);
+      D('well', 0, 0, 0, rng() * 6, 1.15, WHITE);
+      taken.push([0, 0]);
     }
   }
 

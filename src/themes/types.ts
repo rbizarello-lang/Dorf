@@ -14,7 +14,9 @@ export type TreeGeo =
   | 'blossom' // copa florida em cachos (cerejeira, ipê)
   | 'palm' // palmeira / buriti / tamareira
   | 'crystal' // cristais (ficção)
-  | 'cypress' // cipreste estreito e alto
+  | 'cypress' // cipreste estreito e alto (quina marcada)
+  | 'puff' // copa gorda e baixa em um bloco só (o contraste da mata contra o cipreste e o abeto)
+  | 'spire' // abeto estreito e alto, de ponta
   | 'olive' // oliveira: copa larga e baixa, tronco retorcido
   | 'oak' // carvalho: copa grande em vários blocos
   | 'birch' // bétula: tronco branco, copa pequena
@@ -31,7 +33,8 @@ export type BodyStyle =
   | 'long' // casa comprida (viking, rancho)
   | 'cube' // cubo de adobe/pedra (Egito, Mediterrâneo)
   | 'tall' // sobrado estreito de 2-3 andares (Holanda, colonial)
-  | 'round'; // cilíndrica (cabana andina, módulo marciano)
+  | 'round' // cilíndrica (cabana andina, módulo marciano)
+  | 'annex'; // corpo principal com um volume baixo encostado ao lado (celeiro, cozinha, estábulo)
 
 export type RoofStyle =
   | 'gable' // duas águas
@@ -42,6 +45,8 @@ export type RoofStyle =
   | 'thatch' // palha grossa e arredondada
   | 'turf' // grama sobre o telhado (use cor verde)
   | 'stepgable' // empena escalonada holandesa
+  | 'steep' // duas águas muito íngreme, com beiral curto (empena alta e estreita)
+  | 'cross' // cumeeira cruzada: dois telhados de duas águas em cruz
   | 'cone'; // cônico (cabanas redondas)
 
 export interface HouseKind {
@@ -54,8 +59,12 @@ export interface HouseKind {
   roofs: string[];
   /** Madeira aparente/enxaimel, molduras ou faixas. Omitir = sem detalhe. */
   trim?: string;
+  /** Cor da porta. Omitir = a madeira do `trim` escurecida (ou marrom, sem `trim`). */
+  door?: string;
   /** Chaminé com fumaça. */
   chimney?: boolean;
+  /** Variante rara de silhueta: fica de fora da escolha do sobrado da terceira era (`risingKind`). */
+  minor?: boolean;
   // Os campos abaixo vêm da era da vila (src/themes/progress.ts); o tema não precisa escrevê-los.
   /** Escala da casa inteira (padrão 1). */
   scale?: number;
@@ -243,6 +252,8 @@ export interface Theme {
   bg: string;
   voidFill: string;
   voidLine: string;
+  /** O que cerca o tabuleiro: 'mar' (água funda, espuma e faixa de areia nas bordas), 'areia' (dunas, a cor sai do chão do tema) ou 'pergaminho' (a terra incógnita; o padrão). */
+  surround?: 'mar' | 'pergaminho' | 'areia';
   sun: string;
   sunIntensity: number;
   sunDir: [number, number, number];
