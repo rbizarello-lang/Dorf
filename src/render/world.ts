@@ -1638,6 +1638,29 @@ export class World {
       .sort((a, b) => b.tris - a.tris);
   }
 
+  /**
+   * Algo se move por conta própria (peça caindo, câmera chegando, fantasma deslizando, troca de
+   * hora, avanço de era)? Enquanto sim, a economia de quadros (framePacing.ts) desenha a taxa cheia.
+   * As animações contínuas do mundo (vento, água, bichos) não contam: andam bem em menos quadros.
+   */
+  isSettling() {
+    return this.settlingWhy() !== '';
+  }
+
+  /** O que está se movendo (vazio = parado); serve ao `?debug` e a quem investiga por que a economia não entra. */
+  settlingWhy(): string {
+    if (this.drops.length) return 'peça caindo';
+    if (this.centerAnim >= 0) return 'era';
+    if (U.eraWave.value.w > 0 && this.time - U.eraWave.value.z < 8) return 'onda de era';
+    const r = this.rig;
+    if (r.target.distanceToSquared(r.goal) > 1e-6 || Math.abs(r.goalYaw - r.yaw) > 1e-3 || Math.abs(r.goalDist - r.dist) > 1e-3 || Math.abs(r.goalTilt - r.tilt) > 1e-3) return 'câmera';
+    const g = this.ghost?.group;
+    if (g?.visible && (Math.hypot(this.ghostTarget.x - g.position.x, this.ghostTarget.z - g.position.z) > 2e-3 || Math.abs(this.ghostVel.x) + Math.abs(this.ghostVel.y) > 0.02)) return 'fantasma';
+    const a = this.sky, b = this.skyTarget;
+    if (a && b && (Math.abs(a.night - b.night) > 1e-3 || Math.abs(a.sunI - b.sunI) > 1e-3 || a.sunDir.distanceToSquared(b.sunDir) > 1e-6 || Math.abs(a.haze - b.haze) > 1e-3)) return 'hora';
+    return Math.abs(this.voidU.radius.value - this.voidGoal) > 1e-2 ? 'vazio' : '';
+  }
+
   stats() {
     const info = this.renderer.info;
     let tris = 0;
