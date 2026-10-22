@@ -3,7 +3,7 @@ import type { Rules } from './board';
 // Versões alternativas do jogo. Um modo é dado: muda regras e o que a interface oferece
 // (desfazer, semente do dia). As regras finais são padrão ← tema ← modo.
 
-export type ModeId = 'classico' | 'zen' | 'diario' | 'exploradores' | 'rotas';
+export type ModeId = 'classico' | 'zen' | 'diario' | 'exploradores' | 'rotas' | 'rapida';
 
 export interface Mode {
   id: ModeId;
@@ -52,6 +52,15 @@ export const MODES: readonly Mode[] = [
     tagline: 'Mais trilhos. Mercados e portos da mesma rede rendem pela distância, e a rota de 6 ou mais casas devolve uma peça.',
     rules: { railChance: 0.2, routes: true },
     undos: 3,
+  },
+  {
+    id: 'rapida',
+    name: 'Partida rápida',
+    tagline: '30 peças e nada mais: sem missões nem peças extras. Uma partida inteira em 10 a 12 minutos.',
+    // Pilha fixa: com missões, encaixes perfeitos e eras devolvendo peças a partida passaria de 30
+    // (a média do Clássico chega a ~100). Sem missões, sítios, maravilha e cartas, que só dão peças.
+    rules: { startTiles: 30, fixedStack: true, questChance: 0, sites: 0, wonderStages: 0, blessings: false },
+    undos: 1,
   },
 ];
 
