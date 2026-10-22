@@ -65,6 +65,12 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 - **Renderização por software (SwiftShader):** o FPS medido assim não vale nada. Compare triângulos, draw calls e CPU por quadro.
 - **WebGPU sem GPU:** `scripts/browser.mjs` liga o WebGPU do SwiftShader com `--enable-features=Vulkan --use-vulkan=swiftshader` (sem o Vulkan, o canvas perde o dispositivo). Acrescente `&webgl` à URL para conferir o caminho WebGL2; os dois precisam funcionar.
 - **Captura avulsa:** `node scripts/shot.mjs <pasta> "nome=query" ...` grava fora de `docs/screens` (ex.: `"rio=theme=egito&seed=4&auto=32&zoom=4&focus=4"`). Com `?seed=`, o `?auto=` monta sempre o mesmo tabuleiro, e as capturas ficam comparáveis.
+- **Servidor em outra porta:** `shot.mjs` e `compare.mjs` leem `BASE` (padrão `http://127.0.0.1:4173/`), para vários agentes usarem portas diferentes: `BASE=http://127.0.0.1:4202/ node scripts/shot.mjs ...`.
+- **Antes e depois (`npm run compare`):** grava 6 vistas fixas (vale de dia, Egito ao entardecer, noite, zoom aberto, rio de perto, vila de perto; semente fixa e `timescale=0.001`) e mede a diferença por pixel, decodificando os PNGs no próprio Chromium. Roda à mão, fora da CI e do `check` (o SwiftShader varia).
+  1. na `main`, com o build servido: `npm run compare -- grava .cache/compare/ref`;
+  2. com a sua mudança buildada: `npm run compare -- confere .cache/compare/ref` (ou `compara <pastaA> <pastaB>` para duas pastas já gravadas).
+  - Por captura imprime a % de pixels com diferença acima de `CH` (padrão 12 de 255 em algum canal) e a diferença média, e falha (código 1) acima de `TOL_PCT` (0,5%) ou `TOL_MEAN` (0,5). Duas rodadas seguidas do mesmo build dão no máximo ~0,11% e média ~0,05. Grava `diff-<nome>.png` (diferença ×4 em vermelho) na pasta B.
+  - As referências ficam em `.cache/compare/` (já ignorada pelo git): 6 PNGs de 1440×860 são pesados e dependem da máquina, então não vão para o repositório. Mudança visual intencional dá diferença acima da tolerância: confira as imagens `diff-*` e as capturas.
 - **Capturas:** só faça commit das PNGs de `docs/screens/` quando a mudança visual for intencional. Se gerou capturas apenas para conferir, desfaça com `git checkout docs/screens/`.
 - **Rede:** o Chromium tenta acessar domínios do Google. Em ambiente com proxy, essas falhas de conexão são esperadas e inofensivas.
 
