@@ -6,12 +6,12 @@ import { Game } from '../src/core/game';
 import { DIRS, hkey, opposite, unkey, hexToWorld, worldToHex, hexDistance } from '../src/core/hex';
 import { T, isStrict, rotateEdges, type TileDef } from '../src/core/tiles';
 import { mulberry32 } from '../src/core/rng';
-import { MODES, type Mode } from '../src/core/modes';
+import { MODES, modeRules, type Mode } from '../src/core/modes';
 import { generateSites } from '../src/core/sites';
 import { SPECIAL_KINDS, type SpecialKind } from '../src/core/specials';
 import { THEMES } from '../src/themes/themes';
 
-const rulesFor = (t: { rules?: Partial<Rules> }, mode?: Mode): Rules => ({ ...DEFAULT_RULES, ...(mode?.daily ? {} : t.rules), ...mode?.rules });
+const rulesFor = (t: { rules?: Partial<Rules> }, mode: Mode | undefined, seed: number): Rules => ({ ...DEFAULT_RULES, ...(mode?.daily ? {} : t.rules), ...(mode ? modeRules(mode, seed) : {}) });
 
 // Recompensas dos sítios (cópia independente da tabela de src/core/sites.ts).
 const ORACLE_SITE: Record<string, { points: number; tiles: number }> = {
@@ -328,7 +328,7 @@ function oraclePayOne(b: Board, placed: Placed, terr: T, isNode: (p: Placed) => 
 function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: Policy = 'greedy', mode: Mode = MODES[0], specials: SpecialKind[] = []): GameLog {
   const prnd = mulberry32(seed ^ 0x5bd1e995);
   const theme = THEMES[themeIdx];
-  const rules = rulesFor(theme, mode);
+  const rules = rulesFor(theme, mode, seed);
   // Zen não acaba: a simulação para num teto de jogadas.
   const maxMoves = rules.infinite ? 70 : Infinity;
   let expectedEra = 0;
@@ -955,7 +955,7 @@ if (contBad) fail(`continuação pós-replay divergiu em ${contBad} partidas`);
     if (mode.id === 'zen') continue;
     for (let seed = 1; seed <= 8; seed++) {
       const theme = THEMES[seed % THEMES.length];
-      const game = new Game(seed + mode.id.length * 100, rulesFor(theme, mode), seed % 2 ? ['station', 'lighthouse'] : []);
+      const game = new Game(seed + mode.id.length * 100, rulesFor(theme, mode, seed + mode.id.length * 100), seed % 2 ? ['station', 'lighthouse'] : []);
       const rand = mulberry32((seed ^ 0x5eed) >>> 0);
       let guard = 0;
       while (game.current && guard++ < 60) {

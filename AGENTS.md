@@ -124,7 +124,8 @@ src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em
   game.ts        Game: semente, pilha, sorteio por peça, descarte, bestMove (IA gulosa), rankMoves (as n melhores casas com os pontos reais, determinística: alimenta o "Onde encaixa", tecla `O`), upcoming (mirante)
   blessings.ts   cartas da virada de era: 1 de 2 por era, oferecidas pela semente; a escolha vai no save junto da jogada
   sites.ts       sítios escondidos (ruína, tesouro, relíquia, mirante), da semente por um gerador à parte
-  modes.ts       modos: Clássico, Zen, Desafio do dia, Exploradores, Estrada Real, Partida rápida (regras + desfazer; `fixedStack` = pilha de 30 sem peças de volta). O recorde é por modo e tema (`best.<modo>.<tema>`)
+  modes.ts       modos: Clássico, Zen, Desafio do dia, Exploradores, Estrada Real, Partida rápida (regras + desfazer; `fixedStack` = pilha de 30 sem peças de volta). O recorde é por modo e tema (`best.<modo>.<tema>`). `DAILY_RULES`/`dailyRule(seed)`: a regra do dia sai só da semente AAAAMMDD (data local), por dias seguidos em rodízio; `modeRules(modo, semente)` soma o modo e a regra do dia
+  share.ts       texto de compartilhar do desafio (`shareLine`, `shareUrl`, `terrainPoints`): puro
   specials.ts    peças especiais (estação, moinho d'água, farol): bordas, pontos e posições na pilha
   rng.ts         mulberry32 e utilitários de sorteio
 src/themes/      temas como DADOS
@@ -196,9 +197,10 @@ scripts/         capturas, teste de carga, conversão para página publicável; 
    Mude os três juntos ou nenhum.
 5. **Rio e estrada são estritos** (`isStrict`): só encostam neles mesmos. Os 4 terrenos comuns aceitam qualquer vizinho, mas só pontuam quando iguais. As interações pontuam pares diferentes.
 6. **Saves:**
-   - o formato é `{ v, seed, rulesId, mode, moves, undone, score, specials }` (v11), guardado em `localStorage` com o prefixo `retalhos.`; cada jogada é `[q, r, giro, ...escolhas]`, com as cartas da era (0 ou 1) escolhidas logo depois dela;
+   - o formato é `{ v, seed, rulesId, mode, moves, undone, score, specials }` (v12), guardado em `localStorage` com o prefixo `retalhos.`; cada jogada é `[q, r, giro, ...escolhas]`, com as cartas da era (0 ou 1) escolhidas logo depois dela;
    - o progresso entre partidas (totais, registro por tema e peças especiais liberadas) fica em `retalhos.progress` (`src/ui/progress.ts`), validado campo a campo ao ler;
    - **exportar e importar** (`src/ui/storage.ts`, botões no Almanaque): o arquivo `{ app, v, at, data }` leva todas as chaves `retalhos.*`; ao importar, `save` passa por `validSave` (main.ts) e `progress` por `cleanProgress` (progress.ts), os outros valores só por tipo e tamanho, e nada é gravado se algo falhar. Chave nova de preferência entra no backup sozinha; chave com formato próprio que importe validar ganha um caso em `check` (`importProgress`, main.ts). Se mudar `SAVE_VERSION`, backups antigos trazem um save recusado: o jogador vê o aviso de dado inválido;
+   - no Desafio do dia a regra do dia sai da `seed` (AAAAMMDD), então o save não guarda mais nada; mudar `DAILY_RULES` (ordem ou conteúdo) altera o replay e pede `SAVE_VERSION` novo. Variação nova só com campos de `Rules` que o oráculo de `tests/logic.ts` já cobre;
   - ao carregar, a partida é **reconstruída pelo replay** das jogadas e conferida contra a pontuação.
    - Se você mudar regras, pontuação ou geração de peças de um jeito que altere o replay, **aumente `SAVE_VERSION` em `main.ts`**. Saves antigos mostram um aviso e são descartados.
 7. **Os testes têm oráculos independentes.** Ao mudar a pontuação, atualize o oráculo em `tests/logic.ts` reimplementando a regra. Nunca faça o oráculo chamar o código que ele testa.

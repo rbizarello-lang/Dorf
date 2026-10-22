@@ -3,7 +3,8 @@ import { Sfx } from './audio';
 import { SEASON_KIND, SEASON_NAME, seasonAt } from './core/seasons';
 import { DEFAULT_RULES, type PlaceResult, type Rules } from './core/board';
 import { Game } from './core/game';
-import { MODES, dailySeed, modeById, type Mode, type ModeId } from './core/modes';
+import { MODES, dailyRule, dailySeed, modeById, modeRules, type Mode, type ModeId } from './core/modes';
+import { shareLine, shareUrl, terrainPoints } from './core/share';
 import { LOOKOUT_MOVES, SITE_REWARD, type SiteKind } from './core/sites';
 import { SPECIALS, SPECIAL_KINDS, type SpecialKind } from './core/specials';
 import { mulberry32 } from './core/rng';
@@ -39,7 +40,7 @@ type QualityMode = 'auto' | Quality;
 type MoveRec = number[];
 /** v11: a rota da Estrada Real dobrou de peso. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 11;
+  v: 12;
   seed: number;
   rulesId: string;
   mode: ModeId;
@@ -50,7 +51,7 @@ interface Save {
   /** Peças especiais que entraram nesta partida (mudam a sequência da pilha). */
   specials: SpecialKind[];
 }
-const SAVE_VERSION = 11;
+const SAVE_VERSION = 12;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -272,8 +273,11 @@ let committed = false;
 // ?specials=station.watermill.lighthouse (ou all) põe peças especiais na partida sem liberá-las (capturas).
 const forcedSpecials: SpecialKind[] | null = params.has('specials') ? (params.get('specials') === 'all' ? [...SPECIAL_KINDS] : SPECIAL_KINDS.filter((k) => params.get('specials')!.split('.').includes(k))) : null;
 
-// Regras: padrão ← tema ← modo. O desafio do dia ignora as regras do tema (é igual para todos).
-const rulesFor = (t: Theme, m: Mode = mode): Rules => ({ ...DEFAULT_RULES, ...(m.daily ? {} : t.rules), ...m.rules });
+// Regras: padrão ← tema ← modo. O desafio do dia ignora as regras do tema (é igual para todos) e soma a regra do dia,
+// que sai da semente (AAAAMMDD local): o save já a guarda, então o replay refaz a mesma regra.
+const rulesFor = (t: Theme, seed: number, m: Mode = mode): Rules => ({ ...DEFAULT_RULES, ...(m.daily ? {} : t.rules), ...modeRules(m, seed) });
+/** Nome do modo no HUD; no desafio do dia, com a regra do dia. */
+const modeLabel = () => (mode.daily ? `${mode.name} · ${dailyRule(game.seed).name}` : mode.name);
 let mode: Mode = modeById(params.get('mode') ?? store.get('mode'));
 let undone = 0;
 const ERA_NAMES = ['Aldeia', 'Vila', 'Burgo', 'Cidade'];
@@ -305,7 +309,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   clearTimeout(overTimer);
   for (const t of synTimers.splice(0)) clearTimeout(t);
   // Peças especiais: as liberadas entram em toda partida nova, menos no Desafio do dia (igual para todos).
-  game = new Game(seed, rulesFor(rulesTheme), specials ?? forcedSpecials ?? (mode.daily ? [] : progress.unlocked));
+  game = new Game(seed, rulesFor(rulesTheme, seed), specials ?? forcedSpecials ?? (mode.daily ? [] : progress.unlocked));
   // Partida nova (não um replay do desfazer ou do save): ainda não entrou no progresso.
   if (!replay.length) committed = false;
   undone = undos;
@@ -413,7 +417,14 @@ function startFresh(m: Mode = mode) {
   store.set('mode', m.id);
   rulesTheme = theme;
   newGame();
-  hud.toast(m.daily ? `Desafio do dia ${dailySeed()} · ${m.name}` : `Nova partida · ${m.name} · ${theme.name}`);
+  if (m.daily) announceDaily();
+  else hud.toast(`Nova partida · ${m.name} · ${theme.name}`);
+}
+
+/** A regra do dia, no começo do Desafio do dia. */
+function announceDaily() {
+  const r = dailyRule(game.seed);
+  hud.toast(`Desafio do dia ${game.seed} · ${r.name}: ${r.desc}`, 'good');
 }
 
 /** Desfaz a última jogada: refaz a partida pelo replay sem ela (o mesmo caminho do save). */
@@ -456,7 +467,7 @@ function refreshHud(instant = false) {
   const b = game.board, es = game.rules.eraScores;
   const nextAt = es[b.era + 1];
   const season = SEASON_NAME[seasonAt(Math.max(0, b.list.length - 2), game.rules.seasonLock)];
-  hud.setEra(es.length > 1 ? `Era ${['I', 'II', 'III', 'IV', 'V', 'VI'][b.era] ?? b.era + 1} · ${eraName(b.era)} · ${season} · ${mode.name}` : `${mode.name} · ${season}`, nextAt === undefined ? null : Math.min(1, (b.score - es[b.era]) / (nextAt - es[b.era])));
+  hud.setEra(es.length > 1 ? `Era ${['I', 'II', 'III', 'IV', 'V', 'VI'][b.era] ?? b.era + 1} · ${eraName(b.era)} · ${season} · ${modeLabel()}` : `${modeLabel()} · ${season}`, nextAt === undefined ? null : Math.min(1, (b.score - es[b.era]) / (nextAt - es[b.era])));
   hud.setUndo(Math.min(mode.undos - undone, moves.length ? 99 : 0));
   // Com 1 peça na pilha, a "próxima" só entraria se a jogada render peças: não mostra.
   hud.renderNext(game.stack <= 1 && !game.rules.infinite ? null : game.next, theme, game.board.lookout > 0 ? game.upcoming(3) : []);
@@ -1005,13 +1016,35 @@ function synergyLegend() {
   return [row(3, 1, theme.synergy.lumber), row(3, 2, theme.synergy.mill), row(3, 0, theme.synergy.pasture), row(2, 0, theme.synergy.apiary)].join('');
 }
 
+/** Compartilhar o resultado do desafio: `navigator.share` quando há, área de transferência como reserva. */
+async function shareResult() {
+  const top = terrainPoints(game.board, game.rules).slice(0, 3).map(([t]) => t);
+  const base = location.href.split(/[?#]/)[0];
+  const text = `${shareLine(game.seed, game.board.score, top)}\nRegra: ${dailyRule(game.seed).name}`;
+  const url = shareUrl(base, game.seed);
+  try {
+    if (typeof navigator.share === 'function') {
+      await navigator.share({ text, url });
+      return;
+    }
+  } catch (err) {
+    if ((err as Error)?.name === 'AbortError') return; // a pessoa fechou a folha de compartilhar
+  }
+  try {
+    await navigator.clipboard.writeText(`${text}\n${url}`);
+    hud.toast('Resultado copiado. É só colar.', 'good');
+  } catch {
+    hud.toast('Não deu para copiar: o navegador bloqueou a área de transferência.', 'bad');
+  }
+}
+
 function showGameOver() {
   ensureTurns();
   const b = game.board;
   const record = b.score > bestAtStart && b.score > 0;
   hud.showModal(`
     <h2 id="modal-title">${record ? 'Novo recorde!' : b.sites.length && !b.sitesLeft() && game.rules.endOnSites ? 'Todos os sítios achados!' : 'Pilha vazia'}</h2>
-    <p class="muted">${mode.name} · ${theme.name} · semente ${game.seed}</p>
+    <p class="muted">${modeLabel()} · ${theme.name} · semente ${game.seed}</p>
     <div class="final">
       <div><b data-count="${b.score}">${b.score.toLocaleString('pt-BR')}</b><span>pontos</span></div>
       <div><b>${game.placedCount}</b><span>peças</span></div>
@@ -1024,7 +1057,7 @@ function showGameOver() {
     ${special ? '' : specialsLine()}
     <div class="row">
       <button class="primary" type="button" data-act="new">Jogar de novo</button>
-      ${mode.daily ? '' : `<button class="secondary" type="button" data-act="replay-seed">Repetir a semente</button>`}
+      ${mode.daily ? `<button class="secondary" type="button" data-act="share">Compartilhar</button>` : `<button class="secondary" type="button" data-act="replay-seed">Repetir a semente</button>`}
       <button class="secondary" type="button" data-act="theme">Trocar tema</button>
       ${special ? '' : `<button class="secondary" type="button" data-act="almanac">Almanaque</button>`}
     </div>
@@ -1053,6 +1086,10 @@ hud.modal.addEventListener('click', (e) => {
   if (act === 'film') {
     // O diálogo de exportação toma o lugar do placar final.
     capture.showExportDialog('film');
+    return;
+  }
+  if (act === 'share') {
+    void shareResult();
     return;
   }
   if (act === 'almanac') {
@@ -1141,7 +1178,7 @@ function pickTheme(t: Theme) {
   if (game.over) {
     rulesTheme = t;
     newGame();
-  } else if (!mode.daily && JSON.stringify(rulesFor(t)) !== JSON.stringify(game.rules)) {
+  } else if (!mode.daily && JSON.stringify(rulesFor(t, game.seed)) !== JSON.stringify(game.rules)) {
     hud.toast(`${t.ruleNote ?? 'Regras padrão.'} Vale a partir da próxima partida.`);
   }
 }
@@ -1726,6 +1763,7 @@ function start(data: unknown) {
   if (!resumed) {
     rulesTheme = theme;
     newGame(wantSeed > 0 ? wantSeed : undefined);
+    if (mode.daily && !special) announceDaily();
   }
   if (params.has('stress')) {
     const r = autoPlace(Number(params.get('stress')) || 1000, true);

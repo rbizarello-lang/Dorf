@@ -8,6 +8,8 @@ import { T, generateTile, rotateEdges, type TileDef } from '../src/core/tiles';
 import { mulberry32 } from '../src/core/rng';
 import { timelineSvg, type TurnNote } from '../src/ui/minimap';
 import { monumentsDue } from '../src/ui/progress';
+import { DAILY_RULES, dailyDate, dailyRule, dailySeed, modeRules, MODES } from '../src/core/modes';
+import { shareLine, shareUrl, terrainPoints } from '../src/core/share';
 
 const rules: Rules = { ...DEFAULT_RULES };
 let bad = 0;
@@ -302,6 +304,40 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
   ok(wrongTop === 0, 'a 1ª sugestão tem a maior pontuação de todas as casas e giros, em ordem e sem casa repetida');
   ok(wrongPts === 0, 'os pontos de cada sugestão são os que place() paga');
   ok(unstable === 0 && mutated === 0, 'determinística e sem efeito colateral');
+}
+
+// ---- 11) Desafio do dia: regra do dia e texto de compartilhar
+{
+  console.log('Cenário 11: regra do dia e compartilhar');
+  ok(dailyRule(20261014) === dailyRule(20261014), 'a mesma data dá a mesma regra');
+  ok(dailySeed(new Date(2026, 9, 14)) === 20261014, 'a semente do dia é AAAAMMDD da data local');
+  const ids = new Set<string>();
+  let repeat = 0;
+  for (let i = 0; i < 366; i++) {
+    const d = new Date(2026, 0, 1 + i);
+    ids.add(dailyRule(dailySeed(d)).id);
+    if (i > 0 && dailyRule(dailySeed(d)).id === dailyRule(dailySeed(new Date(2026, 0, i))).id) repeat++;
+  }
+  ok(ids.size === DAILY_RULES.length, 'ao longo do ano todas as regras aparecem');
+  ok(repeat === 0, 'dois dias seguidos nunca têm a mesma regra');
+  ok(dailyRule(20261014).id !== dailyRule(20261015).id, 'datas diferentes variam');
+  ok(dailyDate(20260230) === null && dailyDate(12345) === null, 'semente que não é data é recusada');
+  ok(typeof dailyRule(777).id === 'string' && dailyRule(-5).id !== undefined, 'semente que não é data ainda dá uma regra');
+  const daily = MODES.find((m) => m.daily)!;
+  ok(JSON.stringify(modeRules(daily, 20261014)) === JSON.stringify(dailyRule(20261014).rules), 'modeRules traz a regra do dia no desafio');
+  ok(JSON.stringify(modeRules(MODES[0], 20261014)) === JSON.stringify(MODES[0].rules), 'os outros modos não mudam');
+
+  ok(shareLine(20261014, 1240, [T.Forest, T.Field, T.Village]) === 'Retalhos 14/10 · 1.240 · 🌲🌾🏘', 'texto fixo: Retalhos 14/10 · 1.240 · 🌲🌾🏘');
+  ok(shareLine(20260105, 999, [T.Grass, T.Water, T.Rail, T.Forest]) === 'Retalhos 05/01 · 999 · 🌿🌊🚂', 'só três emojis e dia com zero à esquerda');
+  ok(shareLine(20261014, 1234567, []) === 'Retalhos 14/10 · 1.234.567', 'sem terrenos não sobra separador');
+  ok(shareUrl('https://x.test/Dorf/', 20261014) === 'https://x.test/Dorf/?mode=diario&seed=20261014', 'link com modo e semente');
+  const b = new Board({ ...DEFAULT_RULES, matchBonus: { [T.Forest]: 3 } });
+  b.placeRaw(0, 0, land(T.Forest), 0);
+  b.placeRaw(1, 0, land(T.Forest), 0);
+  b.placeRaw(0, 1, land(T.Field), 0);
+  b.placeRaw(-1, 1, land(T.Field), 0);
+  const tp = terrainPoints(b, { matchPoints: 10, matchBonus: { [T.Forest]: 3 } });
+  ok(tp.length === 2 && tp[0][0] === T.Forest && tp[0][1] === 13 && tp[1][0] === T.Field && tp[1][1] === 10, 'terrenos que mais pontuaram: floresta 13, plantação depois');
 }
 
 console.log(bad ? `\n${bad} FALHA(S)` : '\nTodos os cenários sintéticos passaram');

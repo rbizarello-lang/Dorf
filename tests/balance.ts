@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { DEFAULT_RULES, type PlaceResult, type Rules } from '../src/core/board';
 import { Game } from '../src/core/game';
 import { DIRS, hkey, opposite, unkey } from '../src/core/hex';
-import { MODES, type Mode } from '../src/core/modes';
+import { MODES, modeRules, type Mode } from '../src/core/modes';
 import { mulberry32 } from '../src/core/rng';
 import { previewRoutes } from '../src/core/routes';
 import { SITE_REWARD } from '../src/core/sites';
@@ -13,7 +13,7 @@ import { synergyOf } from '../src/core/synergy';
 import { T, rotateEdges, type TileDef } from '../src/core/tiles';
 import { THEMES, type Theme } from '../src/themes/themes';
 
-const rulesFor = (t: Theme, mode: Mode): Rules => ({ ...DEFAULT_RULES, ...(mode.daily ? {} : t.rules), ...mode.rules });
+const rulesFor = (t: Theme, mode: Mode, seed: number): Rules => ({ ...DEFAULT_RULES, ...(mode.daily ? {} : t.rules), ...modeRules(mode, seed) });
 
 type Player = 'guloso' | 'missoes' | 'rotas';
 const PLAYERS: Player[] = ['guloso', 'missoes', 'rotas'];
@@ -169,7 +169,7 @@ function choose(game: Game, player: Player, rand: () => number) {
 }
 
 function play(seed: number, theme: Theme, mode: Mode, player: Player): Sample {
-  const rules = rulesFor(theme, mode);
+  const rules = rulesFor(theme, mode, seed);
   const game = new Game(seed, rules, []);
   // O desempate do guloso usa um gerador à parte, para não mexer na sequência de peças.
   const rand = mulberry32((seed ^ 0x5eed) >>> 0);
