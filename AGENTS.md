@@ -107,6 +107,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__boat(zoom?)` | centraliza a câmera num barco andando (esteiras na água) |
 | `window.__fishing(i?, cais?, zoom?)` | centraliza no i-ésimo cardume de peixes; com `cais = true`, no i-ésimo cais de pescador |
 | `window.__folk(i?, zoom?)` | centraliza a câmera no i-ésimo aldeão de construção |
+| `window.__relief(i?, zoom?)` | centraliza na i-ésima serra ou morro assentado (`Theme.relief`) e devolve `'peak'` ou `'hill'` |
 | `window.__site(zoom?)` | centraliza no último sítio achado (ou no primeiro escondido) e devolve qual |
 | `?specials=all` / `window.__special(i?, zoom?)` | põe as peças especiais na partida sem liberá-las; centraliza na i-ésima colocada e devolve qual |
 | `window.__wonder(etapa?, zoom?)` | centraliza no canteiro da maravilha; com `etapa` (0 a 6), mostra a obra nessa etapa |
@@ -143,6 +144,7 @@ src/themes/      temas como DADOS
 src/render/
   gpu.ts         cria o WebGPURenderer (WebGPU ou WebGL2)
   materials.ts   materiais em TSL: chão, água, kits instanciados (vento, plantações, janelas), pergaminho do vazio (terra incógnita); uniformes U
+  relief.ts      relevo decorativo (`Theme.relief`): geometria dos kits `peak` (serra de rocha com neve opcional, cume + ombros) e `hill` (morro gramado), cada um com a versão leve; só aparência, sem regra
   noise.ts       texturas de ruído periódicas geradas em código (nuvens, chão, ondulação da água)
   atmosphere.ts  névoa da cena (scene.fogNode): bruma e névoa rasteira por altura, e a névoa de alcance
   groundMap.ts   mapa do chão visto de cima: cor do terreno (luz rebatida) e poças dos lampiões; cobertura (R8) para a costura de cor entre peças
@@ -155,6 +157,7 @@ src/render/
   tileBuilder.ts buildTile: monta UMA peça (chão com leito de rio, água com correnteza, estradas, decoração)
                  a partir de bordas + semente + tema. Vilas em quarteirões: uma rua clara do meio de cada borda de vila ao centro,
                  casas (1 por setor, 2 em ~30%) de cumeeira paralela à rua, e pracinha com poço com vila em 3+ bordas
+                 Relevo (`Theme.relief`, `amp` 0 ou omitido = sem relevo): uma serra ou um morro por peça de prado ou mata (gerador à parte, `seed ^ RELIEF_SEED`), perto do centro, só em setores sem vila nem lavoura, com a mata subindo a encosta do morro e pedras no pé da serra; reserva o lugar (`reserved`) antes das árvores e das casas
   world.ts       World: cena, luz, céu e hora do dia, blocos estáticos, pools instanciados, fantasma, animações
                  de queda, sentido da correnteza por peça
   liveTile.ts    LiveTile: peça avulsa (fantasma, queda, pilha)
@@ -227,7 +230,7 @@ scripts/         capturas, teste de carga, conversão para página publicável; 
    - Sem tone mapping do renderizador: o pós-processamento aplica um ombro suave que preserva as paletas dos temas.
    - O entorno do tabuleiro é `Theme.surround` (`'mar' | 'areia' | 'pergaminho'`, padrão pergaminho): o próprio `makeVoidMaterial` vira mar (água funda que ganha cor do tema, espuma e faixa de areia lidas do `seaMap`, brilho do céu) ou dunas de areia, sem malha nem draw call a mais, e desbota para a cor do fundo além do raio explorado.
    - Se um nó falhar ao compilar, o erro aparece no console das capturas.
-10. **Blocos estáticos só crescem** (append-only), e o mapa do chão (`groundMap.ts`) também: cada peça pinta a sua parte quando assenta. Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim (nível de detalhe): entre `rig.dist` 11,5 e 14,5 cada planta dessa metade afunda no chão na sua vez (`U.fine`, material `cropFine`), e mais longe o pool fica escondido. No Ultra e no Cinema a faixa vai 1,35× e 1,6× mais longe. Quem consulta geometria pela chave precisa tirar o `~`. Árvores, arbustos e pedras têm também uma **versão leve** (`Lib.farGeo`, octaedros e cones de 3 lados, mesmas cores por instância): além de `rig.dist` 18 (×1,35 no Ultra, ×1,6 no Cinema, ×1,35 na primavera), `World.setFarTrees` troca a geometria dos lotes com `Pool.retarget` (mesmas instâncias, sem lote novo, as chamadas não sobem; histerese de ±0,4). `Lib.geo` devolve sempre a versão cheia, e `pool()` já cria o lote na versão da hora.
+10. **Blocos estáticos só crescem** (append-only), e o mapa do chão (`groundMap.ts`) também: cada peça pinta a sua parte quando assenta. Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim (nível de detalhe): entre `rig.dist` 11,5 e 14,5 cada planta dessa metade afunda no chão na sua vez (`U.fine`, material `cropFine`), e mais longe o pool fica escondido. No Ultra e no Cinema a faixa vai 1,35× e 1,6× mais longe. Quem consulta geometria pela chave precisa tirar o `~`. Árvores, arbustos, pedras, serras e morros (`peak`, `hill`) têm também uma **versão leve** (`Lib.farGeo`, octaedros e cones de 3 lados, mesmas cores por instância): além de `rig.dist` 18 (×1,35 no Ultra, ×1,6 no Cinema, ×1,35 na primavera), `World.setFarTrees` troca a geometria dos lotes com `Pool.retarget` (mesmas instâncias, sem lote novo, as chamadas não sobem; histerese de ±0,4). `Lib.geo` devolve sempre a versão cheia, e `pool()` já cria o lote na versão da hora.
 11. **Construções internas não pontuam.** A roda d'água (vila na beira do rio), a irrigação, a estação e o silo (junto à ferrovia) são só visuais. Pontos de interação vêm apenas de `synergy.ts` × `Rules.synergyPoints`.
 12. **Parâmetros de URL e valores salvos são validados** contra listas fixas (ver `pickQ` e o uso de `Object.hasOwn` para `time`). Mantenha esse padrão ao criar um parâmetro novo.
 13. **O mundo anda pelo `dt` do `World.tick`.** O vídeo é desenhado depois da gravação, quadro a quadro, cada um com `world.tick(1/60)`, e o modo foto congela o mundo com `world.timeScale = 0`.

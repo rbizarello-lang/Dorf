@@ -314,6 +314,7 @@ export const BASE_THEMES: Theme[] = [
     grade: { shadow: '#4a78b8', light: '#cfe3ff', saturation: 0.92 },
     atmos: { haze: 1.4, hazeColor: '#d5e4f2', wind: 0.55, filter: [0.94, 0.98, 1.06] },
     season: 3,
+    relief: { amp: 0.9, style: 'serra', snow: true, rock: '#56616f' },
     synergy: { lumber: 'Lenhadores', mill: 'Moinho', pasture: 'Renas', apiary: 'Colmeias' },
     folk: { skin: '#e8c4a8', hat: 'hood', hatColor: '#a83a2e' },
     music: { scale: [0, 2, 3, 5, 7, 8, 10], timbre: 'glass' },

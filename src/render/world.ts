@@ -1754,6 +1754,20 @@ export class World {
   }
 
   /** Custo por kit: instâncias e triângulos (para achar o que pesa). */
+  /** Posição da i-ésima serra ou morro assentado (`window.__relief`), ou null. */
+  reliefPos(i: number): { x: number; z: number; kind: string } | null {
+    const all: { x: number; z: number; kind: string }[] = [];
+    for (const [k, p] of this.pools) {
+      const kind = k.split('@')[0];
+      if (kind !== 'peak' && kind !== 'hill') continue;
+      for (let j = 0; j < p.count; j++) {
+        p.mesh.getMatrixAt(j, tmpM);
+        all.push({ x: tmpM.elements[12], z: tmpM.elements[14], kind });
+      }
+    }
+    return all[i] ?? null;
+  }
+
   poolReport() {
     return [...this.pools.entries()]
       .map(([k, p]) => {

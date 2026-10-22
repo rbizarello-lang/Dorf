@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { corner, edgeMid, INR } from '../core/hex';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
+import { HILL, hillProfile, PEAK, PEAK_CONES, PEAK_REACH } from './relief';
 import type { SynKind } from '../core/synergy';
 import type { SiteKind } from '../core/sites';
 import type { SpecialKind } from '../core/specials';
@@ -164,6 +165,8 @@ const WHITE = new THREE.Color(1, 1, 1);
 const TREE_SCALE = 0.85;
 /** Mistura no `mulberry32(seed ^ …)` que sorteia as árvores das peças de mata, para o resto da peça não depender da quantidade delas. */
 const FOREST_SEED = 0x5f0e5;
+/** Mistura no gerador do relevo decorativo (`Theme.relief`): serra ou morro, posição, tamanho e o que sobe a encosta. */
+const RELIEF_SEED = 0x3d9a1c7;
 /** Chance de um arbusto de frutas por setor de prado (nos temas com `berry`). */
 const BERRY_CHANCE = 0.06;
 const LANDMARK_SCALE = 1.25;
@@ -1316,6 +1319,66 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     }
   }
 
+  // --- Relevo decorativo (Theme.relief): uma serra ou um morro na peça, por um gerador à parte (semente da
+  // peça). Entra antes das árvores e das casas, que desviam dele (reserved). Só ocupa setores de prado, mata,
+  // rio ou trilho (vila e lavoura ficam livres, com as casas e as parcelas de sempre), e a pegada inteira
+  // tem de caber neles; fica de fora a peça com marco, sítio ou construção especial. Rio e trilho: clear().
+  interface Relief { kind: 'peak' | 'hill'; x: number; z: number; ry: number; sx: number; sy: number; sz: number; reach: number }
+  let relief: Relief | null = null;
+  const rel = theme.relief;
+  const lr = mulberry32((seed ^ RELIEF_SEED) >>> 0);
+  const roomy = (i: number) => edges[i] === T.Grass || edges[i] === T.Forest || edges[i] === T.Water || edges[i] === T.Rail;
+  const sectorAt = (x: number, z: number) => {
+    let best = 0, bd = -Infinity;
+    for (let i = 0; i < 6; i++) {
+      const [mx, mz] = edgeMid(i);
+      if (x * mx + z * mz > bd) (bd = x * mx + z * mz), (best = i);
+    }
+    return best;
+  };
+  const sectors = [0, 1, 2, 3, 4, 5].filter(roomy);
+  if (rel && rel.amp > 0 && sectors.length && !opts.center && !opts.special && !opts.wonder && !opts.site && opts.eraMark === undefined) {
+    const roll = lr(), kindRoll = lr();
+    if (roll < Math.min(0.9, rel.amp * 0.6)) {
+      const kind = rel.style === 'serra' && kindRoll < 0.55 ? 'peak' : 'hill';
+      const s0 = randRange(lr, 0.85, 1.3);
+      const kx = randRange(lr, 0.88, 1.18), kz = randRange(lr, 0.88, 1.18);
+      const ky = randRange(lr, 0.85, 1.3), kh = randRange(lr, 0.8, 1.5), ry = lr() * Math.PI * 2;
+      // Se a peça não comporta o tamanho sorteado, tenta de novo menor (a pegada tem de caber nos setores livres).
+      for (const f of [1, 0.78, 0.6]) {
+        if (relief) break;
+        const s = s0 * f;
+        const sx = s * kx, sz = s * kz;
+        // Altura total até ~0,85 (a câmera baixa não esconde mais que uma casa atrás).
+        const sy = kind === 'peak' ? Math.max(0.75, Math.min(1.05, s * ky * 0.95)) : kh * (0.6 + 0.4 * f);
+        const reach = kind === 'peak' ? PEAK_REACH * PEAK.r * Math.max(sx, sz) : HILL.r * 1.07 * Math.max(sx, sz);
+        const maxD = Math.max(0.02, 0.8 - reach);
+        for (let t = 0; t < 6 && !relief; t++) {
+          // Perto do centro da peça (a distância pesa para o meio), na direção de um setor livre.
+          const sec = sectors[Math.floor(lr() * sectors.length)];
+          const a = Math.PI / 6 + (Math.PI / 3) * sec + (lr() - 0.5) * 1.0, d = maxD * lr() ** 1.5;
+          const x = Math.cos(a) * d, z = Math.sin(a) * d;
+          if (!free(x, z, 0.1) || clear(x, z) <= reach * (kind === 'peak' ? 0.6 : 0.45)) continue;
+          let fits = true;
+          for (let k = 0; k < 6 && fits; k++) fits = roomy(sectorAt(x + Math.cos(k * 1.047) * reach * 0.75, z + Math.sin(k * 1.047) * reach * 0.75));
+          if (fits) relief = { kind, x, z, ry, sx, sy, sz, reach };
+        }
+      }
+      if (relief) {
+        const { x, z, ry, sx, sy, sz, reach } = relief;
+        if (kind === 'peak') {
+          D('peak', x, 0, z, ry, [sx, sy, sz], vary(lr, tc(rel.rock ?? theme.rock), 0.08));
+          reserved.push([x, z, reach * 0.85]);
+        } else {
+          const gi = [sectorAt(x, z), 0, 1, 2, 3, 4, 5].find((i) => edges[i] === T.Grass || edges[i] === T.Forest) ?? 0;
+          D('hill', x, 0, z, ry, [sx, sy, sz], vary(lr, groundCols[gi], 0.05));
+          reserved.push([x, z, reach * 0.55]);
+        }
+        taken.push([x, z]);
+      }
+    }
+  }
+
   // --- Árvores, casas, capim, animais.
   const forestKinds = theme.forest.map((k) => [k, k.weight] as const);
   // Clareira da serraria: as árvores perto dela viram tocos (sem sorteio a mais, para o resto
@@ -1535,6 +1598,55 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         const c = tc(pick(r4, theme.flowers));
         for (let f = 0; f < 3; f++) D('flower', bx + (r4() - 0.5) * 0.12, 0, bz + (r4() - 0.5) * 0.12, 0, 1, c);
         taken.push([bx, bz]);
+      }
+    }
+  }
+
+  // Relevo: a mata sobe a encosta do morro e abraça o pé da serra (a rocha tem cristas e vales, então nada sobe
+  // por ela), pedras caídas no pé da serra e moitas no alto do morro. Depois das árvores da peça (taken), por um gerador próprio.
+  if (relief) {
+    const { kind, x: cx, z: cz, ry, sx, sy, sz } = relief;
+    const cr = Math.cos(ry), sr = Math.sin(ry);
+    const baseR = kind === 'peak' ? PEAK.r : HILL.r;
+    // Ponto no molde do kit (polar: ângulo e fração do raio) para o mundo, e a altura da encosta ali.
+    const onSlope = (t: number, d: number) => {
+      const lx = Math.cos(t) * d * baseR * sx, lz = Math.sin(t) * d * baseR * sz;
+      return { x: cx + lx * cr + lz * sr, z: cz - lx * sr + lz * cr, y: kind === 'peak' ? 0 : Math.max(0, HILL.h * hillProfile(d) * sy) };
+    };
+    // Na serra, os ombros são mais altos que a encosta do cume principal: a mata não sobe por onde eles passam.
+    const inShoulder = (t: number, d: number) => kind === 'peak' && PEAK_CONES.slice(1).some(([a, r, rs]) => Math.hypot(Math.cos(t) * d - Math.cos(a) * r, Math.sin(t) * d - Math.sin(a) * r) < rs * 1.35);
+    const room = (px: number, pz: number, minD: number) => Math.hypot(px, pz) < INR - 0.1 && clear(px, pz) > 0.03 && taken.every(([tx, tz]) => (tx - px) ** 2 + (tz - pz) ** 2 >= minD * minD);
+    const forests = edges.filter((e) => e === T.Forest).length;
+    const wr = mulberry32((seed ^ RELIEF_SEED ^ 0x77) >>> 0);
+    if (forests > 0) {
+      for (let n = Math.round(forests * (kind === 'hill' ? 1.5 : 1) + wr() * 3), tries = 0; n > 0 && tries < 40; tries++) {
+        const t = wr() * Math.PI * 2, d = kind === 'peak' ? randRange(wr, 1.1, 1.3) : randRange(wr, 0.25, 0.92);
+        if (inShoulder(t, d)) continue;
+        const p = onSlope(t, d);
+        if (!room(p.x, p.z, 0.07)) continue;
+        const k = weighted(wr, forestKinds);
+        const sc = randRange(wr, 0.7, 1.05) * TREE_SCALE * (k.geo === 'crystal' ? 1.4 : k.geo === 'cactus' ? 1.1 : 1);
+        D(`tree:${k.geo}`, p.x, p.y > 0 ? p.y - 0.004 : 0, p.z, wr() * 6.28, [sc, sc * randRange(wr, 0.9, 1.15), sc], vary(wr, tc(pick(wr, k.colors)), 0.1));
+        taken.push([p.x, p.z]);
+        n--;
+      }
+    } else if (kind === 'hill') {
+      for (let n = randInt(wr, 1, 3), tries = 0; n > 0 && tries < 20; tries++) {
+        const p = onSlope(wr() * Math.PI * 2, randRange(wr, 0.1, 0.6));
+        if (!room(p.x, p.z, 0.08)) continue;
+        D('bush', p.x, Math.max(0, p.y - 0.004), p.z, wr() * 6, randRange(wr, 1.1, 1.8), vary(wr, tc(pick(wr, theme.bush))));
+        taken.push([p.x, p.z]);
+        n--;
+      }
+    }
+    if (kind === 'peak') {
+      // Pedras caídas no pé da serra.
+      for (let n = randInt(wr, 2, 4), tries = 0; n > 0 && tries < 20; tries++) {
+        const t = wr() * Math.PI * 2, p = onSlope(t, randRange(wr, 1.0, 1.3));
+        if (inShoulder(t, 1.15) || !room(p.x, p.z, 0.06)) continue;
+        D('rock', p.x, 0, p.z, wr() * 6, randRange(wr, 1.2, 2.4), vary(wr, tc(rel?.rock ?? theme.rock), 0.1));
+        taken.push([p.x, p.z]);
+        n--;
       }
     }
   }
