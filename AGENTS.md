@@ -1,6 +1,6 @@
 # AGENTS.md: guia para agentes de IA
 
-> **Resumo em inglês:** *Retalhos* is a relaxing hex-tile puzzle in the Dorfromantik genre, with 14 historical/regional themes. Stack: TypeScript, three.js r186 (WebGPURenderer with TSL node materials; WebGPU where available, automatic WebGL2 fallback) and Vite, with procedural geometry and no art assets. The build is a single HTML file. Before every commit, run `npm run check`, which does the typecheck, simulates 600 games and builds. UI text, docs, code comments and commit messages are in Brazilian Portuguese.
+> **Resumo em inglês:** *Retalhos* is a relaxing hex-tile puzzle in the Dorfromantik genre, with 5 historical/regional themes (Holanda, Egito, Oriental, Brasil, Inverno). Stack: TypeScript, three.js r186 (WebGPURenderer with TSL node materials; WebGPU where available, automatic WebGL2 fallback) and Vite, with procedural geometry and no art assets. The build is a single HTML file. Before every commit, run `npm run check`, which does the typecheck, simulates 600 games and builds. UI text, docs, code comments and commit messages are in Brazilian Portuguese.
 
 Este arquivo existe para que qualquer agente (Claude Code, Codex, Cursor, Copilot, Gemini etc.) entenda o projeto e trabalhe nele sem quebrar o que já funciona. O `README.md` é o manual de quem joga e roda o projeto. Este arquivo é o manual de quem mexe no código.
 
@@ -8,7 +8,7 @@ Este arquivo existe para que qualquer agente (Claude Code, Codex, Cursor, Copilo
 
 - **O que é:** um protótipo jogável (v3) de puzzle de peças hexagonais. Cada peça tem 6 bordas de terreno, e quem joga encaixa a peça no mapa buscando bordas iguais.
 - **O que a v3 tem:**
-  - 14 temas de países e épocas;
+  - 5 temas de países e épocas (Holanda Dourada, o padrão; Egito do Nilo; Terraços do Oriente; Brasil Dourado; Inverno Nórdico), consolidados dos 14 de antes (`docs/TEMAS.md`);
   - interações entre bordas diferentes, que dão pontos e erguem construções;
   - mundo animado: trigo ao vento, barcos, trens, moinhos, animais;
   - ciclo de dia, entardecer e noite.
@@ -20,7 +20,7 @@ Este arquivo existe para que qualquer agente (Claude Code, Codex, Cursor, Copilo
 |---|---|
 | `README.md` | regras do jogo, controles, temas, parâmetros de URL |
 | `docs/VIABILIDADE.md` | decisões de arquitetura, medições de desempenho, histórico das revisões de código, riscos |
-| `docs/TEMAS.md` | pesquisa histórica dos 8 temas de época e a **lista priorizada de kits a adicionar** |
+| `docs/TEMAS.md` | nota da consolidação de 14 para 5 temas, pesquisa histórica dos temas de época e a **lista priorizada de kits a adicionar** |
 | `docs/DIVIDAS.md` | dívidas técnicas: plano para quebrar o `main.ts`, arquivos grandes, exports sem uso, branches antigas |
 | `docs/PESQUISA.md` | mecânicas do original, stacks, mercado e aspectos legais |
 | `docs/screens/*.png` | capturas de referência, uma por tema e por situação |
@@ -95,7 +95,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?silhueta` | decorações pretas sobre chão branco: confere se vilas, construções e marcos leem de longe |
 | `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
 | `window.__ripple(idade)` | dispara a onda do chão no foco da câmera, já com essa idade em segundos |
-| `window.__weather(tipo, idade?)` | clima tocável: `'rain'`, `'snow'`, `'sun'` ou `null` (encerra); com `idade` em segundos, já entra com essa idade (capturas por software). `scripts/weather.mjs` roda os 14 temas e falha com erro no console (`SHOTS=vale:rain,inverno:snow,egito:sun` grava capturas) |
+| `window.__weather(tipo, idade?)` | clima tocável: `'rain'`, `'snow'`, `'sun'` ou `null` (encerra); com `idade` em segundos, já entra com essa idade (capturas por software). `scripts/weather.mjs` roda os 5 temas e falha com erro no console (`SHOTS=holanda:rain,inverno:snow,egito:sun` grava capturas) |
 | `window.__celebrate()` | anel dourado e bando de pássaros no foco da câmera (efeitos de nova era) |
 | `window.__era(era, idade?, zoom?)` | centraliza no Centro da vila e o mostra na era (0 a 3); com `idade`, a onda dourada já com essa idade em segundos |
 | `window.__plaza(zoom?)` | mostra os três monumentos na praça do Centro (só a imagem) |
@@ -137,8 +137,9 @@ src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em
   rng.ts         mulberry32 e utilitários de sorteio
 src/themes/      temas como DADOS
   types.ts       esquema Theme, com cada kit comentado: é a referência de tudo que um tema pode escolher
-  themes.ts      6 temas base, THEMES, PERIOD_LABEL/ORDER, themeById
-  eras.ts        8 temas históricos (Egito, Song, Vikings, Toscana, Edo, Colonial, Oeste, Andes)
+  themes.ts      índice: THEMES (os 5 temas, Holanda primeiro = padrão), PERIOD_LABEL/ORDER, themeById (ids antigos fundidos levam ao tema novo; MERGED_THEMES)
+  holanda.ts, egito.ts, oriental.ts, brasil.ts, inverno.ts   um tema por arquivo (oriental = Sakura + Song + Edo; brasil = Cerrado + Colonial; inverno absorveu o Viking)
+  legacy.ts      migração dos recordes `best.<modo>.<tema>` dos temas fundidos para o tema novo (o maior fica; puro, testado em tests/themes.ts)
   progress.ts    housesAtEra: as casas do tema em cada era da vila (taipa e palha, o tema, enxaimel e sobrado, flâmulas)
 src/render/
   gpu.ts         cria o WebGPURenderer (WebGPU ou WebGL2)
@@ -181,6 +182,7 @@ tests/logic.ts      simulação de partidas contra oráculos independentes (grup
 tests/synthetic.ts  cenários montados à mão (peça travada, descarte, fim de jogo, semente → sequência)
 tests/legibility.ts telhados e paredes contra o chão da vila (ΔE em CIELAB, ponderado pelo peso das casas)
 tests/storage.ts    ida e volta do backup com armazenamento falso e recusas sem gravar
+tests/themes.ts     os 5 temas, `?theme=` antigo, migração dos recordes dos temas fundidos e o progresso dos removidos
 tests/video.ts      MP4 conferido por um leitor de caixas próprio, resolução dinâmica, nível por placa, câmera e filme
 scripts/         capturas, teste de carga, conversão para página publicável; pwa-plugin.mjs (plugin do Vite: manifesto, ícones PNG desenhados em código e sw.js no dist); pwa.mjs (confere SW, offline, manifesto e backup)
 ```
@@ -209,6 +211,7 @@ scripts/         capturas, teste de carga, conversão para página publicável; 
    - o progresso entre partidas (totais, registro por tema e peças especiais liberadas) fica em `retalhos.progress` (`src/ui/progress.ts`), validado campo a campo ao ler;
    - **exportar e importar** (`src/ui/storage.ts`, botões no Almanaque): o arquivo `{ app, v, at, data }` leva todas as chaves `retalhos.*`; ao importar, `save` passa por `validSave` (main.ts) e `progress` por `cleanProgress` (progress.ts), os outros valores só por tipo e tamanho, e nada é gravado se algo falhar. Chave nova de preferência entra no backup sozinha; chave com formato próprio que importe validar ganha um caso em `check` (`importProgress`, main.ts). Se mudar `SAVE_VERSION`, backups antigos trazem um save recusado: o jogador vê o aviso de dado inválido;
    - no Desafio do dia a regra do dia sai da `seed` (AAAAMMDD), então o save não guarda mais nada; mudar `DAILY_RULES` (ordem ou conteúdo) altera o replay e pede `SAVE_VERSION` novo. Variação nova só com campos de `Rules` que o oráculo de `tests/logic.ts` já cobre;
+  - **o tema do save:** `validSave` recusa um `rulesId` que não é um dos `THEMES` atuais (a importação do backup aceita o formato do id e deixa o descarte para o carregamento, com o aviso de versão anterior). Foi assim, sem `SAVE_VERSION` novo, que os 14 temas viraram 5: os fundidos e os removidos mudaram de regra ou sumiram e seus saves caem na validação, e os que ficaram (Holanda, Egito, Inverno) mantiveram as `rules`. Mudar as `rules` de um tema que fica altera o replay das partidas dele e pede `SAVE_VERSION` novo. O tema escolhido e `?theme=` passam por `themeById`, que leva o id antigo fundido ao novo e o removido ao padrão; o recorde `best.<modo>.<tema>` migra uma vez na leitura (`migrateBests`), e o registro de `retalhos.progress` de tema removido fica guardado, sem uso;
   - ao carregar, a partida é **reconstruída pelo replay** das jogadas e conferida contra a pontuação.
    - Se você mudar regras, pontuação ou geração de peças de um jeito que altere o replay, **aumente `SAVE_VERSION` em `main.ts`**. Saves antigos mostram um aviso e são descartados.
 7. **Os testes têm oráculos independentes.** Ao mudar a pontuação, atualize o oráculo em `tests/logic.ts` reimplementando a regra. Nunca faça o oráculo chamar o código que ele testa.
@@ -263,10 +266,10 @@ Números de 2026-10-02, depois do traço, do pincel, dos aldeões, dos estandart
 
 ### Novo tema
 
-1. Copie um tema de `src/themes/eras.ts`.
+1. Copie um dos arquivos de `src/themes/` (ex.: `oriental.ts`) para `src/themes/<id>.ts` e acrescente o tema à lista `THEMES` de `src/themes/themes.ts`.
 2. Troque `id`, nomes, cores e kits, e a gradação (`grade`: tom das sombras, dos realces e saturação). Os campos estão comentados em `types.ts`.
 3. Confira as formas com `?gallery&theme=<id>`.
-4. Adicione o tema em `scripts/screenshots.mjs` e gere a captura.
+4. Adicione o tema em `scripts/screenshots.mjs` e `scripts/weather.mjs` e gere a captura.
 
 O menu agrupa os temas pelo campo `period` sem nenhuma outra mudança. Os testes já rodam as regras de todos os temas (`THEMES`). Se o tema tiver `rules` próprias, rode `npm test`.
 
@@ -307,7 +310,7 @@ São opcionais no tema (`gate`, `bridge`) e não pontuam. O `buildTile` decide o
 
 - **Feito (outubro de 2026, depois da v4):** água física (leito visível, cáusticas, esteiras); acabamento (oclusão só na luz indireta, nitidez, cor por hora, sombra firme); luz e céu (amanhecer e hora dourada, névoa por altura, lampiões, luz rebatida do chão, nuvens volumétricas); cinema e vídeo (nível Cinema, Auto pela placa com resolução dinâmica, modo foto, gravação e filme da partida em MP4). Detalhes em `docs/VIABILIDADE.md`.
 - **Feito (v4, outubro de 2026):** renderização WebGPU/TSL com GTAO, TRAA, bloom e profundidade de campo; rios escavados com correnteza; céu procedural (IBL); chão com detalhe por terreno; clima por tema; vilas com trilhas; eras da vila, sítios, bônus por tema, desfazer e 6 modos (o Estrada Real tem a regra das rotas). O andamento do plano de Age of Empires está no topo de `docs/IDEIAS_AOE.md`; as vinte propostas estão feitas, inclusive minimapa e linha do tempo, interface por tema, estações e monumentos.
-- **Feito (v3):** 14 temas, kits detalhados, 4 interações com prévia em dourado, mundo animado, dia/entardecer/noite, qualidade adaptativa, save v3 com replay, duas rodadas de revisão de código com correções. O histórico está em `docs/VIABILIDADE.md`, Apêndice A.
+- **Feito (v3):** 14 temas (consolidados em 5 na rodada 3, etapa T0), kits detalhados, 4 interações com prévia em dourado, mundo animado, dia/entardecer/noite, qualidade adaptativa, save v3 com replay, duas rodadas de revisão de código com correções. O histórico está em `docs/VIABILIDADE.md`, Apêndice A.
 - **Pendente:**
   - medir o FPS numa GPU real (`?stress=1000&quality=high&perf`, ou `window.__perf(5)` com a tecla `F`) no PC e no celular;
   - kits de fidelidade histórica que ainda faltam (`docs/TEMAS.md`, fim): roda-d'água como `MillStyle`, cipreste em alameda, estação de fim de linha por tema;

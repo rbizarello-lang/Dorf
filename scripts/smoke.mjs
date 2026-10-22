@@ -31,7 +31,7 @@ const base = `http://127.0.0.1:${server.address().port}/`;
 const cases = [
   // ?bench: só confere que abre, monta o tabuleiro e mostra o painel (a tabela inteira leva minutos no SwiftShader).
   { name: 'bench', q: 'bench&quality=low', backend: 'webgpu', bench: true },
-  { name: 'webgpu', q: 'theme=vale&seed=3&auto=12&quality=low', backend: 'webgpu' },
+  { name: 'webgpu', q: 'theme=holanda&seed=3&auto=12&quality=low', backend: 'webgpu' },
   { name: 'webgl', q: 'theme=egito&seed=3&auto=12&quality=low&webgl', backend: 'webgl2' },
 ];
 

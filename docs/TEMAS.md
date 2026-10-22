@@ -1,6 +1,22 @@
 # Temas históricos: pesquisa de referência
 
-Pesquisa de apoio aos 8 temas de `src/themes/eras.ts` · 30/09/2026 · PT-BR
+> **Consolidação (rodada 3, etapa T0, 22/10/2026): os 14 temas viraram 5.** O que está abaixo é a pesquisa histórica dos 8 temas de época de antes, mantida como referência dos kits e das fontes; os temas ficam hoje um por arquivo em `src/themes/<id>.ts` (o índice é `src/themes/themes.ts`, o padrão é a Holanda). Saíram sem herdeiro Vale Pastel, Colônia Marciana, Toscana Renascentista, Velho Oeste e Andes Incas; as seções 3, 4, 7 e 8 e os kits que só eles usavam (`crystal`, `cactus`, `hydro`, `rover`, `maglev`, `windpump`, `inca`, `rope`, `kancha`, `temple`, `dome`, `castle`, `elevator` etc.) continuam no motor, sem uso, para serem reaproveitados.
+>
+> | Tema | Origem | O que veio de cada uma |
+> |---|---|---|
+> | `holanda` Holanda Dourada (padrão) | Holanda, sem mudança | tudo, é o modelo histórico |
+> | `egito` Egito do Nilo | Egito, sem mudança | tudo |
+> | `oriental` Terraços do Oriente | Jardim Sakura + Jade Song + Edo Tranquilo | do Sakura, a cerejeira, as pétalas, a primavera travada (`season: 0`), o emblema; do Song, o arroz, o salgueiro, o junco (`junk`), a casa de pátio e a casa de chá, o búfalo; do Edo, a machiya, o torii, a estrada de posta, o pinheiro (`umbrella`), os nomes das eras, o encaixe perfeito de 25. Saíram o trem-bala, a ferrovia, a barcaça, as jazidas, o trigo e a amoreira |
+> | `brasil` Brasil Dourado | Cerrado Dourado + Minas Colonial | do Cerrado, os ipês, o buriti, o café, a cana, a luz de fim de tarde, o pólen, a pluck mixolídia; do Colonial, o casario caiado, o barroco, a mula da Estrada Real (`caravan`), a ponte de pedra, o ouro (`ore`), as eras Pouso → Cidade. Saíram a ferrovia e o trem, a araucária, o mar e o fundo azul-acinzentado |
+> | `inverno` Inverno Nórdico | Inverno Nórdico + Terra dos Vikings | do Viking, a casa longa de turfa, o estabur, o drakkar, a cevada e o linho, o capuz, a moldura de madeira com o corvo, os nomes das cartas, o ferro dos pântanos; saíram o verde de verão, o carvalho, a data do século X e o trem a vapor (a trilha é de terra batida) |
+>
+> **Regras dos temas fundidos.** Oriental: `matchBonus` de arrozal 3 (Song) + encaixe perfeito 25 (Edo) + primavera travada (Sakura); a regra de missões raras do Edo e o bônus de ferrovia do Sakura saíram. Brasil: encaixe perfeito 25 (Cerrado) + pouso de tropa 5 (Colonial). Inverno: as regras do Inverno ficaram como eram (55 peças, missões raras, lenhadores +3, inverno travado), então uma partida salva do Inverno continua valendo; o `synergyBonus` de carpintaria naval (5) do Viking saiu.
+>
+> **Migração.** `?theme=` e o tema escolhido guardados com um id antigo levam ao tema novo (`sakura`, `song`, `edo` → `oriental`; `cerrado`, `colonial` → `brasil`; `viking` → `inverno`; os demais → `holanda`). O recorde `best.<modo>.<tema>` dos temas fundidos passa para o tema novo, ficando o maior, uma vez, na leitura (`src/themes/legacy.ts`). A partida salva de um tema que saiu ou foi fundido é descartada com o aviso de versão anterior (sem mudar `SAVE_VERSION`: a regra do tema muda, mas as dos temas que ficaram não). O registro de `retalhos.progress` dos temas removidos fica guardado, sem uso.
+>
+> **Anacronismos declarados.** O Brasil Dourado junta o Cerrado de hoje e as Minas do século XVIII sem ano exato: o café em larga escala e a maria-fumaça mineira são do século XIX; o tema trata tudo como "Brasil interior". O Terraços do Oriente é uma paisagem de rolo pintado (da China Song ao Japão Edo), com torii e casa de pátio na mesma vila. O Inverno Nórdico é atemporal (casa longa de turfa, stuga vermelha e drakkar convivem). O que ainda falta de cada fusão (terraços de arroz, rena, trenó, lago congelado, aurora, cachoeira, cupinzeiro, fauna do cerrado, telhado colonial, portais em lista) está nos relatórios da rodada 3 e entra nas etapas seguintes.
+
+Pesquisa de apoio aos 8 temas de época que existiam em `src/themes/eras.ts` (hoje dissolvido, ver acima) · 30/09/2026 · PT-BR
 
 **Nota de método.** O WebFetch está bloqueado pelo proxy de saída; toda a evidência vem de resumos do WebSearch (nenhuma página foi lida na íntegra). Onde a busca não confirmou um detalhe, ele vem de conhecimento geral e está marcado **[C]**. Anacronismos e aproximações de kit estão sempre explicitados. Em todos os temas o renderizador só conhece os kits de `src/themes/types.ts`; onde o kit ideal não existe, usei o mais próximo e listei o que faltaria.
 

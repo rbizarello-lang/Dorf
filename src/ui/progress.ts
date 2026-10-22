@@ -91,9 +91,21 @@ function sanitize(raw: unknown, themeIds: readonly string[]): ProgressData {
   for (const k of Object.keys(d.totals) as (keyof Totals)[]) d.totals[k] = nat(r.totals?.[k]);
   for (const k of SITE_KINDS) d.siteKinds[k] = nat(r.siteKinds?.[k]);
   for (const k of SPECIAL_KINDS) d.specialsPlaced[k] = nat(r.specialsPlaced?.[k]);
+  const rec = (t: Partial<ThemeRecord>): ThemeRecord => ({ games: nat(t.games), era: Math.min(3, nat(t.era)), wonder: t.wonder === true });
   for (const id of themeIds) {
     const t = r.themes?.[id] as Partial<ThemeRecord> | undefined;
-    if (t) d.themes[id] = { games: nat(t.games), era: Math.min(3, nat(t.era)), wonder: t.wonder === true };
+    if (t && typeof t === 'object') d.themes[id] = rec(t);
+  }
+  // Temas que saíram do jogo (14 viraram 5): o registro fica guardado, sem uso, para não se perder nem quebrar.
+  // O id só entra com o formato de um id de tema e o registro, campo a campo, como os outros; no máximo 40.
+  if (r.themes && typeof r.themes === 'object' && !Array.isArray(r.themes)) {
+    let kept = 0;
+    for (const [id, t] of Object.entries(r.themes)) {
+      if (kept >= 40) break;
+      if (Object.hasOwn(d.themes, id) || !/^[a-z][a-z0-9_-]{0,31}$/.test(id) || !t || typeof t !== 'object') continue;
+      d.themes[id] = rec(t as Partial<ThemeRecord>);
+      kept++;
+    }
   }
   const un = r.unlocked;
   if (Array.isArray(un)) d.unlocked = SPECIAL_KINDS.filter((k) => un.includes(k));

@@ -20,6 +20,7 @@ import { autoStartTier, gpuName } from './render/gpuTier';
 import { FX_FLAGS } from './render/post';
 import { U } from './render/materials';
 import { WEATHER_SECONDS, World } from './render/world';
+import { migrateBests } from './themes/legacy';
 import { THEMES, themeById, type Theme } from './themes/themes';
 import { withSafeColors } from './ui/a11y';
 import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor } from './ui/banner';
@@ -121,6 +122,9 @@ let banner = (() => {
     return validBanner(null);
   }
 })();
+// Os 14 temas viraram 5: o recorde de cada tema fundido passa para o novo (o maior vale). `?theme=` e o tema
+// escolhido de antes passam por `themeById`, que leva o id antigo ao novo ou ao padrão.
+migrateBests(store, MODES.map((m) => m.id));
 let theme: Theme = dress(themeById(params.get('theme') ?? store.get('theme')), house);
 const a11yText = store.get('a11y-text');
 const a11yCalm = store.get('a11y-calm');
@@ -374,11 +378,15 @@ function snapshot(): Save {
   return { v: SAVE_VERSION, seed: game.seed, rulesId: rulesTheme.id, mode: mode.id, moves, undone, score: game.board.score, specials: [...game.specials] };
 }
 
-/** Aceita só saves completos e da versão atual; qualquer outra coisa é descartada. */
-function validSave(raw: unknown): Save | null {
+/**
+ * Aceita só saves completos, da versão atual e de um tema que ainda existe; qualquer outra coisa é descartada.
+ * Sem `anyTheme`, um save de tema que saiu ou foi fundido (sakura, viking, vale...) é recusado: a regra dele
+ * mudou ou sumiu, e o replay não bateria. Com `anyTheme`, só o formato do id conta (a importação do backup).
+ */
+function validSave(raw: unknown, anyTheme = false): Save | null {
   const s = raw as Partial<Save> | null;
   const okMove = (m: unknown) => Array.isArray(m) && m.length >= 3 && m.length <= 6 && m.every(Number.isInteger) && m[2] >= 0 && m[2] < 6 && m.slice(3).every((p) => p === 0 || p === 1);
-  if (s && s.v === SAVE_VERSION && Number.isInteger(s.seed) && s.seed! > 0 && typeof s.rulesId === 'string' && MODES.some((m) => m.id === s.mode) && Number.isInteger(s.undone) && s.undone! >= 0 && Array.isArray(s.moves) && s.moves.every(okMove) && Number.isFinite(s.score) && Array.isArray(s.specials) && s.specials.every((k) => SPECIAL_KINDS.includes(k))) return s as Save;
+  if (s && s.v === SAVE_VERSION && Number.isInteger(s.seed) && s.seed! > 0 && typeof s.rulesId === 'string' && (anyTheme ? /^[a-z][a-z0-9_-]{0,31}$/.test(s.rulesId) : THEMES.some((t) => t.id === s.rulesId)) && MODES.some((m) => m.id === s.mode) && Number.isInteger(s.undone) && s.undone! >= 0 && Array.isArray(s.moves) && s.moves.every(okMove) && Number.isFinite(s.score) && Array.isArray(s.specials) && s.specials.every((k) => SPECIAL_KINDS.includes(k))) return s as Save;
   return null;
 }
 
@@ -388,7 +396,7 @@ function readSave(): Save | null {
   try {
     const raw = JSON.parse(store.get('save') ?? 'null') as { v?: unknown } | null;
     save = validSave(raw);
-    old = !save && typeof raw?.v === 'number' && raw.v < SAVE_VERSION;
+    old = !save && ((typeof raw?.v === 'number' && raw.v < SAVE_VERSION) || validSave(raw, true) !== null);
   } catch {
     /* save ilegível */
   }
@@ -704,7 +712,7 @@ function importProgress(file: File) {
     // Confere sem gravar (armazenamento falso) para só então perguntar; a gravação real repete a mesma conferência.
     const mem = new Map<string, string>();
     const fake = { get length() { return mem.size; }, key: (i: number) => [...mem.keys()][i] ?? null, getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v) };
-    const check = (k: string, v: string) => (k === 'save' ? (validSave(safeParse(v)) ? v : null) : k === 'progress' ? cleanProgress(v, themeIds) : v);
+    const check = (k: string, v: string) => (k === 'save' ? (validSave(safeParse(v), true) ? v : null) : k === 'progress' ? cleanProgress(v, themeIds) : v);
     const dry = importKeys(json, 'retalhos.', check, fake);
     if (!dry.ok) return hud.toast(dry.error);
     hud.showModal(`

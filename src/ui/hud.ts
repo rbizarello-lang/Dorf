@@ -153,7 +153,7 @@ export class Hud {
     root.setProperty('--ink', theme.ui.ink);
     root.setProperty('--soft', theme.ui.soft);
     root.setProperty('--accent', theme.ui.accent);
-    root.setProperty('color-scheme', theme.ui.frame === 'madeira' || theme.ui.frame === 'metal' || theme.id === 'marte' ? 'dark' : 'light');
+    root.setProperty('color-scheme', theme.ui.frame === 'madeira' || theme.ui.frame === 'metal' ? 'dark' : 'light');
     applyFrame(theme.ui);
     $('theme-name').textContent = theme.name;
     $('theme-swatch').innerHTML = theme.terrainColors.slice(0, 5).map((c) => `<i style="background:${c}"></i>`).join('');

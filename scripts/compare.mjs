@@ -14,12 +14,12 @@ import { launch } from './browser.mjs';
 
 // Vistas fixas: semente fixa e mundo quase parado (timescale baixo) para reduzir a variação entre rodadas.
 const SHOTS = {
-  vale: 'theme=vale&seed=7&auto=40&time=day&timescale=0.001',
+  holanda: 'theme=holanda&seed=7&auto=40&time=day&timescale=0.001',
   'egito-entardecer': 'theme=egito&seed=4&auto=40&time=dusk&timescale=0.001',
-  noite: 'theme=vale&seed=7&auto=40&time=night&timescale=0.001',
-  'zoom-aberto': 'theme=vale&seed=11&auto=60&time=day&zoom=18&timescale=0.001',
+  noite: 'theme=holanda&seed=7&auto=40&time=night&timescale=0.001',
+  'zoom-aberto': 'theme=holanda&seed=11&auto=60&time=day&zoom=18&timescale=0.001',
   'rio-perto': 'theme=egito&seed=4&auto=32&zoom=4&focus=4&time=day&timescale=0.001',
-  'vila-perto': 'theme=toscana&seed=5&auto=40&zoom=4&time=day&timescale=0.001',
+  'vila-perto': 'theme=oriental&seed=5&auto=40&zoom=4&time=day&timescale=0.001',
 };
 
 const base = (process.env.BASE ?? 'http://127.0.0.1:4173/').replace(/\/?$/, '/');

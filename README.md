@@ -1,8 +1,8 @@
 # Retalhos
 
-Puzzle relaxante de peças hexagonais, no gênero de Dorfromantik, com **14 temas de países e épocas**, **interações entre tipos de borda** e um mundo que se mexe: trigo ondulando ao vento, barcos descendo os rios, trens e caravanas nas estradas, moinhos girando, animais pastando e janelas que acendem à noite. Feito com Three.js (WebGPU, com WebGL2 automático onde não houver WebGPU), TypeScript e Vite, sem nenhum arquivo de arte: peças, casas, plantações, animais e sons são gerados em código.
+Puzzle relaxante de peças hexagonais, no gênero de Dorfromantik, com **5 temas de países e épocas**, **interações entre tipos de borda** e um mundo que se mexe: trigo ondulando ao vento, barcos descendo os rios, carroças e caravanas nas estradas, moinhos girando, animais pastando e janelas que acendem à noite. Feito com Three.js (WebGPU, com WebGL2 automático onde não houver WebGPU), TypeScript e Vite, sem nenhum arquivo de arte: peças, casas, plantações, animais e sons são gerados em código.
 
-![Toscana Renascentista](docs/screens/toscana.png)
+![Holanda Dourada](docs/screens/holanda.png)
 
 - **Estudo de viabilidade:** [docs/VIABILIDADE.md](docs/VIABILIDADE.md)
 - **Pesquisa de mecânicas, stacks, mercado e aspectos legais:** [docs/PESQUISA.md](docs/PESQUISA.md)
@@ -38,19 +38,19 @@ Nas primeiras partidas, um cartão curto explica cada coisa na primeira vez que 
 
 O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Repetir a semente" joga a mesma sequência de peças de novo.
 
-**Estações:** a cada 20 jogadas a paisagem muda — primavera, verão, outono e inverno — e uma interação passa a valer +3: colmeias, moinho, serraria e pasto, nessa ordem. No inverno a neve pousa nas faces de cima e a beira dos rios congela. O Inverno Nórdico fica no inverno e o Jardim Sakura na primavera. No Desafio do dia a pontuação da estação gira igual para todos; esses dois temas continuam com a paisagem da estação deles. À noite, as construções têm fogueira e, em alguns temas, a estrada ganha lanternas. O botão de hora também tem a aurora, com sol baixo e rosado.
+**Estações:** a cada 20 jogadas a paisagem muda — primavera, verão, outono e inverno — e uma interação passa a valer +3: colmeias, moinho, serraria e pasto, nessa ordem. No inverno a neve pousa nas faces de cima e a beira dos rios congela. O Inverno Nórdico fica no inverno e o Terraços do Oriente na primavera. No Desafio do dia a pontuação da estação gira igual para todos; esses dois temas continuam com a paisagem da estação deles. À noite, as construções têm fogueira e, em alguns temas, a estrada ganha lanternas. O botão de hora também tem a aurora, com sol baixo e rosado.
 
-**Eras da vila:** com 500, 1.500 e 3.000 pontos a vila muda de era (os nomes mudam por tema, como Borgo → Comune → Signoria → Rinascimento na Toscana) e ganha +3 peças. A cada era, o Centro da vila (no meio da primeira peça) muda de forma, de fogueira com cabanas a palácio, e uma onda dourada corre pelo mapa. As casas do mapa inteiro mudam junto: na primeira era são menores, de taipa e palha; na segunda, o tema como ele é; na terceira ganham enxaimel ou molduras e o tipo de casa mais raro vira sobrado; na última, os sobrados hasteiam flâmulas na cor da casa e as janelas acendem mais forte à noite. A próxima peça com vila ergue o marco da era, que o fantasma já mostra antes de colocar.
+**Eras da vila:** com 500, 1.500 e 3.000 pontos a vila muda de era (os nomes mudam por tema, como Mura → Vila de mercado → Cidade murada → Capital no Terraços do Oriente) e ganha +3 peças. A cada era, o Centro da vila (no meio da primeira peça) muda de forma, de fogueira com cabanas a palácio, e uma onda dourada corre pelo mapa. As casas do mapa inteiro mudam junto: na primeira era são menores, de taipa e palha; na segunda, o tema como ele é; na terceira ganham enxaimel ou molduras e o tipo de casa mais raro vira sobrado; na última, os sobrados hasteiam flâmulas na cor da casa e as janelas acendem mais forte à noite. A próxima peça com vila ergue o marco da era, que o fantasma já mostra antes de colocar.
 
 **Influência:** cada interação marca as casas vazias em volta da peça onde nasceu, que ganham um contorno dourado tracejado. Uma peça colocada numa delas ganha pontos por setor do terreno que a construção trabalha: floresta para a serraria, plantação para o moinho, prado para o pasto e os dois para as colmeias. Vale +1 por setor na primeira era, +2 na segunda e na terceira e +3 na última (as colmeias, +1 e, na última era, +2). Cada tipo conta uma vez por casa, e o bônus vai até +8 por peça. Com o fantasma numa casa contornada, a etiqueta mostra o ganho.
 
 **Escolha da era:** a cada era nova a vila escolhe 1 de 2 cartas (clique ou teclas `1` e `2`), e a carta vale até o fim da partida. São 8: Guilda dos carpinteiros, Moleiros, Pastores e Apicultores (+5 por interação do tipo), Agrimensores (+10 por encaixe perfeito), Mestres de obras (+1 peça por peça cercada), Peregrinos (+2 peças por missão cumprida) e Cartógrafos (próximas peças à vista por 10 jogadas e +1 peça por sítio). Alguns temas dão nomes próprios, como os Escribas do faraó no Egito. A próxima peça espera a escolha.
 
-**Maravilha:** na última era, a próxima peça com 2 ou mais bordas de vila vira o canteiro da maravilha do tema (Castelo de Conto no Vale, Pilone de Karnak no Egito, Cúpula de Brunelleschi na Toscana, Terraços de Moray nos Andes etc.). Cada peça colocada depois avança uma etapa da obra, que sobe dentro do andaime; com as 6 etapas ela fica pronta e rende +300 pontos e +6 peças.
+**Maravilha:** na última era, a próxima peça com 2 ou mais bordas de vila vira o canteiro da maravilha do tema (Paço Municipal na Holanda, Pilone de Karnak no Egito, Grande Pagode no Terraços do Oriente, Santuário do Bom Jesus no Brasil Dourado, Palácio de Gelo no Inverno Nórdico). Cada peça colocada depois avança uma etapa da obra, que sobe dentro do andaime; com as 6 etapas ela fica pronta e rende +300 pontos e +6 peças.
 
 **Sua casa:** no topo do menu de temas, escolha uma das 8 cores da casa (ou a do tema) e monte o brasão (metal, peça e móvel). A cor aparece no placar, nos estandartes das missões (pequenos, só aparecem com a câmera perto ou com a lista de missões aberta), nas bandeiras do Centro, dos marcos e dos barcos e nas camisas de metade dos aldeões.
 
-**Moldura do tema:** os painéis mudam de material com o lugar (papiro no Egito, tábuas na Terra dos Vikings, seda na Dinastia Song, washi no Japão Edo, metal em Marte, cartaz no Oeste). O emblema ao lado do nome diz o tema antes do texto.
+**Moldura do tema:** os painéis mudam de material com o lugar (papiro no Egito, tábuas no Inverno Nórdico, seda no Terraços do Oriente, papel na Holanda e no Brasil). O emblema ao lado do nome diz o tema antes do texto.
 
 **Monumentos:** conquistas enfeitam a praça do Centro e ficam para as partidas seguintes. Dez serrarias numa partida erguem uma tora entalhada, a primeira maravilha uma estátua dourada, e vinte relíquias no total um relicário. O almanaque mostra quais já estão na praça.
 
@@ -138,20 +138,21 @@ O botão de qualidade abre a lista: **Auto**, **Ultra**, **Alta**, **Média** e 
 
 ## Temas
 
-| Época | Temas |
-|---|---|
-| Antiguidade | Egito do Nilo |
-| Séculos V a XV | Jade Song (China), Terra dos Vikings, Toscana Renascentista, Andes Incas |
-| Séculos XVI a XVIII | Holanda Dourada, Edo Tranquilo (Japão), Minas Colonial |
-| Séculos XIX a XXI | Velho Oeste, Cerrado Dourado, Inverno Nórdico, Jardim Sakura |
-| Futuro | Colônia Marciana |
-| Fantasia | Vale Pastel |
+| Época | Tema | O que é |
+|---|---|---|
+| Séculos XVI a XVIII | **Holanda Dourada** (padrão) | Países Baixos, século XVII: pôlderes, canais, moinhos de vento, tulipas |
+| Antiguidade | **Egito do Nilo** | Novo Império, c. 1300 a.C.: o Nilo, tamareiras, casas de adobe, pilone |
+| Séculos XVI a XVIII | **Terraços do Oriente** | Leste Asiático em paisagem de rolo, da China Song ao Japão Edo: arrozais, bambuzais, torii, pagodes, cerejeiras |
+| Séculos XVI a XVIII | **Brasil Dourado** | Brasil interior, Minas e Cerrado: casario caiado, ipês, buritis, café, Estrada Real |
+| Séculos XIX a XXI | **Inverno Nórdico** | Escandinávia no inverno: casas longas de turfa, cabanas vermelhas, drakkars no fiorde |
+
+Eram 14 temas. O Jardim Sakura, o Jade Song e o Edo Tranquilo viraram o Terraços do Oriente; o Cerrado Dourado e a Minas Colonial, o Brasil Dourado; a Terra dos Vikings foi para o Inverno Nórdico; Vale Pastel, Colônia Marciana, Toscana, Velho Oeste e Andes saíram. Links com `?theme=` antigo, o tema escolhido e os recordes dos temas fundidos passam para o tema novo; a partida salva de um tema que saiu é descartada. O motivo e o que veio de cada tema estão em [docs/TEMAS.md](docs/TEMAS.md).
 
 ## Parâmetros de URL
 
 | Parâmetro | Efeito |
 |---|---|
-| `?theme=toscana` | tema inicial (ids em `src/themes/themes.ts` e `eras.ts`) |
+| `?theme=oriental` | tema inicial: `holanda` (padrão), `egito`, `oriental`, `brasil` ou `inverno` (ids antigos como `sakura` ou `viking` levam ao tema novo; arquivos em `src/themes/`) |
 | `?seed=123` | partida reproduzível: a mesma semente dá a mesma sequência de peças |
 | `?time=night` | `dawn`, `aurora`, `day`, `golden`, `dusk` ou `night` |
 | `?quality=high` | `auto`, `ultra`, `high`, `medium` ou `low` (`cinema` vira `ultra`; só vale junto de `?debug`, `?perf`, `?stress`, `?auto` ou `?demo`, para medir) |

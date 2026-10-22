@@ -288,14 +288,14 @@ function summarize(label: string, player: string, samples: Sample[]): Row {
 
 const nArg = Number(process.argv[2]);
 const N = Number.isInteger(nArg) && nArg > 0 ? nArg : 80;
-const vale = THEMES[0];
+const padrao = THEMES[0];
 const modes = MODES.filter((m) => m.id !== 'zen');
 
 const modeRows: Row[] = [];
 for (const mode of modes) {
   for (const player of PLAYERS) {
     const samples: Sample[] = [];
-    for (let seed = 1; seed <= N; seed++) samples.push(play(seed, vale, mode, player));
+    for (let seed = 1; seed <= N; seed++) samples.push(play(seed, padrao, mode, player));
     modeRows.push(summarize(mode.name, PLAYER_NAME[player], samples));
     process.stderr.write(`${mode.name} · ${PLAYER_NAME[player]}: ${N} partidas\n`);
   }
@@ -342,7 +342,7 @@ const lines = [
   `Travadas = partidas com pelo menos um descarte. Era 0 é a primeira. "Demais" junta bônus do tema, cartas da era, estação e o extra do agrimensor.`,
   `Para comparar uma regra nova: rode de novo e veja a diferença em \`.cache/balance.json\`.`,
   ``,
-  `## Modos (tema ${vale.name})`,
+  `## Modos (tema ${padrao.name})`,
   ``,
   scoreTable(modeRows),
   ``,
