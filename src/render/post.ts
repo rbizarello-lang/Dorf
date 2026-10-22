@@ -14,10 +14,11 @@ import { traa } from 'three/addons/tsl/display/TRAANode.js';
 import { indirectShare, ssrMask } from './materials';
 
 // Pós-processamento por perfil de qualidade, montado como um grafo de nós (RenderPipeline).
-//   cinema: o Ultra com mais amostras na luz indireta e nos raios, reflexo em resolução cheia,
+//   cinema: luz indireta SSGI (mais amostras), reflexos SSR na água em resolução cheia, raios de luz,
 //          aberração cromática da lente e grão de filme (a supersamplagem vem de world.ts)
-//   ultra: iluminação indireta com oclusão (SSGI) + reflexos na água (SSR, meia resolução)
-//          + raios de luz + bloom + profundidade de campo + TRAA + o grão e a lente do Cinema
+//   ultra: GTAO em meia resolução (16 amostras) + luz rebatida do chão (groundMap, um pouco mais forte)
+//          + bloom + profundidade de campo + TRAA + o grão e a lente do Cinema; o céu na água vem do
+//          Fresnel do material, sem SSGI, SSR nem raios de luz (que ficam no Cinema)
 //   high:  GTAO em meia resolução + bloom + profundidade de campo + TRAA + o mesmo grão e lente
 //          (GTAO lê a profundidade, que no WebGPU não pode ser multiamostrada: por isso TRAA, não MSAA)
 //   (cinema, ultra e high também desenham o traço de tinta, o contorno dos objetos)
@@ -46,7 +47,7 @@ interface Config {
 
 const CONFIG: Record<Exclude<Quality, 'low'>, Config> = {
   cinema: { ao: 0, gi: true, ssr: true, rays: true, bloom: true, dof: true, ink: true, aa: 'traa', film: true },
-  ultra: { ao: 0, gi: true, ssr: true, rays: true, bloom: true, dof: false, tilt: true, ink: true, aa: 'traa', finish: true },
+  ultra: { ao: 0.5, gi: false, ssr: false, rays: false, bloom: true, dof: false, tilt: true, ink: true, aa: 'traa', finish: true },
   high: { ao: 0.5, gi: false, ssr: false, rays: false, bloom: true, dof: false, tilt: true, ink: true, aa: 'traa', finish: true },
   medium: { ao: 0, gi: false, ssr: false, rays: false, bloom: false, dof: false, ink: false, aa: 'msaa' },
 };
