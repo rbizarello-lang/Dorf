@@ -423,11 +423,14 @@ function decoMaterial(o: DecoOpts) {
   return m;
 }
 
-export type MatKey = 'deco' | 'foliage' | 'crop' | 'cropFine' | 'crystal' | 'glass' | 'fire';
+export type MatKey = 'deco' | 'relief' | 'reliefSoft' | 'foliage' | 'crop' | 'cropFine' | 'crystal' | 'glass' | 'fire';
 
 export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
   return {
     deco: decoMaterial({ shingles: true, paint: 'wall', rimSun: 0.3 }),
+    // Serra (faces planas) e morro (normais suaves): sem as fileiras de telha do `deco`, que listrariam a rocha.
+    relief: decoMaterial({ paint: 'wall', rimSun: 0.3 }),
+    reliefSoft: decoMaterial({ smooth: true, paint: 'wall', rimSun: 0.3 }),
     foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy' }),
     crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide }),
     cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true }),

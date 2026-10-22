@@ -84,6 +84,7 @@ export const inverno: Theme = {
   grade: { shadow: '#4a78b8', light: '#cfe3ff', saturation: 0.92 },
   atmos: { haze: 1.4, hazeColor: '#d5e4f2', wind: 0.9, filter: [0.94, 0.98, 1.06] },
   season: 3,
+  relief: { amp: 0.9, style: 'serra', snow: true, rock: '#56616f' },
   synergy: { lumber: 'Lenhadores', mill: 'Estabur', pasture: 'Curral de renas', apiary: 'Colmeias de hidromel' },
   blessingNames: { cartographers: 'Navegadores', builders: 'Construtores de salões', pilgrims: 'Escaldos' },
   folk: { skin: '#e8c4a8', hat: 'hood', hatColor: '#a83a2e' },

@@ -1959,6 +1959,15 @@ function start(data: unknown) {
   if (zoom) world.rig.dist = world.rig.goalDist = zoom;
   return found ? `achado:${found.site}` : `escondido:${(st as { kind: string }).kind}`;
 };
+// Relevo decorativo: centraliza na i-ésima serra ou morro assentado e devolve qual (`peak` ou `hill`).
+(window as unknown as { __relief: (i?: number, zoom?: number) => string | null }).__relief = (i = 0, zoom) => {
+  const r = world.reliefPos(i);
+  if (!r) return null;
+  world.rig.goal.set(r.x, 0, r.z);
+  world.rig.target.set(r.x, 0, r.z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return r.kind;
+};
 // Peça especial: centraliza na i-ésima colocada (estação, moinho d'água ou farol) e devolve qual.
 (window as unknown as { __special: (i?: number, zoom?: number) => string | null }).__special = (i = 0, zoom) => {
   const p = game.board.list.filter((t) => t.def.special)[i];

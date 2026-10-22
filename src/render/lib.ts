@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { housesAtEra } from '../themes/progress';
 import type { SiteKind } from '../core/sites';
+import { hillGeometry, peakGeometry } from './relief';
 import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
 import type { EggKit } from '../core/eggs';
 import { gatesOf, type AnimalKind, type BoatKind, type BodyStyle, type BridgeStyle, type CenterCrown, type CropStyle, type GateStyle, type HatStyle, type HouseKind, type Landmark, type RoofStyle, type Theme, type TreeGeo, type VehicleKind } from '../themes/types';
@@ -2323,6 +2324,17 @@ export class Lib {
     // Versões leves para o zoom aberto (octaedros), no mesmo molde das árvores.
     this.farGeos.set('bush', softCanopy(kit([{ geo: jitter(new THREE.OctahedronGeometry(0.05, 0), 0.01, 5).translate(0, 0.03, 0), color: '#fff', tint: 1, grad: [0.8, 1.1, 0, 0.07] }])));
     this.farGeos.set('rock', kit([{ geo: new THREE.OctahedronGeometry(0.042, 0).scale(1, 0.55, 1).translate(0, 0.012, 0), color: '#fff', tint: 1 }]));
+    // Relevo decorativo (Theme.relief): serra e morro, com a versão leve no mesmo molde das árvores.
+    if (theme.relief && theme.relief.amp > 0) {
+      const foot = theme.ground[0];
+      const snow = !!theme.relief.snow;
+      if (theme.relief.style === 'serra') {
+        set('peak', peakGeometry({ snow, foot }));
+        this.farGeos.set('peak', peakGeometry({ snow, foot, far: true }));
+      }
+      set('hill', hillGeometry());
+      this.farGeos.set('hill', hillGeometry({ far: true }));
+    }
     set('flower', kit([{ geo: oct(0.014).translate(0, 0.024, 0), color: '#fff', tint: 1 }, { geo: tri([-0.002, 0, 0], [0.002, 0, 0], [0, 0.02, 0]), color: '#4f7a3a' }]));
     set('lily', kit([{ geo: cyl(0.035, 0.035, 0.006, 7, 0, 0.011), color: '#fff', tint: 1 }, { geo: oct(0.008).translate(0.01, 0.02, 0.006), color: '#f7c6d8' }]));
     set('animal', animalGeometry(theme.animals.kind));
@@ -2378,6 +2390,8 @@ export class Lib {
     if (key.startsWith('tree:') || key === 'bush') return this.mats.foliage;
     if (key.startsWith('crop:') || key === 'grass' || key === 'reed' || key === 'flower') return this.mats.crop;
     if (this.domeKeys.has(key)) return this.mats.glass;
+    if (key === 'peak') return this.mats.relief;
+    if (key === 'hill') return this.mats.reliefSoft;
     return this.mats.deco;
   }
 

@@ -1906,7 +1906,6 @@ export class World {
     return { x: (v.x * 0.5 + 0.5) * this.size.x, y: (-v.y * 0.5 + 0.5) * this.size.y, visible: v.z < 1 && Math.abs(v.x) < 1.2 && Math.abs(v.y) < 1.2 };
   }
 
-  /** Custo por kit: instâncias e triângulos (para achar o que pesa). */
   /** Posição da i-ésima instância dos kits cuja chave começa com `prefix` (`gate`, `egg:`, `fauna:`...), ou null (capturas). */
   decoPos(prefix: string, i: number): { x: number; z: number; key: string } | null {
     let n = 0;
@@ -1922,6 +1921,21 @@ export class World {
     return null;
   }
 
+  /** Posição da i-ésima serra ou morro assentado (`window.__relief`), ou null. */
+  reliefPos(i: number): { x: number; z: number; kind: string } | null {
+    const all: { x: number; z: number; kind: string }[] = [];
+    for (const [k, p] of this.pools) {
+      const kind = poolKey(k);
+      if (kind !== 'peak' && kind !== 'hill') continue;
+      for (let j = 0; j < p.count; j++) {
+        p.mesh.getMatrixAt(j, tmpM);
+        all.push({ x: tmpM.elements[12], z: tmpM.elements[14], kind });
+      }
+    }
+    return all[i] ?? null;
+  }
+
+  /** Custo por kit: instâncias e triângulos (para achar o que pesa). */
   poolReport() {
     return [...this.pools.entries()]
       .map(([k, p]) => {

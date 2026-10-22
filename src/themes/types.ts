@@ -388,6 +388,15 @@ export interface Theme {
   grade: { shadow: string; light: string; saturation: number };
   /** Atmosfera por cima da hora: bruma, vento e um filtro leve na imagem. */
   atmos?: Atmos;
+  /**
+   * Relevo decorativo (R1): serras e morros dentro das peças de prado e floresta, sem mudar regra nem
+   * replay (só a aparência). `amp` é a quantidade (0 ou omitido = sem relevo, como antes; ~0,6 = cerca
+   * de uma em cada três peças elegíveis). Peças com vila, plantação, marco, sítio ou peça especial ficam
+   * de fora, e rios e estradas são respeitados. `style`: 'serra' = serras de rocha e morros; 'suave' = só
+   * morros gramados; 'terraco', 'falesia' e 'dique' são reservados para as próximas etapas e, por ora,
+   * valem como 'suave'. `snow` põe neve nos cumes; `rock` troca a cor da rocha (padrão: `rock` do tema).
+   */
+  relief?: { amp: number; style: 'suave' | 'serra' | 'terraco' | 'falesia' | 'dique'; snow?: boolean; rock?: string };
   /** Trava a paisagem numa estação (0 primavera, 1 verão, 2 outono, 3 inverno). A pontuação usa `rules.seasonLock`. */
   season?: 0 | 1 | 2 | 3;
   /** Lanternas ao longo da estrada, acesas à noite. */
