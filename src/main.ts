@@ -38,9 +38,9 @@ import './ui/style.css';
 type QualityMode = 'auto' | Quality;
 /** q, r, giro e as escolhas de era (0 ou 1) feitas logo depois da jogada. */
 type MoveRec = number[];
-/** v11: a rota da Estrada Real dobrou de peso. Guarda a pontuação para conferir o replay. */
+/** v13: junta a regra do dia (D17, v12) e as mudanças dos modos fracos (D18, v12) numa só versão. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 12;
+  v: 13;
   seed: number;
   rulesId: string;
   mode: ModeId;
@@ -51,7 +51,7 @@ interface Save {
   /** Peças especiais que entraram nesta partida (mudam a sequência da pilha). */
   specials: SpecialKind[];
 }
-const SAVE_VERSION = 12;
+const SAVE_VERSION = 13;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -1191,7 +1191,7 @@ function pickTheme(t: Theme) {
 const qualityLabel: Record<QualityMode, string> = { auto: 'Auto', cinema: 'Cinema', ultra: 'Ultra', high: 'Alta', medium: 'Média', low: 'Baixa' };
 const QUALITY_NOTE: Record<Quality, string> = {
   cinema: 'Desenha 1,5× acima da tela, com mais luz, sombra e vegetação, grão e lente. Só na foto e no vídeo',
-  ultra: 'Luz indireta, reflexos, raios de sol, desfoque de miniatura, grão de filme e lente. Para placas acima da RX 580',
+  ultra: 'Oclusão reforçada, desfoque de miniatura, grão de filme e lente. Para placas acima da RX 580',
   high: 'Oclusão, bloom, desfoque de miniatura, grão de filme e lente',
   medium: 'Leve, para notebooks e celulares',
   low: 'Sem sombras nem pós-processamento',

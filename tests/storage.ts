@@ -28,8 +28,8 @@ class Fake implements KeyStore {
 
 const THEMES = ['vale', 'egito'];
 const progress = JSON.stringify({ totals: { games: 3, tiles: 90, quests: 2, synergies: 5, sites: 1, perfects: 4, wonders: 0 }, themes: { vale: { games: 3, era: 2, wonder: false } }, unlocked: ['station'], monuments: [] });
-const save = JSON.stringify({ v: 11, seed: 5, moves: [[0, 1, 2]] });
-const check = (k: string, v: string) => (k === 'progress' ? cleanProgress(v, THEMES) : k === 'save' ? (JSON.parse(v).v === 11 ? v : null) : v);
+const save = JSON.stringify({ v: 13, seed: 5, moves: [[0, 1, 2]] });
+const check = (k: string, v: string) => (k === 'progress' ? cleanProgress(v, THEMES) : k === 'save' ? (JSON.parse(v).v === 13 ? v : null) : v);
 
 // ida e volta
 const a = new Fake();
