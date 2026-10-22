@@ -10,7 +10,7 @@ import { mulberry32 } from './core/rng';
 import { T } from './core/tiles';
 import { DIRS, hexDistance, hexToWorld, hkey, unkey, worldToHex } from './core/hex';
 import { routeMarks, type RouteHit, type RouteMark } from './core/routes';
-import type { Quality, TimeOfDay } from './render/world';
+import type { PassingWeather, Quality, TimeOfDay } from './render/world';
 import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
 import { DynRes } from './render/dynres';
 import { dtCap, shouldRender, targetFps } from './render/framePacing';
@@ -18,7 +18,7 @@ import { readGpuInfo } from './render/gpu';
 import { autoStartTier, gpuName } from './render/gpuTier';
 import { FX_FLAGS } from './render/post';
 import { U } from './render/materials';
-import { World } from './render/world';
+import { WEATHER_SECONDS, World } from './render/world';
 import { THEMES, themeById, type Theme } from './themes/themes';
 import { withSafeColors } from './ui/a11y';
 import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor } from './ui/banner';
@@ -1243,6 +1243,7 @@ const input = bindInput({
   place,
   rotate,
   cycleTime,
+  skyTap: () => cycleWeather(),
   showHelp: () => showHelp(),
   requestNewGame,
   undo,
@@ -1317,6 +1318,31 @@ timeBtn.addEventListener('click', cycleTime);
   }
 }
 
+// Clima tocável: cada toque faz passar o próximo (chuva, neve, sol) por 30 s; efeito passageiro, fora do save.
+const WEATHER_ORDER: PassingWeather[] = ['rain', 'snow', 'sun'];
+const WEATHER_LABEL: Record<PassingWeather | 'none', string> = { none: '', rain: 'Chuva', snow: 'Neve', sun: 'Sol' };
+const WEATHER_ICON: Record<PassingWeather | 'none', string> = { none: '☂', rain: '☂', snow: '❄', sun: '☀' };
+const weatherBtn = document.getElementById('btn-weather')!;
+let weatherShown: PassingWeather | null = null;
+function setWeather(kind: PassingWeather | null, age = 0) {
+  world.setWeather(kind, age);
+  sfx.weather(kind, WEATHER_SECONDS);
+  syncWeatherBtn();
+}
+function syncWeatherBtn() {
+  const k = world.passingWeather;
+  weatherShown = k;
+  weatherBtn.setAttribute('aria-pressed', String(!!k));
+  weatherBtn.querySelector('.long')!.textContent = k ? WEATHER_LABEL[k] : 'Clima';
+  weatherBtn.querySelector('.short')!.textContent = WEATHER_ICON[k ?? 'none'];
+}
+function cycleWeather() {
+  sfx.unlock();
+  const k = world.passingWeather;
+  setWeather(WEATHER_ORDER[(k ? WEATHER_ORDER.indexOf(k) + 1 : 0) % WEATHER_ORDER.length]);
+}
+weatherBtn.addEventListener('click', cycleWeather);
+
 // Som em três estados: música e efeitos ('1'), só efeitos ('sfx'), mudo ('0').
 type SoundMode = '1' | 'sfx' | '0';
 const SOUND: Record<SoundMode, { long: string; short: string; title: string }> = {
@@ -1351,6 +1377,7 @@ document.getElementById('btn-more')!.addEventListener('click', () => {
       { id: 'time', label: 'Hora do dia', note: TIME_LABEL[world.timeOfDay] },
       { id: 'quality', label: 'Qualidade', note: qualityLabel[qualityMode] },
       { id: 'camera', label: 'Foto e vídeo' },
+      { id: 'weather', label: 'Clima', note: WEATHER_LABEL[world.passingWeather ?? 'none'] },
       { id: 'sound', label: 'Som', note: soundBtn.querySelector('.long')!.textContent ?? '' },
       { id: 'hints', label: 'Onde encaixa' },
       { id: 'help', label: 'Como jogar' },
@@ -1586,6 +1613,7 @@ function step(now: number) {
     world.scout(game.board);
   }
   world.tick(dt);
+  if (world.passingWeather !== weatherShown) syncWeatherBtn();
   mapFrame();
   updateAmbience(now);
   if (capture.take && !capture.take.frame(realDt, { x: world.rig.target.x, z: world.rig.target.z, dist: world.rig.dist, yaw: world.rig.yaw, tilt: world.rig.tilt })) capture.stopTake('A gravação chegou a 2 minutos.');
@@ -1795,6 +1823,10 @@ function start(data: unknown) {
 (window as unknown as { __celebrate: () => void }).__celebrate = () => {
   world.halo(world.rig.target.x, world.rig.target.z, 2);
   world.flushBirds(world.rig.target.x, world.rig.target.z);
+};
+(window as unknown as { __weather: (kind: PassingWeather | null, age?: number) => void }).__weather = (kind, age = 0) => {
+  if (kind !== null && !WEATHER_ORDER.includes(kind)) return;
+  setWeather(kind, age);
 };
 (window as unknown as { __ripple: (age: number) => void }).__ripple = (age) => world.ripple(world.rig.target.x, world.rig.target.z, 1, age);
 

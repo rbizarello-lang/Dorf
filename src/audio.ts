@@ -551,6 +551,72 @@ export class Sfx {
     }
   }
 
+  private wxVoice: { g: GainNode; src: AudioBufferSourceNode; lfo?: OscillatorNode } | null = null;
+
+  /**
+   * Som do clima tocável. Chuva: ruído filtrado (chiado fino com pingos). Neve: vento suave que
+   * sobe e desce. Sol: um acorde curto de sinos. `null` (ou outro clima) leva o anterior a sumir.
+   * Vai pelo barramento do ambiente, então segue o volume geral e o mudo.
+   */
+  weather(kind: 'rain' | 'snow' | 'sun' | null, secs = 30) {
+    const ctx = this.ctx;
+    const old = this.wxVoice;
+    if (old && ctx) {
+      this.wxVoice = null;
+      const t = ctx.currentTime;
+      old.g.gain.cancelScheduledValues(t);
+      old.g.gain.setValueAtTime(old.g.gain.value, t);
+      old.g.gain.linearRampToValueAtTime(0, t + 1.2);
+      old.src.stop(t + 1.3);
+      old.lfo?.stop(t + 1.3);
+    }
+    if (!ctx || !this.amb || !kind) return;
+    if (kind === 'sun') {
+      if (!this.enabled) return;
+      // Maior com sétima maior, em sinos suaves e espaçados.
+      [0, 4, 7, 11].forEach((st, i) => this.bell(523.25 * Math.pow(2, st / 12), ctx.currentTime + 0.15 + i * 0.16, 1.8, 0.03, this.master!));
+      return;
+    }
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    let lfo: OscillatorNode | undefined;
+    if (kind === 'rain') {
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 1400;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 7000;
+      src.connect(hp).connect(lp).connect(g);
+    } else {
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 420;
+      bp.Q.value = 0.7;
+      lfo = ctx.createOscillator();
+      lfo.frequency.value = 0.18;
+      const depth = ctx.createGain();
+      depth.gain.value = 160;
+      lfo.connect(depth).connect(bp.frequency);
+      lfo.start(t);
+      src.connect(bp).connect(g);
+    }
+    g.connect(this.amb.bus);
+    const vol = kind === 'rain' ? 0.1 : 0.12;
+    const fade = 2.5;
+    g.gain.linearRampToValueAtTime(vol, t + fade);
+    g.gain.setValueAtTime(vol, t + Math.max(fade, secs - fade));
+    g.gain.linearRampToValueAtTime(0, t + secs);
+    src.start(t, Math.random() * 1.5);
+    src.stop(t + secs + 0.1);
+    lfo?.stop(t + secs + 0.1);
+    this.wxVoice = { g, src, lfo };
+  }
+
   /** Desfazer: um sopro curto que sobe, como a peça voltando para a mão. */
   undo() {
     if (!this.ready()) return;

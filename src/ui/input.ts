@@ -26,6 +26,8 @@ export interface InputHost {
   place(q: number, r: number): void;
   rotate(dir: 1 | -1): void;
   cycleTime(): void;
+  /** Toque no céu (fora do chão): faz passar o próximo clima. */
+  skyTap(): void;
   showHelp(): void;
   requestNewGame(): void;
   undo(): void;
@@ -154,7 +156,11 @@ export function bindInput(h: InputHost): Input {
       return;
     }
     const t = hoverAt(e.clientX, e.clientY);
-    if (!t) return;
+    if (!t) {
+      // O raio não cruza o chão: é céu, não uma jogada.
+      h.skyTap();
+      return;
+    }
     if (d.touch) {
       // Toque: primeiro mostra a peça no espaço, o segundo toque confirma.
       const hover = h.hover();
