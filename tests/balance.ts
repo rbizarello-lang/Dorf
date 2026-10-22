@@ -4,7 +4,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { DEFAULT_RULES, type PlaceResult, type Rules } from '../src/core/board';
 import { Game } from '../src/core/game';
-import { DIRS, hkey, opposite, unkey } from '../src/core/hex';
+import { DIRS, hexDistance, hkey, opposite, unkey } from '../src/core/hex';
 import { MODES, modeRules, type Mode } from '../src/core/modes';
 import { mulberry32 } from '../src/core/rng';
 import { previewRoutes } from '../src/core/routes';
@@ -15,12 +15,13 @@ import { THEMES, type Theme } from '../src/themes/themes';
 
 const rulesFor = (t: Theme, mode: Mode, seed: number): Rules => ({ ...DEFAULT_RULES, ...(mode.daily ? {} : t.rules), ...modeRules(mode, seed) });
 
-type Player = 'guloso' | 'missoes' | 'rotas';
-const PLAYERS: Player[] = ['guloso', 'missoes', 'rotas'];
+type Player = 'guloso' | 'missoes' | 'rotas' | 'explorador';
+const PLAYERS: Player[] = ['guloso', 'missoes', 'rotas', 'explorador'];
 const PLAYER_NAME: Record<Player, string> = {
   guloso: 'guloso',
   missoes: 'persegue missões',
   rotas: 'busca rotas',
+  explorador: 'caça sítios',
 };
 
 interface Buckets {
@@ -160,11 +161,38 @@ function routeMove(game: Game, def: TileDef, rand: () => number) {
   return best;
 }
 
+/**
+ * O guloso, mas puxado para o sítio escondido mais perto (quem joga vê os carimbos no mapa
+ * e a prévia da recompensa). Serve para medir se dá para achar todos nos Exploradores.
+ */
+function siteMove(game: Game, def: TileDef, rand: () => number) {
+  const b = game.board;
+  const left = b.sites.filter((s) => !s.found);
+  let best: { q: number; r: number; rot: number; score: number } | null = null;
+  for (const k of b.frontier) {
+    const [q, r] = unkey(k);
+    let pull = 0;
+    if (left.length) {
+      const d = Math.min(...left.map((s) => hexDistance(q, r, s.q, s.r)));
+      pull = d === 0 ? 12 : Math.max(0, 6 - d) * 1.2;
+    }
+    for (let rot = 0; rot < 6; rot++) {
+      const edges = rotateEdges(def.edges, rot);
+      const c = b.check(q, r, edges);
+      if (!c.valid) continue;
+      const score = greedyScore(c.matches, c.neighbors, rand) + pull;
+      if (!best || score > best.score) best = { q, r, rot, score };
+    }
+  }
+  return best;
+}
+
 function choose(game: Game, player: Player, rand: () => number) {
   const def = game.current;
   if (!def) return null;
   if (player === 'guloso') return game.bestMove(rand);
   if (player === 'missoes') return questMove(game, def, rand);
+  if (player === 'explorador') return siteMove(game, def, rand);
   return routeMove(game, def, rand);
 }
 

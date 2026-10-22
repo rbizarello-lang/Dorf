@@ -39,7 +39,7 @@ npm run dev          # servidor de desenvolvimento (Vite)
 npm run check        # typecheck + testes + build: rode antes de todo commit
 npm run typecheck    # tsc --noEmit
 npm test             # 600 partidas simuladas com oráculos independentes, cenários sintéticos e legibilidade das cores (tests/legibility.ts)
-npm run balance      # painel de equilíbrio (tests/balance.ts): média, p10/p50/p90 e origem dos pontos, por modo e por tema. Não entra no check. `npm run balance -- 40` muda o tamanho da amostra (padrão 80)
+npm run balance      # painel de equilíbrio (tests/balance.ts): média, p10/p50/p90 e origem dos pontos, por modo e por tema. Não entra no check. `npm run balance -- 40` muda o tamanho da amostra (padrão 80). Meta dos Exploradores: o jogador "caça sítios" acha os 10 em pelo menos 50% das partidas (linha "todos os sítios"); o guloso puro não mira sítios e fica bem abaixo, de propósito
 npm run build        # dist/index.html (arquivo único)
 npm run smoke        # depois do build: abre o jogo em WebGPU e WebGL2 e falha com erro no console
 node scripts/pwa.mjs http://127.0.0.1:4173/   # depois do build e com o dist servido: service worker, offline, manifesto, exportar/importar
@@ -124,7 +124,7 @@ src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em
   game.ts        Game: semente, pilha, sorteio por peça, descarte, bestMove (IA gulosa), rankMoves (as n melhores casas com os pontos reais, determinística: alimenta o "Onde encaixa", tecla `O`), upcoming (mirante)
   blessings.ts   cartas da virada de era: 1 de 2 por era, oferecidas pela semente; a escolha vai no save junto da jogada
   sites.ts       sítios escondidos (ruína, tesouro, relíquia, mirante), da semente por um gerador à parte
-  modes.ts       modos: Clássico, Zen, Desafio do dia, Exploradores, Estrada Real, Partida rápida (regras + desfazer; `fixedStack` = pilha de 30 sem peças de volta). O recorde é por modo e tema (`best.<modo>.<tema>`). `DAILY_RULES`/`dailyRule(seed)`: a regra do dia sai só da semente AAAAMMDD (data local), por dias seguidos em rodízio; `modeRules(modo, semente)` soma o modo e a regra do dia
+  modes.ts       modos: Clássico, Zen, Desafio do dia, Exploradores, Estrada Real, Partida rápida (regras + desfazer; `fixedStack` = pilha de 30 sem peças de volta; `more: true` manda o modo para "Mais modos" no menu, até ser equilibrado). O recorde é por modo e tema (`best.<modo>.<tema>`). `DAILY_RULES`/`dailyRule(seed)`: a regra do dia sai só da semente AAAAMMDD (data local), por dias seguidos em rodízio; `modeRules(modo, semente)` soma o modo e a regra do dia
   share.ts       texto de compartilhar do desafio (`shareLine`, `shareUrl`, `terrainPoints`): puro
   specials.ts    peças especiais (estação, moinho d'água, farol): bordas, pontos e posições na pilha
   rng.ts         mulberry32 e utilitários de sorteio

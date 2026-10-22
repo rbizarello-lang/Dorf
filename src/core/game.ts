@@ -50,7 +50,7 @@ export class Game {
     };
     this.board.placeRaw(0, 0, starter, 0);
     this.board.computeGroups();
-    this.board.sites = generateSites(seed, rules.sites);
+    this.board.sites = generateSites(seed, rules.sites, rules.siteScale);
     this.stack = rules.startTiles;
     this.current = this.draw();
     this.next = this.draw();

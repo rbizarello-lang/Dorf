@@ -32,6 +32,8 @@ export interface Rules {
   seasonLock?: 0 | 1 | 2 | 3;
   /** Quantos sítios escondidos o mapa tem. */
   sites: number;
+  /** Escala dos anéis onde os sítios aparecem (1 = padrão; 0,5 = metade da distância ao Centro). */
+  siteScale: number;
   /** Modo zen: a pilha nunca acaba. */
   infinite: boolean;
   /** Pilha fixa: nenhuma jogada devolve peças (missão, encaixe, era, sítio, peça especial). Partida rápida. */
@@ -79,6 +81,7 @@ export const DEFAULT_RULES: Rules = {
   synergyBonus: {},
   seasonBonus: true,
   sites: 6,
+  siteScale: 1,
   infinite: false,
   fixedStack: false,
   endOnSites: false,

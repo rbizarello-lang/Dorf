@@ -924,6 +924,17 @@ if (contBad) fail(`continuação pós-replay divergiu em ${contBad} partidas`);
       }
     }
   }
+  // Escala dos anéis (Exploradores usa 0,5): ainda são 10 sítios, mais perto, sem ficarem a menos de 3 um do outro.
+  for (let seed = 1; seed <= 400; seed++) {
+    const a = generateSites(seed, 10, 0.5), a1 = generateSites(seed, 10, 1);
+    total++;
+    if (a.length !== 10) bad++;
+    if (JSON.stringify(a1) !== JSON.stringify(generateSites(seed, 10))) bad++;
+    for (let i = 0; i < a.length; i++) {
+      if (dist(a[i], { q: 0, r: 0 }) > 8) bad++;
+      for (let j = i + 1; j < a.length; j++) if (dist(a[i], a[j]) < 3) bad++;
+    }
+  }
   // A semente dos sítios não mexe na sequência de peças: mesma semente, mesmas peças com e sem sítios.
   for (let seed = 1; seed <= 50; seed++) {
     const g1 = new Game(seed, { ...DEFAULT_RULES, sites: 0 });
