@@ -4,7 +4,8 @@ import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Board, Check, PlaceResult, Placed } from '../core/board';
 import { EggTracker, phaseOfTod, type EggSpec } from '../core/eggs';
-import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey } from '../core/hex';
+import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey, worldToHex } from '../core/hex';
+import { levelAt } from '../core/relief';
 import { seasonAt } from '../core/seasons';
 import type { SiteKind } from '../core/sites';
 import type { SynHit, SynKind } from '../core/synergy';
@@ -26,7 +27,7 @@ import { SkyEnv } from './sky';
 import { FX, Fireflies, Sprites, Weather } from './fx';
 import { LiveTile } from './liveTile';
 import { PreviewView } from './preview';
-import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type BuildOpts, type TileBuild } from './tileBuilder';
+import { LEVEL_STEP, TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type BuildOpts, type TileBuild } from './tileBuilder';
 import { NIGHT_LIGHT } from './nightLight';
 
 export type { Quality };
@@ -326,6 +327,8 @@ interface Drop {
   placed: Placed;
   t: number;
   y0: number;
+  /** Altura do chão da casa (relevo): a queda termina aqui. */
+  ly: number;
   landed: boolean;
   /** Quanto tempo a peça fica viva depois de assentar (mais longo quando há obra). */
   hold: number;
@@ -632,6 +635,7 @@ export class World {
     this.life = new Life(this.lib, this.scene);
     this.life.onSplash = (x, z) => this.sprites.splash(x, WATER_Y, z, 7);
     this.life.onTrade = (x, z) => this.burst(x, z, 'sparkle', 12, 0.12);
+    this.life.levelOf = (q, r) => this.levelOf(q, r);
     this.life.onSmoke = (x, y, z) => this.sprites.smoke(x, y, z, tc(this.theme.smoke), U.wind.value);
 
     this.sun.castShadow = true;
@@ -758,6 +762,8 @@ export class World {
     this.clearGhost();
     // Mapa refeito do zero (outra partida, desfazer, fim de um vídeo): a onda de uma era passada não continua.
     U.eraWave.value.w = 0;
+    this.reliefMax = this.levelsEnabled ? theme.relief?.levels ?? 0 : 0;
+    this.levelCache.clear();
     this.rebuild(board);
   }
 
@@ -1055,13 +1061,54 @@ export class World {
 
   // ---------------------------------------------------------------- mapa
 
-  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; eggs?: BuildOpts['eggs'] }) {
+  // ---------------------------------------------------------------- relevo (R2)
+
+  /** Semente da partida (o jogo a põe antes do `setTheme`): os níveis das casas saem só dela e do tema. */
+  reliefSeed = 0;
+  /** `?levels=0` desliga o relevo (comparar com a versão plana). */
+  levelsEnabled = true;
+  /** Nível máximo do tema atual (0 = tabuleiro plano). */
+  private reliefMax = 0;
+  private levelCache = new Map<number, number>();
+
+  /** Nível (0 a 2) da casa (q, r): função pura da semente, vale para casas ainda vazias. */
+  levelOf(q: number, r: number): number {
+    if (!this.reliefMax) return 0;
+    const k = hkey(q, r);
+    let l = this.levelCache.get(k);
+    if (l === undefined) this.levelCache.set(k, (l = levelAt(this.reliefSeed, q, r, this.reliefMax)));
+    return l;
+  }
+
+  /** Altura do chão da casa (q, r) no mundo. */
+  heightOf(q: number, r: number): number {
+    return this.reliefMax ? this.levelOf(q, r) * LEVEL_STEP : 0;
+  }
+
+  /** Altura do chão sob o ponto (x, z) do mundo (a da casa que o cobre). */
+  heightAt(x: number, z: number): number {
+    if (!this.reliefMax) return 0;
+    const [q, r] = worldToHex(x, z);
+    return this.heightOf(q, r);
+  }
+
+  /** Níveis da casa e das 6 vizinhas, na orientação de origem da peça (`BuildOpts.levels`); sem relevo, indefinido. */
+  private levelsFor(q: number, r: number, rot: number): BuildOpts['levels'] {
+    if (!this.reliefMax) return undefined;
+    const own = this.levelOf(q, r);
+    return { own, nb: [0, 1, 2, 3, 4, 5].map((s) => {
+      const [dq, dr] = DIRS[(s + rot) % 6];
+      return this.levelOf(q + dq, r + dr);
+    }) };
+  }
+
+  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; eggs?: BuildOpts['eggs']; levels?: BuildOpts['levels'] }) {
     return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, special: def.special, ...extra });
   }
 
   /** Peça do mapa já colocada: a inicial reserva o Centro, e a do marco o ergue. */
   private buildPlaced(p: Placed) {
-    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths: this.settleWidths(p), eggs: this.eggKits.get(p.key) });
+    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths: this.settleWidths(p), eggs: this.eggKits.get(p.key), levels: this.levelsFor(p.q, p.r, p.rot) });
   }
 
   /**
@@ -1072,8 +1119,16 @@ export class World {
   private flows = new Map<number, number[]>();
   private flowAt(q: number, r: number, edges: readonly T[]) {
     const known = [0, 0, 0, 0, 0, 0];
+    const own = this.levelOf(q, r);
     for (let i = 0; i < 6; i++) {
       if (edges[i] !== T.Water) continue;
+      // Relevo (R2): a água só desce. Onde a vizinha é mais baixa ela sai, onde é mais alta ela entra, sem olhar a ordem
+      // (a vizinha chega à mesma conclusão pelo nível, então as duas concordam).
+      const nl = this.levelOf(q + DIRS[i][0], r + DIRS[i][1]);
+      if (nl !== own) {
+        known[i] = own > nl ? 1 : -1;
+        continue;
+      }
       const nf = this.flows.get(hkey(q + DIRS[i][0], r + DIRS[i][1]));
       if (nf && nf[opposite(i)]) known[i] = -nf[opposite(i)];
     }
@@ -1284,7 +1339,7 @@ export class World {
   // ---------------------------------------------------------------- maravilha
 
   /** Pódio, corpo, remate e andaime da maravilha: objetos avulsos, como o Centro. */
-  private wonder: { key: number; x: number; z: number; base: THREE.InstancedMesh; body: THREE.InstancedMesh; crown: THREE.InstancedMesh; scaffold: THREE.InstancedMesh | null } | null = null;
+  private wonder: { key: number; x: number; y: number; z: number; base: THREE.InstancedMesh; body: THREE.InstancedMesh; crown: THREE.InstancedMesh; scaffold: THREE.InstancedMesh | null } | null = null;
   /** Etapa mostrada (anda devagar até a etapa da regra) e a etapa alvo. */
   private wonderShown = 0;
   private wonderTarget = 0;
@@ -1323,7 +1378,7 @@ export class World {
         return m;
       };
       const { x, z } = hexToWorld(w.tile.q, w.tile.r);
-      this.wonder = { key: w.tile.key, x, z, base: mk('wonder:base'), body: mk('wonder:body'), crown: mk('wonder:crown'), scaffold: this.lib.geo('scaffold') ? mk('scaffold') : null };
+      this.wonder = { key: w.tile.key, x, y: this.heightOf(w.tile.q, w.tile.r), z, base: mk('wonder:base'), body: mk('wonder:body'), crown: mk('wonder:crown'), scaffold: this.lib.geo('scaffold') ? mk('scaffold') : null };
       this.wonderShown = animate ? 0 : w.stage;
       if (animate) this.burst(x, z, 'dust', 30);
     }
@@ -1347,12 +1402,12 @@ export class World {
     const k = this.wonderShown / full;
     const { h, w } = this.lib.wonderSize;
     const y0 = WONDER_PODIUM;
-    W.base.setMatrixAt(0, tmpM.makeTranslation(W.x, 0, W.z));
-    W.body.setMatrixAt(0, tmpM.makeTranslation(W.x, y0, W.z).multiply(tmpM2.makeScale(1, Math.max(0.001, k), 1)));
+    W.base.setMatrixAt(0, tmpM.makeTranslation(W.x, W.y, W.z));
+    W.body.setMatrixAt(0, tmpM.makeTranslation(W.x, W.y + y0, W.z).multiply(tmpM2.makeScale(1, Math.max(0.001, k), 1)));
     W.body.visible = k > 0.001;
     const done = this.wonderShown >= full;
     W.crown.visible = done;
-    W.crown.setMatrixAt(0, tmpM.makeTranslation(W.x, 0, W.z));
+    W.crown.setMatrixAt(0, tmpM.makeTranslation(W.x, W.y, W.z));
     if (W.scaffold) {
       // Andaime em volta da obra: três seções por lado, viradas para fora, da altura da obra.
       W.scaffold.visible = !done;
@@ -1363,7 +1418,7 @@ export class World {
         for (const t of [-0.62, 0, 0.62]) {
           const lx = t * half, lz = half;
           const c = Math.cos(ang), sn = Math.sin(ang);
-          tmpM.makeTranslation(W.x + lx * c + lz * sn, y0, W.z - lx * sn + lz * c).multiply(tmpM2.makeRotationY(ang)).multiply(tmpQ.makeScale(1.3, sy, 0.5));
+          tmpM.makeTranslation(W.x + lx * c + lz * sn, W.y + y0, W.z - lx * sn + lz * c).multiply(tmpM2.makeRotationY(ang)).multiply(tmpQ.makeScale(1.3, sy, 0.5));
           W.scaffold.setMatrixAt(i++, tmpM);
         }
       }
@@ -1417,7 +1472,7 @@ export class World {
   }
 
   private bake(p: Placed, b: TileBuild, flush = true) {
-    const m = tileMatrix(p.q, p.r, p.rot);
+    const m = tileMatrix(p.q, p.r, p.rot, this.heightOf(p.q, p.r));
     this.chunkFor(p.q, p.r).append(b, m);
     groundMap.add(b, m, this.waterColor);
     seaMap.add(p.q, p.r);
@@ -1458,7 +1513,7 @@ export class World {
       const { x, z } = hexToWorld(q, r);
       maxR = Math.max(maxR, Math.hypot(x, z));
       if (i >= 512) continue;
-      this.slots.setMatrixAt(i++, tmpM.makeTranslation(x, 0, z));
+      this.slots.setMatrixAt(i++, tmpM.makeTranslation(x, this.heightOf(q, r), z));
     }
     this.slotCount = i;
     this.slots.count = i;
@@ -1474,7 +1529,7 @@ export class World {
     for (const [q, r] of cells) {
       if (i >= 256) break;
       const { x, z } = hexToWorld(q, r);
-      this.infl.setMatrixAt(i++, tmpM.makeTranslation(x, 0, z));
+      this.infl.setMatrixAt(i++, tmpM.makeTranslation(x, this.heightOf(q, r), z));
     }
     this.infl.count = i;
     this.infl.instanceMatrix.needsUpdate = true;
@@ -1502,11 +1557,11 @@ export class World {
     const geos = left.map((s) => {
       const { x, z } = hexToWorld(s.q, s.r);
       // Cada carimbo um pouco torto, como batido à mão (sem sorteio: vem da posição).
-      return stampGeometry(s.kind).rotateY(Math.sin(s.q * 12.9898 + s.r * 78.233) * 0.25).translate(x, 0, z);
+      return stampGeometry(s.kind).rotateY(Math.sin(s.q * 12.9898 + s.r * 78.233) * 0.25).translate(x, this.heightOf(s.q, s.r), z);
     });
     for (const p of board.posts) {
       const { x, z } = hexToWorld(p.q, p.r);
-      geos.push(postStampGeometry().rotateY(0.2).translate(x, 0, z));
+      geos.push(postStampGeometry().rotateY(0.2).translate(x, this.heightOf(p.q, p.r), z));
     }
     this.stamps.geometry.dispose();
     this.stamps.geometry = geos.length ? mergeGeometries(geos)! : new THREE.BufferGeometry();
@@ -1520,16 +1575,18 @@ export class World {
     // Ovos de peça desta jogada: o kit entra na peça; o resto (evento, céu, som) dispara quando ela assenta.
     if (this.board) this.feedEggs(this.board.list, p.index + 1, true);
     const eggs = this.eggKits.get(p.key);
-    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${eggs?.map((e) => e.kit).join('+') ?? ''}`;
+    const lvs = this.levelsFor(p.q, p.r, p.rot);
+    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${eggs?.map((e) => e.kit).join('+') ?? ''}|${lvs ? `${lvs.own}${lvs.nb.join('')}` : ''}`;
     let live: LiveTile;
-    let y0 = 1.2;
+    const ly = this.heightOf(p.q, p.r);
+    let y0 = ly + 1.2;
     if (this.ghost && this.ghost.def === p.def && this.ghost.sig === sig) {
       live = this.ghost;
       y0 = live.group.position.y;
       this.ghost = null;
       this.ghostKey = '';
     } else {
-      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths, eggs }), sig, this.lib, this.quality !== 'low');
+      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths, eggs, levels: lvs }), sig, this.lib, this.quality !== 'low');
       this.scene.add(live.group);
       this.dropGhost();
     }
@@ -1538,7 +1595,7 @@ export class World {
     live.group.position.set(x, y0, z);
     this.hoverRing.visible = false;
     for (const m of this.markers) m.visible = false;
-    this.drops.push({ live, placed: p, t: 0, y0, landed: false, hold: live.has(BUILDS) ? SCAFFOLD_DOWN + 0.3 : 0.55, cleared: false });
+    this.drops.push({ live, placed: p, t: 0, y0, ly, landed: false, hold: live.has(BUILDS) ? SCAFFOLD_DOWN + 0.3 : 0.55, cleared: false });
   }
 
   /** Coloca várias peças de uma vez, sem animação (modo automático / teste de carga). */
@@ -1714,11 +1771,12 @@ export class World {
     const mark = check.valid && !def.special ? (check.eraMark ?? undefined) : undefined;
     const site = check.valid ? check.site?.kind : undefined;
     const wonder = check.valid && check.wonder && !def.special ? true : undefined;
+    const lvs = this.levelsFor(q, r, rot);
     const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}`;
-    const key = `${def.seed}:${this.theme.id}:${sig}`;
+    const key = `${def.seed}:${this.theme.id}:${sig}:${lvs ? `${lvs.own}${lvs.nb.join('')}` : ''}`;
     if (!this.ghost || this.ghostKey !== key) {
       const old = this.ghost;
-      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site, wonder, widths }), sig, this.lib, this.quality !== 'low');
+      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site, wonder, widths, levels: lvs }), sig, this.lib, this.quality !== 'low');
       this.ghostKey = key;
       this.scene.add(this.ghost.group);
       if (old && old.def === def) {
@@ -1727,7 +1785,7 @@ export class World {
         this.ghost.inner.rotation.y = old.inner.rotation.y;
       } else {
         const { x, z } = hexToWorld(q, r);
-        this.ghost.group.position.set(x, 0.5, z);
+        this.ghost.group.position.set(x, 0.5 + this.heightOf(q, r), z);
         this.ghost.inner.rotation.y = -angle;
         this.ghostPrev.copy(this.ghost.group.position);
         this.ghostVel.set(0, 0);
@@ -1737,9 +1795,10 @@ export class World {
     this.ghost.group.visible = true;
     this.ghostAngle = angle;
     const { x, z } = hexToWorld(q, r);
-    this.ghostTarget.set(x, 0.32, z);
+    const ly = this.heightOf(q, r);
+    this.ghostTarget.set(x, 0.32 + ly, z);
     this.hoverRing.visible = true;
-    this.hoverRing.position.set(x, -0.1, z);
+    this.hoverRing.position.set(x, -0.1 + ly, z);
     this.hoverMat.color.set(check.valid ? '#ffffff' : '#ff5a4f');
     for (let i = 0; i < 6; i++) {
       const m = this.markers[i];
@@ -1784,7 +1843,7 @@ export class World {
       }
     }
     h.mesh.material.color.copy(tc(this.theme.sparkle)).multiplyScalar(1.1 + strength * 0.4);
-    h.mesh.position.set(x, 0.06, z);
+    h.mesh.position.set(x, 0.06 + this.heightAt(x, z), z);
     h.mesh.visible = true;
     h.t = 0;
     h.dur = 0.8 + strength * 0.35;
@@ -1845,8 +1904,9 @@ export class World {
   }
 
   burst(x: number, z: number, kind: 'dust' | 'sparkle', n: number, y = 0) {
-    if (kind === 'dust') this.sprites.dust(x, z, tc(this.theme.smoke), n);
-    else this.sprites.sparkle(x, z, tc(this.theme.sparkle), n, y);
+    const h = this.heightAt(x, z);
+    if (kind === 'dust') this.sprites.dust(x, z, tc(this.theme.smoke), n, h);
+    else this.sprites.sparkle(x, z, tc(this.theme.sparkle), n, y + h);
   }
 
   private smokeCursor = 0;
@@ -1879,6 +1939,9 @@ export class World {
 
   private ray = new THREE.Raycaster();
   private plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private pickPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  /** Altura de foco da câmera, suavizada (a da casa sob o alvo). */
+  private focusY = 0;
   private ndc = new THREE.Vector2();
   private groundHit = new THREE.Vector3();
 
@@ -1887,6 +1950,24 @@ export class World {
     this.ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     this.ray.setFromCamera(this.ndc, this.camera);
     return this.ray.ray.intersectPlane(this.plane, out);
+  }
+
+  /**
+   * A casa sob o ponteiro, com relevo: testa o plano do topo de cada nível, do mais alto ao chão, e fica com a primeira
+   * casa que alcança esse nível (se o raio entra pela parede de um platô, é a casa dele).
+   */
+  pickHex(clientX: number, clientY: number): [number, number] | null {
+    const rect = this.canvas.getBoundingClientRect();
+    this.ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    this.ray.setFromCamera(this.ndc, this.camera);
+    for (let l = this.reliefMax; l >= 0; l--) {
+      this.pickPlane.constant = -l * LEVEL_STEP;
+      const hit = this.ray.ray.intersectPlane(this.pickPlane, this.groundHit);
+      if (!hit) continue;
+      const [q, r] = worldToHex(hit.x, hit.z);
+      if (l === 0 || this.levelOf(q, r) >= l) return [q, r];
+    }
+    return null;
   }
 
   /**
@@ -2085,6 +2166,13 @@ export class World {
     this.voidU.radius.value += (this.voidGoal - this.voidU.radius.value) * Math.min(1, realDt / 1.2);
     this.rig.snap = this.reducedMotion;
     this.rig.update(realDt);
+    // Relevo: a câmera olha à altura da casa sob o alvo, sem pular entre níveis.
+    if (this.reliefMax || this.focusY !== 0) {
+      const gy = this.heightAt(this.rig.target.x, this.rig.target.z);
+      this.focusY += (gy - this.focusY) * (this.rig.snap ? 1 : 1 - Math.exp(-realDt * 5));
+      if (Math.abs(this.focusY - gy) < 1e-4) this.focusY = gy;
+      this.rig.target.y = this.focusY;
+    }
     this.rig.apply(this.camera);
 
     // Distâncias de verdade até a câmera (rig.eye), não o enquadramento (rig.dist).
@@ -2264,11 +2352,11 @@ export class World {
       const fall = 0.16;
       if (d.t < fall) {
         const u = d.t / fall;
-        g.position.y = d.y0 * (1 - u * u);
+        g.position.y = d.ly + (d.y0 - d.ly) * (1 - u * u);
       } else {
         // Assenta com um quique pequeno.
         const ub = Math.min(1, (d.t - fall) / 0.34);
-        g.position.y = 0.022 * Math.abs(Math.sin(ub * Math.PI)) * (1 - ub);
+        g.position.y = d.ly + 0.022 * Math.abs(Math.sin(ub * Math.PI)) * (1 - ub);
         if (!d.landed) {
           d.landed = true;
           this.burst(g.position.x, g.position.z, 'dust', 22);

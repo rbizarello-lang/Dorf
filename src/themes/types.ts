@@ -459,6 +459,12 @@ export interface Theme {
     tall?: number;
     /** Árvores que sobem a encosta (as `geo` da mata do tema); omitir = a mata inteira. Pinheiros nas serras do Oriente. */
     slopeTrees?: TreeGeo[];
+    /**
+     * Níveis de altura do tabuleiro (R2): 0 ou omitido = plano (como antes); 1 ou 2 = platôs de até esse nível (`core/relief.ts`,
+     * função só da semente), a peça assenta na altura da casa e a parede de rocha (`rock`) desce até o fundo comum.
+     * Estrada e trilho descem em rampa e o rio, em corredeira, até a vizinha mais baixa. Só aparência: regras e replay não mudam.
+     */
+    levels?: 0 | 1 | 2;
   };
   /** Quanto da neve de inverno cobre as parcelas de plantação (1 = tudo, o padrão; 0 = nada). O lago congelado usa um valor baixo: o gelo azul não some sob a neve. */
   fieldSnow?: number;

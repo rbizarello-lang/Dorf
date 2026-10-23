@@ -93,7 +93,7 @@ export const oriental: Theme = {
     { kind: 'buffalo', weight: 1, colors: ['#5c5e5e', '#6d6f6f'], time: 'dia', where: 'campo', chance: 0.3 },
   ],
   // Serras de névoa em tinta (rocha cinza-azulada, sem neve, pinheiros na encosta) no estilo de rolo pintado.
-  relief: { amp: 1.1, style: 'serra', rock: '#7d8c99', mist: '#dfe8ea', tall: 1.3, slopeTrees: ['conifer', 'niwaki'] },
+  relief: { amp: 1.1, style: 'serra', levels: 2, rock: '#7d8c99', mist: '#dfe8ea', tall: 1.3, slopeTrees: ['conifer', 'niwaki'] },
   ambience: [
     { kind: 'sapos', weight: 0.7 },
     { kind: 'cigarras', weight: 0.6 },

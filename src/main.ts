@@ -10,7 +10,7 @@ import { LOOKOUT_MOVES, SITE_REWARD, type SiteKind } from './core/sites';
 import { SPECIALS, SPECIAL_KINDS, type SpecialKind } from './core/specials';
 import { mulberry32 } from './core/rng';
 import { T } from './core/tiles';
-import { DIRS, hexDistance, hexToWorld, hkey, unkey, worldToHex } from './core/hex';
+import { DIRS, edgeMid, hexDistance, hexToWorld, hkey, unkey, worldToHex } from './core/hex';
 import { routeMarks, type RouteHit, type RouteMark } from './core/routes';
 import type { PassingWeather, Quality, TimeOfDay } from './render/world';
 import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
@@ -104,6 +104,8 @@ async function createWorld(): Promise<World> {
   }
 }
 const world = await createWorld();
+// `?levels=0` desliga o relevo (platôs): o tabuleiro sai plano, como antes (comparar capturas).
+world.levelsEnabled = params.get('levels') !== '0';
 {
   // ?fx=ao.traa.bloom.dof.tilt.ink liga os efeitos um a um (medir custo); só nomes conhecidos.
   const fx = params.get('fx');
@@ -320,6 +322,8 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   for (const t of synTimers.splice(0)) clearTimeout(t);
   // Peças especiais: as liberadas entram em toda partida nova, menos no Desafio do dia (igual para todos).
   game = new Game(seed, rulesFor(rulesTheme, seed), specials ?? forcedSpecials ?? (mode.daily ? [] : progress.unlocked));
+  // Os níveis de altura (relevo) saem só da semente: o mundo os lê daqui até a próxima partida.
+  world.reliefSeed = seed;
   // Partida nova (não um replay do desfazer ou do save): ainda não entrou no progresso.
   if (!replay.length) committed = false;
   undone = undos;
@@ -540,7 +544,7 @@ const QUEST_FLAG_REACH = 9;
 
 function screenOf(q: number, r: number, y = 0.4) {
   const { x, z } = hexToWorld(q, r);
-  return world.project(x, y, z);
+  return world.project(x, y + world.heightOf(q, r), z);
 }
 
 function place(q: number, r: number) {
@@ -842,7 +846,7 @@ function announce(res: PlaceResult) {
     const [dq, dr] = DIRS[h.edge];
     const a = hexToWorld(res.placed.q, res.placed.r);
     const b = hexToWorld(res.placed.q + dq, res.placed.r + dr);
-    const p = world.project((a.x + b.x) / 2, 0.35, (a.z + b.z) / 2);
+    const p = world.project((a.x + b.x) / 2, 0.35 + world.heightOf(res.placed.q, res.placed.r), (a.z + b.z) / 2);
     synTimers.push(window.setTimeout(() => {
       hud.floater(p.x, p.y, `${theme.synergy[h.kind]} +${game.rules.synergyPoints}`, 'syn');
       sfx.note(7 + k * 2, 0, 0.5, 0.08);
@@ -1865,6 +1869,11 @@ function start(data: unknown) {
     world.rig.tilt = world.rig.goalTilt = pitchDeg * THREE.MathUtils.DEG2RAD - world.rig.basePitch(world.rig.goalDist);
   }
   if (params.has('focus')) (window as unknown as { __focus: (t: number) => boolean }).__focus(Number(params.get('focus')));
+  // ?step=rail ou ?step=water.1 (a i-ésima borda entre níveis): centraliza na rampa ou na corredeira.
+  if (params.has('step')) {
+    const [k, i] = (params.get('step') ?? '').split('.');
+    (window as unknown as { __step: (kind: string, i: number) => unknown }).__step(k === 'water' ? 'water' : 'rail', Number(i) || 0);
+  }
   if (!special && !store.get('seenHelp') && !(resumed && moves.length)) showHelp();
   requestAnimationFrame((t) => {
     last = t;
@@ -1968,6 +1977,39 @@ function start(data: unknown) {
   if (zoom) world.rig.dist = world.rig.goalDist = zoom;
   return r.kind;
 };
+// Relevo: centraliza na i-ésima borda de estrada (`rail`) ou de rio (`water`) entre níveis diferentes (a rampa ou a corredeira),
+// vista da peça alta; devolve { q, r, edge, de, para } ou null (capturas).
+(window as unknown as { __step: (kind?: 'rail' | 'water', i?: number, zoom?: number) => unknown }).__step = (kind = 'rail', i = 0, zoom) => {
+  const terr = kind === 'water' ? T.Water : T.Rail;
+  const hits: { q: number; r: number; edge: number; de: number; para: number }[] = [];
+  for (const p of game.board.list) {
+    const own = world.levelOf(p.q, p.r);
+    for (let e = 0; e < 6; e++) {
+      if (p.edges[e] !== terr) continue;
+      const n = world.levelOf(p.q + DIRS[e][0], p.r + DIRS[e][1]);
+      if (own > n) hits.push({ q: p.q, r: p.r, edge: e, de: own, para: n });
+    }
+  }
+  const h = hits[i];
+  if (!h) return null;
+  const { x, z } = hexToWorld(h.q, h.r);
+  const [mx, mz] = edgeMid(h.edge);
+  // A meio caminho entre o centro da peça e a borda: a rampa inteira cabe no quadro.
+  world.rig.goal.set(x + mx * 0.6, 0, z + mz * 0.6);
+  world.rig.target.set(x + mx * 0.6, 0, z + mz * 0.6);
+  // De frente para a parede, vista da casa mais baixa e um pouco de lado: se vê o perfil da rampa.
+  world.rig.yaw = world.rig.goalYaw = Math.atan2(mx, mz) + 0.45;
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return h;
+};
+// Relevo: as casas vazias da fronteira com o nível e o ponto da tela onde cada uma aparece (teste do clique por nível).
+(window as unknown as { __cells: () => { q: number; r: number; level: number; x: number; y: number }[] }).__cells = () =>
+  [...game.board.frontier].map((k) => {
+    const [q, r] = unkey(k);
+    const s = screenOf(q, r, 0.02);
+    return { q, r, level: world.levelOf(q, r), x: s.x, y: s.y };
+  });
+(window as unknown as { __pick: (x: number, y: number) => [number, number] | null }).__pick = (x, y) => world.pickHex(x, y);
 // Peça especial: centraliza na i-ésima colocada (estação, moinho d'água ou farol) e devolve qual.
 (window as unknown as { __special: (i?: number, zoom?: number) => string | null }).__special = (i = 0, zoom) => {
   const p = game.board.list.filter((t) => t.def.special)[i];
