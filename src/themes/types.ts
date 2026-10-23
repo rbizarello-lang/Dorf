@@ -37,6 +37,7 @@ export type BodyStyle =
   | 'cube' // cubo de adobe/pedra (Egito, Mediterrâneo)
   | 'terrace' // adobe em dois níveis: sala em cima, escada externa e terraço (Egito)
   | 'tall' // sobrado estreito de 2-3 andares (Holanda, colonial)
+  | 'sobrado' // sobrado largo de 2 andares, mais largo que alto, com sacada de ferro (casario mineiro)
   | 'round' // cilíndrica (cabana andina, módulo marciano)
   | 'annex'; // corpo principal com um volume baixo encostado ao lado (celeiro, cozinha, estábulo)
 
@@ -67,6 +68,11 @@ export interface HouseKind {
   roofs: string[];
   /** Madeira aparente/enxaimel, molduras ou faixas. Omitir = sem detalhe. */
   trim?: string;
+  /**
+   * Como o `trim` é desenhado: 'enxaimel' (padrão) = vigas e escoras aparentes nos painéis; 'caiado' = parede lisa
+   * de cal com cunhais, cinta entre os andares e molduras de janela e porta na cor do `trim` (casario mineiro).
+   */
+  trimStyle?: 'enxaimel' | 'caiado';
   /** Cor da porta. Omitir = a madeira do `trim` escurecida (ou marrom, sem `trim`). */
   door?: string;
   /** Chaminé com fumaça. */
@@ -173,6 +179,14 @@ export interface CropKind {
   colors: string[];
   /** Cor da terra da parcela (em arroz, a lâmina d'água). */
   soil: string;
+  /** Plantação drenada: nos terraços alagados (`Theme.terraces.flooded`) fica sem lâmina d'água (o arroz maduro, dourado sobre lama). */
+  dry?: boolean;
+  /** Margem dura da parcela: o bisel acaba nesta cor (e com o peso cheio da plantação, sem a neve do `fieldSnow`) em vez de se fundir ao chão. */
+  rim?: string;
+  /** Lâmina rasa e espelhada sobre a parcela inteira (o gelo do lago congelado), no material da água; esta é a cor do leito. As parcelas ficam na mesma altura, para se emendarem numa mancha só. */
+  glaze?: string;
+  /** Coluna d'água da lâmina (padrão 0,014): menos fica mais branco (a água rasa congela no inverno), mais fica mais azul e escura. */
+  glazeDepth?: number;
 }
 
 /**
@@ -402,6 +416,17 @@ export interface Theme {
     styles?: CropStyle[];
     /** Multiplica a altura de cada patamar e do beiral (padrão 1 = 12 mm por degrau; o arrozal oriental sobe mais para o degrau ler de longe). */
     rise?: number;
+    /**
+     * Curvas de nível: em vez de anéis concêntricos, a parcela vira 2 ou 3 faixas largas e contínuas, paralelas a uma
+     * direção sorteada pela peça (e levemente curvas), cada uma com uma mureta fina de terra na frente e as fileiras
+     * seguindo a curva. A faixa sobe de frente para o fundo; o miolo fica longe da borda da peça. Padrão: desligado.
+     */
+    contour?: boolean;
+    /**
+     * Só com `contour`: lâmina d'água rasa sobre cada patamar das culturas `rice` (menos as `dry`), no material da água
+     * (reflexo do céu, brilho do sol, cáusticas), com o arroz saindo dela. Padrão: desligado.
+     */
+    flooded?: boolean;
   };
   /**
    * Chão pela distância ao rio (várzea): o prado e a plantação perto da água ganham a cor `color`, e a cor volta ao normal
@@ -459,6 +484,12 @@ export interface Theme {
     tall?: number;
     /** Árvores que sobem a encosta (as `geo` da mata do tema); omitir = a mata inteira. Pinheiros nas serras do Oriente. */
     slopeTrees?: TreeGeo[];
+    /**
+     * Níveis de altura do tabuleiro (R2): 0 ou omitido = plano (como antes); 1 ou 2 = platôs de até esse nível (`core/relief.ts`,
+     * função só da semente), a peça assenta na altura da casa e a parede de rocha (`rock`) desce até o fundo comum.
+     * Estrada e trilho descem em rampa e o rio, em corredeira, até a vizinha mais baixa. Só aparência: regras e replay não mudam.
+     */
+    levels?: 0 | 1 | 2;
   };
   /** Quanto da neve de inverno cobre as parcelas de plantação (1 = tudo, o padrão; 0 = nada). O lago congelado usa um valor baixo: o gelo azul não some sob a neve. */
   fieldSnow?: number;

@@ -15,6 +15,11 @@ import { CROP_LAYOUT, type HouseMeta } from './lib';
 // no bloco estático: só muda a matriz. Tudo é determinístico pela semente.
 
 export const TILE_T = 0.28;
+/** Altura de um nível de relevo (R2): `Theme.relief.levels` e `core/relief.ts`. Vizinhos diferem 1 nível, então o degrau é 0,3. */
+export const LEVEL_STEP = 0.3;
+/** Comprimento da rampa de estrada e trilho (e da corredeira do rio) na peça alta, contado da borda para dentro. */
+export const RAMP_ROAD = 0.62;
+const RAMP_WATER = 0.52;
 /** Superfície da água: abaixo do chão, dentro do leito escavado. */
 export const WATER_Y = -0.02;
 const BED_Y = 0.004;
@@ -114,6 +119,12 @@ export interface BuildOpts {
   special?: SpecialKind;
   /** Canteiro da maravilha: o meio da peça fica livre (a maravilha é um objeto à parte, no World). */
   wonder?: boolean;
+  /**
+   * Relevo (R2): nível desta casa e o das 6 vizinhas, na orientação de origem. A peça é desenhada na altura 0 local
+   * (o World a levanta `own · LEVEL_STEP`); aqui ela só ganha a parede até o fundo comum e as rampas de estrada e rio
+   * rumo à vizinha mais baixa. Sem isto (pilha, galeria) ou com `own` 0, a peça sai como sempre.
+   */
+  levels?: { own: number; nb: readonly number[] };
   /** Easter eggs de kit desta peça (`Theme.eggs`, efeito 'kit'): decididos pelo jogo, pela partida, nunca pelo relógio. */
   eggs?: { id: string; kit: EggKit; scale?: number; color?: string }[];
 }
@@ -606,7 +617,8 @@ class WaterBuf {
   flow: number[] = [];
   bed: number[] = [];
   private cache = new Map<string, [number, number]>();
-  constructor(private field: ReturnType<typeof waterField>) {}
+  /** `ramp` (R2): quanto o chão e a água descem nesse ponto (corredeira rumo à vizinha mais baixa); a coluna de água fica a mesma. */
+  constructor(private field: { at: (x: number, z: number) => [number, number] }, private ramp: ((x: number, z: number) => number) | null = null) {}
 
   private attr(x: number, z: number) {
     const k = `${x.toFixed(4)},${z.toFixed(4)}`;
@@ -616,15 +628,18 @@ class WaterBuf {
   }
 
   tri(a: { p: V3; c: THREE.Color }, b: { p: V3; c: THREE.Color }, c: { p: V3; c: THREE.Color }) {
-    if (Math.min(a.p[1], b.p[1], c.p[1]) > WATER_Y - 1e-4) return;
+    const rw = this.ramp;
+    const drop = (v: { p: V3 }) => (rw ? rw(v.p[0], v.p[2]) : 0);
+    if (Math.min(a.p[1] - drop(a), b.p[1] - drop(b), c.p[1] - drop(c)) > WATER_Y - 1e-4) return;
     // Sempre virado para cima.
     const cross = (b.p[0] - a.p[0]) * (c.p[2] - a.p[2]) - (b.p[2] - a.p[2]) * (c.p[0] - a.p[0]);
     for (const v of cross > 0 ? [a, c, b] : [a, b, c]) {
       const [x, y, z] = v.p;
       const [fx, fz] = this.attr(x, z);
-      this.pos.push(x, WATER_Y, z);
+      const w = drop(v);
+      this.pos.push(x, WATER_Y + w, z);
       this.flow.push(fx, fz);
-      this.bed.push(v.c.r, v.c.g, v.c.b, WATER_Y - y);
+      this.bed.push(v.c.r, v.c.g, v.c.b, WATER_Y - (y - w));
     }
   }
 }
@@ -717,6 +732,225 @@ function insidePoly(x: number, z: number, pts: V2[]) {
   return inside;
 }
 
+/** Água rasa dos patamares alagados (Theme.terraces.flooded): triângulos da lâmina no mesmo formato da `WaterBuf`, sem correnteza. */
+class PaddyBuf {
+  pos: number[] = [];
+  flow: number[] = [];
+  bed: number[] = [];
+  /** Leque de um polígono plano em `y`; `depth` é a coluna d'água que o material enxerga (a absorção e a espuma da beira dependem dela). */
+  fan(poly: V2[], y: number, bed: THREE.Color, depth: number) {
+    if (poly.length < 3) return;
+    const cx = poly.reduce((s, q) => s + q[0], 0) / poly.length, cz = poly.reduce((s, q) => s + q[1], 0) / poly.length;
+    for (let k = 0; k < poly.length; k++) {
+      const a = poly[k], b = poly[(k + 1) % poly.length];
+      // Sempre virado para cima, como na WaterBuf.
+      const cross = (a[0] - cx) * (b[1] - cz) - (a[1] - cz) * (b[0] - cx);
+      for (const v of cross > 0 ? [[cx, cz], b, a] : [[cx, cz], a, b]) {
+        this.pos.push(v[0], y, v[1]);
+        this.flow.push(0, 0);
+        this.bed.push(bed.r, bed.g, bed.b, depth);
+      }
+    }
+  }
+}
+
+/** Mantém (x, z) a no máximo `lim` do centro do hexágono em cada uma das 6 bordas. */
+function clampTile(x: number, z: number, lim: number): V2 {
+  for (let e = 0; e < 6; e++) {
+    const [mx, mz] = edgeMid(e);
+    const proj = (x * mx + z * mz) / INR;
+    if (proj > lim) {
+      x -= (mx / INR) * (proj - lim);
+      z -= (mz / INR) * (proj - lim);
+    }
+  }
+  return [x, z];
+}
+
+/** Recorta um polígono pelo semiplano s ≥ bound (above) ou s ≤ bound, na segunda coordenada (Sutherland–Hodgman). */
+function clipBand(poly: V2[], bound: number, above: boolean): V2[] {
+  const inside = (q: V2) => (above ? q[1] - bound : bound - q[1]) >= 0;
+  const out: V2[] = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const ia = inside(a), ib = inside(b);
+    if (ia) out.push(a);
+    if (ia !== ib) {
+      const t = (bound - a[1]) / (b[1] - a[1]);
+      out.push([a[0] + (b[0] - a[0]) * t, bound]);
+    }
+  }
+  return out;
+}
+
+/** Passo (em u) das amostras ao longo de uma curva de nível: o mesmo para a mureta e para a faixa que a encosta, senão a emenda racha. */
+const CONTOUR_STEP = 0.05;
+
+/** Insere amostras nas arestas do polígono que correm sobre uma curva de nível (segunda coordenada igual a `cuts[k]`). */
+function densifyCuts(poly: V2[], cuts: number[]): V2[] {
+  const out: V2[] = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    out.push(a);
+    if (cuts.some((c) => Math.abs(a[1] - c) < 1e-7 && Math.abs(b[1] - c) < 1e-7)) {
+      // Amostras contadas do menor u: as duas faixas que dividem a curva repetem os mesmos pontos, qualquer que seja o sentido da aresta.
+      const lo = Math.min(a[0], b[0]), hi = Math.max(a[0], b[0]);
+      const n = Math.ceil((hi - lo) / CONTOUR_STEP);
+      const mid: V2[] = [];
+      for (let k = 1; k < n; k++) mid.push([lo + ((hi - lo) * k) / n, a[1]]);
+      out.push(...(a[0] > b[0] ? mid.reverse() : mid));
+    }
+  }
+  return out;
+}
+
+interface ContourIn {
+  g: Buf;
+  pad: PaddyBuf | null;
+  /** Contorno da parcela (o miolo dos patamares sai dele, encolhido e longe da borda da peça). */
+  pts: V2[];
+  cx: number;
+  cz: number;
+  /** Altura do chão da parcela, e dos patamares: cada um sobe `tH` sobre o anterior, com a mureta `tLip` acima do seu piso. */
+  h: number;
+  tH: number;
+  tLip: number;
+  levels: number;
+  /** Ângulo da direção das curvas de nível (rad) e o gerador derivado desta parcela. */
+  theta: number;
+  rng: Rng;
+  /** Piso dos patamares sem água, terra da mureta e do talude, e cor do leito sob a lâmina. */
+  tread: THREE.Color;
+  earth: THREE.Color;
+  bed: THREE.Color;
+  spIn: Splat;
+}
+
+/**
+ * Patamares em curvas de nível (Theme.terraces.contour): a parcela inteira vira 2 ou 3 faixas contínuas, sempre
+ * paralelas e levemente onduladas, cada uma mais alta que a da frente. Cada faixa tem uma mureta fina de terra no limite
+ * da frente e, se `pad` existir, uma lâmina d'água rasa que a mureta segura. A geometria se faz num espaço "esticado"
+ * (u ao longo da curva, s' = distância à curva), onde as faixas são retas e o recorte é um semiplano; o contorno do miolo
+ * vem do contorno da parcela encolhido, para as faixas nunca encostarem na borda da peça.
+ * Devolve `rows`: as fileiras de plantas, que seguem a curva dentro da água (ou do piso), longe da mureta.
+ */
+function contourTerraces(o: ContourIn) {
+  const { g, pad, cx, cz, h, tH, tLip, rng: r } = o;
+  const theta = o.theta + (r() - 0.5) * 0.5;
+  const tx = Math.cos(theta), tz = Math.sin(theta), nx = -tz, nz = tx;
+  const amp = randRange(r, 0.02, 0.038), om = (Math.PI * 2) / randRange(r, 0.5, 0.8), ph = r() * Math.PI * 2;
+  const bend = (u: number) => amp * Math.sin(om * u + ph);
+  const to = (p: V2): V2 => {
+    const dx = p[0] - cx, dz = p[1] - cz, u = dx * tx + dz * tz;
+    return [u, dx * nx + dz * nz - bend(u)];
+  };
+  const from = (q: V2): V2 => {
+    const s = q[1] + bend(q[0]);
+    return [cx + q[0] * tx + s * nx, cz + q[0] * tz + s * nz];
+  };
+  // Miolo: a parcela encolhida 12% e a 0,07 da borda da peça (o desnível nunca chega à emenda com a vizinha).
+  const sh = o.pts.map(([x, z]) => to(clampTile(cx + (x - cx) * 0.88, cz + (z - cz) * 0.88, INR - 0.07)));
+  const lo = Math.min(...sh.map((q) => q[1])), hi = Math.max(...sh.map((q) => q[1]));
+  const n = Math.max(2, Math.min(3, Math.round(o.levels), hi - lo > 0.31 ? 3 : 2));
+  const wts = Array.from({ length: n }, () => 0.85 + r() * 0.3);
+  const total = wts.reduce((s, v) => s + v, 0);
+  const b: number[] = [lo - 1];
+  for (let j = 0, acc = 0; j < n - 1; j++) b.push(lo + ((acc += wts[j]) / total) * (hi - lo));
+  b.push(hi + 1);
+  const cuts = b.slice(1, -1);
+  const BW = 0.014, SL = 0.006; // largura do topo da mureta e do talude de dentro
+  const earthTop = shade(o.earth, 1.28), earthWall = shade(o.earth, 0.95), earthFoot = shade(o.earth, 0.8);
+  const ctr = (poly: V2[]): V2 => [poly.reduce((s, q) => s + q[0], 0) / poly.length, poly.reduce((s, q) => s + q[1], 0) / poly.length];
+  const cs = ctr(sh);
+  const bands: { y: number; plant: V2[] }[] = [];
+  for (let j = 0; j < n; j++) {
+    const y = h + 0.001 + j * tH;
+    let q = sh;
+    if (j > 0) q = clipBand(q, b[j], true);
+    if (j < n - 1) q = clipBand(q, b[j + 1], false);
+    if (q.length < 3) continue;
+    q = densifyCuts(q, cuts);
+    const c = from(ctr(q));
+    const R = q.map(from);
+    for (let k = 0; k < R.length; k++) {
+      const a = R[k], d = R[(k + 1) % R.length];
+      g.tri([c[0], y, c[1]], [a[0], y, a[1]], [d[0], y, d[1]], o.tread, o.tread, o.tread, UP, o.spIn);
+      // Talude de terra em volta da faixa que sobe: do piso da parcela até o piso da faixa (nas arestas que não são curva de nível).
+      const onCut = cuts.some((v) => Math.abs(q[k][1] - v) < 1e-7 && Math.abs(q[(k + 1) % q.length][1] - v) < 1e-7);
+      if (j > 0 && !onCut) {
+        const mx = (a[0] + d[0]) / 2 - c[0], mz = (a[1] + d[1]) / 2 - c[1];
+        g.quad([a[0], h, a[1]], [d[0], h, d[1]], [d[0], y, d[1]], [a[0], y, a[1]], earthFoot, earthFoot, earthWall, earthWall, [mx, 0, mz], SPLAT_WALL);
+      }
+    }
+    // Água: a parcela inteira encolhida 10%, afastada da mureta da frente e rente ao paredão de trás.
+    let w = sh.map((v) => [cs[0] + (v[0] - cs[0]) * 0.9, cs[1] + (v[1] - cs[1]) * 0.9] as V2);
+    const wLo = j > 0 ? b[j] + BW + SL + 0.006 : -Infinity, wHi = j < n - 1 ? b[j + 1] - 0.003 : Infinity;
+    if (wLo > -Infinity) w = clipBand(w, wLo, true);
+    if (wHi < Infinity) w = clipBand(w, wHi, false);
+    if (w.length >= 3) {
+      w = densifyCuts(w, [wLo, wHi]);
+      bands.push({ y, plant: w });
+      pad?.fan(w.map(from), y + tLip * 0.5, o.bed, 0.014);
+    }
+  }
+  // Muretas: no limite de cada faixa de cima, o paredão que sobe da faixa da frente, o topo da mureta e o talude para dentro da água.
+  for (let j = 1; j < n; j++) {
+    const us = clipBand(clipBand(sh, b[j] - 1e-9, true), b[j] + 1e-9, false).map((v) => v[0]);
+    if (us.length < 2) continue;
+    const ua = Math.min(...us), ub = Math.max(...us);
+    const m = Math.max(1, Math.ceil((ub - ua) / CONTOUR_STEP));
+    const yLo = h + 0.001 + (j - 1) * tH, yHi = h + 0.001 + j * tH;
+    // Topo e talude só onde cabem dentro do contorno: as pontas ficam a 2 cm do fim da curva.
+    const inset = (k: number) => Math.min(Math.max(ua + ((ub - ua) * k) / m, ua + 0.02), ub - 0.02);
+    for (let k = 0; k < m; k++) {
+      const u0 = ua + ((ub - ua) * k) / m, u1 = ua + ((ub - ua) * (k + 1)) / m;
+      const f0 = from([u0, b[j]]), f1 = from([u1, b[j]]);
+      g.quad([f0[0], yLo, f0[1]], [f1[0], yLo, f1[1]], [f1[0], yHi + tLip, f1[1]], [f0[0], yHi + tLip, f0[1]], earthFoot, earthFoot, earthWall, earthWall, [-nx, 0, -nz], SPLAT_WALL);
+      const v0 = inset(k), v1 = inset(k + 1);
+      if (v1 - v0 < 1e-5) continue;
+      const t0 = from([v0, b[j]]), t1 = from([v1, b[j]]), i0 = from([v0, b[j] + BW]), i1 = from([v1, b[j] + BW]), s0 = from([v0, b[j] + BW + SL]), s1 = from([v1, b[j] + BW + SL]);
+      g.quad([t0[0], yHi + tLip, t0[1]], [t1[0], yHi + tLip, t1[1]], [i1[0], yHi + tLip, i1[1]], [i0[0], yHi + tLip, i0[1]], earthTop, earthTop, earthTop, earthTop, UP, o.spIn);
+      g.quad([i0[0], yHi + tLip, i0[1]], [i1[0], yHi + tLip, i1[1]], [s1[0], yHi, s1[1]], [s0[0], yHi, s0[1]], earthWall, earthWall, o.bed, o.bed, [nx * 0.7, 0.7, nz * 0.7], o.spIn);
+    }
+  }
+  return {
+    /**
+     * Fileiras de plantas que seguem a curva, de `gap` em `gap` (afastadas `edge` da borda da água): chama
+     * `fn(x, y, z, tangenteX, tangenteZ, distânciaÀBorda)` por planta.
+     */
+    rows(gap: number, step: number, edge: number, rr: Rng, fn: (x: number, y: number, z: number, dx: number, dz: number, d: number) => void) {
+      for (const band of bands) {
+        const poly = band.plant;
+        const smin = Math.min(...poly.map((q) => q[1])), smax = Math.max(...poly.map((q) => q[1]));
+        const nr = Math.max(1, Math.floor((smax - smin - 2 * edge) / gap) + 1);
+        for (let row = 0; row < nr; row++) {
+          const sv = (smin + smax) / 2 + (row - (nr - 1) / 2) * gap;
+          // Cruzamentos da fileira com o contorno da água: o trecho de u dentro dele.
+          let ua = Infinity, ub = -Infinity;
+          for (let i = 0; i < poly.length; i++) {
+            const p = poly[i], q = poly[(i + 1) % poly.length];
+            if (p[1] > sv === q[1] > sv) continue;
+            const u = p[0] + ((q[0] - p[0]) * (sv - p[1])) / (q[1] - p[1]);
+            ua = Math.min(ua, u);
+            ub = Math.max(ub, u);
+          }
+          for (let u = ua + edge + step * 0.25 + (row % 2) * step * 0.5; u <= ub - edge; u += step) {
+            const uj = u + (rr() - 0.5) * step * 0.2, sj = sv + (rr() - 0.5) * gap * 0.2;
+            const [x, z] = from([uj, sj]);
+            const bd = amp * om * Math.cos(om * uj + ph);
+            fn(x, band.y, z, tx + bd * nx, tz + bd * nz, polyEdgeDist(uj, sj, poly));
+          }
+        }
+      }
+    },
+  };
+}
+
+/** Plantação alagada nos terraços em curva de nível (arroz com lâmina d'água), e a terra da mureta e da borda dela. */
+const floodedCrop = (theme: Theme, crop: CropKind) =>
+  !!theme.terraces?.contour && !!theme.terraces.flooded && crop.style === 'rice' && !crop.dry && (!theme.terraces.styles || theme.terraces.styles.includes('rice'));
+const paddyEarth = (theme: Theme, crop: CropKind) => shade(tc(theme.side).clone().lerp(tc(crop.soil), 0.3), 1.1);
+
 /** Marcos de planta larga: as casas guardam mais distância deles. */
 const WIDE_LANDMARKS: ReadonlySet<string> = new Set(['pyramid', 'pylon', 'kancha', 'hall']);
 
@@ -761,7 +995,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // y = 0 quer dizer "no chão": acompanha o leito e as margens dos rios.
   const D = (key: string, x: number, y: number, z: number, ry: number, s: number | V3, color: THREE.Color, anim?: Anim) => {
     const [sx, sy, sz] = typeof s === 'number' ? [s, s, s] : s;
-    decos.push({ key, x, y: y === 0 ? groundY(x, z) : y, z, ry, sx, sy, sz, color, anim });
+    decos.push({ key, x, y: y === 0 ? groundY(x, z) : y + rampY(x, z), z, ry, sx, sy, sz, color, anim });
   };
   /** Andaime em volta de uma construção que sobe: `w` de largura e `h` de altura. */
   const scaffold = (x: number, z: number, ry: number, w: number, h: number) => {
@@ -780,16 +1014,57 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const field = hasWater ? waterField(shape, water.paths, widths, flow, seed) : null;
   /** Distância até a água ou a via mais próxima (negativa dentro): a decoração desvia. */
   const clear = (x: number, z: number) => Math.min(road.paths.length ? distToPaths(x, z, road.paths) : Infinity, field ? field.e(x, z) - (shape.lake ? BANK_EXTRA : 0) : Infinity);
-  /** Altura do chão: 0, exceto no leito e nas margens dos rios. */
-  const groundY = (x: number, z: number) => (field ? field.ground(x, z) : 0);
+  // --- Relevo (R2): peça mais alta que a vizinha. Estrada, trilho e rio descem em rampa até a borda, no nível dela
+  // (`rampR`, `rampW`: 0 ou negativo, função só da peça, da borda e da vizinha, então a emenda casa em qualquer ordem).
+  const lv = opts.levels && opts.levels.own > 0 ? opts.levels : null;
+  const dropOf = (e: number) => (lv && e >= 0 ? Math.max(0, lv.own - lv.nb[e]) * LEVEL_STEP : 0);
+  /** Comprimento do traçado e quanto cada ponta desce: a descida acompanha o arco desde a borda (`len` de rampa). */
+  const mkRamp = (paths: Path[], ends: number[][], reach: number, fade: number, len: number) => {
+    const items = paths
+      .map((p, k) => {
+        let L = 0;
+        for (let j = 1; j < p.pts.length; j++) L += Math.hypot(p.pts[j][0] - p.pts[j - 1][0], p.pts[j][1] - p.pts[j - 1][1]);
+        return { p, L, a: dropOf(ends[k][0]), b: dropOf(ends[k][1]) };
+      })
+      .filter((it) => it.a > 0 || it.b > 0);
+    if (!items.length) return null;
+    return (x: number, z: number) => {
+      let v = 0;
+      for (const it of items) {
+        const r = nearestParam(x, z, it.p);
+        if (r.d > reach + fade) continue;
+        const s = r.t * it.L;
+        const lon = Math.max(it.a * (1 - smooth(0, len, s)), it.b * (1 - smooth(0, len, it.L - s)));
+        v = Math.min(v, -lon * (1 - smooth(reach, reach + fade, r.d)));
+      }
+      return v;
+    };
+  };
+  const rampR = lv && road.idx.length ? mkRamp(road.paths, road.idx.length === 2 ? [[road.idx[0], road.idx[1]]] : road.idx.length > 2 ? road.idx.map((i, j) => [i, road.idx[(j + 1) % road.idx.length]]) : road.idx.map((i) => [i, -1]), 0.085, 0.13, RAMP_ROAD) : null;
+  const rampW = lv && hasWater ? mkRamp(water.paths, water.paths.length === 1 && water.idx.length === 2 ? [[water.idx[0], water.idx[1]]] : water.idx.map((i) => [i, -1]), BANK_W + 0.03, 0.12, RAMP_WATER) : null;
+  const hasRamp = !!(rampR || rampW);
+  /** Quanto o chão desce neste ponto por causa das rampas (0 se não há). */
+  const rampY = (x: number, z: number) => (hasRamp ? (rampR ? rampR(x, z) : 0) + (rampW ? rampW(x, z) : 0) : 0);
+  /** Altura do chão: 0, exceto no leito e nas margens dos rios e nas rampas. */
+  const groundY = (x: number, z: number) => (field ? field.ground(x, z) : 0) + rampY(x, z);
   const bank = tc(theme.bank);
   const waterSide = tc(theme.water).clone().lerp(bank, 0.25);
   const waterDeep = shade(tc(theme.water), 0.55);
-  const wb = field ? new WaterBuf(field) : null;
+  // Na corredeira a água corre mais (mais veloz no meio da descida, igual à da vizinha nas pontas).
+  const chute = rampW ? Math.max(0, ...water.idx.map((i) => dropOf(i))) : 0;
+  const wField = field && chute > 0 ? { at: (x: number, z: number): [number, number] => {
+    const [fx, fz] = field.at(x, z);
+    const u = Math.min(1, -rampW!(x, z) / chute);
+    const k = 1 + 2.2 * 4 * u * (1 - u);
+    return [fx * k, fz * k];
+  } } : field;
+  const wb = wField ? new WaterBuf(wField, rampW ? (x, z) => rampY(x, z) : null) : null;
+  // Lâmina d'água dos patamares alagados (Theme.terraces.flooded): vai para o mesmo mesh da água dos rios.
+  const pad = theme.terraces?.flooded || theme.crops.some((c) => c.glaze) ? new PaddyBuf() : null;
 
   // --- Topo: 6 setores subdivididos, com cores misturadas nas divisas. Peças com rio
   // usam uma malha mais fina para o leito e as margens inclinadas.
-  const N = hasWater ? 12 : 4;
+  const N = hasWater || hasRamp ? 12 : 4;
   const center = new THREE.Color(0, 0, 0);
   for (const c of groundCols) center.add(c);
   center.multiplyScalar(1 / 6);
@@ -869,10 +1144,61 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const rockBot = rockTop.clone().multiplyScalar(0.7);
     const rockY: number[] = [];
     for (let k = 0; k <= N; k++) rockY.push(-0.16 - rs() * 0.05);
+    // Relevo (R2): a parede desce até o fundo comum (`floor`, o mesmo de uma peça no nível 0), qualquer que seja a
+    // vizinha, então não há fresta em nenhuma ordem de colocação. Onde a vizinha é mais baixa é um penhasco (`cliff`):
+    // o solo raso por cima e a rocha em camadas (cor do tema) até o chão.
+    const cliff = !!lv && lv.nb[i] < lv.own;
+    const floor = -TILE_T - (lv?.own ?? 0) * LEVEL_STEP;
+    const rockC = tc(theme.relief?.rock ?? theme.rock);
     for (let k = 0; k < N; k++) {
       const v0 = V(N - k, k), v1 = V(N - k - 1, k + 1);
       const [x0, y0, z0] = v0.p, [x1, y1, z1] = v1.p;
       const l0 = shade(v0.c, 0.72), l1 = shade(v1.c, 0.72);
+      if (lv) {
+        // Camadas de cima para baixo, cada borda presa à anterior (a rampa baixa o topo da parede: nada sobe acima dele).
+        const cut = (y: number, r: number) => {
+          const b = Math.min(y - 0.05, -0.05, y);
+          const m = Math.min(-0.11, b);
+          const q = Math.min(r, m);
+          return [y, b, m, q, Math.min(-TILE_T, q)];
+        };
+        const A = cut(y0, rockY[k]), B = cut(y1, rockY[k + 1]);
+        const flat = (j: number) => A[j - 1] - A[j] > 1e-4 || B[j - 1] - B[j] > 1e-4;
+        const layer = (j: number, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, cd: THREE.Color) => {
+          if (flat(j)) g.quad([x0, A[j - 1], z0], [x1, B[j - 1], z1], [x1, B[j], z1], [x0, A[j], z0], ca, cb, cc, cd, nrm);
+        };
+        layer(1, l0, l1, l1, l0);
+        layer(2, side, side, midC, midC);
+        if (cliff) {
+          // Rocha em camadas: faixas de ~0,13 com o valor sorteado por faixa e por trecho, mais escura para baixo.
+          const rr = rockC.clone().lerp(sideDark, 0.15);
+          const edgesAbs = [-0.11];
+          while (edgesAbs[edgesAbs.length - 1] - 0.13 > floor + 0.04) edgesAbs.push(edgesAbs[edgesAbs.length - 1] - 0.13);
+          edgesAbs.push(floor);
+          const depth = (y: number) => 1 - 0.38 * Math.min(1, Math.max(0, (-0.11 - y) / (-0.11 - floor)));
+          for (let j = 0; j + 1 < edgesAbs.length; j++) {
+            const ta = Math.min(A[2], edgesAbs[j]), tb = Math.min(B[2], edgesAbs[j]);
+            const bot = edgesAbs[j + 1];
+            const jit = 0.9 + rs() * 0.2;
+            if (ta - bot < 1e-4 && tb - bot < 1e-4) continue;
+            const ct = rr.clone().multiplyScalar(depth(edgesAbs[j]) * jit), cb = rr.clone().multiplyScalar(depth(bot) * jit * (j % 2 ? 0.94 : 1));
+            g.quad([x0, ta, z0], [x1, tb, z1], [x1, Math.min(bot, tb), z1], [x0, Math.min(bot, ta), z0], ct, ct, cb, cb, nrm);
+          }
+        } else {
+          layer(3, midC, midC, soilC, soilC);
+          layer(4, rockTop, rockTop, rockBot, rockBot);
+          // Extensão do relevo: continua a rocha até o fundo comum (só aparece na beira aberta do mapa).
+          if (A[4] - floor > 1e-4 || B[4] - floor > 1e-4) g.quad([x0, A[4], z0], [x1, B[4], z1], [x1, floor, z1], [x0, floor, z0], rockBot, rockBot, shade(rockBot, 0.8), shade(rockBot, 0.8), nrm);
+        }
+        // Corte da água na lateral (só aparece na beira aberta do mapa, como num aquário), na altura da água da rampa.
+        const r0 = rampY(x0, z0), r1 = rampY(x1, z1);
+        const w0 = WATER_Y + r0, w1 = WATER_Y + r1;
+        if (hasWater && (y0 - r0 < WATER_Y - 0.001 || y1 - r1 < WATER_Y - 0.001)) {
+          const c0 = Math.min(y0, w0), c1 = Math.min(y1, w1);
+          g.quad([x0, w0, z0], [x1, w1, z1], [x1, c1, z1], [x0, c0, z0], waterSide, waterSide, waterDeep, waterDeep, [mx * 1.01, 0, mz * 1.01]);
+        }
+        continue;
+      }
       const b0 = Math.min(y0 - 0.05, -0.05), b1 = Math.min(y1 - 0.05, -0.05);
       g.quad([x0, y0, z0], [x1, y1, z1], [x1, b1, z1], [x0, b0, z0], l0, l1, l1, l0, nrm);
       g.quad([x0, b0, z0], [x1, b1, z1], [x1, -0.11, z1], [x0, -0.11, z0], side, side, midC, midC, nrm);
@@ -919,6 +1245,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   }
 
   // --- Estradas: trilho, terra, pedra, areia ou via maglev.
+  const roadStart = g.pos.length;
   if (road.idx.length) {
     const bed = tc(theme.roadBed);
     const det = tc(theme.roadDetail);
@@ -1049,6 +1376,15 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const gk = gates.length > 1 ? Math.floor(mulberry32((seed ^ 0x6a7e5) >>> 0)() * gates.length) : 0;
       D(`gate:${gk}`, n.p[0], BED_Y, n.p[1], yawTo(-n.t[1], n.t[0]), 1, WHITE);
       reserved.push([n.p[0], n.p[1], 0.17]);
+    }
+  }
+
+  // Relevo (R2): a via inteira (leito, dormentes, trilhos, lajes) acompanha a rampa; um fio acima do chão, que a malha
+  // do chão só aproxima entre os vértices.
+  if (rampR) {
+    for (let i = roadStart; i < g.pos.length; i += 3) {
+      const d = rampR(g.pos[i], g.pos[i + 2]);
+      g.pos[i + 1] += d + (d < -1e-4 ? 0.004 : 0);
     }
   }
 
@@ -1308,6 +1644,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     abaCrops[i] = crop;
     const L = CROP_LAYOUT[crop.style];
     const soil = tc(crop.soil);
+    const terrCfg = theme.terraces && (!theme.terraces.styles || theme.terraces.styles.includes(crop.style)) ? theme.terraces : null;
+    // Curvas de nível (Theme.terraces.contour): faixas contínuas no lugar dos anéis; alagadas só no arroz de lâmina d'água.
+    const contour = !!terrCfg?.contour && terrCfg.levels > 1;
+    const flooded = contour && floodedCrop(theme, crop);
     const isLush = lush.has(i);
     const plots: V2[] = [];
     const want = randInt(rng, 3, 5);
@@ -1340,14 +1680,23 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       }
       const cx = pts.reduce((s, q) => s + q[0], 0) / sides;
       const cz = pts.reduce((s, q) => s + q[1], 0) / sides;
-      const h = 0.006 + k * 0.002;
+      // Lago com lâmina (CropKind.glaze): as parcelas se emendam na mesma altura (degraus de 0,6 mm só contra o z-fighting),
+      // e a lâmina, as rachaduras e o pesqueiro assentam sobre ela.
+      const glaze = crop.glaze ? tc(crop.glaze) : null;
+      const h = glaze ? 0.006 + k * 0.0006 : 0.006 + k * 0.002;
+      const hTop = glaze ? 0.0013 : 0;
       // De longe a parcela precisa "ler" como a cultura: a terra puxa a cor da planta.
       const tintAmt = crop.style === 'rice' ? 0.2 : crop.style === 'tulip' || crop.style === 'bulb' ? 0.1 : 0.42;
-      const sc = vary(rng, soil.clone().lerp(tc(crop.colors[0]), tintAmt), 0.08);
+      const sc0 = vary(rng, soil.clone().lerp(tc(crop.colors[0]), tintAmt), 0.08);
+      // Arrozal alagado: a água é a lâmina dos patamares, então o chão em volta é terra (e não a cor da água).
+      const sc = flooded ? paddyEarth(theme, crop) : sc0;
       // Sem parede lateral: o leque tem dois anéis, o interno na cor da terra e o externo
       // (bisel de ~0,04, altura 0) misturado ao chão, para a parcela se fundir ao prado.
       const gc = groundCols[i];
-      const edge = sc.clone().lerp(gc, 0.6);
+      // Margem dura (CropKind.rim): o bisel acaba na cor da margem, não no chão, e com o peso cheio da plantação (a neve do
+      // `fieldSnow` não a cobre).
+      const rim = crop.rim ? tc(crop.rim) : null;
+      const edge = rim ?? sc.clone().lerp(gc, 0.6);
       const clampIn = (x: number, z: number): V2 => {
         for (let e = 0; e < 6; e++) {
           const [mx, mz] = edgeMid(e);
@@ -1361,8 +1710,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         return [x, z];
       };
       abaPlots[i].push(pts);
-      const outer = pts.map(([x, z]) => clampIn(cx + (x - cx) * 1.2, cz + (z - cz) * 1.2));
-      const spIn: Splat = [0, 0, 0.6, 0], spOut: Splat = [0, 0, 0.25, 0];
+      const outer = pts.map(([x, z]) => clampIn(cx + (x - cx) * (rim ? 1.1 : 1.2), cz + (z - cz) * (rim ? 1.1 : 1.2)));
+      const spIn: Splat = [0, 0, 0.6, 0], spOut: Splat = rim ? [0, 0, 0.8, 0] : [0, 0, 0.25, 0];
+      // Lâmina sobre a parcela inteira (no mesmo mesh da água: reflexo do céu e brilho do sol).
+      if (glaze) pad?.fan(pts.map(([x, z]) => [cx + (x - cx) * 1.02, cz + (z - cz) * 1.02] as V2), h + 0.0012, glaze, crop.glazeDepth ?? 0.014);
       for (let j = 0; j < sides; j++) {
         const j2 = (j + 1) % sides;
         const a = pts[j], b = pts[j2], ao = outer[j], bo = outer[j2];
@@ -1373,7 +1724,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       // Terraços (Theme.terraces): patamares concêntricos sobre a parcela, cada um um pouco mais alto e menor,
       // com um riser de muro (mureta de pedra) e um beiral de 4 mm que guarda a água do arrozal. Só a geometria
       // do chão muda: a borda externa da parcela continua na altura 0 e o rng da peça não gasta nada.
-      const terr = theme.terraces && (!theme.terraces.styles || theme.terraces.styles.includes(crop.style)) ? Math.max(1, Math.min(3, Math.round(theme.terraces.levels))) : 1;
+      const terr = terrCfg && !contour ? Math.max(1, Math.min(3, Math.round(terrCfg.levels))) : 1;
       // `rise` (Theme.terraces.rise) multiplica a altura do patamar e do beiral (1 = 12 mm por degrau).
       const tH = TERRACE_H * (theme.terraces?.rise ?? 1), tLip = TERRACE_LIP * (theme.terraces?.rise ?? 1);
       const rings: V2[][] = [pts];
@@ -1397,6 +1748,16 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           }
         }
       }
+      // Curvas de nível: o `rng` da peça gasta o mesmo de antes (o laço das plantas abaixo roda inteiro, sem emitir), e as
+      // faixas, a água e as plantas novas saem de geradores derivados.
+      const rows = contour && terrCfg
+        ? contourTerraces({
+            g, pad: flooded ? pad : null, pts, cx, cz, h, tH, tLip, levels: terrCfg.levels,
+            theta: mulberry32((seed ^ 0x7e44ace) >>> 0)() * Math.PI,
+            rng: mulberry32((seed ^ 0x7e44ace) + i * 131 + k * 17),
+            tread: sc, earth: shade(tc(theme.side).clone().lerp(tc(theme.ground[T.Grass]), 0.4), 1.25), bed: flooded ? shade(tc(crop.soil), 0.85) : shade(sc, 0.6), spIn,
+          })
+        : null;
       const levelAt = (x: number, z: number) => {
         let lv = 0;
         for (let j = 1; j < rings.length; j++) if (insidePoly(x, z, rings[j])) lv = j;
@@ -1464,8 +1825,22 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           if (L.sparse !== undefined && fr() > L.sparse) continue;
           const s = s0 * (isLush ? 1.12 : 1) * (0.45 + 0.55 * edgeT);
           if (isLush && !rowCol) c = c.lerp(LUSH, 0.22);
-          D(`crop:${crop.style}`, x, h + levelAt(x, z) * tH, z, yaw, s, c);
+          if (!rows) D(`crop:${crop.style}`, x, h + hTop + levelAt(x, z) * tH, z, yaw, s, c);
         }
+      }
+      if (rows) {
+        const pr2 = mulberry32((seed ^ 0x9a7b1e) + i * 131 + k * 17);
+        const hedge = crop.style === 'tea' || crop.style === 'vineyard' || crop.style === 'lavender';
+        // Arroz na água: mudas pequenas em fileiras abertas (a lâmina é o que a parcela mostra).
+        const rg = (flooded ? 0.058 : L.rowGap) * dens, rs = (flooded ? 0.054 : L.step) * dens;
+        rows.rows(rg, rs, flooded ? 0.012 : 0.01, pr2, (x, y, z, dx, dz, d) => {
+          if (!free(x, z, 0)) return;
+          const edgeT = smooth(0, 0.035, d);
+          let c = vary(pr2, pr2() < 0.7 ? base : tc(pick(pr2, crop.colors)), 0.06);
+          if (isLush) c = c.lerp(LUSH, 0.22);
+          const s = randRange(pr2, L.scale[0], L.scale[1]) * (flooded ? 0.72 : 1) * (isLush ? 1.12 : 1) * (0.6 + 0.4 * edgeT);
+          D(`crop:${crop.style}`, x, y, z, hedge ? yawTo(dx, dz) : pr2() * Math.PI * 2, s, c);
+        });
       }
       // Lago congelado: um pesqueiro (tenda, buraco, varal) perto do meio de algumas parcelas, por um gerador à parte.
       if (crop.style === 'icefield') {
@@ -1474,7 +1849,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         const walls = theme.houses[0].walls, tent = tc(walls[Math.floor(cr() * walls.length)]);
         const x = cx + ox, z = cz + oz;
         if (roll < (k === 1 ? 0.55 : 0.16) && rad > 0.17 && insidePoly(x, z, old) && free(x, z, 0.1) && clear(x, z) > 0.12) {
-          D('icecamp', x, h, z, yaw, 1, tent);
+          D('icecamp', x, h + hTop, z, yaw, 1, tent);
           reserved.push([x, z, 0.1]);
         }
       }
@@ -1535,7 +1910,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       if (relief) {
         const { x, z, ry, sx, sy, sz, reach } = relief;
         if (kind === 'peak') {
-          D('peak', x, 0, z, ry, [sx, sy, sz], vary(lr, tc(rel.rock ?? theme.rock), 0.08));
+          // Em platô a serra encolhe (o platô já soma 0,3 a 0,6 de altura): o conjunto fica abaixo de ~1,3 sobre o nível 0.
+          D('peak', x, 0, z, ry, [sx, sy * (lv ? (lv.own === 1 ? 0.78 : 0.62) : 1), sz], vary(lr, tc(rel.rock ?? theme.rock), 0.08));
           reserved.push([x, z, reach * 0.85]);
         } else {
           const gi = [sectorAt(x, z), 0, 1, 2, 3, 4, 5].find((i) => edges[i] === T.Grass || edges[i] === T.Forest) ?? 0;
@@ -1585,9 +1961,11 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const r4 = mulberry32((seed ^ 0x0d29a77) >>> 0);
   // Raio aproximado da casa no chão, para os lotes não se tocarem.
   const houseR = (s: number) => 0.085 * s;
+  // Sobrados (a torre estreita e o sobrado largo) ficam só nos lotes grandes, não nos pequenos nem nos galpões.
+  const isTower = (b: string) => b === 'tall' || b === 'sobrado';
   const addHouse = (x: number, z: number, baseAng: number, sector = -1, door?: V2, small?: [number, number]) => {
     const R = small ? r4 : rng;
-    const i = small ? weighted(R, houseKinds.filter(([k]) => theme.houses[k].body !== 'tall').length ? houseKinds.filter(([k]) => theme.houses[k].body !== 'tall') : houseKinds) : weighted(R, houseKinds);
+    const i = small ? weighted(R, houseKinds.filter(([k]) => !isTower(theme.houses[k].body)).length ? houseKinds.filter(([k]) => !isTower(theme.houses[k].body)) : houseKinds) : weighted(R, houseKinds);
     const kind = theme.houses[i];
     const meta = opts.houses[i];
     // Uma casa dominante grande de cumeeira paralela à rua (de longe ela se lê sozinha) e, ao redor,
@@ -1766,7 +2144,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       if (houses.some((h) => Math.hypot(h.x - bx, h.z - bz) < houseR(h.s) + 0.06)) continue;
       if (pick1 < 0.45) {
         // Galpão: casa pequena de paredes e telhado escuros, sem fumaça.
-        const gi = houseKinds.find(([k]) => theme.houses[k].body !== 'tall' && theme.houses[k].body !== 'long')?.[0] ?? 0;
+        const gi = houseKinds.find(([k]) => !isTower(theme.houses[k].body) && theme.houses[k].body !== 'long')?.[0] ?? 0;
         const ry = sectorAng + (r4() < 0.5 ? 0 : Math.PI / 2);
         const gs = 0.75 + r4() * 0.15;
         D(`wall:${gi}`, bx, 0, bz, ry, [gs, gs, gs], shade(vary(r4, tc(pick(r4, theme.houses[gi].walls)), 0.04), 0.78));
@@ -1912,9 +2290,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     };
     const inner = ring(0, 0), outer = ring(0.04, 0.04);
     const c0 = theme.crops[0];
-    const sc = tc(c0.soil).clone().lerp(tc(c0.colors[0]), c0.style === 'rice' ? 0.2 : c0.style === 'tulip' || c0.style === 'bulb' ? 0.1 : 0.42);
-    const edge = sc.clone().lerp(groundCols[i], 0.6);
-    const spIn: Splat = [0, 0, 0.6, 0], spOut: Splat = [0, 0, 0.25, 0];
+    const sc = floodedCrop(theme, c0) ? paddyEarth(theme, c0) : tc(c0.soil).clone().lerp(tc(c0.colors[0]), c0.style === 'rice' ? 0.2 : c0.style === 'tulip' || c0.style === 'bulb' ? 0.1 : 0.42);
+    const edge = c0.rim ? tc(c0.rim) : sc.clone().lerp(groundCols[i], 0.6);
+    const spIn: Splat = [0, 0, 0.6, 0], spOut: Splat = c0.rim ? [0, 0, 0.8, 0] : [0, 0, 0.25, 0];
+    if (c0.glaze) pad?.fan(inner, ABA_H + 0.0012, tc(c0.glaze), c0.glazeDepth ?? 0.014);
     const [cx, cz] = at(0, INR - ABA_D * 0.4);
     for (let j = 0; j < ABA_N; j++) {
       const a = inner[j], b = inner[j + 1], ao = outer[j], bo = outer[j + 1];
@@ -2152,9 +2531,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     pos: new Float32Array(g.pos),
     col: new Float32Array(g.col),
     splat: new Float32Array(g.spl),
-    water: new Float32Array(wb?.pos ?? []),
-    wflow: new Float32Array(wb?.flow ?? []),
-    wbed: new Float32Array(wb?.bed ?? []),
+    water: new Float32Array([...(wb?.pos ?? []), ...(pad?.pos ?? [])]),
+    wflow: new Float32Array([...(wb?.flow ?? []), ...(pad?.flow ?? [])]),
+    wbed: new Float32Array([...(wb?.bed ?? []), ...(pad?.bed ?? [])]),
     decos,
     chimneys,
   };

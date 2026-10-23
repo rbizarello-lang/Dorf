@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { mulberry32 } from '../../core/rng';
 import { box, cone, cyl, kit, pyramid, taper, type Part } from '../lib';
-import { PEAK, PEAK_CONES } from '../relief';
+import { PEAK } from '../relief';
 
 // Kits do Egito do Nilo (T2): falésia de arenito, pilone de entrada, terraço de adobe com toldo, shaduf, ibis, crocodilo,
 // boi de chifres de lira e os easter eggs (esfinge, gato, ibis em pé, pirâmide). Tudo procedural, no contrato de lib.ts
@@ -11,22 +11,25 @@ type V3 = [number, number, number];
 
 // ---------------------------------------------------------------- falésia de arenito
 
-/** Altura da mesa de arenito em relação à serra do `relief.ts`: a falésia é baixa e de topo chato. */
+/** Altura da mesa de arenito em relação à serra do `relief.ts`: a falésia é baixa e de topo quase chato. */
 const MESA_H = 0.58;
-/** Faixas da parede: fração da altura e fator de valor do estrato (claro, escuro, claro...). O arenito é listrado. */
-const STRATA: readonly [number, number][] = [
-  [0.0, 1.1],
-  [0.3, 0.86],
-  [0.46, 1.04],
-  [0.62, 0.8],
-  [0.78, 1.0],
-  [0.9, 0.86],
+/**
+ * Os blocos da falésia, no espaço do kit (x, z do centro, raio da parede e altura): um maciço alto, um bloco mais baixo
+ * encostado nele e uma torre estreita e solta, de alturas diferentes. O conjunto cabe na pegada da serra (`PEAK_REACH`),
+ * para o tileBuilder tratar as duas igual.
+ */
+const MESA_BLOCKS: readonly { x: number; z: number; R: number; H: number; strata: number; n: number; nFar: number }[] = [
+  { x: -0.05, z: 0.02, R: 0.31, H: PEAK.h * MESA_H, strata: 6, n: 14, nFar: 8 },
+  { x: 0.33, z: 0.2, R: 0.21, H: PEAK.h * MESA_H * 0.62, strata: 4, n: 10, nFar: 6 },
+  { x: 0.1, z: -0.34, R: 0.14, H: PEAK.h * MESA_H * 0.92, strata: 4, n: 8, nFar: 6 },
 ];
 
 /**
- * Falésia de arenito: mesas de topo chato, parede quase vertical em estratos claros e escuros e um talude de areia no pé.
- * Mesma pegada da serra (`PEAK_CONES`), para o tileBuilder tratar as duas igual. `tint = 1` na rocha (recebe a cor da
- * instância); o pé e o topo de areia têm cor fixa. A versão leve tem menos lados e menos estratos.
+ * Falésia de arenito: um conjunto de 3 blocos de alturas diferentes, cada um com o contorno recortado (reentrâncias e
+ * esporões vêm de harmônicas e de um entalhe, então a versão leve tem a mesma silhueta), estratos de espessura
+ * variável que ora saem, ora recuam (o duro sai, o mole recua), topo levemente inclinado e talude de detritos no pé,
+ * com alguns blocos caídos. `tint = 1` na rocha (recebe a cor da instância); o pé e o topo de areia têm cor fixa.
+ * A versão leve tem menos lados e menos estratos.
  */
 export function mesaGeometry(o: { foot: THREE.ColorRepresentation; far?: boolean }): THREE.BufferGeometry {
   const rng = mulberry32(0x3e5a11);
@@ -55,34 +58,45 @@ export function mesaGeometry(o: { foot: THREE.ColorRepresentation; far?: boolean
     vert(b, cb, tb);
     vert(d, cd, td);
   };
-  PEAK_CONES.forEach(([ang, dist, rs, hs], k) => {
-    const ox = Math.cos(ang) * dist * PEAK.r, oz = Math.sin(ang) * dist * PEAK.r;
-    const R = PEAK.r * rs * 0.9, H = PEAK.h * MESA_H * hs;
-    const N = o.far ? 7 : k === 0 ? 12 : 8;
-    // Perfil: [fração da altura, raio em fração de R]. Talude no pé, parede quase reta, ressalto do topo.
-    const prof: [number, number][] = o.far
-      ? [[-0.06, 1.18], [0.3, 0.9], [0.96, 0.84]]
-      : [[-0.06, 1.2], [0.2, 0.98], [0.3, 0.9], [0.46, 0.94], [0.62, 0.86], [0.78, 0.92], [0.9, 0.85], [0.97, 0.83]];
-    const rot = rng() * 6.28;
-    // Os recortes da parede (reentrâncias e esporões) são os mesmos em todos os anéis, para a parede não torcer.
-    const wob = Array.from({ length: N }, (_, i) => (i % 2 ? 0.88 : 1.1) * (0.92 + rng() * 0.16));
-    const ang0 = Array.from({ length: N }, (_, i) => rot + ((i + (rng() - 0.5) * 0.35) / N) * Math.PI * 2);
-    const rings: V3[][] = prof.map(([hh, rr]) =>
+  MESA_BLOCKS.forEach((blk, k) => {
+    const { x: ox, z: oz, R, H } = blk;
+    const N = o.far ? blk.nFar : blk.n;
+    // Contorno: harmônicas de fases sorteadas e um entalhe fundo (a ravina), os mesmos em todos os anéis e nas duas versões.
+    const ph = [rng() * 6.28, rng() * 6.28, rng() * 6.28];
+    const am = [0.13 + rng() * 0.07, 0.09 + rng() * 0.06, 0.06 + rng() * 0.05];
+    const notchA = rng() * 6.28, notchW = 0.32 + rng() * 0.2, notchD = 0.34 + rng() * 0.12;
+    const contour = (a: number) => {
+      let dn = Math.abs(a - notchA) % (Math.PI * 2);
+      if (dn > Math.PI) dn = Math.PI * 2 - dn;
+      return 1 + am[0] * Math.sin(2 * a + ph[0]) + am[1] * Math.sin(3 * a + ph[1]) + am[2] * Math.sin(5 * a + ph[2]) - notchD * Math.exp(-((dn / notchW) ** 2));
+    };
+    // Estratos de espessura variável: fronteiras entre o talude e o topo, e o valor (claro, escuro...) de cada faixa.
+    const talusTop = 0.17 + rng() * 0.07;
+    const ws = Array.from({ length: blk.strata }, () => 0.45 + rng());
+    const wsum = ws.reduce((a2, b2) => a2 + b2, 0);
+    const bounds: number[] = [talusTop];
+    ws.forEach((w) => bounds.push(bounds[bounds.length - 1] + (w / wsum) * (0.97 - talusTop)));
+    const bandVal = ws.map((_, i) => (i % 2 ? 0.82 : 1.08) * (0.93 + rng() * 0.14));
+    const bulge = ws.map((_, i) => (i % 2 ? 0.93 : 1.0) * (0.97 + rng() * 0.06));
+    // Topo inclinado: um lado sobe e o outro desce até ~10% da altura.
+    const tilt = (0.05 + rng() * 0.05) * (rng() < 0.5 ? -1 : 1), tiltDir = rng() * 6.28;
+    // Anéis [fração da altura, raio em frações de R, faixa de cima]; o de baixo afunda no chão.
+    const full: [number, number, number][] = [[-0.06, 1.34, -1], [talusTop, 1.04, -1]];
+    bounds.slice(1).forEach((hh, i) => full.push([hh, bulge[i], i]));
+    full.push([1, 0.86, blk.strata - 1]);
+    const rings = o.far ? [full[0], full[1], full[Math.ceil(full.length / 2)], full[full.length - 1]] : full;
+    const verts: V3[][] = rings.map(([hh, rr], ri) =>
       Array.from({ length: N }, (_, i) => {
-        const r = R * rr * (hh < 0.25 ? 1 + (wob[i] - 1) * 0.4 : wob[i]);
-        return [ox + Math.cos(ang0[i]) * r, H * hh, oz + Math.sin(ang0[i]) * r] as V3;
+        const a = ((i + (o.far ? 0 : Math.sin(i * 12.9 + k) * 0.18)) / N) * Math.PI * 2;
+        const cf = contour(a);
+        const r = R * rr * (hh < talusTop - 0.01 ? 1 + (cf - 1) * 0.5 : cf) * (o.far ? 1 : 0.985 + 0.03 * Math.abs(Math.sin(i * 7.7 + ri * 3.1 + k)));
+        return [ox + Math.cos(a) * r, H * hh + (hh > 0 ? tilt * H * hh * Math.cos(a - tiltDir) * (r / R) : 0), oz + Math.sin(a) * r] as V3;
       }),
     );
-    const strata = (hh: number) => {
-      let f = STRATA[0][1];
-      for (const [t, v] of STRATA) if (hh >= t * 0.98) f = v;
-      return f * (0.97 + rng() * 0.06);
-    };
-    const put = (a: V3, b: V3, d: V3) => {
+    const put = (a: V3, b: V3, d: V3, band: number) => {
       const yc = (a[1] + b[1] + d[1]) / 3;
-      const hh = yc / H;
-      const talus = hh < 0.28;
-      const f = strata(hh);
+      const talus = band < 0;
+      const f = (talus ? 1 : bandVal[band]) * (0.97 + rng() * 0.06) * (talus ? 0.98 + 0.12 * (1 - Math.max(0, yc) / (H * talusTop)) : 1);
       // O talude clareia na direção da areia do pé; a parede leva o estrato; o pé afundado (y < 0,015) tem a cor do chão.
       c.setRGB(f * (talus ? 1.06 : 1), f * (talus ? 1.03 : 0.98), f * (talus ? 0.96 : 0.9));
       const base = c.clone();
@@ -91,24 +105,41 @@ export function mesaGeometry(o: { foot: THREE.ColorRepresentation; far?: boolean
       face(a, b, d, vc(a), vc(b), vc(d), vt(a), vt(b), vt(d), ox, oz);
     };
     for (let ri = 0; ri + 1 < rings.length; ri++) {
+      const band = rings[ri + 1][2];
       for (let i = 0; i < N; i++) {
         const j = (i + 1) % N;
-        const a = rings[ri][i], b = rings[ri][j], d = rings[ri + 1][j], e = rings[ri + 1][i];
+        const a = verts[ri][i], b = verts[ri][j], d = verts[ri + 1][j], e = verts[ri + 1][i];
         if ((i + ri + k) % 2) {
-          put(a, b, d);
-          put(a, d, e);
+          put(a, b, d, band);
+          put(a, d, e, band);
         } else {
-          put(a, b, e);
-          put(b, d, e);
+          put(a, b, e, band);
+          put(b, d, e, band);
         }
       }
     }
-    // Topo chato de areia clara, com um leve abaulado no meio.
-    const top = rings[rings.length - 1];
+    // Topo de areia clara, com um leve abaulado no meio.
+    const top = verts[verts.length - 1];
     const apex: V3 = [ox, H * 1.02, oz];
     for (let i = 0; i < N; i++) {
       const j = (i + 1) % N;
       face(top[i], top[j], apex, cap, cap, cap, 0, 0, 0, ox, oz);
+    }
+    // Blocos caídos no pé do maciço (só na versão cheia): octaedros achatados de rocha, no talude.
+    if (k === 0 && !o.far) {
+      for (let q = 0; q < 6; q++) {
+        const a = 0.4 + q * 1.05 + rng() * 0.4, rr = R * (1.38 + rng() * 0.22) * contour(a), s = 0.022 + rng() * 0.03;
+        const cx = ox + Math.cos(a) * rr, cz = oz + Math.sin(a) * rr, cy = s * 0.2;
+        const g = new THREE.OctahedronGeometry(s, 0).rotateY(rng() * 3);
+        const pp = g.attributes.position as THREE.BufferAttribute;
+        const f = 0.9 + rng() * 0.2;
+        c.setRGB(f * 1.04, f, f * 0.9);
+        const rc = c.clone();
+        for (let t = 0; t < pp.count; t += 3) {
+          const tv = [0, 1, 2].map((u) => [cx + pp.getX(t + u), cy + pp.getY(t + u) * 0.62, cz + pp.getZ(t + u)] as V3);
+          face(tv[0], tv[1], tv[2], rc, rc, rc, 1, 1, 1, cx, cz);
+        }
+      }
     }
   });
   const g = new THREE.BufferGeometry();

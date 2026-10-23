@@ -173,12 +173,12 @@ export class Sprites {
   }
 
   /** Anel de poeira quando a peça assenta. */
-  dust(x: number, z: number, color: THREE.Color, n: number) {
+  dust(x: number, z: number, color: THREE.Color, n: number, y0 = 0) {
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + Math.random() * 0.4;
       const r = 0.82 + Math.random() * 0.15;
       const sp = 0.35 + Math.random() * 0.45;
-      this.soft.add({ x: x + Math.cos(a) * r, y: 0.02, z: z + Math.sin(a) * r, vx: Math.cos(a) * sp, vy: 0.12 + Math.random() * 0.18, vz: Math.sin(a) * sp, age: 0, life: 0.8 + Math.random() * 0.5, size: 0.16 + Math.random() * 0.12, grow: 1.6, color, alpha: 0.55, drag: 3, gravity: 0.05, seed: Math.random() });
+      this.soft.add({ x: x + Math.cos(a) * r, y: y0 + 0.02, z: z + Math.sin(a) * r, vx: Math.cos(a) * sp, vy: 0.12 + Math.random() * 0.18, vz: Math.sin(a) * sp, age: 0, life: 0.8 + Math.random() * 0.5, size: 0.16 + Math.random() * 0.12, grow: 1.6, color, alpha: 0.55, drag: 3, gravity: 0.05, seed: Math.random() });
     }
   }
 

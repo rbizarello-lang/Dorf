@@ -125,18 +125,21 @@ function flatHull(len: number, w: number, h: number) {
 
 /**
  * Tjalk: barco de carga de fundo chato dos rios e do Zuiderzee, com as quilhas laterais (leeboards) em pá, mastro
- * curto, vela de gávea marrom-ferrugem, buja na proa e a cabine pequena na popa. ~110 triângulos.
+ * curto, vela de gávea marrom-ferrugem, buja na proa e a cabine pequena na popa. ~110 triângulos. `part` separa o
+ * velame (`rig`) do casco: o barco que anda é casco + velame em dois lotes, para baixar o mastro sob a ponte levadiça.
  */
-export function tjalkParts(hull: string, sail: string): Part[] {
+export function tjalkParts(hull: string, sail: string, part: 'all' | 'hull' | 'rig' = 'all'): Part[] {
   const wood = '#4a3a30';
-  return [
+  const body: Part[] = [
     { geo: flatHull(0.15, 0.044, 0.024), color: hull },
     { geo: box(0.15, 0.004, 0.046, 0, 0.022), color: '#7a5a3c' },
     { geo: box(0.03, 0.02, 0.028, -0.052, 0.024), color: '#f1e6d2' },
     { geo: box(0.034, 0.004, 0.032, -0.052, 0.044), color: '#3e3530' },
     // Leeboards: pás arredondadas que pendem dos dois bordos, inclinadas para fora.
     ...[1, -1].map((s) => ({ geo: new THREE.BoxGeometry(0.036, 0.004, 0.026).rotateX(s * 0.55).translate(0.01, 0.014, s * 0.034), color: '#6a4a32' })),
-    // Mastro, retranca e vela de gávea (um quadrilátero de dois triângulos) mais a buja.
+  ];
+  // Mastro, retranca e vela de gávea (um quadrilátero de dois triângulos) mais a buja.
+  const rig: Part[] = [
     { geo: cyl(0.0025, 0.003, 0.14, 4, 0.012, 0.02), color: wood },
     { geo: strut([-0.05, 0.05, 0], [0.012, 0.06, 0], 0.003), color: wood },
     { geo: strut([-0.044, 0.07, 0], [0.0, 0.16, 0], 0.0025), color: wood },
@@ -147,40 +150,65 @@ export function tjalkParts(hull: string, sail: string): Part[] {
     { geo: tri([0.016, 0.05, 0], [0.016, 0.13, 0], [0.07, 0.034, 0]), color: '#e8dcc4' },
     { geo: tri([0.016, 0.13, 0], [0.016, 0.05, 0], [0.07, 0.034, 0]), color: '#e8dcc4' },
   ];
+  return part === 'hull' ? body : part === 'rig' ? rig : [...body, ...rig];
 }
+
+/** Ponto em que o mastro do tjalk nasce (x, y no espaço do barco): o eixo da escala que baixa o velame sob a ponte. */
+export const TJALK_MAST_FOOT = { x: 0.012, y: 0.02 };
 
 // ---------------------------------------------------------------- ponte e portão
 
 /**
- * Ponte levadiça de contrapeso (aqui fechada): tabuleiro plano e baixo entre dois encontros de tijolo, e sobre cada
- * encontro um pórtico de dois postes com a viga de balanço inclinada e a corrente que desce até o tabuleiro. A ponte
- * atravessa ao longo de x (a água corre em z), como as outras. Madeira escura com guarda-corpo branco.
+ * Ponte levadiça de contrapeso, como a Magere Brug de Amsterdam (aqui fechada): tabuleiro de tábuas entre dois
+ * encontros de tijolo e, sobre cada encontro, um par de pórticos em A de madeira branca. De cada pórtico sai a viga
+ * de balanço longa, que sobe sobre o vão e leva uma corrente até a borda do tabuleiro; atrás, a ponta curta da viga
+ * carrega o contrapeso. A ponte atravessa ao longo de x (a água corre em z), como as outras. O tabuleiro fica a
+ * `deckY` (0,07), alto o bastante para o casco do tjalk passar por baixo; o velame dele baixa (life.ts).
  */
 export function drawbridgeParts(main: string, det: string): Part[] {
   const L = 0.31;
-  const deckY = 0.05;
+  const deckY = 0.07;
+  const wood = '#8a6a46';
   const parts: Part[] = [];
-  parts.push({ geo: box(2 * L - 0.1, 0.012, 0.078, 0, deckY - 0.012), color: main });
+  // Tabuleiro de tábuas com a junta das duas folhas no meio e as vigas de borda escuras.
+  parts.push({ geo: box(2 * L - 0.1, 0.012, 0.078, 0, deckY - 0.012), color: wood, grad: [0.85, 1.05, deckY - 0.012, deckY] });
+  parts.push({ geo: box(0.004, 0.0015, 0.078, 0, deckY), color: main });
+  for (const z of [0.039, -0.039]) parts.push({ geo: box(2 * L - 0.1, 0.008, 0.005, 0, deckY - 0.014, z), color: main });
+  // Guarda-corpo branco ao longo do tabuleiro.
   for (const z of [0.04, -0.04]) {
-    parts.push({ geo: box(2 * L - 0.1, 0.006, 0.006, 0, deckY + 0.026, z), color: det });
-    for (let i = 0; i <= 5; i++) parts.push({ geo: box(0.005, 0.03, 0.005, -L + 0.05 + ((2 * L - 0.1) * i) / 5, deckY, z), color: det });
+    parts.push({ geo: box(2 * L - 0.1, 0.005, 0.005, 0, deckY + 0.024, z), color: det });
+    for (let i = 0; i <= 8; i++) parts.push({ geo: box(0.005, 0.026, 0.005, -L + 0.05 + ((2 * L - 0.1) * i) / 8, deckY, z), color: det });
   }
   for (const s of [1, -1]) {
     const x = s * (L - 0.05);
-    // Encontro de tijolo, do fundo do leito ao tabuleiro.
+    // Encontro de tijolo, do fundo do leito ao tabuleiro, com a rampa de tijolo que desce ao chão do lado de terra.
     parts.push({ geo: box(0.1, deckY + 0.02, 0.11, x, -0.03), color: '#a0553a', grad: [0.75, 1.05, -0.03, deckY] });
     parts.push({ geo: box(0.106, 0.008, 0.116, x, deckY - 0.004), color: '#d8cdb6' });
-    // Pórtico: dois postes e a travessa; a viga de balanço sobe inclinada para o lado de fora do vão.
-    for (const z of [0.052, -0.052]) {
-      parts.push({ geo: box(0.01, 0.13, 0.01, x - s * 0.02, deckY, z), color: main });
-      parts.push({ geo: strut([x - s * 0.02, deckY + 0.12, z], [x + s * 0.045, deckY + 0.185, z], 0.008), color: main });
-      parts.push({ geo: strut([x - s * 0.02, deckY + 0.12, z], [x - s * 0.17, deckY + 0.185, z], 0.006), color: main });
-      // Corrente: da ponta da viga ao tabuleiro, no lado do vão.
-      parts.push({ geo: strut([x - s * 0.17, deckY + 0.185, z], [x - s * 0.17, deckY + 0.02, z], 0.0025), color: '#2a2622' });
+    const ramp = new THREE.Shape();
+    ramp.moveTo(0, -0.03);
+    ramp.lineTo(0.075, -0.03);
+    ramp.lineTo(0.0, deckY + 0.004);
+    ramp.closePath();
+    const wedge = new THREE.ExtrudeGeometry(ramp, { depth: 0.1, bevelEnabled: false }).translate(0, 0, -0.05);
+    if (s < 0) wedge.rotateY(Math.PI);
+    parts.push({ geo: wedge.translate(s * (L - 0.0), 0, 0), color: '#a0553a', grad: [0.75, 1.05, -0.03, deckY] });
+    // Pares de pórticos em A (um de cada lado do tabuleiro), a viga de balanço, a corrente e o contrapeso.
+    const xc = s * 0.25;
+    const apex = deckY + 0.14;
+    const tip: V3 = [s * 0.08, deckY + 0.215, 0];
+    const tail: V3 = [s * 0.31, deckY + 0.105, 0];
+    for (const z of [0.046, -0.046]) {
+      for (const d of [-1, 1]) parts.push({ geo: strut([xc + d * 0.032, deckY, z], [xc, apex, z], 0.009), color: det });
+      parts.push({ geo: box(0.05, 0.006, 0.008, xc, deckY + 0.05, z), color: det });
+      parts.push({ geo: strut([tip[0], tip[1], z], [tail[0], tail[1], z], 0.009), color: det });
+      parts.push({ geo: strut([tip[0], tip[1], z], [tip[0], deckY + 0.026, z * 0.93], 0.0028), color: main });
+      parts.push({ geo: box(0.01, 0.01, 0.01, tip[0], tip[1] - 0.004, z), color: main });
     }
-    parts.push({ geo: box(0.01, 0.01, 0.114, x - s * 0.02, deckY + 0.12), color: main });
-    // Contrapeso: caixa de pedra na ponta da viga do lado de terra.
-    parts.push({ geo: box(0.02, 0.026, 0.1, x + s * 0.052, deckY + 0.16), color: '#8a8478' });
+    // Travessas entre os dois pórticos (no alto e a meia altura) e o contrapeso pendurado na ponta curta das vigas.
+    parts.push({ geo: box(0.012, 0.01, 0.104, xc, apex - 0.005), color: det });
+    parts.push({ geo: box(0.008, 0.008, 0.092, xc, deckY + 0.05), color: det });
+    parts.push({ geo: box(0.022, 0.044, 0.1, tail[0], tail[1] - 0.046), color: '#6e675c' });
+    parts.push({ geo: box(0.01, 0.012, 0.1, tail[0], tail[1] - 0.004), color: det });
   }
   return parts;
 }

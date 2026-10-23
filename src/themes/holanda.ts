@@ -96,7 +96,7 @@ export const holanda: Theme = {
   grade: { shadow: '#5a6a7a', light: '#ffd889', saturation: 1.0 },
   atmos: { haze: 1.35, hazeColor: '#cfe0e8', wind: 1.3, filter: [0.99, 1, 1.03] },
   // Relevo de dique: o prado ganha aterros baixos e compridos (sem serras, o país é plano).
-  relief: { amp: 0.9, style: 'dique' },
+  relief: { amp: 0.9, style: 'dique', levels: 0 },
   ambience: [
     { kind: 'vento', weight: 0.7 },
     { kind: 'sinos', weight: 0.45 },

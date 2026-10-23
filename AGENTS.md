@@ -86,6 +86,9 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?gallery&theme=<id>` | mostra todos os kits do tema lado a lado; `window.__gallery` lista as chaves. `?gallery=casas` mostra só as casas (parede e telhado juntos, na era atual) |
 | `?auto=40` | a IA gulosa coloca 40 peças |
 | `?stress=1000` | teste de carga; o resultado fica em `window.__load` |
+| `?levels=0` | desliga o relevo (platôs de `Theme.relief.levels`): o tabuleiro sai plano, para comparar capturas |
+| `?step=rail` ou `?step=water.1` / `window.__step(tipo, i, zoom)` | centraliza (de frente para a parede, de lado) na i-ésima borda de estrada ou de rio entre níveis diferentes: a rampa ou a corredeira; devolve `{ q, r, edge, de, para }` ou null |
+| `window.__cells()` / `window.__pick(x, y)` | casas vazias da fronteira com `{ q, r, level, x, y }` (nível e ponto da tela) e a casa que o clique em (x, y) escolhe: teste do clique por nível |
 | `?focus=4` | centraliza a câmera na peça com mais bordas do terreno (4 = rio); `window.__focus(t, zoom)` |
 | `?economia=0` | desliga a economia de quadros (ver Orçamento de desempenho) |
 | `?webgl` | força o backend WebGL2 (o padrão é WebGPU quando o navegador oferece) |
@@ -111,6 +114,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__deco(prefixo, i?, zoom?)` | centraliza na i-ésima instância dos kits cuja chave começa com o prefixo (`'gate'`, `'egg:'`, `'wall:'`) e devolve a chave; só enxerga os lotes do mapa, não o `Life` |
 | `window.__egg(id)` | toca os efeitos de evento, céu e som de um easter egg do tema no foco da câmera (o kit na peça só nasce numa jogada). `__stats.eggSky` mostra o quanto do tom de céu do ovo já entrou (0 a 1) |
 | `window.__relief(i?, zoom?)` | centraliza na i-ésima serra ou morro assentado (`Theme.relief`) e devolve `'peak'` ou `'hill'` |
+| `window.__bridge(i?, zoom?)` | centraliza na i-ésima ponte assentada e devolve o giro dela (capturas da ponte levadiça e do mastro baixando) |
 | `window.__site(zoom?)` | centraliza no último sítio achado (ou no primeiro escondido) e devolve qual |
 | `?specials=all` / `window.__special(i?, zoom?)` | põe as peças especiais na partida sem liberá-las; centraliza na i-ésima colocada e devolve qual |
 | `window.__wonder(etapa?, zoom?)` | centraliza no canteiro da maravilha; com `etapa` (0 a 6), mostra a obra nessa etapa |
@@ -139,6 +143,7 @@ src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em
   seasons.ts     estações da partida (a cada 20 jogadas), derivadas do índice da peça: o replay não guarda nada
   specials.ts    peças especiais (estação, moinho d'água, farol): bordas, pontos e posições na pilha
   eggs.ts        easter eggs genéricos (`Theme.eggs`): gatilhos de peça (`EggTracker`, reavaliado na ordem das peças) e de relógio (`clockEggs`), fase do dia (`phaseOfTod`); puro, testado em tests/eggs.ts
+  relief.ts      nível de altura de cada casa (`levelAt(seed, q, r, maxLevel)`, 0 a 2): ruído suave de onda longa, vizinhos a no máximo 1 nível, origem no 0, sem casas soltas; só aparência
   rng.ts         mulberry32 e utilitários de sorteio
 src/themes/      temas como DADOS
   types.ts       esquema Theme, com cada kit comentado: é a referência de tudo que um tema pode escolher
@@ -191,6 +196,7 @@ src/main.ts      entrada: fluxo da partida, telas e botões, qualidade, salvamen
 tests/logic.ts      simulação de partidas contra oráculos independentes (grupos por BFS, pontuação recalculada, replay)
 tests/synthetic.ts  cenários montados à mão (peça travada, descarte, fim de jogo, semente → sequência)
 tests/legibility.ts telhados e paredes contra o chão da vila (ΔE em CIELAB, ponderado pelo peso das casas)
+tests/relief.ts     níveis de altura: determinismo, vizinhos a ≤1 degrau, origem no 0, distribuição, sem casas soltas
 tests/storage.ts    ida e volta do backup com armazenamento falso e recusas sem gravar
 tests/eggs.ts       gatilhos dos easter eggs: horas, datas (inclusive virando o ano), sorte por semente, grupos conferidos por BFS numa partida de verdade e replay idêntico
 tests/themes.ts     os 5 temas, `?theme=` antigo, migração dos recordes dos temas fundidos e o progresso dos removidos
@@ -251,6 +257,12 @@ scripts/         capturas, teste de carga, conversão para página publicável; 
     - Foto e vídeo copiam o canvas logo depois do `tick`, no mesmo passo do desenho.
 
 14. **Easter eggs: a partida decide a peça, o relógio só enfeita.** Gatilho de peça (`pecas`, `grupo`, `bordas`, `sorte`) sai só do índice, das bordas e da semente da peça: o `EggTracker` os reavalia na ordem, então replay, desfazer e carregar o save reconstroem os mesmos kits (invariante 3) sem guardar nada. Gatilho de relógio (`hora`, `data`) só dispara evento, céu e som, nunca põe kit na peça, fica fora do save e do replay e roda em `main.ts` (`eggClock`). Nada de `if (theme.id)`: o ovo é dado do tema.
+
+15. **O nível da casa sai só da semente.** `levelAt(seed, q, r, maxLevel)` (`core/relief.ts`) é pura: a peça sabe o nível de todos os vizinhos, colocados ou não, então a emenda não depende da ordem das jogadas e nada entra no save, no replay nem no `SAVE_VERSION`. É só aparência, por `Theme.relief.levels` (0 ou omitido = plano; 1 ou 2 = platôs).
+    - `World` guarda a semente (`reliefSeed`, posta pelo `newGame`) e tira o nível de `levelOf`/`heightOf`/`heightAt` (`LEVEL_STEP` = 0,3 de altura por nível). A peça é montada em y local 0 e levantada pela matriz (`tileMatrix`): decorações, vida e efeitos herdam a altura; a pilha e a galeria ficam no 0. O que for desenhado numa casa fora de uma peça (marcas, estandartes, fantasma, maravilha, estampas) soma `heightOf`.
+    - `buildTile` recebe `BuildOpts.levels` (nível próprio e das 6 vizinhas, na orientação de origem). Peça no nível 0 sai idêntica à de antes. Em platô: a parede desce sempre até o fundo comum (sem fresta em qualquer ordem), em rocha de camadas (`relief.rock`) onde a vizinha é mais baixa; estrada e trilho descem em rampa (`RAMP_ROAD`) e o rio em corredeira (`RAMP_WATER`) até o nível da vizinha mais baixa, com o chão e a água acompanhando a mesma função (`rampY`).
+    - A correnteza é forçada pelo nível (`flowAt`): a água sai pela borda da peça alta e entra pela da baixa, igual dos dois lados. O barco trata o degrau como fim de linha (a cachoeira de verdade é a etapa seguinte).
+    - O clique usa `World.pickHex` (um plano por nível, do mais alto ao chão); a câmera segue a altura da casa sob o alvo (`focusY`). O mapa do chão e a costura de cor continuam 2D.
 
 ### Interface calma
 
