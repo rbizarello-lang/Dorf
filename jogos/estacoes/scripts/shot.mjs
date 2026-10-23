@@ -18,7 +18,7 @@ const SHOTS = {
   outono: 'season=2&hour=manha&year=1&yaw=28',
   'inverno-noite': 'season=3&hour=noite&year=1&yaw=28',
   ano3: 'season=1&hour=tarde&year=3&yaw=28',
-  perto: 'season=2&hour=tarde&year=1&yaw=20&zoom=2.3&pitch=24',
+  perto: 'season=2&hour=tarde&year=1&yaw=12&zoom=2.1&pitch=46',
 };
 const want = process.argv.slice(2);
 for (const w of want) { const k = w.indexOf('::'); if (k > 0) SHOTS[w.slice(0, k)] = w.slice(k + 2); }

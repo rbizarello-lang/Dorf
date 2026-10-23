@@ -705,7 +705,7 @@ export class World {
     this.moonDisc.scale.setScalar(Math.max(0.0001, H.moonVis));
     const sh = this.sunHalo, mh = this.moonHalo;
     sh.x = this.sunDisc.position.x; sh.y = this.sunDisc.position.y; sh.z = this.sunDisc.position.z;
-    sh.bx = sh.by = sh.bz = 1.7 * H.sunVis; sh.col.copy(H.sunCol).multiplyScalar(0.55);
+    sh.bx = sh.by = sh.bz = 1.2 * H.sunVis; sh.col.copy(H.sunCol).multiplyScalar(0.32);
     mh.x = this.moonDisc.position.x; mh.y = this.moonDisc.position.y; mh.z = this.moonDisc.position.z;
     mh.bx = mh.by = mh.bz = 2.0 * H.moonVis; mh.col.setRGB(0.5, 0.58, 0.9);
     // janelas
@@ -853,7 +853,7 @@ export class World {
     const mistAmt = S.mist * H.mist;
     this.mistM.forEach((m, i) => {
       const mat = m.material as THREE.MeshBasicMaterial;
-      mat.opacity = clamp01(mistAmt) * (0.5 - i * 0.1);
+      mat.opacity = clamp01(mistAmt) * (0.85 - i * 0.18);
       mat.color.copy(H.mistCol);
       m.rotation.z += dt * (0.01 + i * 0.006) * (i % 2 ? -1 : 1);
       m.visible = mat.opacity > 0.004;
