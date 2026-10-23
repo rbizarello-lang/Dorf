@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
-import { Fn, abs, cameraPosition, dot, exp, float, length, max, mix, output, positionView, positionWorld, select, smoothstep, texture, uniform, vec2, vec3, vec4 } from 'three/tsl';
+import { Fn, If, abs, cameraPosition, dot, exp, float, length, max, mix, output, positionView, positionWorld, select, smoothstep, texture, uniform, vec2, vec3, vec4 } from 'three/tsl';
+import { auroraHaze } from './aurora';
 import { U, noiseTex } from './materials';
 
 // Atmosfera: a névoa da cena, no lugar do THREE.Fog linear de cor única. São três camadas:
@@ -67,5 +68,10 @@ export const fogNode = Fn(() => {
   const misted = output.rgb.mul(tMist).add(glow.add(A.mistColor).mul(vec3(1).sub(tMist)));
   const col = misted.mul(tHaze).add(glow.add(A.haze).mul(vec3(1).sub(tHaze)));
   const range = smoothstep(A.near, A.far, positionView.z.negate());
-  return vec4(mix(col, A.bg, range), output.a);
+  // Aurora boreal (Theme.skyFx): a luz da cortina tinge o fundo para onde a névoa de alcance leva o chão.
+  const bg: N = A.bg.toVar();
+  If(U.aurora.greaterThan(1e-3), () => {
+    bg.addAssign(auroraHaze(toP.div(dist)));
+  });
+  return vec4(mix(col, bg, range), output.a);
 })();

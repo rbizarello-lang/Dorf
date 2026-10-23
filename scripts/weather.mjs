@@ -1,12 +1,12 @@
-// Clima tocável nos 14 temas: dispara chuva, neve e sol por window.__weather e falha com erro no console.
+// Clima tocável nos 5 temas: dispara chuva, neve e sol por window.__weather e falha com erro no console.
 // Uso: npm run build && (cd dist && python3 -m http.server 4173 &) && node scripts/weather.mjs [baseUrl]
-// Variáveis: SHOTS=vale:rain,inverno:snow,egito:sun grava capturas em SHOT_DIR (padrão ./weather-shots);
-// WAIT (ms por clima, padrão 2500); THEMES=vale,egito limita os temas.
+// Variáveis: SHOTS=holanda:rain,inverno:snow,egito:sun grava capturas em SHOT_DIR (padrão ./weather-shots);
+// WAIT (ms por clima, padrão 2500); THEMES=holanda,egito limita os temas.
 import { mkdirSync } from 'node:fs';
 import { launch } from './browser.mjs';
 
 const base = process.argv[2] ?? 'http://127.0.0.1:4173/';
-const themes = ['vale', 'holanda', 'cerrado', 'inverno', 'sakura', 'marte', 'egito', 'song', 'viking', 'toscana', 'edo', 'colonial', 'oeste', 'andes'];
+const themes = ['holanda', 'egito', 'oriental', 'brasil', 'inverno'];
 const kinds = ['rain', 'snow', 'sun'];
 const wait = Number(process.env.WAIT ?? 2500);
 const shots = Object.fromEntries((process.env.SHOTS ?? '').split(',').filter(Boolean).map((s) => s.split(':')));

@@ -1,6 +1,6 @@
 # AGENTS.md: guia para agentes de IA
 
-> **Resumo em inglês:** *Retalhos* is a relaxing hex-tile puzzle in the Dorfromantik genre, with 14 historical/regional themes. Stack: TypeScript, three.js r186 (WebGPURenderer with TSL node materials; WebGPU where available, automatic WebGL2 fallback) and Vite, with procedural geometry and no art assets. The build is a single HTML file. Before every commit, run `npm run check`, which does the typecheck, simulates 600 games and builds. UI text, docs, code comments and commit messages are in Brazilian Portuguese.
+> **Resumo em inglês:** *Retalhos* is a relaxing hex-tile puzzle in the Dorfromantik genre, with 5 historical/regional themes (Holanda, Egito, Oriental, Brasil, Inverno). Stack: TypeScript, three.js r186 (WebGPURenderer with TSL node materials; WebGPU where available, automatic WebGL2 fallback) and Vite, with procedural geometry and no art assets. The build is a single HTML file. Before every commit, run `npm run check`, which does the typecheck, simulates 600 games and builds. UI text, docs, code comments and commit messages are in Brazilian Portuguese.
 
 Este arquivo existe para que qualquer agente (Claude Code, Codex, Cursor, Copilot, Gemini etc.) entenda o projeto e trabalhe nele sem quebrar o que já funciona. O `README.md` é o manual de quem joga e roda o projeto. Este arquivo é o manual de quem mexe no código.
 
@@ -8,7 +8,7 @@ Este arquivo existe para que qualquer agente (Claude Code, Codex, Cursor, Copilo
 
 - **O que é:** um protótipo jogável (v3) de puzzle de peças hexagonais. Cada peça tem 6 bordas de terreno, e quem joga encaixa a peça no mapa buscando bordas iguais.
 - **O que a v3 tem:**
-  - 14 temas de países e épocas;
+  - 5 temas de países e épocas (Holanda Dourada, o padrão; Egito do Nilo; Terraços do Oriente; Brasil Dourado; Inverno Nórdico), consolidados dos 14 de antes (`docs/TEMAS.md`);
   - interações entre bordas diferentes, que dão pontos e erguem construções;
   - mundo animado: trigo ao vento, barcos, trens, moinhos, animais;
   - ciclo de dia, entardecer e noite.
@@ -20,7 +20,7 @@ Este arquivo existe para que qualquer agente (Claude Code, Codex, Cursor, Copilo
 |---|---|
 | `README.md` | regras do jogo, controles, temas, parâmetros de URL |
 | `docs/VIABILIDADE.md` | decisões de arquitetura, medições de desempenho, histórico das revisões de código, riscos |
-| `docs/TEMAS.md` | pesquisa histórica dos 8 temas de época e a **lista priorizada de kits a adicionar** |
+| `docs/TEMAS.md` | nota da consolidação de 14 para 5 temas, pesquisa histórica dos temas de época e a **lista priorizada de kits a adicionar** |
 | `docs/DIVIDAS.md` | dívidas técnicas: plano para quebrar o `main.ts`, arquivos grandes, exports sem uso, branches antigas |
 | `docs/PESQUISA.md` | mecânicas do original, stacks, mercado e aspectos legais |
 | `docs/screens/*.png` | capturas de referência, uma por tema e por situação |
@@ -39,7 +39,7 @@ npm install          # Node >= 22.12 (ver .nvmrc)
 npm run dev          # servidor de desenvolvimento (Vite)
 npm run check        # typecheck + testes + build: rode antes de todo commit
 npm run typecheck    # tsc --noEmit
-npm test             # 600 partidas simuladas com oráculos independentes, cenários sintéticos, legibilidade das cores (tests/legibility.ts) e vídeo/câmera/nível por placa (tests/video.ts)
+npm test             # 600 partidas simuladas com oráculos independentes, cenários sintéticos, legibilidade das cores (tests/legibility.ts), vídeo/câmera/nível por placa (tests/video.ts) e os gatilhos dos easter eggs (tests/eggs.ts)
 npm run balance      # painel de equilíbrio (tests/balance.ts): média, p10/p50/p90 e origem dos pontos, por modo e por tema. Não entra no check. `npm run balance -- 40` muda o tamanho da amostra (padrão 80). Meta dos Exploradores: o jogador "caça sítios" acha os 10 em pelo menos 50% das partidas (linha "todos os sítios"); o guloso puro não mira sítios e fica bem abaixo, de propósito
 npm run build        # dist/index.html (arquivo único)
 npm run smoke        # depois do build: abre o jogo em WebGPU e WebGL2 e falha com erro no console
@@ -95,7 +95,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?silhueta` | decorações pretas sobre chão branco: confere se vilas, construções e marcos leem de longe |
 | `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
 | `window.__ripple(idade)` | dispara a onda do chão no foco da câmera, já com essa idade em segundos |
-| `window.__weather(tipo, idade?)` | clima tocável: `'rain'`, `'snow'`, `'sun'` ou `null` (encerra); com `idade` em segundos, já entra com essa idade (capturas por software). `scripts/weather.mjs` roda os 14 temas e falha com erro no console (`SHOTS=vale:rain,inverno:snow,egito:sun` grava capturas) |
+| `window.__weather(tipo, idade?)` | clima tocável: `'rain'`, `'snow'`, `'sun'` ou `null` (encerra); com `idade` em segundos, já entra com essa idade (capturas por software). `scripts/weather.mjs` roda os 5 temas e falha com erro no console (`SHOTS=holanda:rain,inverno:snow,egito:sun` grava capturas) |
 | `window.__celebrate()` | anel dourado e bando de pássaros no foco da câmera (efeitos de nova era) |
 | `window.__era(era, idade?, zoom?)` | centraliza no Centro da vila e o mostra na era (0 a 3); com `idade`, a onda dourada já com essa idade em segundos |
 | `window.__plaza(zoom?)` | mostra os três monumentos na praça do Centro (só a imagem) |
@@ -107,6 +107,10 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__boat(zoom?)` | centraliza a câmera num barco andando (esteiras na água) |
 | `window.__fishing(i?, cais?, zoom?)` | centraliza no i-ésimo cardume de peixes; com `cais = true`, no i-ésimo cais de pescador |
 | `window.__folk(i?, zoom?)` | centraliza a câmera no i-ésimo aldeão de construção |
+| `window.__fauna(i?, zoom?)` | centraliza no i-ésimo bicho da fauna do tema (`Theme.fauna`) à vista e devolve o kit (`fauna:deer`...). `__stats.life.fauna` conta os que estão à vista na hora do dia e `faunaKinds` separa por espécie |
+| `window.__deco(prefixo, i?, zoom?)` | centraliza na i-ésima instância dos kits cuja chave começa com o prefixo (`'gate'`, `'egg:'`, `'wall:'`) e devolve a chave; só enxerga os lotes do mapa, não o `Life` |
+| `window.__egg(id)` | toca os efeitos de evento, céu e som de um easter egg do tema no foco da câmera (o kit na peça só nasce numa jogada). `__stats.eggSky` mostra o quanto do tom de céu do ovo já entrou (0 a 1) |
+| `window.__relief(i?, zoom?)` | centraliza na i-ésima serra ou morro assentado (`Theme.relief`) e devolve `'peak'` ou `'hill'` |
 | `window.__site(zoom?)` | centraliza no último sítio achado (ou no primeiro escondido) e devolve qual |
 | `?specials=all` / `window.__special(i?, zoom?)` | põe as peças especiais na partida sem liberá-las; centraliza na i-ésima colocada e devolve qual |
 | `window.__wonder(etapa?, zoom?)` | centraliza no canteiro da maravilha; com `etapa` (0 a 6), mostra a obra nessa etapa |
@@ -134,19 +138,25 @@ src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em
   routes.ts      rotas de comércio do modo Estrada Real: mercados e portos ligados pela mesma rede rendem pela distância
   seasons.ts     estações da partida (a cada 20 jogadas), derivadas do índice da peça: o replay não guarda nada
   specials.ts    peças especiais (estação, moinho d'água, farol): bordas, pontos e posições na pilha
+  eggs.ts        easter eggs genéricos (`Theme.eggs`): gatilhos de peça (`EggTracker`, reavaliado na ordem das peças) e de relógio (`clockEggs`), fase do dia (`phaseOfTod`); puro, testado em tests/eggs.ts
   rng.ts         mulberry32 e utilitários de sorteio
 src/themes/      temas como DADOS
   types.ts       esquema Theme, com cada kit comentado: é a referência de tudo que um tema pode escolher
-  themes.ts      6 temas base, THEMES, PERIOD_LABEL/ORDER, themeById
-  eras.ts        8 temas históricos (Egito, Song, Vikings, Toscana, Edo, Colonial, Oeste, Andes)
+  themes.ts      índice: THEMES (os 5 temas, Holanda primeiro = padrão), PERIOD_LABEL/ORDER, themeById (ids antigos fundidos levam ao tema novo; MERGED_THEMES)
+  holanda.ts, egito.ts, oriental.ts, brasil.ts, inverno.ts   um tema por arquivo (oriental = Sakura + Song + Edo; brasil = Cerrado + Colonial; inverno absorveu o Viking)
+  legacy.ts      migração dos recordes `best.<modo>.<tema>` dos temas fundidos para o tema novo (o maior fica; puro, testado em tests/themes.ts)
   progress.ts    housesAtEra: as casas do tema em cada era da vila (taipa e palha, o tema, enxaimel e sobrado, flâmulas)
 src/render/
   gpu.ts         cria o WebGPURenderer (WebGPU ou WebGL2)
   materials.ts   materiais em TSL: chão, água, kits instanciados (vento, plantações, janelas), pergaminho do vazio (terra incógnita); uniformes U
+  relief.ts      relevo decorativo (`Theme.relief`): geometria dos kits `peak` (serra de rocha com neve opcional, cume + ombros) e `hill` (morro gramado), cada um com a versão leve; só aparência, sem regra; `mist` desbota o pé da serra e escurece o cume (picos de tinta do Oriente); `crown` põe mata no topo da serra no lugar da neve (chapada do Brasil)
+  kits/          geometria de kits de um tema só, em arquivo próprio, com um `case` por kit em `lib.ts`: `kits/egito.ts` (falésia de arenito `mesaGeometry` no pool `peak` com `relief.style: 'falesia'`, pilone, terraço e toldo, shaduf, íbis, crocodilo, boi de lira, esfinge, gato, pirâmide), `kits/holanda.ts` (empenas, álamo, bulbo, pato, tjalk, ponte levadiça, portão de tijolo, moinho, queijo e menino do dique), `kits/oriental.ts` (pinheiro `niwaki`, garça, cerejeira milenar, lago da carpa, gato da sorte), `kits/brasil.ts` (telhado colonial, cafezal em florada, engenho, zebu, ema, lobo-guará, tamanduá, arara, mula, carro de boi, porteira, cupinzeiro, profetas, onça; recebe as primitivas por `TOOLS`/`KitTools`), `kits/inverno.ts` (rena, alce, raposa, trenó, gelo, pórtico de dragões, stavkirke, troll; recebe as primitivas por `PRIMS`). Importam as primitivas de `lib.ts`, que as reexporta no fim (o ciclo é inofensivo: só se chamam depois do carregamento)
   noise.ts       texturas de ruído periódicas geradas em código (nuvens, chão, ondulação da água)
   atmosphere.ts  névoa da cena (scene.fogNode): bruma e névoa rasteira por altura, e a névoa de alcance
   groundMap.ts   mapa do chão visto de cima: cor do terreno (luz rebatida) e poças dos lampiões; cobertura (R8) para a costura de cor entre peças
   seaMap.ts      distância de cada ponto até a peça mais próxima (1 canal, só cresce): o mar, a espuma e a areia em volta do tabuleiro
+  riverMap.ts    distância de cada ponto até a água dos rios (1 canal, só cresce; só é preenchido com `Theme.floodplain`): a várzea do chão
+  aurora.ts      aurora boreal em TSL (`Theme.skyFx`): a cortina por direção do olhar, a cúpula do céu, o reflexo no mar e o brilho na névoa de alcance
   clouds.ts      nuvens volumétricas do zoom aberto, marchadas numa laje acima do tabuleiro
   post.ts        pós-processamento por perfil: SSGI ou GTAO, reflexos (SSR), raios de luz, TRAA, bloom,
                  profundidade de campo (Cinema) ou desfoque de miniatura (Alta e Ultra), vinheta, ombro de tons
@@ -155,6 +165,7 @@ src/render/
   tileBuilder.ts buildTile: monta UMA peça (chão com leito de rio, água com correnteza, estradas, decoração)
                  a partir de bordas + semente + tema. Vilas em quarteirões: uma rua clara do meio de cada borda de vila ao centro,
                  casas (1 por setor, 2 em ~30%) de cumeeira paralela à rua, e pracinha com poço com vila em 3+ bordas
+                 Relevo (`Theme.relief`, `amp` 0 ou omitido = sem relevo): uma serra ou um morro por peça de prado ou mata (gerador à parte, `seed ^ RELIEF_SEED`), perto do centro, só em setores sem vila nem lavoura, com a mata subindo a encosta do morro e pedras no pé da serra; reserva o lugar (`reserved`) antes das árvores e das casas
   world.ts       World: cena, luz, céu e hora do dia, blocos estáticos, pools instanciados, fantasma, animações
                  de queda, sentido da correnteza por peça
   liveTile.ts    LiveTile: peça avulsa (fantasma, queda, pilha)
@@ -181,6 +192,8 @@ tests/logic.ts      simulação de partidas contra oráculos independentes (grup
 tests/synthetic.ts  cenários montados à mão (peça travada, descarte, fim de jogo, semente → sequência)
 tests/legibility.ts telhados e paredes contra o chão da vila (ΔE em CIELAB, ponderado pelo peso das casas)
 tests/storage.ts    ida e volta do backup com armazenamento falso e recusas sem gravar
+tests/eggs.ts       gatilhos dos easter eggs: horas, datas (inclusive virando o ano), sorte por semente, grupos conferidos por BFS numa partida de verdade e replay idêntico
+tests/themes.ts     os 5 temas, `?theme=` antigo, migração dos recordes dos temas fundidos e o progresso dos removidos
 tests/video.ts      MP4 conferido por um leitor de caixas próprio, resolução dinâmica, nível por placa, câmera e filme
 scripts/         capturas, teste de carga, conversão para página publicável; pwa-plugin.mjs (plugin do Vite: manifesto, ícones PNG desenhados em código e sw.js no dist); pwa.mjs (confere SW, offline, manifesto e backup)
 ```
@@ -209,6 +222,7 @@ scripts/         capturas, teste de carga, conversão para página publicável; 
    - o progresso entre partidas (totais, registro por tema e peças especiais liberadas) fica em `retalhos.progress` (`src/ui/progress.ts`), validado campo a campo ao ler;
    - **exportar e importar** (`src/ui/storage.ts`, botões no Almanaque): o arquivo `{ app, v, at, data }` leva todas as chaves `retalhos.*`; ao importar, `save` passa por `validSave` (main.ts) e `progress` por `cleanProgress` (progress.ts), os outros valores só por tipo e tamanho, e nada é gravado se algo falhar. Chave nova de preferência entra no backup sozinha; chave com formato próprio que importe validar ganha um caso em `check` (`importProgress`, main.ts). Se mudar `SAVE_VERSION`, backups antigos trazem um save recusado: o jogador vê o aviso de dado inválido;
    - no Desafio do dia a regra do dia sai da `seed` (AAAAMMDD), então o save não guarda mais nada; mudar `DAILY_RULES` (ordem ou conteúdo) altera o replay e pede `SAVE_VERSION` novo. Variação nova só com campos de `Rules` que o oráculo de `tests/logic.ts` já cobre;
+  - **o tema do save:** `validSave` recusa um `rulesId` que não é um dos `THEMES` atuais (a importação do backup aceita o formato do id e deixa o descarte para o carregamento, com o aviso de versão anterior). Foi assim, sem `SAVE_VERSION` novo, que os 14 temas viraram 5: os fundidos e os removidos mudaram de regra ou sumiram e seus saves caem na validação, e os que ficaram (Holanda, Egito, Inverno) mantiveram as `rules`. Mudar as `rules` de um tema que fica altera o replay das partidas dele e pede `SAVE_VERSION` novo. O tema escolhido e `?theme=` passam por `themeById`, que leva o id antigo fundido ao novo e o removido ao padrão; o recorde `best.<modo>.<tema>` migra uma vez na leitura (`migrateBests`), e o registro de `retalhos.progress` de tema removido fica guardado, sem uso;
   - ao carregar, a partida é **reconstruída pelo replay** das jogadas e conferida contra a pontuação.
    - Se você mudar regras, pontuação ou geração de peças de um jeito que altere o replay, **aumente `SAVE_VERSION` em `main.ts`**. Saves antigos mostram um aviso e são descartados.
 7. **Os testes têm oráculos independentes.** Ao mudar a pontuação, atualize o oráculo em `tests/logic.ts` reimplementando a regra. Nunca faça o oráculo chamar o código que ele testa.
@@ -216,7 +230,7 @@ scripts/         capturas, teste de carga, conversão para página publicável; 
 9. **Materiais em TSL (three r186, `three/webgpu` e `three/tsl`):** nada de `onBeforeCompile` nem GLSL; o mesmo nó compila para WebGPU e WebGL2.
    - Importe sempre de `three/webgpu` (não de `three`), para o bundle não levar o WebGLRenderer.
    - Atributos por vértice dos kits: `color`, `tint` (quanto a cor da instância tinge) e `glow` (janelas que acendem com `U.night`). A cor da instância é o atributo `iColor` da geometria criada por `instGeometry()`; não use `mesh.instanceColor`, que o three multiplicaria de novo.
-   - Uniformes globais em `U` (`materials.ts`): `time`, `dt`, `wind`, `night`, `clouds`, `sparkle`, `glow`, `water`, `sun`, `sunDir`, `fine`, `bounce`, `lamps`, `eraWave`, `silhouette`.
+   - Uniformes globais em `U` (`materials.ts`): `time`, `dt`, `wind`, `night`, `clouds`, `sparkle`, `glow`, `water`, `sun`, `sunDir`, `fine`, `bounce`, `lamps`, `eraWave`, `silhouette`, `flood`, `floodReach`, `floodColor` (várzea), `aurora`.
    - No r186 a instância é aplicada **antes** do `positionNode`: ali `positionLocal` já está no espaço do mundo (pools) e `positionGeometry` é o vértice original. Quem desloca vértices (vento) também ajusta `positionPrevious`, senão o antisserrilhado temporal deixa rastro.
    - A água usa os atributos `wflow` (correnteza) e `wbed` (cor do leito e profundidade da coluna): a malha da água repete os triângulos do leito abaixo da linha d'água, então a beira fica exatamente onde a profundidade zera. A correnteza de cada peça herda das vizinhas (`World.flowAt` + `resolveFlow`) e gira junto com a peça no bloco. A largura do rio em cada borda segue a mesma regra (`World.widthsAt`, `BuildOpts.widths`): a peça nova adota a da vizinha já colocada, e perto da borda o campo da água vira o perfil da própria borda, então a emenda casa. Lago ou rio sai de `waterShape` (semente, gerador à parte).
    - Os materiais iluminados do jogo (kits, chão, água) são `LitMaterial`: gravam a parte da cor que veio do céu, e a oclusão de ambiente do pós só escurece essa parte (o sol direto e as janelas acesas ficam de fora). Um material iluminado novo que não seja `LitMaterial` recebe a oclusão inteira, como o vazio.
@@ -227,7 +241,7 @@ scripts/         capturas, teste de carga, conversão para página publicável; 
    - Sem tone mapping do renderizador: o pós-processamento aplica um ombro suave que preserva as paletas dos temas.
    - O entorno do tabuleiro é `Theme.surround` (`'mar' | 'areia' | 'pergaminho'`, padrão pergaminho): o próprio `makeVoidMaterial` vira mar (água funda que ganha cor do tema, espuma e faixa de areia lidas do `seaMap`, brilho do céu) ou dunas de areia, sem malha nem draw call a mais, e desbota para a cor do fundo além do raio explorado.
    - Se um nó falhar ao compilar, o erro aparece no console das capturas.
-10. **Blocos estáticos só crescem** (append-only), e o mapa do chão (`groundMap.ts`) também: cada peça pinta a sua parte quando assenta. Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim (nível de detalhe): entre `rig.dist` 11,5 e 14,5 cada planta dessa metade afunda no chão na sua vez (`U.fine`, material `cropFine`), e mais longe o pool fica escondido. No Ultra e no Cinema a faixa vai 1,35× e 1,6× mais longe. Quem consulta geometria pela chave precisa tirar o `~`. Árvores, arbustos e pedras têm também uma **versão leve** (`Lib.farGeo`, octaedros e cones de 3 lados, mesmas cores por instância): além de `rig.dist` 18 (×1,35 no Ultra, ×1,6 no Cinema, ×1,35 na primavera), `World.setFarTrees` troca a geometria dos lotes com `Pool.retarget` (mesmas instâncias, sem lote novo, as chamadas não sobem; histerese de ±0,4). `Lib.geo` devolve sempre a versão cheia, e `pool()` já cria o lote na versão da hora.
+10. **Blocos estáticos só crescem** (append-only), e o mapa do chão (`groundMap.ts`) também: cada peça pinta a sua parte quando assenta. Os pools são indexados pela chave do kit. Chaves que **terminam em `~`** são a metade "fina" de plantas e capim (nível de detalhe): entre `rig.dist` 11,5 e 14,5 cada planta dessa metade afunda no chão na sua vez (`U.fine`, material `cropFine`), e mais longe o pool fica escondido. No Ultra e no Cinema a faixa vai 1,35× e 1,6× mais longe. Quem consulta geometria pela chave precisa tirar o `~`. Árvores, arbustos, pedras, serras e morros (`peak`, `hill`) têm também uma **versão leve** (`Lib.farGeo`, octaedros e cones de 3 lados, mesmas cores por instância): além de `rig.dist` 18 (×1,35 no Ultra, ×1,6 no Cinema, ×1,35 na primavera), `World.setFarTrees` troca a geometria dos lotes com `Pool.retarget` (mesmas instâncias, sem lote novo, as chamadas não sobem; histerese de ±0,4). `Lib.geo` devolve sempre a versão cheia, e `pool()` já cria o lote na versão da hora.
 11. **Construções internas não pontuam.** A roda d'água (vila na beira do rio), a irrigação, a estação e o silo (junto à ferrovia) são só visuais. Pontos de interação vêm apenas de `synergy.ts` × `Rules.synergyPoints`.
 12. **Parâmetros de URL e valores salvos são validados** contra listas fixas (ver `pickQ` e o uso de `Object.hasOwn` para `time`). Mantenha esse padrão ao criar um parâmetro novo.
 13. **O mundo anda pelo `dt` do `World.tick`.** O vídeo é desenhado depois da gravação, quadro a quadro, cada um com `world.tick(1/60)`, e o modo foto congela o mundo com `world.timeScale = 0`.
@@ -235,6 +249,8 @@ scripts/         capturas, teste de carga, conversão para página publicável; 
     - A câmera, o fantasma e a troca de hora seguem o tempo real (`realDt`), para responderem no modo foto com o mundo parado.
     - Efeito de jogada que o vídeo também deve mostrar vai em `World.placeFx`, que o jogo e o vídeo chamam do mesmo jeito.
     - Foto e vídeo copiam o canvas logo depois do `tick`, no mesmo passo do desenho.
+
+14. **Easter eggs: a partida decide a peça, o relógio só enfeita.** Gatilho de peça (`pecas`, `grupo`, `bordas`, `sorte`) sai só do índice, das bordas e da semente da peça: o `EggTracker` os reavalia na ordem, então replay, desfazer e carregar o save reconstroem os mesmos kits (invariante 3) sem guardar nada. Gatilho de relógio (`hora`, `data`) só dispara evento, céu e som, nunca põe kit na peça, fica fora do save e do replay e roda em `main.ts` (`eggClock`). Nada de `if (theme.id)`: o ovo é dado do tema.
 
 ### Interface calma
 
@@ -263,10 +279,10 @@ Números de 2026-10-02, depois do traço, do pincel, dos aldeões, dos estandart
 
 ### Novo tema
 
-1. Copie um tema de `src/themes/eras.ts`.
+1. Copie um dos arquivos de `src/themes/` (ex.: `oriental.ts`) para `src/themes/<id>.ts` e acrescente o tema à lista `THEMES` de `src/themes/themes.ts`.
 2. Troque `id`, nomes, cores e kits, e a gradação (`grade`: tom das sombras, dos realces e saturação). Os campos estão comentados em `types.ts`.
 3. Confira as formas com `?gallery&theme=<id>`.
-4. Adicione o tema em `scripts/screenshots.mjs` e gere a captura.
+4. Adicione o tema em `scripts/screenshots.mjs` e `scripts/weather.mjs` e gere a captura.
 
 O menu agrupa os temas pelo campo `period` sem nenhuma outra mudança. Os testes já rodam as regras de todos os temas (`THEMES`). Se o tema tiver `rules` próprias, rode `npm test`.
 
@@ -282,11 +298,13 @@ Cada tema tem 3 a 6 tipos de casa (`houses`); as variantes de silhueta (`steep`,
 4. Mantenha poucos triângulos: veja o orçamento acima.
 5. Use o kit em algum tema. Gere a galeria e as capturas.
 
+**`CropStyle` novo** não pede mais nada além disso: o valor no tipo, a entrada em `CROP_LAYOUT` (o compilador cobra) e o `case` em `cropGeometry`, tudo em `lib.ts`. O `tileBuilder` já planta qualquer cultura em parcelas (`Theme.terraces` também vale para ela). Só dois ajustes são opcionais e ficam no `tileBuilder`: `tintAmt` (quanto a terra puxa a cor da planta, 0,42 por padrão) e `hedge` (culturas em sebe, com as plantas alinhadas à fileira).
+
 A lista priorizada de kits que faltam está no fim de `docs/TEMAS.md`.
 
 ### Portal e ponte
 
-São opcionais no tema (`gate`, `bridge`) e não pontuam. O `buildTile` decide onde entram sem sorteio: o portal na primeira borda de estrada vizinha de vila, a ponte no meio de um rio de 2 bordas com vila numa margem. Para um tema novo, basta escolher o estilo e as duas cores.
+São opcionais no tema (`gate` ou a lista `gates`, `bridge`) e não pontuam. O `buildTile` decide onde entram sem sorteio: o portal na primeira borda de estrada vizinha de vila, a ponte no meio de um rio de 2 bordas com vila numa margem. Para um tema novo, basta escolher o estilo e as duas cores.
 
 ### Nova interação entre bordas
 
@@ -303,11 +321,47 @@ São opcionais no tema (`gate`, `bridge`) e não pontuam. O `buildTile` decide o
 3. Aumente `SAVE_VERSION` se o replay mudar.
 4. Atualize a seção "Como jogar" do `README.md`.
 
+## Mecanismos de tema
+
+Campos opcionais de `Theme` (comentados em `src/themes/types.ts`) que dão a cada tema um jeito próprio sem `if (theme.id)` (invariante 8). Com o campo ausente o tema sai exatamente como saía (o `npm run compare` e o `stress.mjs` não mudam). Cada um tem um renderizador genérico: o tema só preenche dados.
+
+| Campo | API (o que o tema escreve) | Onde roda |
+|---|---|---|
+| `fauna` | `{ kind: AnimalKind; weight; colors[]; time?: 'dia' \| 'tarde' \| 'noite'; where?: 'prado' \| 'floresta' \| 'campo' \| 'margem' \| 'agua'; chance? }[]`. Uma espécie por lugar e por peça, sorteada pelo peso; `chance` (padrão 0,25) é a da peça ganhar o bicho. Fora da `time` o bicho some aos poucos e volta sozinho (`dia` = amanhecer ao pleno dia, `tarde` = hora dourada e entardecer, `noite`). | `tileBuilder` (gerador à parte `seed ^ 0xfa07a`, depois de tudo) e `Life` (mesmo passeio dos `animals`, pool `fauna:<kind>`) |
+| `gates` | `{ style: GateStyle; colors: [estrutura, topo] }[]`; cada peça com portal sorteia um estilo pela própria semente (gerador à parte). `gate` continua valendo como atalho de um estilo só; `gatesOf(theme)` junta os dois. | `tileBuilder` (pools `gate:<i>`), `Lib.applyTheme` |
+| `ambience` | `{ kind: 'aves' \| 'sapos' \| 'grilos' \| 'cigarras' \| 'vento' \| 'gelo' \| 'sinos' \| 'agua'; weight }[]`; o peso escala a chance e o volume. Soma-se ao ambiente por proximidade (`Sfx.setAmbience`): sapos ao entardecer e à noite perto de água, cigarras de dia, grilos à noite, uivo de vento, estalo de gelo, sino de vila ao longe, pingos. Tudo sintetizado. | `audio.ts` (`Sfx.setThemeAmbience`, `themeSound`) |
+| `eggs` | `EggSpec[]` (`src/core/eggs.ts`): `{ id, name, note?, when: EggTrigger[], holidays?, once?, effect: EggEffect[] }`. Gatilhos (todos precisam valer): `pecas {n, min?}`, `grupo {terrain, min}`, `bordas {terrain, min, max?}`, `sorte {chance}` (de peça, puros e deterministas) e `hora {from, to}`, `data` (usa `holidays: {month, day, until?}[]`, local, cosméticos). Efeitos: `kit {kit, scale?, color?}` (só com gatilho de peça; kits em `eggGeometry`, `lib.ts`), `evento {event: 'bando-dourado' \| 'procissao' \| 'corvos' \| 'treno'}`, `ceu {tint, strength?, seconds?, aurora?}` (0 segundos = enquanto o gatilho de relógio valer; `aurora` 0 a 1 acende a cortina boreal pálida mesmo de dia), `som {sound: 'sinos' \| 'brilho' \| 'coro'}`. Exemplo ligado: Holanda, `mil-pecas` (a milésima peça solta um bando dourado e toca sinos). Eventos extras do Brasil: `maria-fumaca` (locomotiva atravessando a peça pelas bordas de trilho, com fumaça; `Life.passage(..., smokeY)`), `festa-junina` (balões subindo à deriva, `Life.passage(..., rise)`) e `revoada` (bando grande de `skyBirds`); kits `profetas` e `onca`. Evento novo: `EggEvent` + o `case` em `World.playEgg`; kit novo: `EggKit` + o `case` em `eggGeometry`. | `EggTracker` em `World.feedEggs` (kit na peça, reavaliado em silêncio no replay; evento, céu e som ao pousar, ao vivo), `eggClock` em `main.ts` (hora e data), `Life.flush/passage` |
+| `skyFx` | `'aurora'`: cortina verde e violeta animada por `U.time`, só à noite (`U.aurora` sobe com a noite). Aparece no reflexo do mar (`surround: 'mar'`), no brilho do fundo da névoa e na cúpula do céu quando o horizonte entra na tela (câmera baixa). Sem GPU de verdade, o custo no Ultra só se mede no PC. Nível Baixo não tem a cúpula. | `aurora.ts`, `atmosphere.ts`, `materials.ts` (`seaLook`), `World` (cúpula na cena das nuvens) |
+| `floodplain` | `{ reach, color }`: o prado e a plantação a menos de `reach` unidades da água (1,7 ≈ uma peça) puxam para `color`; mais longe vale a cor de `ground`. Mapa de distância ao rio (`riverMap.ts`, só cresce) lido pelo chão: independe da ordem das peças e não mexe na geometria nem na semente. A pilha não mostra a várzea (como a costura de cor). | `riverMap.ts`, `makeGroundMaterial`, `World.bake` |
+| `irrigation` | `{ color, cross }`: cada parcela de plantação ganha um canal reto de água no sentido das fileiras e, com chance `cross`, um canal cruzado; as plantas abrem espaço (a menos de 0,024) para ele. Mais o shaduf (`shaduf`, estático, `kits/egito.ts`) na margem de todo campo que toca o rio. Só geometria do chão da parcela e um pool de decoração; os canais saem de um gerador à parte (`seed ^ 0xca4a1`), então o resto da peça não muda. | `tileBuilder` (bloco das plantações e construções internas), `Lib` |
+| `terraces` | `{ levels: 2 \| 3; styles?: CropStyle[]; rise?: number }`: cada parcela de plantação vira patamares concêntricos baixos (12 mm cada, vezes `rise`: o Oriental usa 2,4) com mureta e beiral de 4 mm, e as plantas sobem com eles. A borda da peça fica na altura 0 (a emenda não muda) e o gerador da peça não gasta nada. Sem `styles`, todas as culturas. | `tileBuilder` (bloco das plantações) |
+| `forestRows` | `true`: a mata de cada peça de floresta vira 2 ou 3 fileiras retas e paralelas à borda, cada uma de uma espécie só (alameda de álamos da Holanda, `TreeGeo` `poplar`). Tudo sai do gerador da mata (`frng`): o resto da peça não muda. Omitir = mata espalhada, como sempre. | `tileBuilder` (bloco da floresta) |
+| `relief.style: 'dique'` | O relevo vira um aterro baixo e comprido (o morro achatado em x e z, 20% da altura), sem serras: `{ amp, style: 'dique' }`. Nas vias, `road: 'dike'` (`RoadStyle`) ergue o aterro gramado com o caminho de tijolo por cima (`ROAD_Y.dike`: os veículos andam em cima). | `tileBuilder` (relevo e estradas), `life.ts` (altura do veículo) |
+| `groundKits` | `{ kit: GroundKit; chance; colors[]; count?: [min, max] }[]`: tufos de 1 a 3 do kit (hoje só `cupinzeiro`) num setor de prado da peça, por um gerador à parte (`seed ^ 0xc0b1d0`, depois da fauna). Kit em `ground:<kit>`; a cor da instância tinge o kit. | `tileBuilder` (bloco logo antes dos ovos de peça), `Lib.applyTheme` |
+| `skyBirds` | `{ kit: 'arara'; colors: [corpo, asa, ponta]; n?: [min, max] }`: os bandos que dão voltas no céu (pool `bird`) usam esse kit no lugar do pássaro escuro; `n` é o tamanho do bando (padrão 2 a 4 com o campo, 5 a 7 sem ele). O evento `revoada` dos ovos solta um bando maior. | `Lib.applyTheme`, `Life.sync` |
+| `surround: 'chapada'` | O entorno vira capim seco com manchas de terra vermelha (`u.cap` no `makeVoidMaterial`, a cor sai de `ground[0]` e `ground[2]`); mesmo material, sem malha nem draw call a mais. | `materials.ts`, `World.setSurround` |
+| `relief.crown` | Cor da mata no topo da serra (facetas altas de cor fixa, linha irregular), no lugar da neve. | `relief.ts` (`peakGeometry`) |
+| `fieldSnow` | `number` (0 a 1, padrão 1): quanto da neve de inverno cobre as parcelas de plantação do chão (`U.fieldSnow`, `makeGroundMaterial`). O lago congelado (`crops: icefield`) usa 0,12; as rachaduras e o pesqueiro (`icecamp`) usam o material `ice`, quase sem neve por cima. Kits do Inverno Nórdico (rena, alce, raposa, trenó, gelo, pórtico de dragões, stavkirke, troll) em `src/render/kits/inverno.ts`, que recebe as primitivas do `lib.ts` por injeção (`PRIMS`). | `materials.ts`, `world.ts` (`setTheme`), `lib.ts`, `tileBuilder` (pesqueiro por parcela) |
+
+Kits da Holanda (T1, `src/render/kits/holanda.ts`, só dado de geometria, chamado por um `case` em `lib.ts`): empenas `bell` e `neck` (`RoofStyle`), `poplar`, plantação `bulb`, `duck` (`AnimalKind`), barco `tjalk`, ponte `draw`, portão `brick` e o moinho de vento (torre octogonal). Kits de ovo novos: `queijo` e `menino-dique` (`EggKit`).
+
+Outros campos e kits que vieram com o Oriental (todos opcionais, o tema sem eles sai como saía):
+- `relief.mist` (cor): a rocha da serra desbota para ela do pé a ~60% da altura (e a cor da instância tinge menos) e escurece para o cume, como a tinta; `relief.tall` (padrão 1) deixa as serras mais altas e estreitas; `relief.slopeTrees` (lista de `geo`) limita as árvores que sobem a encosta (pinheiros), com um gerador próprio.
+- `RoadStyle 'stepstone'`: terra batida com lajes de passo alternadas e tufos na beira (gerador à parte, `seed ^ 0x57e95`); não desenha trilhos nem sulcos paralelos, então não lê como ferrovia (o `dirt` desenha dois sulcos e parecia trilho).
+- Copas perenes (`EVERGREEN` em `lib.ts`: conífera, abeto, cipreste, pinheiro-manso, araucária e `niwaki`) usam o material `evergreen`: a estação não as tinge, só a neve. Sem isso a primavera misturava 35% de rosa-pálido na copa verde-escura e a deixava cinza-lavanda nos temas de primavera travada.
+- `TreeGeo 'niwaki'`, `AnimalKind 'heron'` e os `EggKit` `cerejeira-milenar`, `lago-carpa` e `gato-da-sorte` são desenhados em `src/render/kits/oriental.ts`.
+
+Ao ligar um mecanismo num tema:
+- **Confira na imagem**, com `?time=` e as capturas: `window.__fauna`, `__deco('gate', i)`, `__deco('egg:', i)` e `__egg(id)` levam a câmera até o efeito. `?auto=40&seed=` monta sempre o mesmo tabuleiro. Em software o mundo anda devagar (`timescale=4` com janela pequena acelera os eventos e o tom de céu).
+- **Orçamento**: cada espécie de `fauna` e cada estilo de `gates` é um pool, ou seja, um draw call a mais onde aparece; `terraces` soma triângulos de chão (uns 30 a 60 por parcela). Meça com `RUNS=300:high node scripts/stress.mjs` (regra dos ~10%).
+- **Legibilidade**: `floodplain`, `terraces` e a cor dos bichos mudam o contraste com a vila; rode `npm test` (`tests/legibility.ts`) e olhe `?silhueta`.
+- **Sem `SAVE_VERSION`**: nenhum deles mexe em regra, pontuação nem replay. Um ovo de peça que mude o jogo (pontos, peças) já não é easter egg: vira regra e pede `SAVE_VERSION`.
+
 ## Estado atual e próximos passos
 
 - **Feito (outubro de 2026, depois da v4):** água física (leito visível, cáusticas, esteiras); acabamento (oclusão só na luz indireta, nitidez, cor por hora, sombra firme); luz e céu (amanhecer e hora dourada, névoa por altura, lampiões, luz rebatida do chão, nuvens volumétricas); cinema e vídeo (nível Cinema, Auto pela placa com resolução dinâmica, modo foto, gravação e filme da partida em MP4). Detalhes em `docs/VIABILIDADE.md`.
 - **Feito (v4, outubro de 2026):** renderização WebGPU/TSL com GTAO, TRAA, bloom e profundidade de campo; rios escavados com correnteza; céu procedural (IBL); chão com detalhe por terreno; clima por tema; vilas com trilhas; eras da vila, sítios, bônus por tema, desfazer e 6 modos (o Estrada Real tem a regra das rotas). O andamento do plano de Age of Empires está no topo de `docs/IDEIAS_AOE.md`; as vinte propostas estão feitas, inclusive minimapa e linha do tempo, interface por tema, estações e monumentos.
-- **Feito (v3):** 14 temas, kits detalhados, 4 interações com prévia em dourado, mundo animado, dia/entardecer/noite, qualidade adaptativa, save v3 com replay, duas rodadas de revisão de código com correções. O histórico está em `docs/VIABILIDADE.md`, Apêndice A.
+- **Feito (v3):** 14 temas (consolidados em 5 na rodada 3, etapa T0), kits detalhados, 4 interações com prévia em dourado, mundo animado, dia/entardecer/noite, qualidade adaptativa, save v3 com replay, duas rodadas de revisão de código com correções. O histórico está em `docs/VIABILIDADE.md`, Apêndice A.
 - **Pendente:**
   - medir o FPS numa GPU real (`?stress=1000&quality=high&perf`, ou `window.__perf(5)` com a tecla `F`) no PC e no celular;
   - kits de fidelidade histórica que ainda faltam (`docs/TEMAS.md`, fim): roda-d'água como `MillStyle`, cipreste em alameda, estação de fim de linha por tema;

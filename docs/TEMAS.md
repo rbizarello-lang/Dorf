@@ -1,6 +1,40 @@
 # Temas históricos: pesquisa de referência
 
-Pesquisa de apoio aos 8 temas de `src/themes/eras.ts` · 30/09/2026 · PT-BR
+> **Consolidação (rodada 3, etapa T0, 22/10/2026): os 14 temas viraram 5.** O que está abaixo é a pesquisa histórica dos 8 temas de época de antes, mantida como referência dos kits e das fontes; os temas ficam hoje um por arquivo em `src/themes/<id>.ts` (o índice é `src/themes/themes.ts`, o padrão é a Holanda). Saíram sem herdeiro Vale Pastel, Colônia Marciana, Toscana Renascentista, Velho Oeste e Andes Incas; as seções 3, 4, 7 e 8 e os kits que só eles usavam (`crystal`, `cactus`, `hydro`, `rover`, `maglev`, `windpump`, `inca`, `rope`, `kancha`, `temple`, `dome`, `castle`, `elevator` etc.) continuam no motor, sem uso, para serem reaproveitados.
+>
+> | Tema | Origem | O que veio de cada uma |
+> |---|---|---|
+> | `holanda` Holanda Dourada (padrão) | Holanda, sem mudança | tudo, é o modelo histórico |
+> | `egito` Egito do Nilo | Egito, sem mudança | tudo |
+> | `oriental` Terraços do Oriente | Jardim Sakura + Jade Song + Edo Tranquilo | do Sakura, a cerejeira, as pétalas, a primavera travada (`season: 0`), o emblema; do Song, o arroz, o salgueiro, o junco (`junk`), a casa de pátio e a casa de chá, o búfalo; do Edo, a machiya, o torii, a estrada de posta, o pinheiro (`umbrella`), os nomes das eras, o encaixe perfeito de 25. Saíram o trem-bala, a ferrovia, a barcaça, as jazidas, o trigo e a amoreira |
+> | `brasil` Brasil Dourado | Cerrado Dourado + Minas Colonial | do Cerrado, os ipês, o buriti, o café, a cana, a luz de fim de tarde, o pólen, a pluck mixolídia; do Colonial, o casario caiado, o barroco, a mula da Estrada Real (`caravan`), a ponte de pedra, o ouro (`ore`), as eras Pouso → Cidade. Saíram a ferrovia e o trem, a araucária, o mar e o fundo azul-acinzentado |
+> | `inverno` Inverno Nórdico | Inverno Nórdico + Terra dos Vikings | do Viking, a casa longa de turfa, o estabur, o drakkar, a cevada e o linho, o capuz, a moldura de madeira com o corvo, os nomes das cartas, o ferro dos pântanos; saíram o verde de verão, o carvalho, a data do século X e o trem a vapor (a trilha é de terra batida) |
+>
+> **Regras dos temas fundidos.** Oriental: `matchBonus` de arrozal 3 (Song) + encaixe perfeito 25 (Edo) + primavera travada (Sakura); a regra de missões raras do Edo e o bônus de ferrovia do Sakura saíram. Brasil: encaixe perfeito 25 (Cerrado) + pouso de tropa 5 (Colonial). Inverno: as regras do Inverno ficaram como eram (55 peças, missões raras, lenhadores +3, inverno travado), então uma partida salva do Inverno continua valendo; o `synergyBonus` de carpintaria naval (5) do Viking saiu.
+>
+> **Migração.** `?theme=` e o tema escolhido guardados com um id antigo levam ao tema novo (`sakura`, `song`, `edo` → `oriental`; `cerrado`, `colonial` → `brasil`; `viking` → `inverno`; os demais → `holanda`). O recorde `best.<modo>.<tema>` dos temas fundidos passa para o tema novo, ficando o maior, uma vez, na leitura (`src/themes/legacy.ts`). A partida salva de um tema que saiu ou foi fundido é descartada com o aviso de versão anterior (sem mudar `SAVE_VERSION`: a regra do tema muda, mas as dos temas que ficaram não). O registro de `retalhos.progress` dos temas removidos fica guardado, sem uso.
+>
+> **Anacronismos declarados.** O Brasil Dourado junta o Cerrado de hoje e as Minas do século XVIII sem ano exato: o café em larga escala e a maria-fumaça mineira são do século XIX; o tema trata tudo como "Brasil interior". O Terraços do Oriente é uma paisagem de rolo pintado (da China Song ao Japão Edo), com torii e casa de pátio na mesma vila. O Inverno Nórdico é atemporal (casa longa de turfa, stuga vermelha e drakkar convivem). O que ainda falta de cada fusão (terraços de arroz, rena, trenó, lago congelado, aurora, cachoeira, cupinzeiro, fauna do cerrado, telhado colonial, portais em lista) está nos relatórios da rodada 3 e entra nas etapas seguintes.
+
+## Terraços do Oriente (`oriental`): etapa T3 da rodada 3
+
+O que o tema tem hoje, depois do aprofundamento (as seções de `song`, `edo` e `sakura` mais abaixo são a pesquisa histórica de origem):
+
+- **Peça-assinatura: o arrozal em terraço.** `terraces: { levels: 3, rise: 2.4 }`: cada parcela de arroz ou chá sobe em três patamares com mureta de pedra e beiral, e as mudas sobem junto (geometria do chão, sem draw call novo). Há arroz alagado, arroz dourado e chá.
+- **Portais em lista.** `gates`: torii (cinabre e nanquim) e paifang (vermelho e telha jade); cada portal sorteia o estilo pela semente da peça.
+- **Caminho de posta.** `road: 'stepstone'`: terra batida com lajes de passo e tufos nas beiras, mais lanternas de papel. O antigo `dirt` desenhava dois sulcos paralelos e parecia trilho de trem.
+- **Serras de névoa em tinta.** `relief: { amp: 1.1, style: 'serra', rock: '#7d8c99', mist: '#dfe8ea', tall: 1.3, slopeTrees: ['conifer', 'niwaki'] }`: rocha cinza-azulada sem neve, pé perdido na bruma, cume escuro e pinheiros nas encostas.
+- **Pinheiro de jardim.** `niwaki` (tronco torcido e três nuvens de agulhas) no lugar do `umbrella`, mais o `conifer`; ambos são perenes.
+- **Primavera sem copas cinza.** As copas perenes (conífera, abeto, cipreste, pinheiro-manso, araucária e `niwaki`) usam o material `evergreen`, que não recebe o tom de primavera nem o de outono. A cerejeira, o bambu e o salgueiro continuam com o tom da estação. A correção vale para todos os temas.
+- **Fauna.** Garça-branca na margem (dia), sika no bosque (fim da tarde) e búfalo no arrozal (dia).
+- **Sons.** Sapos, cigarras, aves, sinos de templo e água.
+- **Easter eggs.** `cerejeira-milenar` (um grupo de 8 peças de bosque faz nascer uma cerejeira milenar com torii miúdo), `grande-carpa` (peça com 4 ou mais bordas de prado e 18% de sorte ganha um lago de jade com carpa dourada), `gato-da-sorte` (a 50ª peça ganha um santuário com maneki-neko; a partida clássica tem ~68 peças, então 100 nunca chegaria) e `noite-de-lanternas` (de 13 a 16 de agosto, Obon, e de 15 a 17 de setembro, Lua da Colheita, das 19h às 23h: procissão de lanternas e céu dourado).
+
+**Fica para depois** (da lista da seção 8 do relatório `scratchpad/temas/oriental.md`): roda-d'água como `MillStyle` (a peça especial `watermill` já existe), telhado `irimoya`, marco `pagoda8` de tijolo, `sampan`, chapéu cônico (`HatStyle: 'conical'`), lótus, carpas em cardume por dado, o torii submerso, o sino de templo ao subir de era e o ambiente de shishi-odoshi.
+
+---
+
+Pesquisa de apoio aos 8 temas de época que existiam em `src/themes/eras.ts` (hoje dissolvido, ver acima) · 30/09/2026 · PT-BR
 
 **Nota de método.** O WebFetch está bloqueado pelo proxy de saída; toda a evidência vem de resumos do WebSearch (nenhuma página foi lida na íntegra). Onde a busca não confirmou um detalhe, ele vem de conhecimento geral e está marcado **[C]**. Anacronismos e aproximações de kit estão sempre explicitados. Em todos os temas o renderizador só conhece os kits de `src/themes/types.ts`; onde o kit ideal não existe, usei o mais próximo e listei o que faltaria.
 
@@ -23,6 +57,20 @@ Os três temas com `rules` variam pouco, de forma coerente com a narrativa: o Eg
 
 ---
 
+## 0. Holanda Dourada (`holanda`): aprofundamento T1 (rodada 3)
+
+Países Baixos, 1600 a 1670: terra ganha da água, plana e medida a régua. A pessoa deve sentir ordem, riqueza tranquila e a cor das flores contra um céu pálido. O tema é dado em `src/themes/holanda.ts`; a geometria nova está em `src/render/kits/holanda.ts` (chamada por um `case` em `lib.ts`).
+
+- **Terrenos.** Prado = *Pôlder* (relevo `dique`: aterros baixos e compridos, sem serras; ovelhas de dia); Floresta = *Alameda* (`forestRows`: 2 ou 3 fileiras retas de uma espécie só, álamo na maioria, com salgueiro, carvalho e bétula); Plantação = *Tulipas* (tulipa, jacinto `bulb`, trigo e cevada, em fileiras de cor); Vila = *Aldeia*; Rio = *Canal* (água verde-turva `#5f8f93`, junco, patos de dia); Estrada = *Dique* (`road: 'dike'`: aterro gramado em dois degraus com caminho de tijolo no topo, estacas na base e um montículo nas junções; os veículos andam em cima).
+- **Casas.** Empena escalonada (a principal), de **pescoço** (`neck`, tijolo, com viga de içamento) e de **sino** (`bell`, arenito claro) como `RoofStyle` novos; casas baixas de duas águas, o celeiro preto-alcatroado (anexo) e o sobrado de empena alta. Tijolo, creme e arenito; nada de parede branca pura. Eras: Aldeia de pôlder, Vila mercante, Cidade das guildas, Século de Ouro (o Paço Municipal).
+- **Marcos.** Moinho de vento novo (torre octogonal afunilada, galeria, boné redondo e rabo; as pás giram no mesmo cubo de antes), portão de cidade de tijolo (`gate: 'brick'`, stadspoort com torrezinha e relógio, nas vias que tocam a vila) e **ponte levadiça de contrapeso** (`bridge: 'draw'`, fechada; a animação de abrir fica para depois).
+- **Bichos e barcos.** Vaca frísia (assinatura), ovelhas, cavalo de tração nas lavouras, patos nos canais (`duck`); barco de carga `tjalk` (fundo chato, quilhas laterais em pá, vela de gávea marrom).
+- **Luz.** Vermeer: sombras frias (`#5a6a7a`), realces âmbar, bruma de canal; sem pólen no ar (a chuva é o clima tocável, `window.__weather('rain')`). Ambiente: vento, sinos ao longe, aves e água.
+- **Easter eggs** (`Theme.eggs`): Tulipomania 1637 (grupo de 7 peças de tulipa: tulipa de ouro), o menino do dedo no dique (peça com 2+ bordas de dique e água, 1 em 5), o queijo gigante (pôlder perfeito, 6 bordas de prado), a Ronda Noturna (22h às 2h, a partir da 30ª peça: fila de aldeões com lanterna) e o Dia do Rei (27 de abril: céu laranja e sinos); a milésima peça solta o bando dourado.
+- **Ficou para depois.** Ponte que abre quando passa um barco (precisa do `Life`); casas geminadas em fita e cais de pedra na aldeia; valas retas pintadas no prado; moinho serrador (paltrok) e de drenagem com parafuso como kits próprios; carrilhão na era III; ciclista no dique (ovo do anacronismo, precisa de evento novo no `Life`); cisnes e garças; estufa de bulbos na sinergia das colmeias; trenó no gelo.
+
+---
+
 ## 1. Egito do Nilo (`egito`)
 
 - **Terrenos.** Prado = *Várzea* (a "Terra Negra" irrigada pela cheia); Floresta = *Palmeiral* (tamareiras, sicômoros e acácias); Plantação = *Lavoura* (trigo-emmer, cevada, papiro, linho); Vila = *Aldeia*; Rio = *Nilo*; Estrada = *Trilha* de areia.
@@ -31,7 +79,16 @@ Os três temas com `rules` variam pouco, de forma coerente com a narrativa: o Eg
 - **Sinergias.** Colmeias de barro: tubos de barro empilhados aparecem na tumba de Rekhmire (séc. XV a.C.), então a apicultura egípcia é bem documentada. Lótus branco e azul entram como `flowers`.
 - **Paleta.** Ouro/areia (`bg`, chão da trilha e da vila), turquesa do Nilo (`water` `#2fb0aa`) e verde-papiro; o Egito antigo pensava em seis grupos de cor (verde, vermelho, azul, amarelo, branco, preto), e azul/turquesa significavam fertilidade e renascimento. Luz forte (`sunIntensity` 2.6, sol alto).
 - **Atualização (01/10/2026).** O marco virou `pylon` (pilone com dois obeliscos, como Karnak e Luxor), o linho tem kit próprio (`flax`) e o barco é `nile` (pontas recurvadas e vela quadrada larga).
-- **Falta no motor.** Shaduf (alavanca de irrigação, chegou com o Novo Império), casa com terraço e escada externa.
+- **Rodada 3, etapa T2 (22/10/2026).** O Egito foi aprofundado em torno da **várzea**, a peça-assinatura:
+  - *Terra negra x duna.* `floodplain` (`reach` 1,7, `#4f4326`): o prado e o campo a menos de uma peça do Nilo viram terra negra e fértil (Kemet); mais longe vale a duna dourada de `ground` (Deshret). A faixa escura acompanha qualquer rio, inclusive o que chega depois. `season: 1` e `seasonLock: 1` travam o verão (Shemu, sem neve nas palmeiras).
+  - *Campo da cheia.* `irrigation` (campo novo de `Theme`): cada parcela ganha um canal de água turquesa no sentido das fileiras e, em 55% delas, outro cruzado, e as plantas abrem espaço; o shaduf (`shaduf`, estático) fica na margem de todo campo que toca o rio. Os dois só mudam o desenho (invariante 11).
+  - *Falésias de arenito.* `relief` com estilo `falesia`: mesas de topo chato em estratos claros e escuros (`src/render/kits/egito.ts`, `mesaGeometry`, no pool `peak`; `amp` 0,4), só em peças sem água. Sem outeiros no estilo `falesia`, para não gastar um pool a mais.
+  - *Casas.* Corpo `terrace` (adobe em dois níveis, sala em cima, escada externa) com telhado `awning` (toldo de cana listrado em lápis-lazúli, marfim e ocre) em 30% das casas (a casa comprida saiu para caber no orçamento de draw calls); o lápis-lazúli virou a cor de moldura (`trim`) e de detalhe do pilone.
+  - *Entrada.* Portal `pylon` (duas torres de paredes inclinadas, cornija, disco solar alado e mastros) onde a trilha encosta na vila; sem ponte, porque o Nilo antigo se cruzava de barco.  - *Fauna.* O burro assumiu a caravana (`animals`), e `fauna` traz o boi de chifres de lira no prado, o íbis e o crocodilo na margem do Nilo (só de dia; o crocodilo toma sol).
+  - *Som.* `ambience` de cigarras, grilos, água e vento; timbre `flute`.
+  - *Easter eggs* (`eggs`, sem data inventada): **Esfinge** na 38ª peça; **Pirâmide** de piramídio dourado na 100ª; **Cheia perfeita** (peça com 3 ou mais bordas de campo e 1 ou mais de rio) com um íbis em pé; **Gato de Bastet** (peça de vila com 3 ou mais bordas e 10% de sorte pela semente da peça); **Rá a pino** (11h45 às 12h15 do aparelho: céu dourado e bando dourado).
+- **Orçamento.** Cada pool novo (pilone, shaduf, boi, íbis, crocodilo, mesa, casa de terraço) soma um draw call onde aparece; por isso saíram a cabra, o outeiro, a casa comprida e as lanternas da trilha. Números do stress no relatório da etapa T2.
+- **Falta no motor.** Shaduf com o braço balançando, crocodilo que mergulha ao ver o barco, íbis que levanta voo, barco solar cerimonial, silhueta das pirâmides no horizonte (`surround`), tamareira em tufo, obelisco isolado, cheia como lâmina de água dentro do campo, toldo e terraço com gente, sistro na música e o ovo da chuva no deserto (clima tocável).
 - **Fontes.** [Ancient Egyptian agriculture (Wikipedia)](https://en.wikipedia.org/wiki/Ancient_Egyptian_agriculture) · [Egypt's Golden Empire: farming (PBS)](https://www.pbs.org/empires/egypt/newkingdom/farming.html) · [Colour in Ancient Egypt](https://ancientegyptonline.co.uk/colour/) · [Tears of Re: beekeeping in Ancient Egypt](https://www.apicultural.co.uk/tears-of-re-beekeeping-in-ancient-egypt) · [The Camel in African History](https://www.africanhistoryextra.com/p/the-camel-in-african-history-ancient)
 
 ## 2. Jade Song (`song`)
@@ -52,6 +109,8 @@ Os três temas com `rules` variam pouco, de forma coerente com a narrativa: o Eg
 - **Paleta.** Verde-escuro e azul-ardósia frios (luz `sunIntensity` 1.95, a mais baixa do conjunto); as cores vivas ficam para o tingimento: vermelho (garança), azul (pastel-dos-tintureiros) e amarelo (uva-de-tintureiro) aparecem nas velas e no carro, e as flores de urze roxa em `bush`/`flowers`.
 - **Atualização (01/10/2026).** O marco virou `hall` (salão com tábuas cruzadas e cabeças de dragão nas empenas), resolvendo o anacronismo da igreja stave; a interação vila + plantação ergue um estabur (`mill: stilt`); linho com kit próprio (`flax`).
 - **Falta no motor.** Casa longa com fileira de estábulo, runestone, ovelhas de chifre, rede de peixe secando.
+- **Inverno Nórdico (rodada 3, etapa T5).** O que virou do Viking dentro do `inverno`: a Plantação é o **lago congelado** (`icefield`: gelo azulado em placas, rachaduras claras e buracos de pesca; muitas parcelas ganham um pesqueiro com tenda de lona, varal de bacalhau e banquinho; 1 parcela em 4 segue de cevada sob a neve; `Theme.fieldSnow` e o material `ice` tiram a neve do gelo); a estrada é **trilha de trenó** puxado por **rena** (`sled`, `reindeer`, no lugar da carroça e do cervo); fauna de **alce** (mata, tarde) e **raposa-do-ártico** (campo, tarde); **pórtico de dragões** na entrada da vila (`gates`, `dragon`); **aurora boreal** à noite (`skyFx`); maravilha **Grande Stavkirke** (`stave`); ambiente de vento, gelo e sino. Ovos: `aurora-solsticio` (20 a 22/12, aurora pálida mesmo de dia), `treno-do-natal` (24 e 25/12, trenó de rena com luz vermelha cruza o céu), `hugin-e-munin` (lago congelado de 5+ peças: dois corvos) e `troll-da-ponte` (peça de rio com vila, sorteada pela semente: troll de pedra ao lado da ponte). Kits em `src/render/kits/inverno.ts`.
+- **Falta no Inverno Nórdico.** Segundo marco (`hall`) por sorteio, `BodyStyle: 'sauna'` e a synergy de sauna, curral de renas e tenda de pesca como construções próprias (hoje a interação de pasto usa a cerca e o animal do tema e a de vila + lago o estabur), neve de telhado por shader, varas-guia na trilha, barco de pesca (`boat2`), aldeão que pula no buraco, `runestone`.
 - **Fontes.** [Medieval Scandinavian architecture (Wikipedia)](https://en.wikipedia.org/wiki/Medieval_Scandinavian_architecture) · [Viking houses (Skjalden)](https://skjalden.com/viking-houses/) · [Life on a Viking farm (History on the Net)](https://www.historyonthenet.com/life-on-a-viking-farm) · [Oseberg ship (Wikipedia)](https://en.wikipedia.org/wiki/Oseberg_ship) · [The Oseberg Wagon](https://www.worldtreeproject.org/items/show/2097) · [Plant dye colors in the Viking Age](https://skjalden.com/plant-dye-colors-in-the-viking-age/)
 
 ## 4. Toscana Renascentista (`toscana`)
@@ -83,6 +142,22 @@ Os três temas com `rules` variam pouco, de forma coerente com a narrativa: o Eg
 - **Atualização (01/10/2026).** Ponte de pedra em arco (`bridge: stone`) onde o ribeirão corta o arraial, como as pontes de Tiradentes e Ouro Preto.
 - **Falta no motor.** Chafariz de pedra-sabão, sobrado com balcão de ferro, mineração (monjolo, cata), engenho de cana com roda-d'água, telha capa e canal em faixas.
 - **Fontes.** [Estrada Real (InfoEscola)](https://www.infoescola.com/brasil-colonia/estrada-real) · [The Original Colors: A Study on Ouro Preto (ArchDaily)](https://www.archdaily.com/1044354/the-original-colors-a-study-on-ouro-preto) · [Sabará: roteiro pela cidade histórica (Estado de Minas)](https://www.em.com.br/cidades/sabara/2025/06/amp/7183843-sabara-roteiro-pela-cidade-historica-onde-o-passado-segue-vivo.html) · [Os caminhos que cortam Ouro Preto](https://www.tribunapr.com.br/arquivo/viagem-turismo/os-caminhos-que-cortam-ouro-preto/) · [Cana e aguardente em Minas (UFMG/Cedeplar)](https://diamantina.cedeplar.ufmg.br/portal/download/diamantina-2000/godoy.pdf) · [História de Minas Gerais (governo de MG)](https://www.mg.gov.br/conheca-minas/historia)
+
+### Brasil Dourado (`brasil`): aprofundamento da etapa T4 (22/10/2026)
+
+O tema fundido ganhou identidade própria em tudo o que se vê de longe. Os nomes dos terrenos são **Cerrado, Grota, Lavoura, Arraial, Ribeirão e Caminho de Pedra**: "Estrada Real" é o nome de um modo de jogo, então nenhum elemento do tema usa esse nome.
+
+- **Lavoura (peça-assinatura).** O café sobe a encosta em **terraços** (`terraces`, 3 patamares com mureta de pedra, só no café); uma parte dos cafezais está em **florada** (`CropStyle: 'coffeebloom'`, a copa salpicada de flores brancas). O canavial fica no plano e, quando a vila encosta nele, ergue o **engenho** (`MillStyle: 'engenho'`: casa caiada, chaminé de tijolo da caldeira, roda d'água no flanco e feixes de cana empilhados).
+- **Cerrado.** Árvores tortas (oliveira = pequi e lixeira), **cupinzeiros** (`Theme.groundKits`, kit torneado de terra vermelha, 1 a 3 por tufo), flores-do-campo e touceiras de capim. Contra a Grota de copa redonda, ipê e jerivá.
+- **Fauna** (`Theme.fauna`, `AnimalKind` novos `rhea`, `maned`, `anteater`): **ema** de dia, **lobo-guará** na hora dourada, **tamanduá-bandeira** de dia; o gado do pasto é o **zebu** (`zebu`: giba, orelhas caídas). No céu, **araras** em pares no lugar dos pássaros escuros (`Theme.skyBirds`).
+- **Estrada.** O caminho de pedra leva o **carro de boi** (`VehicleKind: 'oxcart'`: junta de zebus sob a canga, cabeçalho, rodas maciças, carga de cana) seguido da **mula de tropa** com bruacas. A ferrovia e o trem saíram do tema; a locomotiva só aparece no ovo da maria-fumaça.
+- **Casario.** Telhado **colonial** (`RoofStyle: 'colonial'`: quatro águas de duas inclinações, aba mais baixa e aberta, friso escuro na frente), nos quatro tipos de casa; **porteira** de fazenda onde a estrada entra na vila (`GateStyle: 'porteira'`).
+- **Relevo.** `relief: serra` de rocha avermelhada com **mata no topo** (`relief.crown`), sem neve. **Entorno:** `surround: 'chapada'`, um mar de capim seco com manchas de terra vermelha (mesmo `makeVoidMaterial`, sem malha nem draw call; a cor sai do chão do tema).
+- **Easter eggs** (`Theme.eggs`): *São João* (de 12 a 30 de junho, pelo relógio local: balões de papel sobem à deriva e a fogueira faísca), *Maria-fumaça* (o primeiro trilho de 5 peças ganha uma locomotiva que o atravessa soltando fumaça), *Doze Profetas* (um arraial de 12 peças ergue os doze profetas de pedra-sabão na escadaria, o sétimo de chapéu de tropeiro), *Onça na vereda* (rara: onça-pintada deitada num tronco, em peça de grota com ribeirão) e *Revoada das araras* (a grota de 14 peças levanta um bando).
+- **Som.** Cigarras, aves (bem-te-vi), água e sinos ao longe (`ambience`).
+- **Ficou para depois.** Bandeirinhas e a fogueira fixa do São João nas ruas, cachoeira (etapa R3 do relevo), `FrameKind: 'azulejo'`, apiário de jataí e curral como kits próprios, balsa no rio largo, capela de uma torre só, tucano, serras azuis ao longe na chapada, `MillStyle` do engenho com a roda girando (hoje é estática), beiral duplo em "cachorrada" com cada cabeça de viga.
+
+---
 
 ## 7. Velho Oeste (`oeste`)
 

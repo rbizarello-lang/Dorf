@@ -61,6 +61,8 @@ import {
   vertexColor,
 } from 'three/tsl';
 import { GROUND_EXTENT, GROUND_SIZE, groundMap } from './groundMap';
+import { auroraSky } from './aurora';
+import { RIVER_DMAX, riverMap } from './riverMap';
 import { SEA_DMAX, seaMap } from './seaMap';
 import { CAUSTIC_FRAMES, CAUSTIC_SIZE, makeBrushTexture, makeCausticTexture, makeNoiseTexture, makeWaterTexture } from './noise';
 
@@ -104,8 +106,16 @@ export const U = {
   season: uniform(1),
   /** 1 no inverno: neve nas faces viradas para cima e gelo na beira da água. */
   snow: uniform(0),
+  /** Quanto da neve de inverno cobre as parcelas de plantação do chão (Theme.fieldSnow; 1 = tudo, como sempre). */
+  fieldSnow: uniform(1),
   /** Força do vento do tema (1 = o balanço de sempre). */
   gust: uniform(1),
+  /** Várzea (Theme.floodplain): 1 liga a cor fértil perto do rio (0 na pilha e nos temas sem ela), alcance em unidades do mundo e a cor. */
+  flood: uniform(0),
+  floodReach: uniform(2),
+  floodColor: uniform(new THREE.Color('#4a3a28')),
+  /** Aurora boreal (Theme.skyFx): 0 a 1, sobe à noite (aurora.ts). */
+  aurora: uniform(0),
 };
 
 export const noiseTex = makeNoiseTexture();
@@ -305,6 +315,10 @@ interface DecoOpts {
   smooth?: boolean;
   /** Pincelada nas partes tingidas: toques nas copas, traços verticais nas paredes. */
   paint?: 'canopy' | 'wall';
+  /** Copa perene (conífera): a estação não a tinge, só a neve. */
+  evergreen?: boolean;
+  /** Quanto da neve de inverno cobre as faces de cima (1 = a de sempre; o gelo do lago congelado quase não leva). */
+  snow?: number;
   roughness?: number;
   metalness?: number;
   emissive?: string;
@@ -315,14 +329,17 @@ interface DecoOpts {
 const SNOW = vec3(0.957, 0.973, 0.984);
 
 /** Neve nas faces de cima. `cap` limita o branco para telhado e copa não sumirem no chão. */
-const snowOn = (base: N3, cap: number): N3 => {
+const snowOn = (base: N3, cap: number | N): N3 => {
   const n = texture(noiseTex, positionWorld.xz.mul(0.7)).r.mul(0.35).add(0.65);
   const k = smoothstep(0.7, 0.9, normalWorld.y).mul(U.snow).mul(n).mul(cap);
   return mix(base, SNOW, k);
 };
 
 /** Copas: primavera mais clara, outono puxado para ocre ou ferrugem, inverno com neve contida. */
-const seasonFoliage = (base: N3): N3 => {
+const seasonFoliage = (base: N3, evergreen = false): N3 => {
+  // Perene (pinheiros, abetos, ciprestes): a primavera não clareia e o outono não amarela; só a neve vale. Sem isso, a copa
+  // verde-escura puxava 35% para o rosa-pálido da primavera e saía cinza-lavanda (temas de primavera travada).
+  if (evergreen) return snowOn(base, 0.62);
   const spring = float(1).sub(smoothstep(0.05, 0.5, abs(U.season)));
   const autumn = float(1).sub(smoothstep(0.05, 0.5, abs(U.season.sub(2))));
   const fall = mix(vec3(0.851, 0.51, 0.169), vec3(0.722, 0.263, 0.165), step(0.5, hash(instanceIndex)));
@@ -392,7 +409,7 @@ function decoMaterial(o: DecoOpts) {
     base = base.mul(mix(float(1), rows.mul(0.17).add(0.85), roof.mul(smoothstep(15, 6, camDist))));
   }
   // Telhados e paredes: neve contida, para o branco do inverno não apagar a casa.
-  const seasoned = o.paint === 'canopy' ? seasonFoliage(base) : snowOn(base, 0.55);
+  const seasoned = o.paint === 'canopy' ? seasonFoliage(base, o.evergreen) : snowOn(base, 0.55 * (o.snow ?? 1));
   m.colorNode = mix(seasoned, vec3(0.02), U.silhouette);
   // Cada janela acende num momento diferente do anoitecer.
   const lit = smoothstep(0, 0.25, U.night.mul(1.25).sub(hash(instanceIndex).mul(0.5)));
@@ -415,14 +432,20 @@ function decoMaterial(o: DecoOpts) {
   return m;
 }
 
-export type MatKey = 'deco' | 'foliage' | 'crop' | 'cropFine' | 'crystal' | 'glass' | 'fire';
+export type MatKey = 'deco' | 'relief' | 'reliefSoft' | 'foliage' | 'evergreen' | 'crop' | 'cropFine' | 'ice' | 'crystal' | 'glass' | 'fire';
 
 export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
   return {
     deco: decoMaterial({ shingles: true, paint: 'wall', rimSun: 0.3 }),
+    // Serra (faces planas) e morro (normais suaves): sem as fileiras de telha do `deco`, que listrariam a rocha.
+    relief: decoMaterial({ paint: 'wall', rimSun: 0.3 }),
+    reliefSoft: decoMaterial({ smooth: true, paint: 'wall', rimSun: 0.3 }),
     foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy' }),
+    evergreen: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', evergreen: true }),
     crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide }),
     cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true }),
+    // Lago congelado (rachaduras, buracos e pesqueiro): quase sem neve por cima, para o gelo e a água escura lerem.
+    ice: decoMaterial({ roughness: 0.55, side: THREE.DoubleSide, snow: 0.12 }),
     crystal: decoMaterial({ sway: 'tree', roughness: 0.25, metalness: 0.1, emissive: '#3a2a66', emissiveIntensity: 0.6 }),
     glass: decoMaterial({ roughness: 0.2, metalness: 0.2 }),
     fire: fireMaterial(),
@@ -524,8 +547,14 @@ export function makeGroundMaterial() {
   const sideF = vec3(strata.mul(0.32).add(0.8)).mul(mix(vec3(1), vec3(1.22, 1.18, 1.1), stones.mul(0.8)));
   // Costura de cor com a peça vizinha, só no topo (a lateral fica com a cor do vértice).
   const seam = seamAt();
-  const base = mix(vertexColor().rgb, seam.rgb, seam.a.mul(top));
-  const ground = snowOn(base.mul(mix(sideF, detail, top)), 0.85);
+  const base0 = mix(vertexColor().rgb, seam.rgb, seam.a.mul(top));
+  // Várzea: o prado e a plantação perto da água puxam para a cor fértil do tema (mapa de distância ao rio).
+  const riverD = texture(riverMap.texture, positionWorld.xz.div(GROUND_EXTENT * 2).add(0.5)).r.mul(RIVER_DMAX);
+  const nearRiver = float(1).sub(smoothstep(U.floodReach.mul(0.3), U.floodReach, riverD));
+  const fertile = nearRiver.mul(U.flood).mul(sp.x.add(sp.z).mul(1.4).min(1)).mul(top).mul(0.92);
+  const base = mix(base0, U.floodColor, fertile);
+  // `fieldSnow` (Theme.fieldSnow) tira neve só das parcelas de plantação (o gelo do lago congelado); 1 = como sempre.
+  const ground = snowOn(base.mul(mix(sideF, detail, top)), mix(float(0.85), float(0.85).mul(U.fieldSnow), sp.z.min(1)));
   m.colorNode = mix(ground, vec3(1), U.silhouette);
   // Relevo fino do prado e da mata: inclina a normal com o mapa de declive da água.
   const slope = texture(waterTex, p.mul(0.45)).rg.sub(0.5).mul(sp.x.add(sp.y).mul(0.5).add(0.12));
@@ -826,10 +855,14 @@ export function makeVoidMaterial() {
     /** Entorno do tema (aos poucos): mar e areia, de 0 a 1; o resto é pergaminho. */
     sea: uniform(0),
     sand: uniform(0),
+    /** 1 = a areia vira chapada: capim seco com manchas de terra vermelha, no lugar das dunas (só vale com `sand` em 1). */
+    cap: uniform(0),
     /** Cores do mar (raso e fundo), da areia e do céu refletido na água. */
     shallow: uniform(new THREE.Color('#5fd0c8')),
     deep: uniform(new THREE.Color('#1c5a9c')),
     sandCol: uniform(new THREE.Color('#e6d4a6')),
+    /** Terra que aparece em manchas na chapada. */
+    earthCol: uniform(new THREE.Color('#a5603a')),
     sky: uniform(new THREE.Color('#9cc8ee')),
   };
   // Parte iluminada (recebe a sombra do tabuleiro e a oclusão) e parte emissiva (a cor
@@ -904,6 +937,8 @@ export function makeVoidMaterial() {
     const view = cameraPosition.sub(positionWorld).normalize();
     const fres = float(1).sub(dot(view, nW).max(0)).pow(4).mul(0.85).add(0.04);
     water = mix(water, u.sky, fres.mul(float(1).sub(far)).mul(0.45));
+    // Aurora boreal (Theme.skyFx): a cortina refletida no mar; some com `U.aurora` em 0.
+    water = water.add(auroraSky(vec3(view.x.negate(), view.y, view.z.negate())).mul(float(1).sub(far)).mul(fres.mul(1.2).add(0.35)));
     // Espuma: a faixa que avança e recua sobre a areia, mais a renda de dois ruídos.
     const lap = sin(t.mul(1.05).add(big.b.mul(10))).mul(0.06).add(0.3);
     const foamEdge = smoothstep(lap.sub(0.15), lap.sub(0.03), dd).mul(float(1).sub(smoothstep(lap, lap.add(0.17), dd)));
@@ -933,7 +968,22 @@ export function makeVoidMaterial() {
     return mix(col, u.bg.mul(0.95), farS.mul(0.8));
   })();
 
-  const surround = mix(mix(grid, seaLook, u.sea), sandLook, u.sand);
+  // Chapada (Theme.surround = 'chapada'): mar de capim seco. Faixas largas de capim mais claro e mais escuro levadas pelo
+  // "vento", manchas de terra vermelha nos vãos e tufos finos; desbota para o fundo como a areia.
+  const capimLook = Fn(() => {
+    const wide = texture(noiseTex, p.div(6).add(vec2(0.17, 0.41))).r;
+    const mid = texture(noiseTex, p.mul(0.55)).g;
+    const fine = texture(noiseTex, p.mul(2.6)).b.sub(0.5);
+    const streak = texture(noiseTex, vec2(p.x.mul(0.9).add(p.y.mul(0.35)), p.y.mul(0.12))).r.sub(0.5);
+    const earth = smoothstep(0.58, 0.76, wide.mul(0.7).add(mid.mul(0.3))).mul(0.5);
+    const grass = u.sandCol.mul(float(0.9).add(mid.mul(0.2)).add(streak.mul(0.18)).add(fine.mul(0.12)));
+    const col = mix(grass, u.earthCol.mul(float(0.95).add(fine.mul(0.1))), earth);
+    const dust = smoothstep(0.0, 0.45, d).mul(0.06);
+    const farS = smoothstep(u.radius.add(6), u.radius.add(16), length(p.sub(u.center)));
+    return mix(col.mul(float(1).sub(dust)), u.bg.mul(0.95), farS.mul(0.8));
+  })();
+
+  const surround = mix(mix(grid, seaLook, u.sea), mix(sandLook, capimLook, u.cap), u.sand);
   // Mar e areia usam a luz da cena (sol, sombra do tabuleiro). A areia guarda mais emissão que o mar:
   // sob o céu colorido de um tema (Marte) a parte iluminada sozinha tingiria demais a cor dela.
   const dim = float(1).sub(U.night.mul(0.7));

@@ -2,8 +2,15 @@ import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { housesAtEra } from '../themes/progress';
 import type { SiteKind } from '../core/sites';
+import { hillGeometry, peakGeometry } from './relief';
+import { awningRoofParts, catGeometry, crocodileGeometry, ibisGeometry, mesaGeometry, miniPyramidGeometry, oxGeometry, pylonGateGeometry, shadufGeometry, sphinxGeometry, terraceWallParts, TERRACE } from './kits/egito';
+import { ancientBlossomGeometry, heronGeometry, koiPondGeometry, luckyCatGeometry, niwakiGeometry } from './kits/oriental';
+import { anteaterGeometry, coffeeBloomGeometry, colonialRoof, engenhoGeometry, jaguarGeometry, macawGeometry, manedWolfGeometry, muleGeometry, oxcartGeometry, porteiraGeometry, profetasGeometry, rheaGeometry, termiteMoundGeometry, zebuGeometry, type KitTools } from './kits/brasil';
 import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
-import type { AnimalKind, BoatKind, BodyStyle, BridgeStyle, CenterCrown, CropStyle, GateStyle, HatStyle, HouseKind, Landmark, RoofStyle, Theme, TreeGeo, VehicleKind } from '../themes/types';
+import type { EggKit } from '../core/eggs';
+import { brickGateParts, bulbParts, cheeseParts, dikeBoyParts, drawbridgeParts, duckParts, dutchGableParts, poplarParts, tjalkParts, windmillParts } from './kits/holanda';
+import * as inv from './kits/inverno';
+import { gatesOf, type AnimalKind, type BoatKind, type BodyStyle, type BridgeStyle, type CenterCrown, type CropStyle, type GateStyle, type HatStyle, type HouseKind, type Landmark, type RoofStyle, type Theme, type TreeGeo, type VehicleKind } from '../themes/types';
 
 // Biblioteca de "kits": geometrias low-poly com cor por vértice, montadas por tema.
 // Cada chave vira um InstancedMesh (1 draw call para milhares de cópias).
@@ -13,7 +20,7 @@ import type { AnimalKind, BoatKind, BodyStyle, BridgeStyle, CenterCrown, CropSty
 
 type Col = THREE.ColorRepresentation;
 
-interface Part {
+export interface Part {
   geo: THREE.BufferGeometry;
   color: Col;
   tint?: number;
@@ -143,6 +150,9 @@ function jitter(geo: THREE.BufferGeometry, amount: number, seed: number) {
   return g;
 }
 
+/** As primitivas que os kits de src/render/kits/ recebem (eles não importam este arquivo). */
+const TOOLS: KitTools = { kit, box, cyl, jitter, roofBands };
+
 /** Triângulo avulso (lâminas de capim/trigo). */
 function tri(a: number[], b: number[], c: number[]) {
   const g = new THREE.BufferGeometry();
@@ -218,6 +228,9 @@ function trapezoid(wb: number, wt: number, h: number) {
   return g;
 }
 
+/** As primitivas que os kits de tema (src/render/kits/) recebem por injeção, sem import em ciclo. */
+const PRIMS: inv.Prims = { kit, box, cyl, cone, oct, ico, jitter, strut, taper, pyramid };
+
 // ---------------------------------------------------------------- casas
 
 export interface HouseMeta {
@@ -236,6 +249,7 @@ const BODY: Record<BodyStyle, { w: number; h: number; d: number }> = {
   round: { w: 0.14, h: 0.09, d: 0.14 },
   // Só o corpo principal; o anexo (ANNEX) fica ao lado, no +x.
   annex: { w: 0.12, h: 0.1, d: 0.12 },
+  terrace: TERRACE,
 };
 
 /** Anexo baixo da casa `annex`: o corpo principal desliza `ox` para trás e o anexo encosta na lateral. */
@@ -345,6 +359,7 @@ function wallGeometry(k: HouseKind, win: Col) {
   const base = (hh: number) => ({ ys: [hh * 0.3], f: [0.65, 1] });
   const parts: Part[] = [{ geo: body, color: k.tone ?? '#ffffff', tint: 1, bands: base(h) }, ...windowsFor(k.body, win, w, h, d, k.bright, k.trim, doorColor(k))];
   if (k.trim) parts.push(...trimFor(k.body, k.trim, w, h, d));
+  if (k.body === 'terrace') parts.push(...terraceWallParts(win, doorColor(k), k.bright));
   if (k.body === 'annex') {
     shift(parts, ANNEX.ox);
     const a = ANNEX;
@@ -384,6 +399,12 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
       top = h + 0.026;
       break;
     }
+    case 'awning': {
+      const aw = awningRoofParts();
+      parts.push(...aw.parts);
+      top = aw.top;
+      break;
+    }
     case 'dome': {
       const r = Math.max(w, d) / 2 + 0.004;
       parts.push({ geo: new THREE.SphereGeometry(r, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, h, 0), color: '#fff', tint: 1, glow: 0.35 });
@@ -395,6 +416,12 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
       const rh = 0.09;
       parts.push({ geo: cone(r, rh, round ? 12 : 4, 0, h, 0).rotateY(round ? 0 : Math.PI / 4), color: '#fff', tint: 1, bands: roofBands(h, h + rh) });
       top = h + rh;
+      break;
+    }
+    case 'colonial': {
+      const c = colonialRoof(TOOLS, w, h, d);
+      parts.push(...c.parts);
+      top = c.top;
       break;
     }
     case 'hip': {
@@ -422,19 +449,23 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
       top = h + r * 0.8;
       break;
     }
-    case 'stepgable': {
-      const rh = 0.085;
+    case 'stepgable':
+    case 'bell':
+    case 'neck': {
+      const rh = style === 'stepgable' ? 0.085 : 0.1;
       const g = new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2);
       g.scale(d + 0.01, rh / 1.5, (w + 0.01) / 1.732).translate(0, h + rh / 3, 0).rotateY(Math.PI / 2);
       parts.push({ geo: g, color: '#fff', tint: 1, bands: roofBands(h, h + rh) });
-      // Empena escalonada na fachada: degraus da cor da parede (tijolo).
-      for (const z of [d / 2 + 0.004, -d / 2 - 0.004]) {
-        for (let s = 0; s < 3; s++) {
-          const sw = w * (1 - s * 0.3);
-          parts.push({ geo: box(sw, rh / 3 + 0.006, 0.012, 0, h + (s * rh) / 3, z), color: '#9a4a32' });
+      // Empena escalonada na fachada: degraus da cor da parede (tijolo). Sino e pescoço: kits/holanda.ts.
+      if (style !== 'stepgable') parts.push(...dutchGableParts(style, w, d, h, rh, '#a04c34', '#e4d8bc'));
+      else
+        for (const z of [d / 2 + 0.004, -d / 2 - 0.004]) {
+          for (let s = 0; s < 3; s++) {
+            const sw = w * (1 - s * 0.3);
+            parts.push({ geo: box(sw, rh / 3 + 0.006, 0.012, 0, h + (s * rh) / 3, z), color: '#9a4a32' });
+          }
         }
-      }
-      top = h + rh;
+      top = style === 'stepgable' ? h + rh : h + rh * 1.4;
       break;
     }
     default: {
@@ -545,6 +576,8 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
         { geo: oct(0.04).scale(1, 2.4, 1).rotateZ(0.35).translate(0.06, 0.09, 0.02), color: '#fff', tint: 1 },
         { geo: oct(0.035).scale(1, 2.2, 1).rotateZ(-0.4).translate(-0.05, 0.08, -0.03), color: '#fff', tint: 1 },
       ]);
+    case 'poplar':
+      return kit(poplarParts(trunk, farTree));
     case 'cypress':
       return kit([T(0.06, 0.016), { geo: jitter(ico(0.1, 0), 0.012, 5).scale(0.42, 2.0, 0.42).translate(0, 0.25, 0), color: '#fff', tint: 1, grad: [0.75, 1.05, 0.05, 0.45] }]);
     case 'olive':
@@ -621,6 +654,8 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
         { geo: cyl(0.01, 0.012, 0.1, 5).rotateZ(-0.18).translate(-0.006, 0.16, 0), color: trunk },
         { geo: jitter(ico(0.1, 0), 0.016, 32).scale(1.55, 0.36, 1.45).translate(0.006, 0.27, 0), color: '#fff', tint: 1, grad: [0.72, 1.1, 0.24, 0.3] },
       ]);
+    case 'niwaki':
+      return niwakiGeometry(trunk, farTree);
     case 'waxpalm': {
       // Palmeira-de-cera dos Andes: o tronco claro e altíssimo é o que a identifica.
       const parts: Part[] = [{ geo: cyl(0.009, 0.013, 0.46, 5), color: '#d8d2c2', grad: [0.85, 1.05, 0, 0.46] }];
@@ -636,6 +671,9 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
 
 /** Suavidade da copa (`softCanopy`): as formas esguias ficam menos lisas, para a quina da copa existir de longe. */
 const SOFT: Partial<Record<TreeGeo, number>> = { cypress: 0.45, spire: 0.5 };
+
+/** Copas perenes: a estação (primavera clara, outono ocre) não as tinge, só a neve (material `evergreen`). */
+const EVERGREEN: ReadonlySet<string> = new Set<TreeGeo>(['conifer', 'spire', 'cypress', 'umbrella', 'araucaria', 'niwaki']);
 
 /** Formas com ponta, folha ou cristal: a quina é a forma, então ficam facetadas. */
 const FACETED: ReadonlySet<TreeGeo> = new Set<TreeGeo>(['crystal', 'cactus', 'palm', 'waxpalm', 'bamboo']);
@@ -676,6 +714,8 @@ export interface CropLayout {
   scale: [number, number];
   /** Cada fileira com uma cor (tulipas, quinoa). */
   rowColor: boolean;
+  /** Fração das posições da grade que ganham planta (omitido = todas): o gelo tem poucos buracos, não uma lavoura. */
+  sparse?: number;
 }
 
 export const CROP_LAYOUT: Record<CropStyle, CropLayout> = {
@@ -691,12 +731,15 @@ export const CROP_LAYOUT: Record<CropStyle, CropLayout> = {
   papyrus: { rowGap: 0.06, step: 0.05, scale: [0.85, 1.15], rowColor: false },
   tea: { rowGap: 0.06, step: 0.05, scale: [0.95, 1.1], rowColor: false },
   coffee: { rowGap: 0.06, step: 0.05, scale: [0.9, 1.1], rowColor: false },
+  coffeebloom: { rowGap: 0.06, step: 0.05, scale: [0.9, 1.1], rowColor: false },
   cotton: { rowGap: 0.055, step: 0.045, scale: [0.9, 1.1], rowColor: false },
   quinoa: { rowGap: 0.05, step: 0.042, scale: [0.9, 1.15], rowColor: true },
   potato: { rowGap: 0.058, step: 0.042, scale: [0.9, 1.1], rowColor: false },
   flax: { rowGap: 0.042, step: 0.03, scale: [0.95, 1.2], rowColor: false },
+  bulb: { rowGap: 0.036, step: 0.028, scale: [1.05, 1.3], rowColor: true },
   mulberry: { rowGap: 0.066, step: 0.05, scale: [0.9, 1.1], rowColor: false },
   hydro: { rowGap: 0.06, step: 0.05, scale: [0.9, 1.1], rowColor: false },
+  icefield: { rowGap: 0.1, step: 0.09, scale: [0.85, 1.25], rowColor: false, sparse: 0.6 },
 };
 
 function tuft(n: number, h: number, w: number, spread: number, earAt: number, droop = 0, seed = 1): THREE.BufferGeometry[] {
@@ -781,6 +824,8 @@ function cropGeometry(style: CropStyle): THREE.BufferGeometry {
     }
     case 'tea':
       return kit([{ geo: jitter(ico(0.032, 0), 0.005, 14).scale(1.2, 0.7, 1).translate(0, 0.02, 0), color: '#fff', tint: 1, grad: [0.75, 1.1, 0, 0.04] }]);
+    case 'coffeebloom':
+      return coffeeBloomGeometry(TOOLS);
     case 'coffee':
       return kit([
         { geo: jitter(ico(0.028, 0), 0.006, 15).scale(1, 1.3, 1).translate(0, 0.035, 0), color: '#fff', tint: 1, grad: [0.7, 1.05, 0, 0.07] },
@@ -805,6 +850,8 @@ function cropGeometry(style: CropStyle): THREE.BufferGeometry {
         { geo: oct(0.0055).translate(0.012, 0.042, 0.006), color: '#f4f0f6' },
         { geo: oct(0.0055).translate(-0.01, 0.04, -0.008), color: '#c8b0dc' },
       ]);
+    case 'bulb':
+      return kit(bulbParts());
     case 'flax':
       return kit([
         ...green(tuft(4, 0.075, 0.0035, 0.01, 0.85, 0.004, 35)),
@@ -821,6 +868,8 @@ function cropGeometry(style: CropStyle): THREE.BufferGeometry {
         { geo: cyl(0.003, 0.004, 0.025, 4).rotateZ(0.6).translate(0.006, 0.03, 0), color: '#6a5040' },
         { geo: jitter(ico(0.03, 0), 0.006, 36).scale(1.1, 0.85, 1.1).translate(0, 0.058, 0), color: '#fff', tint: 1, grad: [0.75, 1.08, 0.035, 0.085] },
       ]);
+    case 'icefield':
+      return inv.icefieldGeometry(PRIMS);
     case 'hydro':
       return kit([
         { geo: box(0.05, 0.012, 0.03), color: '#cfd6de' },
@@ -1017,14 +1066,8 @@ function landmarkGeometry(kind: Landmark, [wall, roof, det]: [string, string, st
 }
 
 function windmillBody(wall: Col, roof: Col, det: Col, win: Col) {
-  return kit([
-    { geo: box(0.12, 0.03, 0.12), color: '#8a7a6a' },
-    { geo: cyl(0.05, 0.075, 0.22, 8, 0, 0.03), color: wall, grad: [0.9, 1.05, 0, 0.25] },
-    { geo: cone(0.062, 0.07, 8, 0, 0.25), color: roof },
-    { geo: box(0.02, 0.04, 0.006, 0, 0.03, 0.073), color: DOOR },
-    { geo: box(0.014, 0.018, 0.006, 0, 0.14, 0.061), color: win, glow: 1 },
-    { geo: box(0.1, 0.006, 0.1, 0, 0.1), color: det },
-  ]);
+  // Moinho holandês (kits/holanda.ts): só a Holanda usa o moinho de vento.
+  return kit(windmillParts(String(wall), String(roof), String(det), String(win), DOOR));
 }
 
 /** Pás do moinho: giram em torno do eixo z, centro em (0,0,0). */
@@ -1087,6 +1130,14 @@ function gateGeometry(style: GateStyle, [main, top]: [string, string]): THREE.Bu
       for (const x of [-0.112, 0.112]) parts.push({ geo: pyramid(0.12, 0.028, 0.05, 0.12).translate(x, 0, 0), color: top });
       return kit(parts);
     }
+    case 'brick':
+      return kit(brickGateParts(main, top));
+    case 'pylon':
+      return pylonGateGeometry([main, top]);
+    case 'porteira':
+      return porteiraGeometry(TOOLS, [main, top]);
+    case 'dragon':
+      return inv.dragonGateGeometry(PRIMS, [main, top]);
     case 'inca':
       // Portal de pedra trapezoidal (como o Inti Punku): ombreiras que se inclinam para dentro.
       return kit([
@@ -1136,6 +1187,8 @@ function bridgeGeometry(style: BridgeStyle, [main, det]: [string, string]): THRE
       along((x) => deck(x) + 0.008, 8, -L, L, 0.018, 0.012, -0.04, det);
       return kit(parts);
     }
+    case 'draw':
+      return kit(drawbridgeParts(main, det));
     case 'wood': {
       // Arco alto de madeira: tabuleiro em lombada sobre vigas cruzadas, guarda-corpo pintado.
       // Alto o bastante para os barcos passarem por baixo.
@@ -1246,6 +1299,30 @@ function animalGeometry(kind: AnimalKind): THREE.BufferGeometry {
       return kit([{ geo: box(0.05, 0.022, 0.02, 0, 0.042), color: '#fff', tint: 1 }, { geo: new THREE.SphereGeometry(0.016, 6, 4, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 0.064, 0), color: '#fff', tint: 1 }, { geo: box(0.01, 0.032, 0.01, 0.03, 0.05).rotateZ(-0.5), color: '#fff', tint: 1 }, { geo: box(0.018, 0.01, 0.01, 0.05, 0.075), color: '#fff', tint: 1 }, ...legs(0.018, 0.007, 0.042, '#8a6a4a')]);
     case 'deer':
       return kit([{ geo: box(0.042, 0.018, 0.014, 0, 0.032), color: '#fff', tint: 1 }, { geo: box(0.009, 0.026, 0.009, 0.022, 0.046).rotateZ(-0.3), color: '#fff', tint: 1 }, { geo: box(0.016, 0.009, 0.009, 0.034, 0.066), color: '#fff', tint: 1 }, { geo: cone(0.012, 0.03, 3, 0.03, 0.072, 0).rotateY(0.6), color: '#e8dcc0' }, ...legs(0.015, 0.005, 0.032, '#4a3a2e')]);
+    case 'duck':
+      return kit(duckParts());
+    case 'ibis':
+      return ibisGeometry();
+    case 'crocodile':
+      return crocodileGeometry();
+    case 'ox':
+      return oxGeometry();
+    case 'heron':
+      return heronGeometry();
+    case 'zebu':
+      return zebuGeometry(TOOLS);
+    case 'rhea':
+      return rheaGeometry(TOOLS);
+    case 'maned':
+      return manedWolfGeometry(TOOLS);
+    case 'anteater':
+      return anteaterGeometry(TOOLS);
+    case 'reindeer':
+      return inv.reindeerGeometry(PRIMS);
+    case 'moose':
+      return inv.mooseGeometry(PRIMS);
+    case 'fox':
+      return inv.foxGeometry(PRIMS);
     case 'rover':
       return kit([
         { geo: box(0.05, 0.016, 0.03, 0, 0.012), color: '#fff', tint: 1 },
@@ -1313,6 +1390,8 @@ function boatBody(kind: BoatKind, [hullC, sailC]: [string, string]): THREE.Buffe
       }
       return kit([{ geo: g, color: hullC, grad: [0.85, 1.05, 0, 0.04] }, { geo: box(0.01, 0.022, 0.01, 0.0, 0.02), color: sailC }]);
     }
+    case 'tjalk':
+      return kit(tjalkParts(hullC, sailC));
     case 'nile':
       // Barco do Novo Império: pontas recurvadas como umbelas de papiro, vela quadrada mais
       // larga que alta entre duas vergas, remos de governo na popa.
@@ -1390,6 +1469,11 @@ function vehicleGeometry(kind: VehicleKind, [body, det]: [string, string], anima
         // Caçamba aberta: os caixotes (`cargo`) sentam na borda de cima (y = 0,034).
         car: kit([{ geo: box(0.05, 0.016, 0.034, 0, 0.018), color: body }, ...wheels([0], 0.016, 0.02), { geo: box(0.04, 0.003, 0.003, 0.04, 0.024, 0.01), color: '#5a4032' }, { geo: box(0.04, 0.003, 0.003, 0.04, 0.024, -0.01), color: '#5a4032' }]),
       };
+    case 'oxcart':
+      // Carro de boi à frente e, atrás, uma mula de tropa carregada (o comboio da estrada).
+      return { head: oxcartGeometry(TOOLS, [body, det]), car: muleGeometry(TOOLS, det) };
+    case 'sled':
+      return inv.sledGeometry(PRIMS, [body, det]);
     case 'caravan': {
       const a = animal === 'camel' || animal === 'llama' || animal === 'horse' || animal === 'donkey' ? animal : 'horse';
       const pack = (x: number, y: number) => [{ geo: box(0.014, 0.014, 0.03, x, y), color: det }];
@@ -1400,13 +1484,83 @@ function vehicleGeometry(kind: VehicleKind, [body, det]: [string, string], anima
   }
 }
 
-function birdGeometry() {
+/** Balão de papel de São João: gomos de cor da instância, boca de fogo acesa embaixo (brilha de leve). */
+function balloonGeometry() {
   return kit([
-    { geo: tri([0, 0, 0], [-0.01, 0.004, 0.03], [0.012, 0, 0]), color: '#3a3634' },
-    { geo: tri([0, 0, 0], [0.012, 0, 0], [-0.01, 0.004, -0.03]), color: '#3a3634' },
-    { geo: tri([-0.01, 0.004, 0.03], [0, 0, 0], [0.012, 0, 0]), color: '#3a3634' },
-    { geo: tri([0.012, 0, 0], [0, 0, 0], [-0.01, 0.004, -0.03]), color: '#3a3634' },
+    { geo: new THREE.SphereGeometry(0.022, 7, 4).scale(0.85, 1.25, 0.85).translate(0, 0.04, 0), color: '#fff', tint: 1, glow: 0.35, grad: [1.12, 0.85, 0.014, 0.068] },
+    { geo: cyl(0.005, 0.009, 0.01, 6, 0, 0.004), color: '#6a4a32' },
+    { geo: oct(0.005).translate(0, 0.012, 0), color: '#ffb347', glow: 1 },
   ]);
+}
+
+function birdGeometry(color = '#3a3634', glow = 0) {
+  return kit([
+    { geo: tri([0, 0, 0], [-0.01, 0.004, 0.03], [0.012, 0, 0]), color, glow },
+    { geo: tri([0, 0, 0], [0.012, 0, 0], [-0.01, 0.004, -0.03]), color, glow },
+    { geo: tri([-0.01, 0.004, 0.03], [0, 0, 0], [0.012, 0, 0]), color, glow },
+    { geo: tri([0.012, 0, 0], [0, 0, 0], [-0.01, 0.004, -0.03]), color, glow },
+  ]);
+}
+
+/**
+ * Kits decorativos dos easter eggs de peça (Theme.eggs, efeito 'kit'), chave `egg:<kit>`. Um kit novo entra
+ * no tipo `EggKit` (core/eggs.ts) e ganha o seu `case` aqui. A cor da instância tinge as partes com `tint`.
+ */
+function eggGeometry(kit_: EggKit): THREE.BufferGeometry {
+  switch (kit_) {
+    case 'bulbo-dourado':
+      // Uma tulipa grande de ouro com folhas: o caule e as pétalas brilham de leve.
+      return kit([
+        { geo: cyl(0.004, 0.005, 0.07, 5), color: '#4f8a3a' },
+        { geo: cone(0.022, 0.05, 5, 0, 0.06), color: '#fff', tint: 1, glow: 0.5, grad: [0.85, 1.1, 0.06, 0.11] },
+        { geo: cone(0.012, 0.04, 4, 0.016, 0.062).rotateZ(-0.35), color: '#fff', tint: 1, glow: 0.4 },
+        { geo: cone(0.012, 0.04, 4, -0.016, 0.062).rotateZ(0.35), color: '#fff', tint: 1, glow: 0.4 },
+        { geo: box(0.05, 0.004, 0.012, 0.022, 0.02).rotateZ(0.5), color: '#4f8a3a' },
+        { geo: box(0.05, 0.004, 0.012, -0.022, 0.016).rotateZ(-0.5), color: '#4f8a3a' },
+      ]);
+    case 'queijo':
+      return kit(cheeseParts());
+    case 'menino-dique':
+      return kit(dikeBoyParts());
+    case 'esfinge':
+      return sphinxGeometry();
+    case 'gato':
+      return catGeometry();
+    case 'ibis':
+      return ibisGeometry();
+    case 'piramide':
+      return miniPyramidGeometry();
+    case 'profetas':
+      return profetasGeometry(TOOLS);
+    case 'onca':
+      return jaguarGeometry(TOOLS);
+    case 'troll':
+      return inv.trollGeometry(PRIMS);
+    case 'estela':
+      // Pedra erguida com um anel dourado no alto.
+      return kit([
+        { geo: box(0.05, 0.012, 0.04), color: '#8a8478', grad: [0.8, 1, 0, 0.012] },
+        { geo: box(0.032, 0.11, 0.02, 0, 0.012), color: '#a8a296', grad: [0.85, 1.05, 0.012, 0.12] },
+        { geo: cone(0.022, 0.03, 4, 0, 0.122).rotateY(Math.PI / 4), color: '#a8a296' },
+        { geo: cyl(0.014, 0.014, 0.004, 8, 0, 0.08).rotateX(Math.PI / 2).translate(0, 0, 0.011), color: '#fff', tint: 1, glow: 0.7 },
+      ]);
+    case 'cerejeira-milenar':
+      return ancientBlossomGeometry('#4e3a30');
+    case 'lago-carpa':
+      return koiPondGeometry();
+    case 'gato-da-sorte':
+      return luckyCatGeometry();
+  }
+}
+
+/** Aldeão com lanterna na mão, para a procissão dos easter eggs: a cor da instância tinge a camisa. */
+function lanternFolkGeometry(folk: { skin: string; hat: HatStyle; hatColor: string }, wood: Col): THREE.BufferGeometry {
+  const f = folkGeometry('hoe', folk, wood);
+  const lamp = kit([
+    { geo: box(0.008, 0.01, 0.008, 0.018, 0.05, 0.012), color: '#ffd98a', glow: 1 },
+    { geo: box(0.0015, 0.014, 0.0015, 0.018, 0.058, 0.012), color: '#2a2622' },
+  ]);
+  return mergeGeometries([f, lamp])!;
 }
 
 // ---------------------------------------------------------------- aldeões
@@ -1697,6 +1851,9 @@ function wonderGeometry(theme: Theme): { base: THREE.BufferGeometry; body: THREE
       add(cyl(0.012, 0.016, 0.04, 6, 0, H + 0.09, 0.14), '#2a2622');
       break;
     }
+    case 'stave':
+      P.push(...inv.staveWonderParts(PRIMS, w.colors, win));
+      break;
     case 'rings': {
       for (let i = 0; i < 6; i++) {
         const r = 0.34 - i * 0.045, y = i * 0.035;
@@ -2270,11 +2427,13 @@ export class Lib {
     set('landmark', landmarkGeometry(theme.landmark, theme.landmarkColors, theme.window));
     const [lw, lr, ld] = theme.landmarkColors;
     if (theme.landmark === 'windmill' || theme.mill === 'windmill') set('sails', sailsGeometry(ld, '#f3ead8'));
-    set('mill', theme.mill === 'windmill' ? windmillBody(lw, lr, ld, theme.window) : theme.mill === 'windpump' ? windpumpBody(theme.trunk) : theme.mill === 'stilt' ? stiltGeometry(theme.houses[0].walls[0], theme.houses[0].roofs[0], theme.trunk) : null);
+    set('mill', theme.mill === 'windmill' ? windmillBody(lw, lr, ld, theme.window) : theme.mill === 'windpump' ? windpumpBody(theme.trunk) : theme.mill === 'stilt' ? stiltGeometry(theme.houses[0].walls[0], theme.houses[0].roofs[0], theme.trunk) : theme.mill === 'engenho' ? engenhoGeometry(TOOLS, lw, lr, theme.window) : null);
     if (theme.mill === 'windpump') set('rotor', rotorGeometry());
-    if (theme.gate) set('gate', gateGeometry(theme.gate.style, theme.gate.colors));
+    gatesOf(theme).forEach((g, i) => set(`gate:${i}`, gateGeometry(g.style, g.colors)));
     if (theme.bridge) set('bridge', bridgeGeometry(theme.bridge.style, theme.bridge.colors));
     for (const c of theme.crops) if (!this.geos.has(`crop:${c.style}`)) set(`crop:${c.style}`, cropGeometry(c.style));
+    // Lago congelado: o pesqueiro (tenda, varal e buraco) que cada parcela de gelo pode ganhar.
+    if (theme.crops.some((c) => c.style === 'icefield')) set('icecamp', inv.iceCampGeometry(PRIMS));
     const sp = specialsFor(theme, theme.houses[0].walls[0], theme.houses[0].roofs[0]);
     for (const [k, g] of Object.entries(sp)) set(k, g);
     if (theme.mill === 'granary') set('mill', sp.granary);
@@ -2285,16 +2444,51 @@ export class Lib {
     // Versões leves para o zoom aberto (octaedros), no mesmo molde das árvores.
     this.farGeos.set('bush', softCanopy(kit([{ geo: jitter(new THREE.OctahedronGeometry(0.05, 0), 0.01, 5).translate(0, 0.03, 0), color: '#fff', tint: 1, grad: [0.8, 1.1, 0, 0.07] }])));
     this.farGeos.set('rock', kit([{ geo: new THREE.OctahedronGeometry(0.042, 0).scale(1, 0.55, 1).translate(0, 0.012, 0), color: '#fff', tint: 1 }]));
+    // Relevo decorativo (Theme.relief): serra e morro, com a versão leve no mesmo molde das árvores.
+    if (theme.relief && theme.relief.amp > 0) {
+      const foot = theme.ground[0];
+      const snow = !!theme.relief.snow;
+      if (theme.relief.style === 'serra') {
+        const mist = theme.relief.mist;
+        const crown = theme.relief.crown;
+        set('peak', peakGeometry({ snow, foot, mist, crown }));
+        this.farGeos.set('peak', peakGeometry({ snow, foot, mist, crown, far: true }));
+      } else if (theme.relief.style === 'falesia') {
+        // Falésia: mesas de arenito de topo chato, no mesmo `peak` (mesma pegada da serra).
+        set('peak', mesaGeometry({ foot }));
+        this.farGeos.set('peak', mesaGeometry({ foot, far: true }));
+      }
+      set('hill', hillGeometry());
+      this.farGeos.set('hill', hillGeometry({ far: true }));
+    }
+    if (theme.irrigation) set('shaduf', shadufGeometry());
     set('flower', kit([{ geo: oct(0.014).translate(0, 0.024, 0), color: '#fff', tint: 1 }, { geo: tri([-0.002, 0, 0], [0.002, 0, 0], [0, 0.02, 0]), color: '#4f7a3a' }]));
     set('lily', kit([{ geo: cyl(0.035, 0.035, 0.006, 7, 0, 0.011), color: '#fff', tint: 1 }, { geo: oct(0.008).translate(0.01, 0.02, 0.006), color: '#f7c6d8' }]));
     set('animal', animalGeometry(theme.animals.kind));
+    // Fauna extra do tema: um kit por espécie (`fauna:<kind>`), o mesmo desenho do bicho de pasto.
+    for (const f of theme.fauna ?? []) if (!this.geos.has(`fauna:${f.kind}`)) set(`fauna:${f.kind}`, animalGeometry(f.kind));
     set('boat', boatGeometry(theme.boat, theme.boatColors));
     const v = vehicleGeometry(theme.vehicle, theme.vehicleColors, theme.animals.kind);
     set('vehicle:head', v.head);
     set('vehicle:car', v.car);
     set('cargo', cargoGeometry());
+    // Peças de chão do prado (Theme.groundKits): `ground:<kit>`.
+    for (const g of theme.groundKits ?? []) if (!this.geos.has(`ground:${g.kit}`)) set(`ground:${g.kit}`, termiteMoundGeometry(TOOLS));
+    // Easter eggs com figurantes: a maria-fumaça (locomotiva e dois vagões num kit só) e o balão de São João.
+    for (const e of theme.eggs ?? []) for (const x of e.effect) {
+      if (x.kind !== 'evento') continue;
+      if (x.event === 'maria-fumaca' && !this.geos.has('egg:trem')) {
+        const t = vehicleGeometry('steam', ['#2c2a28', '#b5502f'], theme.animals.kind);
+        set('egg:trem', mergeGeometries([t.head, t.car.clone().translate(-0.078, 0, 0), t.car.clone().translate(-0.156, 0, 0)])!);
+      }
+      if (x.event === 'festa-junina' && !this.geos.has('egg:balao')) set('egg:balao', balloonGeometry());
+    }
+    for (const e of theme.eggs ?? []) for (const x of e.effect) if (x.kind === 'kit' && !this.geos.has(`egg:${x.kit}`)) set(`egg:${x.kit}`, eggGeometry(x.kit));
+    // Trenó do Natal (ovo 'treno'): só existe nos temas que o pedem.
+    if (theme.eggs?.some((e) => e.effect.some((x) => x.kind === 'evento' && x.event === 'treno'))) set('egg:sled', inv.skySledGeometry(PRIMS, theme.vehicleColors));
     set('coin', coinGeometry());
-    set('bird', birdGeometry());
+    set('bird', theme.skyBirds?.kit === 'arara' ? macawGeometry(TOOLS, theme.skyBirds.colors) : birdGeometry());
+    set('bird:gold', birdGeometry('#f4c63a', 0.5));
     for (let e = 0; e < 4; e++) set(`center:${e}`, centerGeometry(e, theme));
     set('monument:log', monumentGeometry('log', theme.trunk));
     set('monument:statue', monumentGeometry('statue', theme.trunk));
@@ -2310,6 +2504,7 @@ export class Lib {
     this.wonderSize = { h: wonder.h, w: wonder.w };
     const folk = theme.folk ?? { skin: '#c99a72', hat: 'none', hatColor: '#000' };
     for (const t of ['axe', 'hoe', 'sack'] as const) set(`folk:${t}`, folkGeometry(t, folk, theme.trunk));
+    set('egg:folk', lanternFolkGeometry(folk, theme.trunk));
     // Batedor do começo da partida: um aldeão montado no animal do tema (a instância tinge os dois).
     set('scout', mergeGeometries([animalGeometry(theme.animals.kind), folkGeometry('sack', folk, theme.trunk).translate(0, 0.022, 0)])!);
     for (const [k, g] of Object.entries(siteGeometries(theme))) set(k, g);
@@ -2332,9 +2527,13 @@ export class Lib {
   material(key: string): THREE.Material {
     if (key === 'fire') return this.mats.fire;
     if (key === 'tree:crystal') return this.mats.crystal;
-    if (key.startsWith('tree:') || key === 'bush') return this.mats.foliage;
+    if (key.startsWith('tree:')) return EVERGREEN.has(key.slice(5)) ? this.mats.evergreen : this.mats.foliage;
+    if (key === 'bush') return this.mats.foliage;
+    if (key === 'crop:icefield' || key === 'icecamp') return this.mats.ice;
     if (key.startsWith('crop:') || key === 'grass' || key === 'reed' || key === 'flower') return this.mats.crop;
     if (this.domeKeys.has(key)) return this.mats.glass;
+    if (key === 'peak') return this.mats.relief;
+    if (key === 'hill') return this.mats.reliefSoft;
     return this.mats.deco;
   }
 
@@ -2363,3 +2562,7 @@ export class Lib {
     return !(key.startsWith('crop:') || key === 'grass' || key === 'reed' || key === 'flower' || key === 'lily' || key === 'fire' || key === 'lantern');
   }
 }
+
+// Primitivas para os arquivos de kits por tema (src/render/kits/*.ts). Eles importam daqui e este arquivo os importa de volta:
+// o ciclo é inofensivo porque os kits só chamam estas funções depois que os dois módulos carregaram.
+export { box, cone, cyl, kit, lean, pyramid, strut, taper, jitter };
