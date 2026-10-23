@@ -46,7 +46,7 @@ O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Re
 
 **Escolha da era:** a cada era nova a vila escolhe 1 de 2 cartas (clique ou teclas `1` e `2`), e a carta vale até o fim da partida. São 8: Guilda dos carpinteiros, Moleiros, Pastores e Apicultores (+5 por interação do tipo), Agrimensores (+10 por encaixe perfeito), Mestres de obras (+1 peça por peça cercada), Peregrinos (+2 peças por missão cumprida) e Cartógrafos (próximas peças à vista por 10 jogadas e +1 peça por sítio). Alguns temas dão nomes próprios, como os Escribas do faraó no Egito. A próxima peça espera a escolha.
 
-**Maravilha:** na última era, a próxima peça com 2 ou mais bordas de vila vira o canteiro da maravilha do tema (Paço Municipal na Holanda, Pilone de Karnak no Egito, Grande Pagode no Terraços do Oriente, Santuário do Bom Jesus no Brasil Dourado, Palácio de Gelo no Inverno Nórdico). Cada peça colocada depois avança uma etapa da obra, que sobe dentro do andaime; com as 6 etapas ela fica pronta e rende +300 pontos e +6 peças.
+**Maravilha:** na última era, a próxima peça com 2 ou mais bordas de vila vira o canteiro da maravilha do tema (Paço Municipal na Holanda, Pilone de Karnak no Egito, Grande Pagode no Terraços do Oriente, Santuário do Bom Jesus no Brasil Dourado, Grande Stavkirke no Inverno Nórdico). Cada peça colocada depois avança uma etapa da obra, que sobe dentro do andaime; com as 6 etapas ela fica pronta e rende +300 pontos e +6 peças.
 
 **Sua casa:** no topo do menu de temas, escolha uma das 8 cores da casa (ou a do tema) e monte o brasão (metal, peça e móvel). A cor aparece no placar, nos estandartes das missões (pequenos, só aparecem com a câmera perto ou com a lista de missões aberta), nas bandeiras do Centro, dos marcos e dos barcos e nas camisas de metade dos aldeões.
 
@@ -144,7 +144,7 @@ O botão de qualidade abre a lista: **Auto**, **Ultra**, **Alta**, **Média** e 
 | Antiguidade | **Egito do Nilo** | Novo Império, c. 1300 a.C.: o Nilo, tamareiras, casas de adobe, pilone |
 | Séculos XVI a XVIII | **Terraços do Oriente** | Leste Asiático em paisagem de rolo, da China Song ao Japão Edo: arrozais, bambuzais, torii, pagodes, cerejeiras |
 | Séculos XVI a XVIII | **Brasil Dourado** | Brasil interior, Minas e Cerrado: casario caiado, ipês, buritis, café, Estrada Real |
-| Séculos XIX a XXI | **Inverno Nórdico** | Escandinávia no inverno: casas longas de turfa, cabanas vermelhas, drakkars no fiorde |
+| Séculos XIX a XXI | **Inverno Nórdico** | Escandinávia no inverno, sem data: casas longas de turfa, cabanas vermelhas, drakkars no fiorde, lago congelado com pesca no gelo no lugar da lavoura, trenó de rena na trilha, alce e raposa-do-ártico, pórtico de dragões, aurora boreal à noite e a Grande Stavkirke. Ovos: a aurora do solstício (20 a 22/12), o trenó de rena (24 e 25/12), Hugin e Munin sobre o lago e o troll da ponte |
 
 Eram 14 temas. O Jardim Sakura, o Jade Song e o Edo Tranquilo viraram o Terraços do Oriente; o Cerrado Dourado e a Minas Colonial, o Brasil Dourado; a Terra dos Vikings foi para o Inverno Nórdico; Vale Pastel, Colônia Marciana, Toscana, Velho Oeste e Andes saíram. Links com `?theme=` antigo, o tema escolhido e os recordes dos temas fundidos passam para o tema novo; a partida salva de um tema que saiu é descartada. O motivo e o que veio de cada tema estão em [docs/TEMAS.md](docs/TEMAS.md).
 

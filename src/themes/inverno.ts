@@ -1,11 +1,15 @@
+import { T } from '../core/tiles';
 import type { Theme } from './types';
 
 // Inverno Nórdico: o Inverno de antes, agora com o melhor da Terra dos Vikings, que saiu da lista. Ficam
-// a casa longa de turfa, o estabur, o drakkar, a cevada, o linho, o capuz, a moldura de madeira com o
-// corvo e os nomes das cartas. Saem o verde de verão, o carvalho, a data do século X e o trem a vapor
-// (a trilha é de terra batida, como era a dos Vikings). As regras ficam como eram, então uma partida
-// salva deste tema continua valendo. O que ainda falta (rena, trenó, lago congelado, aurora, igreja
-// de madeira como maravilha) está em docs/TEMAS.md.
+// a casa longa de turfa, o estabur, o drakkar, o capuz, a moldura de madeira com o corvo e os nomes das
+// cartas. Saem o verde de verão, o carvalho, a data do século X e o trem a vapor. As regras ficam como
+// eram, então uma partida salva deste tema continua valendo.
+//
+// Um fiorde no meio do inverno, sem data: o campo de cultivo virou LAGO CONGELADO (rachaduras, buracos de
+// pesca, tenda e varal de peixe seco), a trilha é de trenó puxado por rena, a noite tem aurora boreal e
+// a maravilha é uma stavkirke. Os kits novos estão em src/render/kits/inverno.ts. O que ainda falta
+// (casa de sauna, segundo marco, neve de telhado por shader) está em docs/TEMAS.md.
 
 export const inverno: Theme = {
   id: 'inverno',
@@ -13,8 +17,8 @@ export const inverno: Theme = {
   era: 'Escandinávia · no inverno, sem data',
   period: 'contemporanea',
   tagline: 'Casas longas de turfa, cabanas vermelhas, drakkars no fiorde e pinhais sob a neve.',
-  terrainNames: ['Neve', 'Taiga', 'Cevadal', 'Aldeia', 'Fiorde', 'Trilha'],
-  terrainColors: ['#e6eef5', '#2e5a4c', '#d9c9a0', '#9a3b2e', '#3a6f88', '#8c7a5c'],
+  terrainNames: ['Neve', 'Taiga', 'Lago gelado', 'Aldeia', 'Fiorde', 'Trilha de trenó'],
+  terrainColors: ['#e6eef5', '#2e5a4c', '#a9cfe3', '#9a3b2e', '#2e5f78', '#8c7a5c'],
   bg: '#cdd2d8',
   voidFill: '#d6dbe0',
   voidLine: '#e6eaee',
@@ -25,23 +29,23 @@ export const inverno: Theme = {
   hemiSky: '#eef4ff',
   hemiGround: '#8f9aa8',
   hemiIntensity: 1.45,
-  ground: ['#eef3f7', '#dfe7ee', '#d8dfe6', '#e4e7ea', '#e6eef4', '#eef3f7'],
+  ground: ['#eef3f7', '#dfe7ee', '#d2e0ea', '#e4e7ea', '#e6eef4', '#eef3f7'],
   side: '#6b7a8a',
   sideDark: '#3b4654',
-  water: '#2f6482',
+  water: '#2e5f78',
   bank: '#ffffff',
   road: 'dirt',
   roadBed: '#a9b3bf',
   roadDetail: '#6d7886',
   sleeper: '#5b4a3e',
-  vehicle: 'cart',
-  vehicleColors: ['#6a4a34', '#9a3b2e'],
+  // Trilha de trenó: sulcos de patins na neve e um trenó de rena (o trem a vapor saiu).
+  vehicle: 'sled',
+  vehicleColors: ['#6a4a34', '#a83a2e'],
   forest: [
-    { geo: 'conifer', weight: 0.45, colors: ['#2e5a4c', '#3b6b58', '#24493f', '#355f52'] },
-    { geo: 'spire', weight: 0.15, colors: ['#24493f', '#2a5446', '#1f4238'] },
+    { geo: 'conifer', weight: 0.48, colors: ['#2e5a4c', '#3b6b58', '#24493f', '#355f52'] },
+    { geo: 'spire', weight: 0.17, colors: ['#24493f', '#2a5446', '#1f4238'] },
     { geo: 'birch', weight: 0.2, colors: ['#dfe9ee', '#cfdde4'] },
     { geo: 'conifer', weight: 0.15, colors: ['#dfe9ee', '#cfdde4'] },
-    { geo: 'puff', weight: 0.05, colors: ['#3b6b58', '#4a7a62'] },
   ],
   trunk: '#4b3a30',
   treesPerSector: [5, 8],
@@ -61,11 +65,15 @@ export const inverno: Theme = {
   landmarkColors: ['#4a2e22', '#2e2420', '#c9a24a'],
   window: '#ffcf7a',
   mill: 'stilt',
+  // Pórtico de dragões na entrada da vila (madeira escura e neve na travessa).
+  gate: { style: 'dragon', colors: ['#4a2e22', '#e6eef5'] },
   bridge: { style: 'wood', colors: ['#5a3a26', '#cfd6dc'] },
   crops: [
-    // Cevada e linho sob a neve: a parcela fica quase branca (o lago de pesca no gelo virá depois).
-    { style: 'barley', weight: 0.7, colors: ['#d9c9a0', '#e6dbc0', '#cbbb92'], soil: '#dfe6ec' },
-    { style: 'flax', weight: 0.3, colors: ['#a3b6d6', '#8fa3c8'], soil: '#e6edf2' },
+    // O lago congelado no lugar da lavoura: gelo azulado com rachaduras e buracos de pesca, e um pesqueiro
+    // (tenda, varal) em muitas parcelas. É a primeira cultura: a aba da emenda herda a cor dela.
+    { style: 'icefield', weight: 0.78, colors: ['#d4ebf8', '#c2e0f2', '#e4f3fb'], soil: '#5c96bb' },
+    // Um campo em cada quatro continua de cevada sob a neve (o laço com a economia dos vikings).
+    { style: 'barley', weight: 0.22, colors: ['#d9c9a0', '#e6dbc0', '#cbbb92'], soil: '#dfe6ec' },
   ],
   grass: ['#e9f0f5', '#d9e3ea', '#f4f8fb'],
   bush: ['#3b6b58', '#dfe9ee'],
@@ -73,7 +81,20 @@ export const inverno: Theme = {
   rock: '#8c96a3',
   ore: { color: '#8a5a3a', chance: 0.04 },
   berry: '#b0202a',
-  animals: { kind: 'deer', colors: ['#8a6a4e', '#6e5440', '#a08262'] },
+  animals: { kind: 'reindeer', colors: ['#a39482', '#8c7c69', '#b8aa97'] },
+  // Bichos de passagem: o alce (raro e solitário, na mata ao entardecer) e a raposa-do-ártico no campo nevado.
+  fauna: [
+    { kind: 'moose', weight: 1, colors: ['#5a4636', '#4a3a2e', '#68503c'], time: 'tarde', where: 'floresta', chance: 0.14 },
+    { kind: 'fox', weight: 1, colors: ['#f2f6f9', '#dfe6ec', '#d6c8b4'], time: 'tarde', where: 'prado', chance: 0.18 },
+  ],
+  // Vento uivando, gelo que estala e, ao longe, o sino da vila.
+  ambience: [
+    { kind: 'vento', weight: 0.8 },
+    { kind: 'gelo', weight: 0.55 },
+    { kind: 'sinos', weight: 0.3 },
+  ],
+  // Aurora boreal à noite (U.aurora, só no céu e no reflexo do mar).
+  skyFx: 'aurora',
   boat: 'longship',
   boatColors: ['#5f4530', '#a9392c'],
   lily: '#f4f9fc',
@@ -84,14 +105,50 @@ export const inverno: Theme = {
   grade: { shadow: '#4a78b8', light: '#cfe3ff', saturation: 0.92 },
   atmos: { haze: 1.4, hazeColor: '#d5e4f2', wind: 0.9, filter: [0.94, 0.98, 1.06] },
   season: 3,
+  fieldSnow: 0.12,
   relief: { amp: 0.9, style: 'serra', snow: true, rock: '#56616f' },
-  synergy: { lumber: 'Lenhadores', mill: 'Estabur', pasture: 'Curral de renas', apiary: 'Colmeias de hidromel' },
+  synergy: { lumber: 'Lenhadores e serraria', mill: 'Estabur de peixe', pasture: 'Curral de renas', apiary: 'Colmeias de hidromel' },
   blessingNames: { cartographers: 'Navegadores', builders: 'Construtores de salões', pilgrims: 'Escaldos' },
   folk: { skin: '#e8c4a8', hat: 'hood', hatColor: '#a83a2e' },
   music: { scale: [0, 2, 3, 5, 7, 8, 10], timbre: 'pluck' },
-  wonder: { name: 'Palácio de Gelo', core: 'ice', colors: ['#cfe6f5', '#e8f4fb', '#9fd0ef'] },
+  wonder: { name: 'Grande Stavkirke', core: 'stave', colors: ['#4a3226', '#3d4652', '#c9a24a'] },
   eras: ['Sítio', 'Vilarejo', 'Entreposto', 'Burgo'],
   center: 'hall',
   rules: { startTiles: 55, questChance: 0.28, synergyBonus: { lumber: 3 }, seasonLock: 3 },
+  // Easter eggs: só cosméticos (data e hora do aparelho) ou decididos pela partida (peças, grupos, bordas, sorte).
+  eggs: [
+    {
+      id: 'aurora-solsticio',
+      name: 'Aurora do solstício',
+      note: 'Solstício de inverno: a aurora boreal acorda mesmo de dia.',
+      when: [{ kind: 'data' }],
+      holidays: [{ month: 12, day: 20, until: { month: 12, day: 22 } }],
+      effect: [{ kind: 'ceu', tint: '#7fe6c0', strength: 0.3, seconds: 0, aurora: 0.55 }, { kind: 'som', sound: 'coro' }],
+    },
+    {
+      id: 'treno-do-natal',
+      name: 'Trenó de rena',
+      note: 'Uma luz vermelha cruza o céu: é o trenó de rena.',
+      when: [{ kind: 'data' }],
+      holidays: [{ month: 12, day: 24, until: { month: 12, day: 25 } }],
+      once: true,
+      effect: [{ kind: 'evento', event: 'treno' }, { kind: 'som', sound: 'sinos' }],
+    },
+    {
+      id: 'hugin-e-munin',
+      name: 'Hugin e Munin',
+      note: 'Hugin e Munin, os corvos de Odin, sobrevoam o lago congelado.',
+      when: [{ kind: 'grupo', terrain: T.Field, min: 5 }],
+      effect: [{ kind: 'evento', event: 'corvos' }, { kind: 'som', sound: 'brilho' }],
+    },
+    {
+      id: 'troll-da-ponte',
+      name: 'Troll da ponte',
+      note: 'Um troll de pedra espreita ao lado da ponte.',
+      when: [{ kind: 'bordas', terrain: T.Water, min: 2, max: 2 }, { kind: 'bordas', terrain: T.Village, min: 1 }, { kind: 'sorte', chance: 0.2 }],
+      once: true,
+      effect: [{ kind: 'kit', kit: 'troll', scale: 1.3, color: '#8c96a3' }],
+    },
+  ],
   ruleNote: 'Começa com 45 peças e missões um pouco mais raras. Lareira: os lenhadores (aldeia + taiga) valem 3 pontos a mais. A paisagem fica no inverno, e o pasto rende +3.',
 };

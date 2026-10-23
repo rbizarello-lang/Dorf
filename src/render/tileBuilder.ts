@@ -1354,9 +1354,21 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           c = vary(R, c, 0.06);
           const yaw = hedge ? yawTo(ux, uz) : R() * Math.PI * 2;
           if (fr() < (1 - edgeT) * 0.55) continue;
+          if (L.sparse !== undefined && fr() > L.sparse) continue;
           const s = s0 * (isLush ? 1.12 : 1) * (0.45 + 0.55 * edgeT);
           if (isLush && !rowCol) c = c.lerp(LUSH, 0.22);
           D(`crop:${crop.style}`, x, h + levelAt(x, z) * TERRACE_H, z, yaw, s, c);
+        }
+      }
+      // Lago congelado: um pesqueiro (tenda, buraco, varal) perto do meio de algumas parcelas, por um gerador à parte.
+      if (crop.style === 'icefield') {
+        const cr = mulberry32((seed ^ 0x1ce5a1) + i * 131 + k * 17);
+        const roll = cr(), ox = (cr() - 0.5) * rad * 0.7, oz = (cr() - 0.5) * rad * 0.7, yaw = cr() * Math.PI * 2;
+        const walls = theme.houses[0].walls, tent = tc(walls[Math.floor(cr() * walls.length)]);
+        const x = cx + ox, z = cz + oz;
+        if (roll < (k === 1 ? 0.55 : 0.16) && rad > 0.17 && insidePoly(x, z, old) && free(x, z, 0.1) && clear(x, z) > 0.12) {
+          D('icecamp', x, h, z, yaw, 1, tent);
+          reserved.push([x, z, 0.1]);
         }
       }
     }
@@ -1799,6 +1811,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         const rho = Math.hypot(t / ABA_A, (INR - d) / ABA_D);
         const edgeT = smooth(1, 0.75, rho);
         if (ar() < (1 - edgeT) * 0.55) continue;
+        if (L.sparse !== undefined && ar() > L.sparse) continue;
         let c = rowCol ?? tc(crop.colors[Math.floor(ar() * crop.colors.length)]);
         c = vary(ar, c, 0.06);
         const s = randRange(ar, L.scale[0], L.scale[1]) * 1.2 * (lush.has(i) ? 1.12 : 1) * (0.45 + 0.55 * edgeT);

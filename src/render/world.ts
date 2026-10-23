@@ -737,6 +737,7 @@ export class World {
       U.floodReach.value = theme.floodplain.reach;
       U.floodColor.value.set(theme.floodplain.color);
     }
+    U.fieldSnow.value = theme.fieldSnow ?? 1;
     this.eggClear();
     this.setSurround(theme);
     this.skyTarget = skyFor(theme, this.timeOfDay);
@@ -859,7 +860,8 @@ export class World {
     const bounceK = this.quality === 'ultra' ? BOUNCE_ULTRA + (BOUNCE_ULTRA_NIGHT - BOUNCE_ULTRA) * nightK : BOUNCE;
     U.bounce.value.copy(s.sun).multiplyScalar(s.sunI * up).add(tmpColor.copy(s.hemiSky).multiplyScalar(s.hemiI)).multiplyScalar(bounceK);
     U.lamps.value = nightK * (this.quality === 'ultra' ? LAMPS_ULTRA : LAMPS);
-    U.aurora.value = this.theme?.skyFx === 'aurora' ? nightK : 0;
+    // Ovo 'ceu' com `aurora`: a cortina aparece pálida mesmo de dia (solstício do Inverno Nórdico).
+    U.aurora.value = Math.max(this.theme?.skyFx === 'aurora' ? nightK : 0, this.eggSky.k * this.eggSky.aurora);
     U.halo.value = this.quality === 'ultra' ? nightK * HALO_ULTRA : 0;
     if (this.quality === 'ultra') U.bounce.value.add(tmpColor.copy(WARM_ULTRA).multiplyScalar(nightK));
     // Nuvens: o topo ao sol um pouco mais claro que o fundo do tema, a base na cor do chão.
@@ -1553,7 +1555,7 @@ export class World {
   /** Um ovo disparou numa jogada ao vivo (ou pelo relógio): o jogo mostra o aviso e toca os sons. */
   onEgg?: (egg: EggSpec, sounds: ('sinos' | 'brilho' | 'coro')[], announce: boolean) => void;
   /** Tom de céu de um ovo: `k` vai ao `target` aos poucos; `left` > 0 conta os segundos até soltar. */
-  private eggSky = { tint: new THREE.Color(), strength: 0.5, k: 0, target: 0, left: 0 };
+  private eggSky = { tint: new THREE.Color(), strength: 0.5, k: 0, target: 0, left: 0, aurora: 0 };
   private eggSkyBuf: Sky | null = null;
 
   private eggReset() {
@@ -1614,9 +1616,15 @@ export class World {
     const sounds: ('sinos' | 'brilho' | 'coro')[] = [];
     for (const f of egg.effect) {
       if (f.kind === 'som') sounds.push(f.sound);
-      else if (f.kind === 'ceu') this.setEggSky(f.tint, f.strength ?? 0.5, f.seconds ?? 20);
+      else if (f.kind === 'ceu') this.setEggSky(f.tint, f.strength ?? 0.5, f.seconds ?? 20, f.aurora ?? 0);
       else if (f.kind === 'evento' && !this.reducedMotion) {
         if (f.event === 'bando-dourado') this.life.flush(x, z, true);
+        else if (f.event === 'corvos') this.life.flush(x, z, false, 2);
+        else if (f.event === 'treno') {
+          // Um trenó de rena cruza o céu bem alto, de um lado ao outro do foco, com a luz vermelha à frente.
+          const a = Math.random() * Math.PI * 2, ux = Math.cos(a), uz = Math.sin(a);
+          this.life.passage('egg:sled', 1, [x - ux * 5, z - uz * 5], [x + ux * 5, z + uz * 5], 0.5, 0.1, 1.5, WHITE, 0.03);
+        }
         else if (f.event === 'procissao') {
           // Cinco aldeões com lanterna cruzam a peça numa direção qualquer (cosmético: o sorteio não é da semente).
           const a = Math.random() * Math.PI * 2, ux = Math.cos(a), uz = Math.sin(a);
@@ -1628,7 +1636,8 @@ export class World {
   }
 
   /** Tom de céu por cima da hora do dia; `seconds` 0 segura até `clearEggSky`. */
-  setEggSky(tint: string, strength: number, seconds: number) {
+  setEggSky(tint: string, strength: number, seconds: number, aurora = 0) {
+    this.eggSky.aurora = aurora;
     this.eggSky.tint.set(tint);
     this.eggSky.strength = strength;
     this.eggSky.target = 1;
@@ -1985,7 +1994,8 @@ export class World {
   /** Depuração visual: todos os kits do tema lado a lado (?gallery). */
   showGallery(only?: string) {
     // `?gallery=casas` mostra só as casas (parede + telhado de cada tipo), maiores.
-    const keys = [...this.lib.geos.keys()].filter((k) => !k.startsWith('roof:') && (only !== 'casas' || k.startsWith('wall:')));
+    // Qualquer outro valor filtra pelo prefixo da chave (`?gallery=wonder:`, `?gallery=gate`, `?gallery=egg:`), maiores.
+    const keys = [...this.lib.geos.keys()].filter((k) => !k.startsWith('roof:') && (only !== 'casas' || k.startsWith('wall:')) && (!only || only === 'casas' || k.startsWith(only)));
     const cols = Math.ceil(Math.sqrt(keys.length));
     const root = new THREE.Group();
     keys.forEach((k, i) => {
@@ -1993,7 +2003,7 @@ export class World {
       // Parede e telhado da mesma casa (`wall:i` e `roof:i`) vão juntos, na posição da parede.
       const roof = k.startsWith('wall:') ? this.lib.geo(`roof:${k.slice(5)}`) : null;
       const x = (i % cols) * 0.45, z = Math.floor(i / cols) * 0.45;
-      const s = k.startsWith('crop:') || k === 'grass' || k === 'flower' || only === 'casas' ? 2.2 : 1.4;
+      const s = k.startsWith('crop:') || k === 'grass' || k === 'flower' || only ? 2.2 : 1.4;
       for (const [kk, gg] of roof ? ([[k, geo], [`roof:${k.slice(5)}`, roof]] as const) : ([[k, geo]] as const)) {
         const mesh = new THREE.InstancedMesh(instGeometry(gg, 1), this.lib.material(kk), 1);
         mesh.setMatrixAt(0, tmpM.makeScale(s, s, s).setPosition(x - (cols * 0.45) / 2, 0, z - (cols * 0.45) / 2));
@@ -2010,7 +2020,7 @@ export class World {
     this.staticRoot.visible = false;
     this.rig.goal.set(0, 0, 0);
     this.rig.target.set(0, 0, 0);
-    this.rig.dist = this.rig.goalDist = cols * (only === 'casas' ? 1.0 : 0.62);
+    this.rig.dist = this.rig.goalDist = cols * (only === 'casas' ? 1.0 : only ? 1.1 : 0.62);
     return keys;
   }
 
