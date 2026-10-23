@@ -105,7 +105,7 @@ export const brasil: Theme = {
   // Os bandos de pássaros do céu são de araras, em pares: [corpo vermelho, asa amarela, ponta azul].
   skyBirds: { kit: 'arara', colors: ['#d8262c', '#f2c12e', '#2a5fc4'], n: [2, 4] },
   // Serras e chapadões de rocha avermelhada com mata no topo (sem neve).
-  relief: { amp: 0.75, style: 'serra', rock: '#b0583a', crown: '#3f7a44' },
+  relief: { amp: 0.75, style: 'serra', levels: 2, rock: '#b0583a', crown: '#3f7a44' },
   ambience: [
     { kind: 'cigarras', weight: 0.8 },
     { kind: 'aves', weight: 0.55 },

@@ -82,7 +82,7 @@ export const egito: Theme = {
   // Várzea: o chão perto do Nilo vira terra negra; longe do rio vale a duna de `ground`.
   floodplain: { reach: 1.7, color: '#4f4326' },
   // Falésias de arenito (estilo 'falesia') longe do rio, sem neve.
-  relief: { amp: 0.4, style: 'falesia', rock: '#c9a26a' },
+  relief: { amp: 0.4, style: 'falesia', levels: 1, rock: '#c9a26a' },
   // O Egito não tem inverno de neve: a paisagem fica em verão (Shemu, a seca e a colheita).
   season: 1,
   ambience: [

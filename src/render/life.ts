@@ -1,13 +1,13 @@
 import * as THREE from 'three/webgpu';
 import type { Board, Placed } from '../core/board';
-import { DIRS, edgeMid, hexToWorld, hkey, opposite } from '../core/hex';
+import { DIRS, edgeMid, hexToWorld, hkey, INR, opposite, worldToHex } from '../core/hex';
 import type { DayPhase } from '../core/eggs';
 import { isMarket, networks } from '../core/routes';
 import { T } from '../core/tiles';
 import type { Theme } from '../themes/types';
 import { instGeometry, setInstColor, type Lib } from './lib';
 import { WAKES, WAKE_MAX, WAKE_N } from './materials';
-import { railCurve, ROAD_Y, WATER_Y } from './tileBuilder';
+import { LEVEL_STEP, railCurve, RAMP_ROAD, ROAD_Y, WATER_Y } from './tileBuilder';
 import { TJALK_MAST_FOOT } from './kits/holanda';
 
 // Vida do mapa: tudo que se move depois de assentado.
@@ -228,7 +228,37 @@ interface Passage {
   puff: number;
 }
 
+const smooth01 = (a: number, b: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
 export class Life {
+  /** Nível de altura da casa (relevo, R2); o World põe o dele. Sem relevo, 0. */
+  levelOf: (q: number, r: number) => number = () => 0;
+
+  /**
+   * Altura da via no ponto: o chão da casa, menos a descida da rampa de estrada na borda que dá numa casa mais baixa
+   * (a mesma curva do `tileBuilder`: `RAMP_ROAD` da borda para dentro). Contínua entre as peças.
+   */
+  private roadLift(x: number, z: number): number {
+    const [q, r] = worldToHex(x, z);
+    const own = this.levelOf(q, r);
+    if (!own) return 0;
+    const t = this.board?.tiles.get(hkey(q, r));
+    if (!t) return own * LEVEL_STEP;
+    const c = hexToWorld(q, r);
+    let drop = 0;
+    for (let i = 0; i < 6; i++) {
+      if (t.edges[i] !== T.Rail) continue;
+      const d = (own - this.levelOf(q + DIRS[i][0], r + DIRS[i][1])) * LEVEL_STEP;
+      if (d <= 0) continue;
+      const [mx, mz] = edgeMid(i);
+      drop = Math.max(drop, d * (1 - smooth01(0, RAMP_ROAD, INR - ((x - c.x) * mx + (z - c.z) * mz) / INR)));
+    }
+    return own * LEVEL_STEP - drop;
+  }
+
   private root = new THREE.Group();
   private pools = new Map<string, AnimPool>();
   private spinners: Spinner[] = [];
@@ -246,7 +276,7 @@ export class Life {
   private fish: Fish[] = [];
   private bobbers: Bobber[] = [];
   /** Centros (x, z) das pontes baixas do mapa: o barco baixa o mastro ao passar sob elas (`boat:rig`). */
-  private bridges: { x: number; z: number }[] = [];
+  private bridges: { x: number; y: number; z: number }[] = [];
   /** Respingo quando um peixe sai ou volta para a água (o World desenha as gotas). */
   onSplash: (x: number, z: number) => void = () => {};
   /** Fumaça da locomotiva do easter egg (o World solta o rolo de fumaça). */
@@ -341,7 +371,7 @@ export class Life {
 
   /** Ponte levadiça assentada (só as baixas, do kit `draw`): o velame dos barcos que passam por baixo desce. */
   addBridge(world: THREE.Matrix4) {
-    if (this.theme.bridge?.style === 'draw' && this.lib.geo('boat:rig')) this.bridges.push({ x: world.elements[12], z: world.elements[14] });
+    if (this.theme.bridge?.style === 'draw' && this.lib.geo('boat:rig')) this.bridges.push({ x: world.elements[12], y: world.elements[13], z: world.elements[14] });
   }
 
   /** Barco ancorado: balança no lugar. */
@@ -601,7 +631,7 @@ export class Life {
         const ox = -Math.sin(m.heading) * side, oz = Math.cos(m.heading) * side;
         const bob = m.wait > 0 ? 0 : Math.abs(Math.sin(t * 9 + m.speed * 50)) * 0.003;
         q4.setFromAxisAngle(UP, -m.heading);
-        m4.compose(v3.set(m.x + ox, roadY + bob, m.z + oz), q4, s3.setScalar(s));
+        m4.compose(v3.set(m.x + ox, roadY + bob + this.roadLift(m.x + ox, m.z + oz), m.z + oz), q4, s3.setScalar(s));
         sack.set(n['folk:sack']++, m4, m.shirt);
       }
     }
@@ -735,7 +765,8 @@ export class Life {
     } else {
       const [dq, dr] = DIRS[m.b];
       const n = board.tiles.get(hkey(m.tile.q + dq, m.tile.r + dr));
-      if (n && n.edges[opposite(m.b)] === terr) {
+      // Relevo: o barco não sobe nem desce a corredeira (a queda é da etapa seguinte): vizinha em outro nível é fim de linha.
+      if (n && n.edges[opposite(m.b)] === terr && !(m.boat && this.levelOf(n.q, n.r) !== this.levelOf(m.tile.q, m.tile.r))) {
         const entry = opposite(m.b);
         const exits = strictEdges(n, terr).filter((e) => e !== entry);
         m.tile = n;
@@ -810,12 +841,13 @@ export class Life {
         m.wake += ((m.wait > 0 ? 0 : 1) - m.wake) * Math.min(1, dt * 1.5);
         const bob = Math.sin(this.time * 2 + m.speed * 40) * 0.003;
         q4.setFromAxisAngle(UP, -m.heading);
-        m4.compose(v3.set(m.x, WATER_Y - 0.001 + bob, m.z), q4, s3.setScalar(1));
+        m4.compose(v3.set(m.x, WATER_Y - 0.001 + bob + this.levelOf(m.tile.q, m.tile.r) * LEVEL_STEP, m.z), q4, s3.setScalar(1));
         m4.multiply(m4b.makeRotationX(Math.sin(this.time * 1.6 + m.speed * 30) * 0.05));
         if (rigs) {
           // Sob a ponte levadiça o mastro desce (o tabuleiro é mais baixo que o velame): escala em y a partir do pé do mastro.
           let near = 1;
-          for (const b of this.bridges) near = Math.min(near, Math.hypot(b.x - m.x, b.z - m.z));
+          const by = this.levelOf(m.tile.q, m.tile.r) * LEVEL_STEP;
+          for (const b of this.bridges) if (Math.abs(b.y - by) < LEVEL_STEP * 0.5) near = Math.min(near, Math.hypot(b.x - m.x, b.z - m.z));
           const k = 1 - 0.7 * (1 - smooth(0.07, 0.17, near));
           const { x: fx, y: fy } = TJALK_MAST_FOOT;
           rigs.set(bi, m4b.copy(m4).multiply(rigLow.makeTranslation(fx, fy, 0)).multiply(rigScale.makeScale(1, k, 1)).multiply(rigLow.makeTranslation(-fx, -fy, 0)), this.house);
@@ -831,14 +863,14 @@ export class Life {
       }
       const bounce = th.vehicle === 'caravan' || th.vehicle === 'oxcart' || th.vehicle === 'sled' ? Math.abs(Math.sin(this.time * 7)) * 0.004 : 0;
       q4.setFromAxisAngle(UP, -m.heading);
-      m4.compose(v3.set(m.x, roadY + bounce, m.z), q4, s3.setScalar(1));
+      m4.compose(v3.set(m.x, roadY + bounce + this.roadLift(m.x, m.z), m.z), q4, s3.setScalar(1));
       head?.set(hi++, m4, this.beast);
       for (let k = 1; k <= cars; k++) {
         const p = trailAt(m.trail, spacing * k);
         if (!p) break;
         q4.setFromAxisAngle(UP, -p.heading);
         const b2 = th.vehicle === 'caravan' || th.vehicle === 'oxcart' ? Math.abs(Math.sin(this.time * 7 + k)) * 0.004 : 0;
-        m4.compose(v3.set(p.x, roadY + b2, p.z), q4, s3.setScalar(1));
+        m4.compose(v3.set(p.x, roadY + b2 + this.roadLift(p.x, p.z), p.z), q4, s3.setScalar(1));
         car?.set(ci++, m4, this.beast);
         if (cargo && lift) {
           // Maior que o desenho do kit: de longe a carga precisa ler em cima do vagão.
@@ -854,7 +886,7 @@ export class Life {
           const ox = -Math.sin(m.heading) * 0.06;
           const oz = Math.cos(m.heading) * 0.06;
           q4.setFromAxisAngle(v3.set(1, 0, 0), this.time * 7);
-          m4.compose(v3.set(m.x + ox, roadY + 0.1 + k * 0.07, m.z + oz), q4, s3.setScalar(0.9 + k * 0.55));
+          m4.compose(v3.set(m.x + ox, roadY + 0.1 + k * 0.07 + this.roadLift(m.x, m.z), m.z + oz), q4, s3.setScalar(0.9 + k * 0.55));
           coin.set(ni++, m4);
         }
         m.coin -= dt;

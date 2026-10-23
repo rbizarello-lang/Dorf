@@ -1,6 +1,5 @@
 import type * as THREE from 'three/webgpu';
 import type { Sfx } from '../audio';
-import { worldToHex } from '../core/hex';
 import type { World } from '../render/world';
 import type { Capture } from './capture';
 import type { Hud } from './hud';
@@ -62,10 +61,8 @@ export function bindInput(h: InputHost): Input {
   }
 
   function hoverAt(clientX: number, clientY: number) {
-    const p = world.groundPoint(clientX, clientY);
-    if (!p) return null;
-    const [q, r] = worldToHex(p.x, p.z);
-    return { q, r };
+    const h = world.pickHex(clientX, clientY);
+    return h ? { q: h[0], r: h[1] } : null;
   }
 
   canvas.addEventListener('pointerdown', (e) => {
