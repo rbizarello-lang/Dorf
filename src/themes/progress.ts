@@ -17,7 +17,7 @@ const ADOBE = '#e6d6b6';
 function risingKind(houses: HouseKind[]) {
   let best = -1;
   houses.forEach((k, i) => {
-    if (k.minor || k.weight > 0.35 || k.body === 'tall' || k.body === 'round' || !TALL_ROOFS.has(k.roof)) return;
+    if (k.minor || k.weight > 0.35 || k.body === 'tall' || k.body === 'sobrado' || k.body === 'round' || !TALL_ROOFS.has(k.roof)) return;
     if (best < 0 || k.weight < houses[best].weight) best = i;
   });
   return best;
@@ -29,7 +29,7 @@ export function housesAtEra(theme: Theme, era: number): HouseKind[] {
   if (era <= 0) {
     return theme.houses.map((k) => ({
       ...k,
-      body: k.body === 'tall' ? 'cottage' : k.body,
+      body: k.body === 'tall' || k.body === 'sobrado' ? 'cottage' : k.body,
       roof: EARLY_THATCH.has(k.roof) ? 'thatch' : k.roof,
       trim: undefined,
       tone: ADOBE,
@@ -38,11 +38,12 @@ export function housesAtEra(theme: Theme, era: number): HouseKind[] {
   }
   const rise = risingKind(theme.houses);
   return theme.houses.map((k, i) => {
-    const body = i === rise ? 'tall' : k.body;
+    // Casario caiado: o sobrado que sobe é o largo de 2 andares, não a torre estreita do enxaimel.
+    const body = i === rise ? (k.trimStyle === 'caiado' ? 'sobrado' : 'tall') : k.body;
     const out: HouseKind = { ...k, body, trim: k.trim ?? theme.landmarkColors[2] };
     if (era >= 3) {
       out.bright = 1.5;
-      if (body === 'tall') out.pennant = theme.ui.accent;
+      if (body === 'tall' || body === 'sobrado') out.pennant = theme.ui.accent;
     }
     return out;
   });

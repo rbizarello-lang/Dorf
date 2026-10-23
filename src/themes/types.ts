@@ -37,6 +37,7 @@ export type BodyStyle =
   | 'cube' // cubo de adobe/pedra (Egito, Mediterrâneo)
   | 'terrace' // adobe em dois níveis: sala em cima, escada externa e terraço (Egito)
   | 'tall' // sobrado estreito de 2-3 andares (Holanda, colonial)
+  | 'sobrado' // sobrado largo de 2 andares, mais largo que alto, com sacada de ferro (casario mineiro)
   | 'round' // cilíndrica (cabana andina, módulo marciano)
   | 'annex'; // corpo principal com um volume baixo encostado ao lado (celeiro, cozinha, estábulo)
 
@@ -67,6 +68,11 @@ export interface HouseKind {
   roofs: string[];
   /** Madeira aparente/enxaimel, molduras ou faixas. Omitir = sem detalhe. */
   trim?: string;
+  /**
+   * Como o `trim` é desenhado: 'enxaimel' (padrão) = vigas e escoras aparentes nos painéis; 'caiado' = parede lisa
+   * de cal com cunhais, cinta entre os andares e molduras de janela e porta na cor do `trim` (casario mineiro).
+   */
+  trimStyle?: 'enxaimel' | 'caiado';
   /** Cor da porta. Omitir = a madeira do `trim` escurecida (ou marrom, sem `trim`). */
   door?: string;
   /** Chaminé com fumaça. */

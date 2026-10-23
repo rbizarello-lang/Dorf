@@ -56,9 +56,9 @@ function frustum(wb: number, db: number, yB: number, wt: number, dt: number, yT:
  * ~32 triângulos: bem perto do `hip`, mas a silhueta deixa de ser europeia.
  */
 export function colonialRoof(T: KitTools, w: number, h: number, d: number): { parts: KitPart[]; top: number } {
-  const rh = 0.076; // altura total acima da parede (o hip tem 0,07)
-  const yMid = h + 0.015;
-  const upper = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1, true).rotateY(Math.PI / 4).scale(w + 0.012, rh - 0.015, d + 0.012).translate(0, yMid + (rh - 0.015) / 2, 0);
+  const rh = 0.058; // altura total acima da parede (o hip tem 0,07): telhado baixo e de beiral largo, como no casario de Minas
+  const yMid = h + 0.012;
+  const upper = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1, true).rotateY(Math.PI / 4).scale(w + 0.012, rh - 0.012, d + 0.012).translate(0, yMid + (rh - 0.012) / 2, 0);
   const skirt = frustum(w + 0.074, d + 0.074, h - 0.005, w + 0.012, d + 0.012, yMid);
   const parts: KitPart[] = [
     { geo: upper, color: '#fff', tint: 1, bands: T.roofBands(yMid, h + rh) },

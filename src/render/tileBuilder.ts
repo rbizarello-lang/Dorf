@@ -1585,9 +1585,11 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const r4 = mulberry32((seed ^ 0x0d29a77) >>> 0);
   // Raio aproximado da casa no chão, para os lotes não se tocarem.
   const houseR = (s: number) => 0.085 * s;
+  // Sobrados (a torre estreita e o sobrado largo) ficam só nos lotes grandes, não nos pequenos nem nos galpões.
+  const isTower = (b: string) => b === 'tall' || b === 'sobrado';
   const addHouse = (x: number, z: number, baseAng: number, sector = -1, door?: V2, small?: [number, number]) => {
     const R = small ? r4 : rng;
-    const i = small ? weighted(R, houseKinds.filter(([k]) => theme.houses[k].body !== 'tall').length ? houseKinds.filter(([k]) => theme.houses[k].body !== 'tall') : houseKinds) : weighted(R, houseKinds);
+    const i = small ? weighted(R, houseKinds.filter(([k]) => !isTower(theme.houses[k].body)).length ? houseKinds.filter(([k]) => !isTower(theme.houses[k].body)) : houseKinds) : weighted(R, houseKinds);
     const kind = theme.houses[i];
     const meta = opts.houses[i];
     // Uma casa dominante grande de cumeeira paralela à rua (de longe ela se lê sozinha) e, ao redor,
@@ -1766,7 +1768,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       if (houses.some((h) => Math.hypot(h.x - bx, h.z - bz) < houseR(h.s) + 0.06)) continue;
       if (pick1 < 0.45) {
         // Galpão: casa pequena de paredes e telhado escuros, sem fumaça.
-        const gi = houseKinds.find(([k]) => theme.houses[k].body !== 'tall' && theme.houses[k].body !== 'long')?.[0] ?? 0;
+        const gi = houseKinds.find(([k]) => !isTower(theme.houses[k].body) && theme.houses[k].body !== 'long')?.[0] ?? 0;
         const ry = sectorAng + (r4() < 0.5 ? 0 : Math.PI / 2);
         const gs = 0.75 + r4() * 0.15;
         D(`wall:${gi}`, bx, 0, bz, ry, [gs, gs, gs], shade(vary(r4, tc(pick(r4, theme.houses[gi].walls)), 0.04), 0.78));
