@@ -96,6 +96,8 @@ function updatePlaques(): void {
 }
 
 paint();
+document.fonts?.ready.then(() => { moveThumb(weeksEl); moveThumb(hoursEl); });
+window.addEventListener('load', () => { moveThumb(weeksEl); moveThumb(hoursEl); });
 window.addEventListener('resize', () => { aimIfIdle(); moveThumb(weeksEl); moveThumb(hoursEl); });
 function aimIfIdle(): void { /* a câmera do usuário é respeitada ao redimensionar */ }
 void SHEET;

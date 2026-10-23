@@ -408,7 +408,7 @@ export class Province {
     this.host.style.background = `radial-gradient(ellipse at 50% 34%, ${css(c.bg[0])} 0%, ${css(c.bg[1])} 52%, ${css(c.bg[2])} 100%)`;
     this.applyWindows();
     this.glowMat.opacity = Math.min(1, c.night * 1.15);
-    this.beamMat.opacity = c.night * 0.2;
+    this.beamMat.opacity = c.night * 0.07;
     this.lamps.forEach((l) => { l.intensity = c.night * 16; });
     this.smokeMat.color.setRGB(lerp(0.94, 0.55, c.night), lerp(0.92, 0.57, c.night), lerp(0.88, 0.68, c.night));
   }
@@ -581,7 +581,7 @@ export class Province {
       }
     }
     this.birdBody.instanceMatrix.needsUpdate = true; this.birdL.instanceMatrix.needsUpdate = true; this.birdR.instanceMatrix.needsUpdate = true;
-    if (this.beam && this.beam.visible) { this.beam.rotation.y = T * 0.9; this.beam.scale.setScalar(1.0); }
+    if (this.beam && this.beam.visible) { this.beam.rotation.y = T * 0.9; this.beam.scale.set(0.8, 0.8, 1.6); }
     void this.tmpE;
   }
 
