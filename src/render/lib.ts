@@ -1362,15 +1362,15 @@ function animalGeometry(kind: AnimalKind): THREE.BufferGeometry {
 }
 
 /** Barco com a bandeira da casa na popa (o pano recebe a cor da instância). */
-function boatGeometry(kind: BoatKind, colors: [string, string]): THREE.BufferGeometry {
+function boatGeometry(kind: BoatKind, colors: [string, string], part: 'all' | 'hull' = 'all'): THREE.BufferGeometry {
   const flag = kit([
     { geo: cyl(0.0015, 0.0018, 0.05, 4, -0.04, 0.012), color: '#4a3a30' },
     { geo: flagGeo(0.028, 0.016, 0.052).rotateY(Math.PI).translate(-0.04, 0, 0), color: '#ffffff', tint: 1 },
   ]);
-  return mergeGeometries([boatBody(kind, colors), flag])!;
+  return mergeGeometries([boatBody(kind, colors, part), flag])!;
 }
 
-function boatBody(kind: BoatKind, [hullC, sailC]: [string, string]): THREE.BufferGeometry {
+function boatBody(kind: BoatKind, [hullC, sailC]: [string, string], part: 'all' | 'hull' | 'rig' = 'all'): THREE.BufferGeometry {
   const H = (len: number, w: number, h: number) => ({ geo: hull(len, w, h), color: hullC });
   const mast = (h: number, x = 0) => ({ geo: cyl(0.0025, 0.003, h, 4, x, 0.01), color: '#4a3a30' });
   switch (kind) {
@@ -1419,7 +1419,7 @@ function boatBody(kind: BoatKind, [hullC, sailC]: [string, string]): THREE.Buffe
       return kit([{ geo: g, color: hullC, grad: [0.85, 1.05, 0, 0.04] }, { geo: box(0.01, 0.022, 0.01, 0.0, 0.02), color: sailC }]);
     }
     case 'tjalk':
-      return kit(tjalkParts(hullC, sailC));
+      return kit(tjalkParts(hullC, sailC, part));
     case 'nile':
       // Barco do Novo Império: pontas recurvadas como umbelas de papiro, vela quadrada mais
       // larga que alta entre duas vergas, remos de governo na popa.
@@ -2495,7 +2495,10 @@ export class Lib {
     set('animal', animalGeometry(theme.animals.kind));
     // Fauna extra do tema: um kit por espécie (`fauna:<kind>`), o mesmo desenho do bicho de pasto.
     for (const f of theme.fauna ?? []) if (!this.geos.has(`fauna:${f.kind}`)) set(`fauna:${f.kind}`, animalGeometry(f.kind));
-    set('boat', boatGeometry(theme.boat, theme.boatColors));
+    // O tjalk anda em dois lotes, casco e velame (`boat:rig`), para o `Life` baixar o mastro sob a ponte levadiça.
+    const lowerRig = theme.boat === 'tjalk' && theme.bridge?.style === 'draw';
+    set('boat', boatGeometry(theme.boat, theme.boatColors, lowerRig ? 'hull' : 'all'));
+    if (lowerRig) set('boat:rig', boatBody(theme.boat, theme.boatColors, 'rig'));
     const v = vehicleGeometry(theme.vehicle, theme.vehicleColors, theme.animals.kind);
     set('vehicle:head', v.head);
     set('vehicle:car', v.car);

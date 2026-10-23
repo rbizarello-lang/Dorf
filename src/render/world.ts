@@ -1436,6 +1436,7 @@ export class World {
         const h = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
         groundMap.lantern(x, z, 0.28 + 0.2 * h);
       }
+      if (d.key === 'bridge') this.life.addBridge(tmpM);
       if (d.anim === 'spin-z' || d.anim === 'spin-x') this.life.addSpinner(d.key, tmpM, d.anim === 'spin-x' ? 'x' : 'z');
       else if (d.anim === 'wander') this.life.addAnimal(d.key, tmpM, d.color, d.when);
       else if (d.anim === 'chop' || d.anim === 'tend' || d.anim === 'carry') this.life.addWorker(d.key, tmpM, d.color, d.anim);
@@ -1974,6 +1975,19 @@ export class World {
       for (let j = 0; j < p.count; j++) {
         p.mesh.getMatrixAt(j, tmpM);
         all.push({ x: tmpM.elements[12], z: tmpM.elements[14], kind });
+      }
+    }
+    return all[i] ?? null;
+  }
+
+  /** Posição da i-ésima ponte assentada (`window.__bridge`), ou null. */
+  bridgePos(i: number): { x: number; z: number; yaw: number } | null {
+    const all: { x: number; z: number; yaw: number }[] = [];
+    for (const [k, p] of this.pools) {
+      if (poolKey(k) !== 'bridge') continue;
+      for (let j = 0; j < p.count; j++) {
+        p.mesh.getMatrixAt(j, tmpM);
+        all.push({ x: tmpM.elements[12], z: tmpM.elements[14], yaw: Math.atan2(-tmpM.elements[2], tmpM.elements[0]) });
       }
     }
     return all[i] ?? null;

@@ -1968,6 +1968,15 @@ function start(data: unknown) {
   if (zoom) world.rig.dist = world.rig.goalDist = zoom;
   return r.kind;
 };
+// Ponte: centraliza na i-ésima ponte assentada e devolve o giro dela (capturas da ponte e do mastro baixando).
+(window as unknown as { __bridge: (i?: number, zoom?: number) => number | null }).__bridge = (i = 0, zoom) => {
+  const b = world.bridgePos(i);
+  if (!b) return null;
+  world.rig.goal.set(b.x, 0, b.z);
+  world.rig.target.set(b.x, 0, b.z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return b.yaw;
+};
 // Peça especial: centraliza na i-ésima colocada (estação, moinho d'água ou farol) e devolve qual.
 (window as unknown as { __special: (i?: number, zoom?: number) => string | null }).__special = (i = 0, zoom) => {
   const p = game.board.list.filter((t) => t.def.special)[i];

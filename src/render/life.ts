@@ -8,6 +8,7 @@ import type { Theme } from '../themes/types';
 import { instGeometry, setInstColor, type Lib } from './lib';
 import { WAKES, WAKE_MAX, WAKE_N } from './materials';
 import { railCurve, ROAD_Y, WATER_Y } from './tileBuilder';
+import { TJALK_MAST_FOOT } from './kits/holanda';
 
 // Vida do mapa: tudo que se move depois de assentado.
 // - pás de moinho e rodas d'água girando
@@ -23,6 +24,12 @@ const q4 = new THREE.Quaternion();
 const v3 = new THREE.Vector3();
 const s3 = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
+const rigLow = new THREE.Matrix4();
+const rigScale = new THREE.Matrix4();
+const smooth = (a: number, b: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 const WHITE = new THREE.Color(1, 1, 1);
 
 class AnimPool {
@@ -238,6 +245,8 @@ export class Life {
   private workers: Worker[] = [];
   private fish: Fish[] = [];
   private bobbers: Bobber[] = [];
+  /** Centros (x, z) das pontes baixas do mapa: o barco baixa o mastro ao passar sob elas (`boat:rig`). */
+  private bridges: { x: number; z: number }[] = [];
   /** Respingo quando um peixe sai ou volta para a água (o World desenha as gotas). */
   onSplash: (x: number, z: number) => void = () => {};
   /** Fumaça da locomotiva do easter egg (o World solta o rolo de fumaça). */
@@ -279,6 +288,7 @@ export class Life {
     this.workers = [];
     this.fish = [];
     this.bobbers = [];
+    this.bridges = [];
     this.scoutRide = null;
     this.theme = theme;
     this.beast.set(theme.animals.colors[0]);
@@ -327,6 +337,11 @@ export class Life {
     const cx = px - r * (cw ? -vz : vz), cz = pz - r * (cw ? vx : -vx);
     const w = ((cw ? -1 : 1) * (0.022 + Math.random() * 0.012)) / r;
     this.fish.push({ cx, cz, r, a: Math.atan2(pz - cz, px - cx), w, y: e[13], color: color.clone(), next: 6 + Math.random() * 30, jump: -1 });
+  }
+
+  /** Ponte levadiça assentada (só as baixas, do kit `draw`): o velame dos barcos que passam por baixo desce. */
+  addBridge(world: THREE.Matrix4) {
+    if (this.theme.bridge?.style === 'draw' && this.lib.geo('boat:rig')) this.bridges.push({ x: world.elements[12], z: world.elements[14] });
   }
 
   /** Barco ancorado: balança no lugar. */
@@ -742,10 +757,12 @@ export class Life {
 
   private updateMovers(dt: number) {
     const boats = this.pool('boat');
+    const rigs = this.pool('boat:rig');
     const head = this.pool('vehicle:head');
     const car = this.pool('vehicle:car');
     if (!this.movers.length) {
       boats?.commit(0);
+      rigs?.commit(0);
       head?.commit(0);
       car?.commit(0);
       this.pools.get('cargo')?.commit(0);
@@ -795,6 +812,14 @@ export class Life {
         q4.setFromAxisAngle(UP, -m.heading);
         m4.compose(v3.set(m.x, WATER_Y - 0.001 + bob, m.z), q4, s3.setScalar(1));
         m4.multiply(m4b.makeRotationX(Math.sin(this.time * 1.6 + m.speed * 30) * 0.05));
+        if (rigs) {
+          // Sob a ponte levadiça o mastro desce (o tabuleiro é mais baixo que o velame): escala em y a partir do pé do mastro.
+          let near = 1;
+          for (const b of this.bridges) near = Math.min(near, Math.hypot(b.x - m.x, b.z - m.z));
+          const k = 1 - 0.7 * (1 - smooth(0.07, 0.17, near));
+          const { x: fx, y: fy } = TJALK_MAST_FOOT;
+          rigs.set(bi, m4b.copy(m4).multiply(rigLow.makeTranslation(fx, fy, 0)).multiply(rigScale.makeScale(1, k, 1)).multiply(rigLow.makeTranslation(-fx, -fy, 0)), this.house);
+        }
         boats?.set(bi++, m4, this.house);
         continue;
       }
@@ -836,6 +861,7 @@ export class Life {
       }
     }
     boats?.commit(bi);
+    rigs?.commit(bi);
     head?.commit(hi);
     car?.commit(ci);
     cargo?.commit(gi);
