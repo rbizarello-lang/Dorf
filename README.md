@@ -142,7 +142,7 @@ O botão de qualidade abre a lista: **Auto**, **Ultra**, **Alta**, **Média** e 
 |---|---|---|
 | Séculos XVI a XVIII | **Holanda Dourada** (padrão) | Países Baixos, século XVII: diques de tijolo e grama, alamedas de álamos, canais com tjalks, casas de empena de sino e de pescoço, moinhos de vento, faixas de tulipas e jacintos |
 | Antiguidade | **Egito do Nilo** | Novo Império, c. 1300 a.C.: a faixa de terra negra do Nilo cercada de duna dourada, falésias de arenito, canais de irrigação e shaduf, casas de adobe em terraço com toldo listrado, pilone, íbis e crocodilo na margem, boi de chifres de lira. Fica em verão o tempo todo (Shemu) |
-| Séculos XVI a XVIII | **Terraços do Oriente** | Leste Asiático em paisagem de rolo, da China Song ao Japão Edo: arrozais, bambuzais, torii, pagodes, cerejeiras |
+| Séculos XVI a XVIII | **Terraços do Oriente** | Leste Asiático em paisagem de rolo, da China Song ao Japão Edo: arrozais em terraço de três degraus, serras de névoa em tinta com pinheiros, caminho de posta de lajes de passo, torii e paifang, garças, pagodes e cerejeiras. Easter eggs: cerejeira milenar, a Grande Carpa, gato da sorte e a noite das lanternas (Obon e Lua da Colheita) |
 | Séculos XVI a XVIII | **Brasil Dourado** | Brasil interior, Minas e Cerrado: casario caiado, ipês, buritis, café, Estrada Real |
 | Séculos XIX a XXI | **Inverno Nórdico** | Escandinávia no inverno: casas longas de turfa, cabanas vermelhas, drakkars no fiorde |
 

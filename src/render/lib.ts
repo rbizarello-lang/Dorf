@@ -4,6 +4,7 @@ import { housesAtEra } from '../themes/progress';
 import type { SiteKind } from '../core/sites';
 import { hillGeometry, peakGeometry } from './relief';
 import { awningRoofParts, catGeometry, crocodileGeometry, ibisGeometry, mesaGeometry, miniPyramidGeometry, oxGeometry, pylonGateGeometry, shadufGeometry, sphinxGeometry, terraceWallParts, TERRACE } from './kits/egito';
+import { ancientBlossomGeometry, heronGeometry, koiPondGeometry, luckyCatGeometry, niwakiGeometry } from './kits/oriental';
 import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
 import type { EggKit } from '../core/eggs';
 import { brickGateParts, bulbParts, cheeseParts, dikeBoyParts, drawbridgeParts, duckParts, dutchGableParts, poplarParts, tjalkParts, windmillParts } from './kits/holanda';
@@ -639,6 +640,8 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
         { geo: cyl(0.01, 0.012, 0.1, 5).rotateZ(-0.18).translate(-0.006, 0.16, 0), color: trunk },
         { geo: jitter(ico(0.1, 0), 0.016, 32).scale(1.55, 0.36, 1.45).translate(0.006, 0.27, 0), color: '#fff', tint: 1, grad: [0.72, 1.1, 0.24, 0.3] },
       ]);
+    case 'niwaki':
+      return niwakiGeometry(trunk, farTree);
     case 'waxpalm': {
       // Palmeira-de-cera dos Andes: o tronco claro e altíssimo é o que a identifica.
       const parts: Part[] = [{ geo: cyl(0.009, 0.013, 0.46, 5), color: '#d8d2c2', grad: [0.85, 1.05, 0, 0.46] }];
@@ -654,6 +657,9 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
 
 /** Suavidade da copa (`softCanopy`): as formas esguias ficam menos lisas, para a quina da copa existir de longe. */
 const SOFT: Partial<Record<TreeGeo, number>> = { cypress: 0.45, spire: 0.5 };
+
+/** Copas perenes: a estação (primavera clara, outono ocre) não as tinge, só a neve (material `evergreen`). */
+const EVERGREEN: ReadonlySet<string> = new Set<TreeGeo>(['conifer', 'spire', 'cypress', 'umbrella', 'araucaria', 'niwaki']);
 
 /** Formas com ponta, folha ou cristal: a quina é a forma, então ficam facetadas. */
 const FACETED: ReadonlySet<TreeGeo> = new Set<TreeGeo>(['crystal', 'cactus', 'palm', 'waxpalm', 'bamboo']);
@@ -1275,6 +1281,8 @@ function animalGeometry(kind: AnimalKind): THREE.BufferGeometry {
       return crocodileGeometry();
     case 'ox':
       return oxGeometry();
+    case 'heron':
+      return heronGeometry();
     case 'rover':
       return kit([
         { geo: box(0.05, 0.016, 0.03, 0, 0.012), color: '#fff', tint: 1 },
@@ -1476,6 +1484,12 @@ function eggGeometry(kit_: EggKit): THREE.BufferGeometry {
         { geo: cone(0.022, 0.03, 4, 0, 0.122).rotateY(Math.PI / 4), color: '#a8a296' },
         { geo: cyl(0.014, 0.014, 0.004, 8, 0, 0.08).rotateX(Math.PI / 2).translate(0, 0, 0.011), color: '#fff', tint: 1, glow: 0.7 },
       ]);
+    case 'cerejeira-milenar':
+      return ancientBlossomGeometry('#4e3a30');
+    case 'lago-carpa':
+      return koiPondGeometry();
+    case 'gato-da-sorte':
+      return luckyCatGeometry();
   }
 }
 
@@ -2370,8 +2384,9 @@ export class Lib {
       const foot = theme.ground[0];
       const snow = !!theme.relief.snow;
       if (theme.relief.style === 'serra') {
-        set('peak', peakGeometry({ snow, foot }));
-        this.farGeos.set('peak', peakGeometry({ snow, foot, far: true }));
+        const mist = theme.relief.mist;
+        set('peak', peakGeometry({ snow, foot, mist }));
+        this.farGeos.set('peak', peakGeometry({ snow, foot, mist, far: true }));
       } else if (theme.relief.style === 'falesia') {
         // Falésia: mesas de arenito de topo chato, no mesmo `peak` (mesma pegada da serra).
         set('peak', mesaGeometry({ foot }));
@@ -2433,7 +2448,8 @@ export class Lib {
   material(key: string): THREE.Material {
     if (key === 'fire') return this.mats.fire;
     if (key === 'tree:crystal') return this.mats.crystal;
-    if (key.startsWith('tree:') || key === 'bush') return this.mats.foliage;
+    if (key.startsWith('tree:')) return EVERGREEN.has(key.slice(5)) ? this.mats.evergreen : this.mats.foliage;
+    if (key === 'bush') return this.mats.foliage;
     if (key.startsWith('crop:') || key === 'grass' || key === 'reed' || key === 'flower') return this.mats.crop;
     if (this.domeKeys.has(key)) return this.mats.glass;
     if (key === 'peak') return this.mats.relief;

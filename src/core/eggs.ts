@@ -37,7 +37,7 @@ export interface Holiday {
 }
 
 /** Kits decorativos que o efeito 'kit' põe na peça (o desenho está em render/lib.ts, `eggGeometry`). */
-export type EggKit = 'bulbo-dourado' | 'estela' | 'queijo' | 'menino-dique' | 'esfinge' | 'gato' | 'ibis' | 'piramide';
+export type EggKit = 'bulbo-dourado' | 'estela' | 'queijo' | 'menino-dique' | 'esfinge' | 'gato' | 'ibis' | 'piramide' | 'cerejeira-milenar' | 'lago-carpa' | 'gato-da-sorte';
 
 /** Eventos animados passageiros (render/life.ts). */
 export type EggEvent =

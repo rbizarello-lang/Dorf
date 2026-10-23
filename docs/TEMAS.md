@@ -16,6 +16,24 @@
 >
 > **Anacronismos declarados.** O Brasil Dourado junta o Cerrado de hoje e as Minas do século XVIII sem ano exato: o café em larga escala e a maria-fumaça mineira são do século XIX; o tema trata tudo como "Brasil interior". O Terraços do Oriente é uma paisagem de rolo pintado (da China Song ao Japão Edo), com torii e casa de pátio na mesma vila. O Inverno Nórdico é atemporal (casa longa de turfa, stuga vermelha e drakkar convivem). O que ainda falta de cada fusão (terraços de arroz, rena, trenó, lago congelado, aurora, cachoeira, cupinzeiro, fauna do cerrado, telhado colonial, portais em lista) está nos relatórios da rodada 3 e entra nas etapas seguintes.
 
+## Terraços do Oriente (`oriental`): etapa T3 da rodada 3
+
+O que o tema tem hoje, depois do aprofundamento (as seções de `song`, `edo` e `sakura` mais abaixo são a pesquisa histórica de origem):
+
+- **Peça-assinatura: o arrozal em terraço.** `terraces: { levels: 3, rise: 2.4 }`: cada parcela de arroz ou chá sobe em três patamares com mureta de pedra e beiral, e as mudas sobem junto (geometria do chão, sem draw call novo). Há arroz alagado, arroz dourado e chá.
+- **Portais em lista.** `gates`: torii (cinabre e nanquim) e paifang (vermelho e telha jade); cada portal sorteia o estilo pela semente da peça.
+- **Caminho de posta.** `road: 'stepstone'`: terra batida com lajes de passo e tufos nas beiras, mais lanternas de papel. O antigo `dirt` desenhava dois sulcos paralelos e parecia trilho de trem.
+- **Serras de névoa em tinta.** `relief: { amp: 1.1, style: 'serra', rock: '#7d8c99', mist: '#dfe8ea', tall: 1.3, slopeTrees: ['conifer', 'niwaki'] }`: rocha cinza-azulada sem neve, pé perdido na bruma, cume escuro e pinheiros nas encostas.
+- **Pinheiro de jardim.** `niwaki` (tronco torcido e três nuvens de agulhas) no lugar do `umbrella`, mais o `conifer`; ambos são perenes.
+- **Primavera sem copas cinza.** As copas perenes (conífera, abeto, cipreste, pinheiro-manso, araucária e `niwaki`) usam o material `evergreen`, que não recebe o tom de primavera nem o de outono. A cerejeira, o bambu e o salgueiro continuam com o tom da estação. A correção vale para todos os temas.
+- **Fauna.** Garça-branca na margem (dia), sika no bosque (fim da tarde) e búfalo no arrozal (dia).
+- **Sons.** Sapos, cigarras, aves, sinos de templo e água.
+- **Easter eggs.** `cerejeira-milenar` (um grupo de 8 peças de bosque faz nascer uma cerejeira milenar com torii miúdo), `grande-carpa` (peça com 4 ou mais bordas de prado e 18% de sorte ganha um lago de jade com carpa dourada), `gato-da-sorte` (a 50ª peça ganha um santuário com maneki-neko; a partida clássica tem ~68 peças, então 100 nunca chegaria) e `noite-de-lanternas` (de 13 a 16 de agosto, Obon, e de 15 a 17 de setembro, Lua da Colheita, das 19h às 23h: procissão de lanternas e céu dourado).
+
+**Fica para depois** (da lista da seção 8 do relatório `scratchpad/temas/oriental.md`): roda-d'água como `MillStyle` (a peça especial `watermill` já existe), telhado `irimoya`, marco `pagoda8` de tijolo, `sampan`, chapéu cônico (`HatStyle: 'conical'`), lótus, carpas em cardume por dado, o torii submerso, o sino de templo ao subir de era e o ambiente de shishi-odoshi.
+
+---
+
 Pesquisa de apoio aos 8 temas de época que existiam em `src/themes/eras.ts` (hoje dissolvido, ver acima) · 30/09/2026 · PT-BR
 
 **Nota de método.** O WebFetch está bloqueado pelo proxy de saída; toda a evidência vem de resumos do WebSearch (nenhuma página foi lida na íntegra). Onde a busca não confirmou um detalhe, ele vem de conhecimento geral e está marcado **[C]**. Anacronismos e aproximações de kit estão sempre explicitados. Em todos os temas o renderizador só conhece os kits de `src/themes/types.ts`; onde o kit ideal não existe, usei o mais próximo e listei o que faltaria.

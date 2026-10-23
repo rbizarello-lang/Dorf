@@ -72,6 +72,8 @@ export interface PeakOpts {
   foot: THREE.ColorRepresentation;
   /** Versão leve para o zoom aberto: poucas faces, mesma silhueta. */
   far?: boolean;
+  /** Névoa de pintura em tinta: do pé até ~60% da altura a rocha desbota para esta cor (e a cor da instância tinge menos). */
+  mist?: THREE.ColorRepresentation;
 }
 
 /**
@@ -83,6 +85,9 @@ export function peakGeometry(o: PeakOpts): THREE.BufferGeometry {
   const m = new Mesh();
   const foot = new THREE.Color(o.foot);
   const snowLine = 0.36;
+  const mist = o.mist !== undefined ? new THREE.Color(o.mist) : null;
+  // Quanto de névoa há na altura y (1 no pé, 0 a 60% do cume principal).
+  const mistAt = (y: number) => (mist ? Math.pow(Math.max(0, 1 - y / (PEAK.h * 0.6)), 1.3) * 0.9 : 0);
   PEAK_CONES.forEach(([ang, dist, rs, hs], k) => {
     const ox = Math.cos(ang) * dist * PEAK.r, oz = Math.sin(ang) * dist * PEAK.r;
     const R = PEAK.r * rs, H = PEAK.h * hs;
@@ -101,7 +106,8 @@ export function peakGeometry(o: PeakOpts): THREE.BufferGeometry {
     );
     const apex: V3 = [ox + (rng() - 0.5) * 0.18 * R, H, oz + (rng() - 0.5) * 0.18 * R];
     const rock = (yc: number) => {
-      const f = (0.74 + 0.34 * Math.min(1, yc / PEAK.h)) * (0.8 + rng() * 0.34);
+      // Com névoa (tinta), a rocha escurece para o cume (nanquim) em vez de clarear: o pé se perde na bruma.
+      const f = (mist ? 0.98 - 0.3 * Math.min(1, yc / PEAK.h) : 0.74 + 0.34 * Math.min(1, yc / PEAK.h)) * (0.8 + rng() * 0.34);
       return tmp.setRGB(f, f * (0.97 + rng() * 0.06), f);
     };
     const faceTint = (yc: number) => (o.snow && yc / H > snowLine + (rng() - 0.5) * 0.18 ? 0 : 1);
@@ -110,8 +116,8 @@ export function peakGeometry(o: PeakOpts): THREE.BufferGeometry {
       const base = rock(yc).clone();
       const snow = faceTint(yc) === 0;
       const col = snow ? SNOW.clone().multiplyScalar(0.94 + rng() * 0.08) : base;
-      const vc = (p: V3) => (p[1] < 0.015 ? foot : col);
-      const vt = (p: V3) => (p[1] < 0.015 ? 0 : snow ? 0 : 1);
+      const vc = (p: V3) => (p[1] < 0.015 ? foot : mist && !snow ? col.clone().lerp(mist, mistAt(p[1])) : col);
+      const vt = (p: V3) => (p[1] < 0.015 ? 0 : snow ? 0 : 1 - mistAt(p[1]) * 0.85);
       m.face(a, b, c, vc(a), vc(b), vc(c), vt(a), vt(b), vt(c), ox, oz);
     };
     for (let ri = 0; ri + 1 < rings.length; ri++) {
