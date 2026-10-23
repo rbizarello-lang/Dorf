@@ -141,6 +141,22 @@ Países Baixos, 1600 a 1670: terra ganha da água, plana e medida a régua. A pe
 - **Falta no motor.** Chafariz de pedra-sabão, sobrado com balcão de ferro, mineração (monjolo, cata), engenho de cana com roda-d'água, telha capa e canal em faixas.
 - **Fontes.** [Estrada Real (InfoEscola)](https://www.infoescola.com/brasil-colonia/estrada-real) · [The Original Colors: A Study on Ouro Preto (ArchDaily)](https://www.archdaily.com/1044354/the-original-colors-a-study-on-ouro-preto) · [Sabará: roteiro pela cidade histórica (Estado de Minas)](https://www.em.com.br/cidades/sabara/2025/06/amp/7183843-sabara-roteiro-pela-cidade-historica-onde-o-passado-segue-vivo.html) · [Os caminhos que cortam Ouro Preto](https://www.tribunapr.com.br/arquivo/viagem-turismo/os-caminhos-que-cortam-ouro-preto/) · [Cana e aguardente em Minas (UFMG/Cedeplar)](https://diamantina.cedeplar.ufmg.br/portal/download/diamantina-2000/godoy.pdf) · [História de Minas Gerais (governo de MG)](https://www.mg.gov.br/conheca-minas/historia)
 
+### Brasil Dourado (`brasil`): aprofundamento da etapa T4 (22/10/2026)
+
+O tema fundido ganhou identidade própria em tudo o que se vê de longe. Os nomes dos terrenos são **Cerrado, Grota, Lavoura, Arraial, Ribeirão e Caminho de Pedra**: "Estrada Real" é o nome de um modo de jogo, então nenhum elemento do tema usa esse nome.
+
+- **Lavoura (peça-assinatura).** O café sobe a encosta em **terraços** (`terraces`, 3 patamares com mureta de pedra, só no café); uma parte dos cafezais está em **florada** (`CropStyle: 'coffeebloom'`, a copa salpicada de flores brancas). O canavial fica no plano e, quando a vila encosta nele, ergue o **engenho** (`MillStyle: 'engenho'`: casa caiada, chaminé de tijolo da caldeira, roda d'água no flanco e feixes de cana empilhados).
+- **Cerrado.** Árvores tortas (oliveira = pequi e lixeira), **cupinzeiros** (`Theme.groundKits`, kit torneado de terra vermelha, 1 a 3 por tufo), flores-do-campo e touceiras de capim. Contra a Grota de copa redonda, ipê e jerivá.
+- **Fauna** (`Theme.fauna`, `AnimalKind` novos `rhea`, `maned`, `anteater`): **ema** de dia, **lobo-guará** na hora dourada, **tamanduá-bandeira** de dia; o gado do pasto é o **zebu** (`zebu`: giba, orelhas caídas). No céu, **araras** em pares no lugar dos pássaros escuros (`Theme.skyBirds`).
+- **Estrada.** O caminho de pedra leva o **carro de boi** (`VehicleKind: 'oxcart'`: junta de zebus sob a canga, cabeçalho, rodas maciças, carga de cana) seguido da **mula de tropa** com bruacas. A ferrovia e o trem saíram do tema; a locomotiva só aparece no ovo da maria-fumaça.
+- **Casario.** Telhado **colonial** (`RoofStyle: 'colonial'`: quatro águas de duas inclinações, aba mais baixa e aberta, friso escuro na frente), nos quatro tipos de casa; **porteira** de fazenda onde a estrada entra na vila (`GateStyle: 'porteira'`).
+- **Relevo.** `relief: serra` de rocha avermelhada com **mata no topo** (`relief.crown`), sem neve. **Entorno:** `surround: 'chapada'`, um mar de capim seco com manchas de terra vermelha (mesmo `makeVoidMaterial`, sem malha nem draw call; a cor sai do chão do tema).
+- **Easter eggs** (`Theme.eggs`): *São João* (de 12 a 30 de junho, pelo relógio local: balões de papel sobem à deriva e a fogueira faísca), *Maria-fumaça* (o primeiro trilho de 5 peças ganha uma locomotiva que o atravessa soltando fumaça), *Doze Profetas* (um arraial de 12 peças ergue os doze profetas de pedra-sabão na escadaria, o sétimo de chapéu de tropeiro), *Onça na vereda* (rara: onça-pintada deitada num tronco, em peça de grota com ribeirão) e *Revoada das araras* (a grota de 14 peças levanta um bando).
+- **Som.** Cigarras, aves (bem-te-vi), água e sinos ao longe (`ambience`).
+- **Ficou para depois.** Bandeirinhas e a fogueira fixa do São João nas ruas, cachoeira (etapa R3 do relevo), `FrameKind: 'azulejo'`, apiário de jataí e curral como kits próprios, balsa no rio largo, capela de uma torre só, tucano, serras azuis ao longe na chapada, `MillStyle` do engenho com a roda girando (hoje é estática), beiral duplo em "cachorrada" com cada cabeça de viga.
+
+---
+
 ## 7. Velho Oeste (`oeste`)
 
 - **Terrenos.** Prado = *Pradaria*; Floresta = *Chaparral* (cactos, pinheiros, choupos, mesquite); Plantação = *Milharal* (milho, trigo, girassol, planta nativa); Vila = *Povoado*; Rio = *Rio*; Estrada = *Ferrovia*.

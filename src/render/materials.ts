@@ -848,10 +848,14 @@ export function makeVoidMaterial() {
     /** Entorno do tema (aos poucos): mar e areia, de 0 a 1; o resto é pergaminho. */
     sea: uniform(0),
     sand: uniform(0),
+    /** 1 = a areia vira chapada: capim seco com manchas de terra vermelha, no lugar das dunas (só vale com `sand` em 1). */
+    cap: uniform(0),
     /** Cores do mar (raso e fundo), da areia e do céu refletido na água. */
     shallow: uniform(new THREE.Color('#5fd0c8')),
     deep: uniform(new THREE.Color('#1c5a9c')),
     sandCol: uniform(new THREE.Color('#e6d4a6')),
+    /** Terra que aparece em manchas na chapada. */
+    earthCol: uniform(new THREE.Color('#a5603a')),
     sky: uniform(new THREE.Color('#9cc8ee')),
   };
   // Parte iluminada (recebe a sombra do tabuleiro e a oclusão) e parte emissiva (a cor
@@ -957,7 +961,22 @@ export function makeVoidMaterial() {
     return mix(col, u.bg.mul(0.95), farS.mul(0.8));
   })();
 
-  const surround = mix(mix(grid, seaLook, u.sea), sandLook, u.sand);
+  // Chapada (Theme.surround = 'chapada'): mar de capim seco. Faixas largas de capim mais claro e mais escuro levadas pelo
+  // "vento", manchas de terra vermelha nos vãos e tufos finos; desbota para o fundo como a areia.
+  const capimLook = Fn(() => {
+    const wide = texture(noiseTex, p.div(6).add(vec2(0.17, 0.41))).r;
+    const mid = texture(noiseTex, p.mul(0.55)).g;
+    const fine = texture(noiseTex, p.mul(2.6)).b.sub(0.5);
+    const streak = texture(noiseTex, vec2(p.x.mul(0.9).add(p.y.mul(0.35)), p.y.mul(0.12))).r.sub(0.5);
+    const earth = smoothstep(0.58, 0.76, wide.mul(0.7).add(mid.mul(0.3))).mul(0.5);
+    const grass = u.sandCol.mul(float(0.9).add(mid.mul(0.2)).add(streak.mul(0.18)).add(fine.mul(0.12)));
+    const col = mix(grass, u.earthCol.mul(float(0.95).add(fine.mul(0.1))), earth);
+    const dust = smoothstep(0.0, 0.45, d).mul(0.06);
+    const farS = smoothstep(u.radius.add(6), u.radius.add(16), length(p.sub(u.center)));
+    return mix(col.mul(float(1).sub(dust)), u.bg.mul(0.95), farS.mul(0.8));
+  })();
+
+  const surround = mix(mix(grid, seaLook, u.sea), mix(sandLook, capimLook, u.cap), u.sand);
   // Mar e areia usam a luz da cena (sol, sombra do tabuleiro). A areia guarda mais emissão que o mar:
   // sob o céu colorido de um tema (Marte) a parte iluminada sozinha tingiria demais a cor dela.
   const dim = float(1).sub(U.night.mul(0.7));

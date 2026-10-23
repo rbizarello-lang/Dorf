@@ -5,6 +5,7 @@ import type { SiteKind } from '../core/sites';
 import { hillGeometry, peakGeometry } from './relief';
 import { awningRoofParts, catGeometry, crocodileGeometry, ibisGeometry, mesaGeometry, miniPyramidGeometry, oxGeometry, pylonGateGeometry, shadufGeometry, sphinxGeometry, terraceWallParts, TERRACE } from './kits/egito';
 import { ancientBlossomGeometry, heronGeometry, koiPondGeometry, luckyCatGeometry, niwakiGeometry } from './kits/oriental';
+import { anteaterGeometry, coffeeBloomGeometry, colonialRoof, engenhoGeometry, jaguarGeometry, macawGeometry, manedWolfGeometry, muleGeometry, oxcartGeometry, porteiraGeometry, profetasGeometry, rheaGeometry, termiteMoundGeometry, zebuGeometry, type KitTools } from './kits/brasil';
 import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
 import type { EggKit } from '../core/eggs';
 import { brickGateParts, bulbParts, cheeseParts, dikeBoyParts, drawbridgeParts, duckParts, dutchGableParts, poplarParts, tjalkParts, windmillParts } from './kits/holanda';
@@ -147,6 +148,9 @@ function jitter(geo: THREE.BufferGeometry, amount: number, seed: number) {
   }
   return g;
 }
+
+/** As primitivas que os kits de src/render/kits/ recebem (eles não importam este arquivo). */
+const TOOLS: KitTools = { kit, box, cyl, jitter, roofBands };
 
 /** Triângulo avulso (lâminas de capim/trigo). */
 function tri(a: number[], b: number[], c: number[]) {
@@ -408,6 +412,12 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
       const rh = 0.09;
       parts.push({ geo: cone(r, rh, round ? 12 : 4, 0, h, 0).rotateY(round ? 0 : Math.PI / 4), color: '#fff', tint: 1, bands: roofBands(h, h + rh) });
       top = h + rh;
+      break;
+    }
+    case 'colonial': {
+      const c = colonialRoof(TOOLS, w, h, d);
+      parts.push(...c.parts);
+      top = c.top;
       break;
     }
     case 'hip': {
@@ -715,6 +725,7 @@ export const CROP_LAYOUT: Record<CropStyle, CropLayout> = {
   papyrus: { rowGap: 0.06, step: 0.05, scale: [0.85, 1.15], rowColor: false },
   tea: { rowGap: 0.06, step: 0.05, scale: [0.95, 1.1], rowColor: false },
   coffee: { rowGap: 0.06, step: 0.05, scale: [0.9, 1.1], rowColor: false },
+  coffeebloom: { rowGap: 0.06, step: 0.05, scale: [0.9, 1.1], rowColor: false },
   cotton: { rowGap: 0.055, step: 0.045, scale: [0.9, 1.1], rowColor: false },
   quinoa: { rowGap: 0.05, step: 0.042, scale: [0.9, 1.15], rowColor: true },
   potato: { rowGap: 0.058, step: 0.042, scale: [0.9, 1.1], rowColor: false },
@@ -806,6 +817,8 @@ function cropGeometry(style: CropStyle): THREE.BufferGeometry {
     }
     case 'tea':
       return kit([{ geo: jitter(ico(0.032, 0), 0.005, 14).scale(1.2, 0.7, 1).translate(0, 0.02, 0), color: '#fff', tint: 1, grad: [0.75, 1.1, 0, 0.04] }]);
+    case 'coffeebloom':
+      return coffeeBloomGeometry(TOOLS);
     case 'coffee':
       return kit([
         { geo: jitter(ico(0.028, 0), 0.006, 15).scale(1, 1.3, 1).translate(0, 0.035, 0), color: '#fff', tint: 1, grad: [0.7, 1.05, 0, 0.07] },
@@ -1112,6 +1125,8 @@ function gateGeometry(style: GateStyle, [main, top]: [string, string]): THREE.Bu
       return kit(brickGateParts(main, top));
     case 'pylon':
       return pylonGateGeometry([main, top]);
+    case 'porteira':
+      return porteiraGeometry(TOOLS, [main, top]);
     case 'inca':
       // Portal de pedra trapezoidal (como o Inti Punku): ombreiras que se inclinam para dentro.
       return kit([
@@ -1283,6 +1298,14 @@ function animalGeometry(kind: AnimalKind): THREE.BufferGeometry {
       return oxGeometry();
     case 'heron':
       return heronGeometry();
+    case 'zebu':
+      return zebuGeometry(TOOLS);
+    case 'rhea':
+      return rheaGeometry(TOOLS);
+    case 'maned':
+      return manedWolfGeometry(TOOLS);
+    case 'anteater':
+      return anteaterGeometry(TOOLS);
     case 'rover':
       return kit([
         { geo: box(0.05, 0.016, 0.03, 0, 0.012), color: '#fff', tint: 1 },
@@ -1429,6 +1452,9 @@ function vehicleGeometry(kind: VehicleKind, [body, det]: [string, string], anima
         // Caçamba aberta: os caixotes (`cargo`) sentam na borda de cima (y = 0,034).
         car: kit([{ geo: box(0.05, 0.016, 0.034, 0, 0.018), color: body }, ...wheels([0], 0.016, 0.02), { geo: box(0.04, 0.003, 0.003, 0.04, 0.024, 0.01), color: '#5a4032' }, { geo: box(0.04, 0.003, 0.003, 0.04, 0.024, -0.01), color: '#5a4032' }]),
       };
+    case 'oxcart':
+      // Carro de boi à frente e, atrás, uma mula de tropa carregada (o comboio da estrada).
+      return { head: oxcartGeometry(TOOLS, [body, det]), car: muleGeometry(TOOLS, det) };
     case 'caravan': {
       const a = animal === 'camel' || animal === 'llama' || animal === 'horse' || animal === 'donkey' ? animal : 'horse';
       const pack = (x: number, y: number) => [{ geo: box(0.014, 0.014, 0.03, x, y), color: det }];
@@ -1437,6 +1463,15 @@ function vehicleGeometry(kind: VehicleKind, [body, det]: [string, string], anima
       return { head: mergeGeometries([base, kit(pack(-0.004, packY))])!, car: mergeGeometries([base.clone(), kit([...pack(-0.004, packY), { geo: box(0.018, 0.01, 0.022, -0.004, packY + 0.014), color: body }])])! };
     }
   }
+}
+
+/** Balão de papel de São João: gomos de cor da instância, boca de fogo acesa embaixo (brilha de leve). */
+function balloonGeometry() {
+  return kit([
+    { geo: new THREE.SphereGeometry(0.022, 7, 4).scale(0.85, 1.25, 0.85).translate(0, 0.04, 0), color: '#fff', tint: 1, glow: 0.35, grad: [1.12, 0.85, 0.014, 0.068] },
+    { geo: cyl(0.005, 0.009, 0.01, 6, 0, 0.004), color: '#6a4a32' },
+    { geo: oct(0.005).translate(0, 0.012, 0), color: '#ffb347', glow: 1 },
+  ]);
 }
 
 function birdGeometry(color = '#3a3634', glow = 0) {
@@ -1476,6 +1511,10 @@ function eggGeometry(kit_: EggKit): THREE.BufferGeometry {
       return ibisGeometry();
     case 'piramide':
       return miniPyramidGeometry();
+    case 'profetas':
+      return profetasGeometry(TOOLS);
+    case 'onca':
+      return jaguarGeometry(TOOLS);
     case 'estela':
       // Pedra erguida com um anel dourado no alto.
       return kit([
@@ -2364,7 +2403,7 @@ export class Lib {
     set('landmark', landmarkGeometry(theme.landmark, theme.landmarkColors, theme.window));
     const [lw, lr, ld] = theme.landmarkColors;
     if (theme.landmark === 'windmill' || theme.mill === 'windmill') set('sails', sailsGeometry(ld, '#f3ead8'));
-    set('mill', theme.mill === 'windmill' ? windmillBody(lw, lr, ld, theme.window) : theme.mill === 'windpump' ? windpumpBody(theme.trunk) : theme.mill === 'stilt' ? stiltGeometry(theme.houses[0].walls[0], theme.houses[0].roofs[0], theme.trunk) : null);
+    set('mill', theme.mill === 'windmill' ? windmillBody(lw, lr, ld, theme.window) : theme.mill === 'windpump' ? windpumpBody(theme.trunk) : theme.mill === 'stilt' ? stiltGeometry(theme.houses[0].walls[0], theme.houses[0].roofs[0], theme.trunk) : theme.mill === 'engenho' ? engenhoGeometry(TOOLS, lw, lr, theme.window) : null);
     if (theme.mill === 'windpump') set('rotor', rotorGeometry());
     gatesOf(theme).forEach((g, i) => set(`gate:${i}`, gateGeometry(g.style, g.colors)));
     if (theme.bridge) set('bridge', bridgeGeometry(theme.bridge.style, theme.bridge.colors));
@@ -2385,8 +2424,9 @@ export class Lib {
       const snow = !!theme.relief.snow;
       if (theme.relief.style === 'serra') {
         const mist = theme.relief.mist;
-        set('peak', peakGeometry({ snow, foot, mist }));
-        this.farGeos.set('peak', peakGeometry({ snow, foot, mist, far: true }));
+        const crown = theme.relief.crown;
+        set('peak', peakGeometry({ snow, foot, mist, crown }));
+        this.farGeos.set('peak', peakGeometry({ snow, foot, mist, crown, far: true }));
       } else if (theme.relief.style === 'falesia') {
         // Falésia: mesas de arenito de topo chato, no mesmo `peak` (mesma pegada da serra).
         set('peak', mesaGeometry({ foot }));
@@ -2406,9 +2446,20 @@ export class Lib {
     set('vehicle:head', v.head);
     set('vehicle:car', v.car);
     set('cargo', cargoGeometry());
+    // Peças de chão do prado (Theme.groundKits): `ground:<kit>`.
+    for (const g of theme.groundKits ?? []) if (!this.geos.has(`ground:${g.kit}`)) set(`ground:${g.kit}`, termiteMoundGeometry(TOOLS));
+    // Easter eggs com figurantes: a maria-fumaça (locomotiva e dois vagões num kit só) e o balão de São João.
+    for (const e of theme.eggs ?? []) for (const x of e.effect) {
+      if (x.kind !== 'evento') continue;
+      if (x.event === 'maria-fumaca' && !this.geos.has('egg:trem')) {
+        const t = vehicleGeometry('steam', ['#2c2a28', '#b5502f'], theme.animals.kind);
+        set('egg:trem', mergeGeometries([t.head, t.car.clone().translate(-0.078, 0, 0), t.car.clone().translate(-0.156, 0, 0)])!);
+      }
+      if (x.event === 'festa-junina' && !this.geos.has('egg:balao')) set('egg:balao', balloonGeometry());
+    }
     for (const e of theme.eggs ?? []) for (const x of e.effect) if (x.kind === 'kit' && !this.geos.has(`egg:${x.kit}`)) set(`egg:${x.kit}`, eggGeometry(x.kit));
     set('coin', coinGeometry());
-    set('bird', birdGeometry());
+    set('bird', theme.skyBirds?.kit === 'arara' ? macawGeometry(TOOLS, theme.skyBirds.colors) : birdGeometry());
     set('bird:gold', birdGeometry('#f4c63a', 0.5));
     for (let e = 0; e < 4; e++) set(`center:${e}`, centerGeometry(e, theme));
     set('monument:log', monumentGeometry('log', theme.trunk));

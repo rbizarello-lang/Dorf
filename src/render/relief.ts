@@ -70,6 +70,8 @@ export interface PeakOpts {
   snow: boolean;
   /** Cor do pé da serra (o chão de prado do tema: a rocha nasce da terra sem emenda). */
   foot: THREE.ColorRepresentation;
+  /** Mata no alto da serra (essa cor, em facetas fixas) no lugar da neve: a chapada de rocha com a mata no topo. */
+  crown?: THREE.ColorRepresentation;
   /** Versão leve para o zoom aberto: poucas faces, mesma silhueta. */
   far?: boolean;
   /** Névoa de pintura em tinta: do pé até ~60% da altura a rocha desbota para esta cor (e a cor da instância tinge menos). */
@@ -88,6 +90,8 @@ export function peakGeometry(o: PeakOpts): THREE.BufferGeometry {
   const mist = o.mist !== undefined ? new THREE.Color(o.mist) : null;
   // Quanto de névoa há na altura y (1 no pé, 0 a 60% do cume principal).
   const mistAt = (y: number) => (mist ? Math.pow(Math.max(0, 1 - y / (PEAK.h * 0.6)), 1.3) * 0.9 : 0);
+  const crown = o.crown !== undefined ? new THREE.Color(o.crown) : null;
+  const crownLine = 0.6;
   PEAK_CONES.forEach(([ang, dist, rs, hs], k) => {
     const ox = Math.cos(ang) * dist * PEAK.r, oz = Math.sin(ang) * dist * PEAK.r;
     const R = PEAK.r * rs, H = PEAK.h * hs;
@@ -115,9 +119,11 @@ export function peakGeometry(o: PeakOpts): THREE.BufferGeometry {
       const yc = (a[1] + b[1] + c[1]) / 3;
       const base = rock(yc).clone();
       const snow = faceTint(yc) === 0;
-      const col = snow ? SNOW.clone().multiplyScalar(0.94 + rng() * 0.08) : base;
-      const vc = (p: V3) => (p[1] < 0.015 ? foot : mist && !snow ? col.clone().lerp(mist, mistAt(p[1])) : col);
-      const vt = (p: V3) => (p[1] < 0.015 ? 0 : snow ? 0 : 1 - mistAt(p[1]) * 0.85);
+      // Mata no topo: as facetas altas ficam verdes (cor fixa, valor sorteado por faceta, linha irregular).
+      const wood = crown !== null && yc / H > crownLine + (rng() - 0.5) * 0.16;
+      const col = wood ? crown!.clone().multiplyScalar(0.8 + rng() * 0.4) : snow ? SNOW.clone().multiplyScalar(0.94 + rng() * 0.08) : base;
+      const vc = (p: V3) => (p[1] < 0.015 ? foot : mist && !snow && !wood ? col.clone().lerp(mist, mistAt(p[1])) : col);
+      const vt = (p: V3) => (p[1] < 0.015 ? 0 : snow || wood ? 0 : 1 - mistAt(p[1]) * 0.85);
       m.face(a, b, c, vc(a), vc(b), vc(c), vt(a), vt(b), vt(c), ox, oz);
     };
     for (let ri = 0; ri + 1 < rings.length; ri++) {

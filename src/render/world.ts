@@ -632,6 +632,7 @@ export class World {
     this.life = new Life(this.lib, this.scene);
     this.life.onSplash = (x, z) => this.sprites.splash(x, WATER_Y, z, 7);
     this.life.onTrade = (x, z) => this.burst(x, z, 'sparkle', 12, 0.12);
+    this.life.onSmoke = (x, y, z) => this.sprites.smoke(x, y, z, tc(this.theme.smoke), U.wind.value);
 
     this.sun.castShadow = true;
     countShadowPasses(this.renderer);
@@ -715,14 +716,20 @@ export class World {
   private setSurround(theme: Theme) {
     const mode = theme.surround ?? 'pergaminho';
     this.voidU.sea.value = mode === 'mar' ? 1 : 0;
-    this.voidU.sand.value = mode === 'areia' ? 1 : 0;
+    this.voidU.sand.value = mode === 'areia' || mode === 'chapada' ? 1 : 0;
+    this.voidU.cap.value = mode === 'chapada' ? 1 : 0;
     const hsl = { h: 0, s: 0, l: 0 };
     tmpColor.set(theme.water).getHSL(hsl);
     // Raso: a cor da água, mais clara; fundo: o azul que o tema puxa, saturado e escuro.
     this.voidU.shallow.value.setHSL(hsl.h, Math.min(0.85, hsl.s * 1.1 + 0.1), Math.min(0.62, hsl.l + 0.1));
     this.voidU.deep.value.setHSL(THREE.MathUtils.lerp(hsl.h, 0.6, 0.65), 0.9, 0.27);
-    this.voidU.sandCol.value.set(mode === 'areia' ? theme.ground[0] : '#e9d8aa');
+    this.voidU.sandCol.value.set(mode === 'areia' || mode === 'chapada' ? theme.ground[0] : '#e9d8aa');
     if (mode === 'areia') this.voidU.sandCol.value.lerp(tmpColor.set('#ead9b0'), 0.4);
+    // Chapada: o capim é o prado do tema um pouco mais claro e a terra é a da lavoura.
+    if (mode === 'chapada') {
+      this.voidU.sandCol.value.lerp(tmpColor.set('#e8d79a'), 0.15);
+      this.voidU.earthCol.value.set(theme.ground[2]);
+    }
   }
 
   setTheme(theme: Theme, board: Board) {
@@ -1605,18 +1612,35 @@ export class World {
         this.burst(x, z, 'sparkle', 30, 0.1);
         this.halo(x, z, 1.4);
       }
-      this.playEgg(e, x, z);
+      this.playEgg(e, x, z, true, p);
     }
   }
 
   /** Executa os efeitos visuais de um ovo (evento e céu) em (x, z) e entrega os sons ao jogo. Só cosmético. */
-  playEgg(egg: EggSpec, x: number, z: number, announce = true) {
+  playEgg(egg: EggSpec, x: number, z: number, announce = true, tile?: Placed) {
     const sounds: ('sinos' | 'brilho' | 'coro')[] = [];
     for (const f of egg.effect) {
       if (f.kind === 'som') sounds.push(f.sound);
       else if (f.kind === 'ceu') this.setEggSky(f.tint, f.strength ?? 0.5, f.seconds ?? 20);
       else if (f.kind === 'evento' && !this.reducedMotion) {
         if (f.event === 'bando-dourado') this.life.flush(x, z, true);
+        else if (f.event === 'revoada') this.life.flush(x, z, false, 16);
+        else if (f.event === 'maria-fumaca') {
+          // Atravessa a peça pelos trilhos: de uma borda de trilho à outra (ou ao longo de uma qualquer, sem a peça).
+          const rail = tile ? [0, 1, 2, 3, 4, 5].filter((i) => tile.edges[i] === T.Rail) : [];
+          const dir = (i: number) => {
+            const w = hexToWorld(DIRS[i][0], DIRS[i][1]);
+            const l = Math.hypot(w.x, w.z) || 1;
+            return [w.x / l, w.z / l];
+          };
+          const [a, b] = rail.length >= 2 ? [dir(rail[0]), dir(rail[1])] : [[1, 0], [-1, 0]];
+          this.life.passage('egg:trem', 1, [x + a[0] * 0.9, z + a[1] * 0.9], [x + b[0] * 0.9, z + b[1] * 0.9], 0.34, 0.1, 0.012, WHITE, 0.002, 0, 0.06);
+        } else if (f.event === 'festa-junina') {
+          // Balões de papel em quatro cores sobem à deriva do vento, em fila, e a fogueira da festa faísca.
+          const a = Math.random() * Math.PI * 2, ux = Math.cos(a), uz = Math.sin(a);
+          ['#ff5a4a', '#ffc83a', '#3fa0e8', '#ee6fb0'].forEach((c, i) => this.life.passage('egg:balao', 2, [x + ux * 0.6 + uz * (i - 1.5) * 0.12, z + uz * 0.6 - ux * (i - 1.5) * 0.12], [x + ux * 4.5, z + uz * 4.5], 0.05, 0.5 + i * 0.07, 0.05 + i * 0.1, tc(c), 0.003, 0.11));
+          this.burst(x, z, 'sparkle', 40, 0.05);
+        }
         else if (f.event === 'procissao') {
           // Cinco aldeões com lanterna cruzam a peça numa direção qualquer (cosmético: o sorteio não é da semente).
           const a = Math.random() * Math.PI * 2, ux = Math.cos(a), uz = Math.sin(a);

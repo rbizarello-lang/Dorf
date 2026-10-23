@@ -1080,7 +1080,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       scaffold(x, z, ry, 0.26, 0.04);
       for (let a = 0; a < 3; a++) D('animal', x + (rng() - 0.5) * 0.1, 0, z + (rng() - 0.5) * 0.1, rng() * 6, randRange(rng, 0.9, 1.15), vary(rng, tc(pick(rng, theme.animals.colors)), 0.05), 'wander');
     } else if (s.kind === 'mill') {
-      const sc = (theme.mill === 'windmill' ? 1.1 : theme.mill === 'windpump' ? 1 : 1.2) * LANDMARK_SCALE;
+      const sc = (theme.mill === 'windmill' ? 1.1 : theme.mill === 'windpump' ? 1 : theme.mill === 'engenho' ? 1.55 : 1.2) * LANDMARK_SCALE;
       const face = Math.atan2(-mx, -mz); // +z local (porta e pás) voltado para o centro da peça
       D('mill', x, 0, z, face, sc, WHITE);
       scaffold(x, z, face, 0.17 * sc, theme.mill === 'windmill' || theme.mill === 'windpump' ? 0.34 * sc : 0.2 * sc);
@@ -2066,6 +2066,26 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         if (spec.time) decos[decos.length - 1].when = spec.time;
       }
       taken.push(at);
+    }
+  }
+
+  // --- Peças de chão do prado (Theme.groundKits): tufos de 1 a 3 do kit (cupinzeiros) num setor de prado. Gerador à
+  // parte e depois de tudo, como a fauna: o resto da peça não muda e os temas sem `groundKits` não gastam nada.
+  if (theme.groundKits?.length) {
+    const gr = mulberry32((seed ^ 0xc0b1d0) >>> 0);
+    const grass = [0, 1, 2, 3, 4, 5].filter((i) => edges[i] === T.Grass);
+    for (const spec of theme.groundKits) {
+      const roll = gr(), sec = grass.length ? grass[Math.floor(gr() * grass.length)] : -1;
+      if (sec < 0 || roll >= spec.chance * Math.min(1, grass.length / 2 + 0.3)) continue;
+      const p = samplePoint(gr, sec, 0.16, 0.12);
+      if (!p || !(free(p[0], p[1], 0.07) && clear(p[0], p[1]) > 0.05)) continue;
+      const [lo, hi] = spec.count ?? [1, 3];
+      for (let n = randInt(gr, lo, hi); n > 0; n--) {
+        const x = p[0] + (gr() - 0.5) * 0.1, z = p[1] + (gr() - 0.5) * 0.1;
+        if (clear(x, z) < 0.03) continue;
+        D(`ground:${spec.kit}`, x, 0, z, gr() * 6, randRange(gr, 0.75, 1.3), vary(gr, tc(pick(gr, spec.colors)), 0.06));
+      }
+      taken.push(p);
     }
   }
 

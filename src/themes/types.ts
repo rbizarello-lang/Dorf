@@ -54,7 +54,8 @@ export type RoofStyle =
   | 'steep' // duas águas muito íngreme, com beiral curto (empena alta e estreita)
   | 'cross' // cumeeira cruzada: dois telhados de duas águas em cruz
   | 'cone' // cônico (cabanas redondas)
-  | 'awning'; // laje com toldo de cana listrado sobre o terraço (use com `terrace`)
+  | 'awning' // laje com toldo de cana listrado sobre o terraço (use com `terrace`)
+  | 'colonial'; // colonial brasileiro: quatro águas com aba (beiral mais baixo e aberto) e friso de cachorrada
 
 export interface HouseKind {
   weight: number;
@@ -159,6 +160,7 @@ export type CropStyle =
   | 'potato' // batata: touceira baixa com flores (cor da planta = folhagem)
   | 'flax' // linho: hastes finas com flor azul (cor da planta = flor)
   | 'mulberry' // amoreira podada baixa, para a seda
+  | 'coffeebloom' // cafezal em florada: o café com a copa coberta de flores brancas
   | 'hydro' // hidroponia luminosa (ficção)
   | 'bulb'; // jacinto: espiga cônica de florzinhas em fileiras de cor
 
@@ -175,7 +177,12 @@ export interface CropKind {
  * Bichos do pasto. Um tipo novo (renas, ema, crocodilo...) entra só com um `case` em `animalGeometry` (render/lib.ts):
  * o compilador cobra a entrada, e `Theme.animals` e `Theme.fauna` já o aceitam.
  */
-export type AnimalKind = 'sheep' | 'cow' | 'goat' | 'horse' | 'donkey' | 'buffalo' | 'llama' | 'camel' | 'deer' | 'rover' | 'duck' | 'ibis' | 'crocodile' | 'ox' | 'heron';
+export type AnimalKind = 'sheep' | 'cow' | 'goat' | 'horse' | 'donkey' | 'buffalo' | 'llama' | 'camel' | 'deer' | 'rover' | 'duck' | 'ibis' | 'crocodile' | 'ox' | 'heron' | 'zebu' | 'rhea' | 'maned' | 'anteater';
+
+/** Peças de chão do prado (`Theme.groundKits`). */
+export type GroundKit = 'cupinzeiro';
+/** Bandos de pássaros do céu (`Theme.skyBirds`). */
+export type SkyBirdKit = 'arara';
 
 /** Onde uma espécie de `Theme.fauna` aparece: no prado, na mata, no campo de cultivo, na beira do rio ou dentro da água. */
 export type FaunaWhere = 'prado' | 'floresta' | 'campo' | 'margem' | 'agua';
@@ -219,13 +226,14 @@ export type BoatKind =
 /** Como a borda "linha" (índice 5) é desenhada. */
 export type RoadStyle = 'rail' | 'dirt' | 'stone' | 'sand' | 'maglev' | 'dike' | 'stepstone'; // stepstone: terra batida com lajes de passo (tobiishi), sem trilhos nem sulcos paralelos
 /** O que anda pela linha: trem, carroça, caravana de animais, maglev. */
-export type VehicleKind = 'steam' | 'cart' | 'caravan' | 'maglev';
+export type VehicleKind = 'steam' | 'cart' | 'caravan' | 'maglev' | 'oxcart';
 /** Estrutura construída quando vila encosta em plantação. */
 export type MillStyle =
   | 'windmill' // moinho de vento com pás de pano
   | 'granary' // celeiro de silos redondos
   | 'windpump' // moinho-bomba americano: torre de treliça, rotor de aço e caixa d'água
-  | 'stilt'; // armazém sobre estacas (estabur, celeiro elevado)
+  | 'stilt' // armazém sobre estacas (estabur, celeiro elevado)
+  | 'engenho'; // engenho de açúcar: casa caiada com roda d'água, chaminé de tijolo e cana empilhada
 
 /** Portal sobre a estrada na entrada da vila. */
 export type GateStyle =
@@ -233,7 +241,8 @@ export type GateStyle =
   | 'paifang' // três vãos com telhadinhos
   | 'inca' // portal trapezoidal de pedra
   | 'brick' // portão de cidade de tijolo (stadspoort): pilares, frontão de degraus e torrezinha com relógio
-  | 'pylon'; // pilone egípcio: duas torres de paredes inclinadas, cornija e travessa
+  | 'pylon' // pilone egípcio: duas torres de paredes inclinadas, cornija e travessa
+  | 'porteira'; // porteira de fazenda: mourões, travessa com tabuleta e uma folha aberta
 /** Ponte de pedestres sobre o rio, entre a vila e a outra margem. */
 export type BridgeStyle =
   | 'stone' // arco de pedra com parapeito
@@ -296,8 +305,8 @@ export interface Theme {
   bg: string;
   voidFill: string;
   voidLine: string;
-  /** O que cerca o tabuleiro: 'mar' (água funda, espuma e faixa de areia nas bordas), 'areia' (dunas, a cor sai do chão do tema) ou 'pergaminho' (a terra incógnita; o padrão). */
-  surround?: 'mar' | 'pergaminho' | 'areia';
+  /** O que cerca o tabuleiro: 'mar' (água funda, espuma e faixa de areia nas bordas), 'areia' (dunas, a cor sai do chão do tema), 'chapada' (mar de capim seco com manchas de terra vermelha, a cor sai do chão do tema) ou 'pergaminho' (a terra incógnita; o padrão). */
+  surround?: 'mar' | 'pergaminho' | 'areia' | 'chapada';
   sun: string;
   sunIntensity: number;
   sunDir: [number, number, number];
@@ -371,6 +380,16 @@ export interface Theme {
    */
   fauna?: FaunaSpec[];
   /**
+   * Peças de chão do prado (cupinzeiros, formigueiros...): tufos de 1 a 3 do kit, por um gerador à parte da semente da
+   * peça (as peças dos temas sem `groundKits` ficam como sempre foram). A cor da instância tinge o kit.
+   */
+  groundKits?: { kit: GroundKit; chance: number; colors: string[]; count?: [number, number] }[];
+  /**
+   * Bandos do céu no lugar dos pássaros escuros de sempre (os bandos que dão voltas sobre o tabuleiro): o kit e as
+   * cores [corpo, asa, ponta da asa]; `n` é o tamanho do bando (padrão 5 a 7; araras voam em pares, 2 a 4).
+   */
+  skyBirds?: { kit: SkyBirdKit; colors: [string, string, string]; n?: [number, number] };
+  /**
    * Degraus nas parcelas de plantação: cada parcela vira 2 ou 3 patamares concêntricos baixos, com mureta, e as plantas
    * sobem com eles. A borda da peça fica na altura 0 (a emenda com a vizinha não muda). `styles` limita às culturas
    * listadas (omitir = todas). A parcela cresce em altura até `levels` × 0,012.
@@ -421,13 +440,16 @@ export interface Theme {
    * de uma em cada três peças elegíveis). Peças com vila, plantação, marco, sítio ou peça especial ficam
    * de fora, e rios e estradas são respeitados. `style`: 'serra' = serras de rocha e morros; 'suave' = só
    * morros gramados; 'terraco', 'falesia' e 'dique' são reservados para as próximas etapas e, por ora,
-   * valem como 'suave'. `snow` põe neve nos cumes; `rock` troca a cor da rocha (padrão: `rock` do tema).
+   * valem como 'suave'. `snow` põe neve nos cumes; `rock` troca a cor da rocha (padrão: `rock` do tema); `crown` põe
+   * mata (essa cor, em facetas) no alto da serra em vez de neve: o chapadão de rocha com a mata no topo.
    */
   relief?: {
     amp: number;
     style: 'suave' | 'serra' | 'terraco' | 'falesia' | 'dique';
     snow?: boolean;
     rock?: string;
+    /** Mata (essa cor, em facetas) no alto da serra em vez de neve: o chapadão de rocha com a mata no topo. */
+    crown?: string;
     /** Névoa de pintura em tinta no pé das serras: a rocha desbota para esta cor a partir da base (omitir = rocha cheia até o chão). */
     mist?: string;
     /** Serras mais altas e estreitas (multiplica a altura; a largura cai na raiz): picos de tinta. Padrão 1. */
