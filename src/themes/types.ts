@@ -34,6 +34,7 @@ export type BodyStyle =
   | 'cottage' // casa comum de dois águas
   | 'long' // casa comprida (viking, rancho)
   | 'cube' // cubo de adobe/pedra (Egito, Mediterrâneo)
+  | 'terrace' // adobe em dois níveis: sala em cima, escada externa e terraço (Egito)
   | 'tall' // sobrado estreito de 2-3 andares (Holanda, colonial)
   | 'round' // cilíndrica (cabana andina, módulo marciano)
   | 'annex'; // corpo principal com um volume baixo encostado ao lado (celeiro, cozinha, estábulo)
@@ -51,7 +52,8 @@ export type RoofStyle =
   | 'neck' // empena de pescoço: ombros em rampa e pescoço reto e alto, de tijolo, com viga de içamento
   | 'steep' // duas águas muito íngreme, com beiral curto (empena alta e estreita)
   | 'cross' // cumeeira cruzada: dois telhados de duas águas em cruz
-  | 'cone'; // cônico (cabanas redondas)
+  | 'cone' // cônico (cabanas redondas)
+  | 'awning'; // laje com toldo de cana listrado sobre o terraço (use com `terrace`)
 
 export interface HouseKind {
   weight: number;
@@ -172,7 +174,7 @@ export interface CropKind {
  * Bichos do pasto. Um tipo novo (renas, ema, crocodilo...) entra só com um `case` em `animalGeometry` (render/lib.ts):
  * o compilador cobra a entrada, e `Theme.animals` e `Theme.fauna` já o aceitam.
  */
-export type AnimalKind = 'sheep' | 'cow' | 'goat' | 'horse' | 'donkey' | 'buffalo' | 'llama' | 'camel' | 'deer' | 'rover' | 'duck';
+export type AnimalKind = 'sheep' | 'cow' | 'goat' | 'horse' | 'donkey' | 'buffalo' | 'llama' | 'camel' | 'deer' | 'rover' | 'duck' | 'ibis' | 'crocodile' | 'ox';
 
 /** Onde uma espécie de `Theme.fauna` aparece: no prado, na mata, no campo de cultivo, na beira do rio ou dentro da água. */
 export type FaunaWhere = 'prado' | 'floresta' | 'campo' | 'margem' | 'agua';
@@ -229,7 +231,8 @@ export type GateStyle =
   | 'torii' // dois pilares e duas travessas, a de cima recurvada
   | 'paifang' // três vãos com telhadinhos
   | 'inca' // portal trapezoidal de pedra
-  | 'brick'; // portão de cidade de tijolo (stadspoort): pilares, frontão de degraus e torrezinha com relógio
+  | 'brick' // portão de cidade de tijolo (stadspoort): pilares, frontão de degraus e torrezinha com relógio
+  | 'pylon'; // pilone egípcio: duas torres de paredes inclinadas, cornija e travessa
 /** Ponte de pedestres sobre o rio, entre a vila e a outra margem. */
 export type BridgeStyle =
   | 'stone' // arco de pedra com parapeito
@@ -378,6 +381,12 @@ export interface Theme {
    * shader do chão, então não importa a ordem das peças: um rio posto depois também fertiliza o campo que já estava lá.
    */
   floodplain?: { reach: number; color: string };
+  /**
+   * Canais de irrigação (Egito): cada parcela de plantação ganha um canal de água em fileira (às vezes com um canal
+   * cruzado), e as plantas abrem espaço para ele. `color` é a água do canal; `cross` é a chance do canal cruzado.
+   * Só geometria do chão da parcela (o gerador da peça não gasta nada; os canais saem de um gerador à parte).
+   */
+  irrigation?: { color: string; cross: number };
   /** Efeito de céu: 'aurora' = cortina boreal verde e violeta animada por `U.time`, só à noite: refletida no mar (`surround: 'mar'`), como brilho no fundo da névoa e na cúpula do céu quando o horizonte entra na tela (câmera baixa). O nível Baixo não a desenha. */
   skyFx?: 'aurora';
   /** Sons de ambiente do tema (aves, sapos, grilos, cigarras, vento, gelo, sinos, água), sintetizados. */

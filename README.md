@@ -38,7 +38,7 @@ Nas primeiras partidas, um cartão curto explica cada coisa na primeira vez que 
 
 O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Repetir a semente" joga a mesma sequência de peças de novo.
 
-**Estações:** a cada 20 jogadas a paisagem muda — primavera, verão, outono e inverno — e uma interação passa a valer +3: colmeias, moinho, serraria e pasto, nessa ordem. No inverno a neve pousa nas faces de cima e a beira dos rios congela. O Inverno Nórdico fica no inverno e o Terraços do Oriente na primavera. No Desafio do dia a pontuação da estação gira igual para todos; esses dois temas continuam com a paisagem da estação deles. À noite, as construções têm fogueira e, em alguns temas, a estrada ganha lanternas. O botão de hora também tem a aurora, com sol baixo e rosado.
+**Estações:** a cada 20 jogadas a paisagem muda — primavera, verão, outono e inverno — e uma interação passa a valer +3: colmeias, moinho, serraria e pasto, nessa ordem. No inverno a neve pousa nas faces de cima e a beira dos rios congela. O Inverno Nórdico fica no inverno, o Terraços do Oriente na primavera e o Egito do Nilo no verão. No Desafio do dia a pontuação da estação gira igual para todos; esses dois temas continuam com a paisagem da estação deles. À noite, as construções têm fogueira e, em alguns temas, a estrada ganha lanternas. O botão de hora também tem a aurora, com sol baixo e rosado.
 
 **Eras da vila:** com 500, 1.500 e 3.000 pontos a vila muda de era (os nomes mudam por tema, como Mura → Vila de mercado → Cidade murada → Capital no Terraços do Oriente) e ganha +3 peças. A cada era, o Centro da vila (no meio da primeira peça) muda de forma, de fogueira com cabanas a palácio, e uma onda dourada corre pelo mapa. As casas do mapa inteiro mudam junto: na primeira era são menores, de taipa e palha; na segunda, o tema como ele é; na terceira ganham enxaimel ou molduras e o tipo de casa mais raro vira sobrado; na última, os sobrados hasteiam flâmulas na cor da casa e as janelas acendem mais forte à noite. A próxima peça com vila ergue o marco da era, que o fantasma já mostra antes de colocar.
 
@@ -141,7 +141,7 @@ O botão de qualidade abre a lista: **Auto**, **Ultra**, **Alta**, **Média** e 
 | Época | Tema | O que é |
 |---|---|---|
 | Séculos XVI a XVIII | **Holanda Dourada** (padrão) | Países Baixos, século XVII: diques de tijolo e grama, alamedas de álamos, canais com tjalks, casas de empena de sino e de pescoço, moinhos de vento, faixas de tulipas e jacintos |
-| Antiguidade | **Egito do Nilo** | Novo Império, c. 1300 a.C.: o Nilo, tamareiras, casas de adobe, pilone |
+| Antiguidade | **Egito do Nilo** | Novo Império, c. 1300 a.C.: a faixa de terra negra do Nilo cercada de duna dourada, falésias de arenito, canais de irrigação e shaduf, casas de adobe em terraço com toldo listrado, pilone, íbis e crocodilo na margem, boi de chifres de lira. Fica em verão o tempo todo (Shemu) |
 | Séculos XVI a XVIII | **Terraços do Oriente** | Leste Asiático em paisagem de rolo, da China Song ao Japão Edo: arrozais, bambuzais, torii, pagodes, cerejeiras |
 | Séculos XVI a XVIII | **Brasil Dourado** | Brasil interior, Minas e Cerrado: casario caiado, ipês, buritis, café, Estrada Real |
 | Séculos XIX a XXI | **Inverno Nórdico** | Escandinávia no inverno: casas longas de turfa, cabanas vermelhas, drakkars no fiorde |

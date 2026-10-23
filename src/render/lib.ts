@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { housesAtEra } from '../themes/progress';
 import type { SiteKind } from '../core/sites';
 import { hillGeometry, peakGeometry } from './relief';
+import { awningRoofParts, catGeometry, crocodileGeometry, ibisGeometry, mesaGeometry, miniPyramidGeometry, oxGeometry, pylonGateGeometry, shadufGeometry, sphinxGeometry, terraceWallParts, TERRACE } from './kits/egito';
 import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
 import type { EggKit } from '../core/eggs';
 import { brickGateParts, bulbParts, cheeseParts, dikeBoyParts, drawbridgeParts, duckParts, dutchGableParts, poplarParts, tjalkParts, windmillParts } from './kits/holanda';
@@ -239,6 +240,7 @@ const BODY: Record<BodyStyle, { w: number; h: number; d: number }> = {
   round: { w: 0.14, h: 0.09, d: 0.14 },
   // Só o corpo principal; o anexo (ANNEX) fica ao lado, no +x.
   annex: { w: 0.12, h: 0.1, d: 0.12 },
+  terrace: TERRACE,
 };
 
 /** Anexo baixo da casa `annex`: o corpo principal desliza `ox` para trás e o anexo encosta na lateral. */
@@ -348,6 +350,7 @@ function wallGeometry(k: HouseKind, win: Col) {
   const base = (hh: number) => ({ ys: [hh * 0.3], f: [0.65, 1] });
   const parts: Part[] = [{ geo: body, color: k.tone ?? '#ffffff', tint: 1, bands: base(h) }, ...windowsFor(k.body, win, w, h, d, k.bright, k.trim, doorColor(k))];
   if (k.trim) parts.push(...trimFor(k.body, k.trim, w, h, d));
+  if (k.body === 'terrace') parts.push(...terraceWallParts(win, doorColor(k), k.bright));
   if (k.body === 'annex') {
     shift(parts, ANNEX.ox);
     const a = ANNEX;
@@ -385,6 +388,12 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
       parts.push({ geo: box(w + 0.01, 0.012, 0.008, 0, h + 0.014, d / 2), color: '#fff', tint: 1 });
       parts.push({ geo: box(w + 0.01, 0.012, 0.008, 0, h + 0.014, -d / 2), color: '#fff', tint: 1 });
       top = h + 0.026;
+      break;
+    }
+    case 'awning': {
+      const aw = awningRoofParts();
+      parts.push(...aw.parts);
+      top = aw.top;
       break;
     }
     case 'dome': {
@@ -1095,6 +1104,8 @@ function gateGeometry(style: GateStyle, [main, top]: [string, string]): THREE.Bu
     }
     case 'brick':
       return kit(brickGateParts(main, top));
+    case 'pylon':
+      return pylonGateGeometry([main, top]);
     case 'inca':
       // Portal de pedra trapezoidal (como o Inti Punku): ombreiras que se inclinam para dentro.
       return kit([
@@ -1258,6 +1269,12 @@ function animalGeometry(kind: AnimalKind): THREE.BufferGeometry {
       return kit([{ geo: box(0.042, 0.018, 0.014, 0, 0.032), color: '#fff', tint: 1 }, { geo: box(0.009, 0.026, 0.009, 0.022, 0.046).rotateZ(-0.3), color: '#fff', tint: 1 }, { geo: box(0.016, 0.009, 0.009, 0.034, 0.066), color: '#fff', tint: 1 }, { geo: cone(0.012, 0.03, 3, 0.03, 0.072, 0).rotateY(0.6), color: '#e8dcc0' }, ...legs(0.015, 0.005, 0.032, '#4a3a2e')]);
     case 'duck':
       return kit(duckParts());
+    case 'ibis':
+      return ibisGeometry();
+    case 'crocodile':
+      return crocodileGeometry();
+    case 'ox':
+      return oxGeometry();
     case 'rover':
       return kit([
         { geo: box(0.05, 0.016, 0.03, 0, 0.012), color: '#fff', tint: 1 },
@@ -1443,6 +1460,14 @@ function eggGeometry(kit_: EggKit): THREE.BufferGeometry {
       return kit(cheeseParts());
     case 'menino-dique':
       return kit(dikeBoyParts());
+    case 'esfinge':
+      return sphinxGeometry();
+    case 'gato':
+      return catGeometry();
+    case 'ibis':
+      return ibisGeometry();
+    case 'piramide':
+      return miniPyramidGeometry();
     case 'estela':
       // Pedra erguida com um anel dourado no alto.
       return kit([
@@ -2347,10 +2372,15 @@ export class Lib {
       if (theme.relief.style === 'serra') {
         set('peak', peakGeometry({ snow, foot }));
         this.farGeos.set('peak', peakGeometry({ snow, foot, far: true }));
+      } else if (theme.relief.style === 'falesia') {
+        // Falésia: mesas de arenito de topo chato, no mesmo `peak` (mesma pegada da serra).
+        set('peak', mesaGeometry({ foot }));
+        this.farGeos.set('peak', mesaGeometry({ foot, far: true }));
       }
       set('hill', hillGeometry());
       this.farGeos.set('hill', hillGeometry({ far: true }));
     }
+    if (theme.irrigation) set('shaduf', shadufGeometry());
     set('flower', kit([{ geo: oct(0.014).translate(0, 0.024, 0), color: '#fff', tint: 1 }, { geo: tri([-0.002, 0, 0], [0.002, 0, 0], [0, 0.02, 0]), color: '#4f7a3a' }]));
     set('lily', kit([{ geo: cyl(0.035, 0.035, 0.006, 7, 0, 0.011), color: '#fff', tint: 1 }, { geo: oct(0.008).translate(0.01, 0.02, 0.006), color: '#f7c6d8' }]));
     set('animal', animalGeometry(theme.animals.kind));
@@ -2436,3 +2466,7 @@ export class Lib {
     return !(key.startsWith('crop:') || key === 'grass' || key === 'reed' || key === 'flower' || key === 'lily' || key === 'fire' || key === 'lantern');
   }
 }
+
+// Primitivas para os arquivos de kits por tema (src/render/kits/*.ts). Eles importam daqui e este arquivo os importa de volta:
+// o ciclo é inofensivo porque os kits só chamam estas funções depois que os dois módulos carregaram.
+export { box, cone, cyl, kit, lean, pyramid, strut, taper, jitter };
