@@ -130,7 +130,7 @@ export function mesaGeometry(o: { foot: THREE.ColorRepresentation; far?: boolean
       for (let q = 0; q < 6; q++) {
         const a = 0.4 + q * 1.05 + rng() * 0.4, rr = R * (1.38 + rng() * 0.22) * contour(a), s = 0.022 + rng() * 0.03;
         const cx = ox + Math.cos(a) * rr, cz = oz + Math.sin(a) * rr, cy = s * 0.2;
-        const g = new THREE.OctahedronGeometry(s, 0).rotateY(rng() * 3).toNonIndexed();
+        const g = new THREE.OctahedronGeometry(s, 0).rotateY(rng() * 3);
         const pp = g.attributes.position as THREE.BufferAttribute;
         const f = 0.9 + rng() * 0.2;
         c.setRGB(f * 1.04, f, f * 0.9);
