@@ -1124,12 +1124,25 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // A peça especial já tem a sua construção: nada de roda ou estação pequenas ao lado.
   let watermill = !!opts.special;
   let station = road.idx.length === 1 || !!opts.special;
+  let shaduf = !!opts.special;
   for (let i = 0; i < 6; i++) {
     for (const j of [(i + 1) % 6, (i + 5) % 6]) {
       const shared = j === (i + 1) % 6 ? (i + 1) % 6 : i; // canto comum aos dois setores
       const [cx, cz] = corner(shared);
       const tx0 = cx * 0.46, tz0 = cz * 0.46;
-      if (edges[i] === T.Field && edges[j] === T.Water) lush.add(i);
+      if (edges[i] === T.Field && edges[j] === T.Water) {
+        lush.add(i);
+        // Shaduf (Theme.irrigation): poste e braço na margem, com o balde sobre a água (só visual).
+        if (theme.irrigation && !shaduf && field && water.paths.length) {
+          const s = shoreFrom(field, tx0, tz0);
+          if (s && Math.hypot(s.x, s.z) < INR - 0.12 && free(s.x, s.z, 0.1)) {
+            shaduf = true;
+            const px = s.x - s.nx * 0.03, pz = s.z - s.nz * 0.03;
+            D('shaduf', px, 0, pz, yawTo(s.nx, s.nz), 1, WHITE);
+            reserved.push([px, pz, 0.09]);
+          }
+        }
+      }
       const lakeTile = !!shape.lake && water.idx.length >= 2;
       // Vila na beira d'água: no lago, e em metade das peças de rio (pela semente, sem sorteio),
       // nasce o cais de pescador em vez da roda d'água.
@@ -1336,6 +1349,35 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const dir = rng() * Math.PI;
       const ux = Math.cos(dir), uz = Math.sin(dir);
       const base = tc(pick(rng, crop.colors));
+      // Canais de irrigação (Theme.irrigation): um canal reto no sentido das fileiras e, às vezes, outro cruzado,
+      // cortando a parcela de lado a lado (a corda do polígono). Gerador à parte: o rng da peça não gasta nada.
+      const canals: [V2, V2][] = [];
+      if (theme.irrigation) {
+        const cr = mulberry32((seed ^ 0xca4a1) + i * 131 + k * 17);
+        const chord = (ox: number, oz: number, dx: number, dz: number) => {
+          let a: V2 | null = null, b: V2 | null = null;
+          for (let t = -rad * 1.5; t <= rad * 1.5; t += 0.008) {
+            const x = ox + dx * t, z = oz + dz * t;
+            if (!insidePoly(x, z, pts)) continue;
+            if (!a) a = [x, z];
+            b = [x, z];
+          }
+          if (a && b && Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.12) canals.push([a, b]);
+        };
+        const off = (cr() - 0.5) * 0.5 * rad;
+        chord(cx - uz * off, cz + ux * off, ux, uz);
+        if (cr() < theme.irrigation.cross) chord(cx + ux * (cr() - 0.5) * 0.6 * rad, cz + uz * (cr() - 0.5) * 0.6 * rad, -uz, ux);
+        const water = tc(theme.irrigation.color), rim = shade(sc, 0.7);
+        for (const [a, b] of canals) {
+          strip(g, [a, b], 0.0165, h + 0.0004, rim, spIn);
+          strip(g, [a, b], 0.0105, h + 0.0009, water);
+        }
+      }
+      const nearCanal = (x: number, z: number) => canals.some(([a, b]) => {
+        const dx = b[0] - a[0], dz = b[1] - a[1];
+        const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / (dx * dx + dz * dz)));
+        return Math.hypot(x - a[0] - dx * t, z - a[1] - dz * t) < 0.024;
+      });
       let row = 0;
       for (let o = -rad; o <= rad; o += gap, row++) {
         const rowCol = L.rowColor ? tc(crop.colors[(row + k) % crop.colors.length]) : null;
@@ -1343,6 +1385,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           const x = cx + ux * t - uz * o + (rng() - 0.5) * step * 0.25;
           const z = cz + uz * t + ux * o + (rng() - 0.5) * step * 0.25;
           if (!insidePoly(x, z, inner) || !free(x, z, 0)) continue; // não planta dentro de construções
+          if (canals.length && nearCanal(x, z)) continue; // as plantas abrem espaço para o canal
           // Dentro do polígono antigo (86%) os sorteios saem do rng da peça, na mesma ordem de
           // antes: cultura e cor das parcelas não mudam. Só a faixa nova de borda usa o derivado.
           const hedge = crop.style === 'tea' || crop.style === 'vineyard' || crop.style === 'lavender';
@@ -1380,10 +1423,12 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     return best;
   };
   const sectors = [0, 1, 2, 3, 4, 5].filter(roomy);
-  if (rel && rel.amp > 0 && sectors.length && !opts.center && !opts.special && !opts.wonder && !opts.site && opts.eraMark === undefined) {
+  // Falésia (estilo 'falesia'): arenito longe do rio, então a peça com água fica sem ela.
+  if (rel && rel.amp > 0 && sectors.length && !(rel.style === 'falesia' && hasWater) && !opts.center && !opts.special && !opts.wonder && !opts.site && opts.eraMark === undefined) {
     const roll = lr(), kindRoll = lr();
     if (roll < Math.min(0.9, rel.amp * 0.6)) {
-      const kind = rel.style === 'serra' && kindRoll < 0.55 ? 'peak' : 'hill';
+      // Falésia: só mesas (sem outeiros), para não somar um pool de decoração a mais.
+      const kind = rel.style === 'falesia' || (rel.style === 'serra' && kindRoll < 0.55) ? 'peak' : 'hill';
       const s0 = randRange(lr, 0.85, 1.3);
       const kx = randRange(lr, 0.88, 1.18), kz = randRange(lr, 0.88, 1.18);
       const ky = randRange(lr, 0.85, 1.3), kh = randRange(lr, 0.8, 1.5), ry = lr() * Math.PI * 2;
@@ -1414,7 +1459,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           reserved.push([x, z, reach * 0.85]);
         } else {
           const gi = [sectorAt(x, z), 0, 1, 2, 3, 4, 5].find((i) => edges[i] === T.Grass || edges[i] === T.Forest) ?? 0;
-          D('hill', x, 0, z, ry, [sx, sy, sz], vary(lr, groundCols[gi], 0.05));
+          // Falésia: o morro é de arenito, da cor da rocha (um outeiro de pedra e areia, não de capim).
+          D('hill', x, 0, z, ry, [sx, sy, sz], vary(lr, rel.style === 'falesia' ? tc(rel.rock ?? theme.rock).clone().lerp(groundCols[gi], 0.35) : groundCols[gi], 0.05));
           reserved.push([x, z, reach * 0.55]);
         }
         taken.push([x, z]);
