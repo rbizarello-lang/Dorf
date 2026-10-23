@@ -32,15 +32,16 @@ export const oriental: Theme = {
   sideDark: '#3c2f27',
   water: '#5aa5ad',
   bank: '#d5e0b8',
-  road: 'dirt',
-  roadBed: '#b19f80',
-  roadDetail: '#8a7858',
+  // Caminho de posta: terra batida com lajes de passo (o 'dirt' desenhava dois sulcos paralelos e lia como trilho de trem).
+  road: 'stepstone',
+  roadBed: '#c2b08a',
+  roadDetail: '#8b8f8a',
   sleeper: '#5a4a3a',
   vehicle: 'cart',
   vehicleColors: ['#7a5238', '#b23a2e'],
   forest: [
     { geo: 'bamboo', weight: 0.3, colors: ['#6f9f4f', '#82b05c', '#5f9048'] },
-    { geo: 'umbrella', weight: 0.2, colors: ['#2f5340', '#284836', '#3a6049'] },
+    { geo: 'niwaki', weight: 0.2, colors: ['#2f5340', '#284836', '#3a6049'] },
     { geo: 'conifer', weight: 0.2, colors: ['#30594a', '#3a6757', '#294d3f'] },
     { geo: 'blossom', weight: 0.15, colors: ['#f7b7cf', '#f4a3c0', '#fbd0de', '#f3c9d2'] },
     { geo: 'willow', weight: 0.08, colors: ['#8fb86a', '#a0c477', '#7fa85e'] },
@@ -66,8 +67,11 @@ export const oriental: Theme = {
   landmarkColors: ['#9a4a34', '#3f4650', '#d9b45a'],
   window: '#ffdf9a',
   mill: 'stilt',
-  // Um portal só por enquanto: o torii. O paifang (Song) volta quando o schema aceitar uma lista de portais.
-  gate: { style: 'torii', colors: ['#c8402e', '#2a2624'] },
+  // Torii (Edo) e paifang (Song) convivem: cada portal sorteia o seu estilo pela semente da peça.
+  gates: [
+    { style: 'torii', colors: ['#c8402e', '#2a2624'] },
+    { style: 'paifang', colors: ['#a8362a', '#3f6b5a'] },
+  ],
   bridge: { style: 'wood', colors: ['#8a6a4a', '#c8402e'] },
   crops: [
     { style: 'rice', weight: 0.5, colors: ['#8fc07a', '#a3ce86', '#7fb26e'], soil: '#7fb0ab' },
@@ -75,11 +79,60 @@ export const oriental: Theme = {
     { style: 'rice', weight: 0.1, colors: ['#d9b84a', '#e6c860', '#cfa93e'], soil: '#9a8a5e' },
     { style: 'tea', weight: 0.4, colors: ['#4f8f4a', '#5f9f55', '#437f44'], soil: '#8a7856' },
   ],
+  // Arrozais em terraço: cada parcela sobe em 3 patamares de muretas de pedra, com a lâmina d'água em cada degrau.
+  terraces: { levels: 3, rise: 2.4 },
   grass: ['#93b080', '#a0c08e', '#86a874'],
   bush: ['#5f8f5a', '#4f6f52', '#f4a3c0'],
   flowers: ['#fbf6ee', '#f3c9d2', '#c9b6e0', '#f0b6c4'],
   rock: '#8f9590',
   animals: { kind: 'buffalo', colors: ['#6d6f6f', '#5c5e5e', '#7d7f7c'] },
+  // Fauna: garça-branca na margem de dia, sika no bosque ao fim da tarde, búfalos no arrozal.
+  fauna: [
+    { kind: 'heron', weight: 1, colors: ['#f4f6f2', '#e8eeea', '#b4bec8'], time: 'dia', where: 'margem', chance: 0.45 },
+    { kind: 'deer', weight: 1, colors: ['#a8764a', '#9a6a44', '#b58656'], time: 'tarde', where: 'floresta', chance: 0.3 },
+    { kind: 'buffalo', weight: 1, colors: ['#5c5e5e', '#6d6f6f'], time: 'dia', where: 'campo', chance: 0.3 },
+  ],
+  // Serras de névoa em tinta (rocha cinza-azulada, sem neve, pinheiros na encosta) no estilo de rolo pintado.
+  relief: { amp: 1.1, style: 'serra', rock: '#7d8c99', mist: '#dfe8ea', tall: 1.3, slopeTrees: ['conifer', 'niwaki'] },
+  ambience: [
+    { kind: 'sapos', weight: 0.7 },
+    { kind: 'cigarras', weight: 0.6 },
+    { kind: 'aves', weight: 0.5 },
+    { kind: 'sinos', weight: 0.35 },
+    { kind: 'agua', weight: 0.5 },
+  ],
+  eggs: [
+    {
+      id: 'cerejeira-milenar',
+      name: 'Cerejeira milenar',
+      note: 'Um bosque de oito peças floresce: uma cerejeira milenar brota no coração dele.',
+      when: [{ kind: 'grupo', terrain: T.Forest, min: 8 }],
+      effect: [{ kind: 'kit', kit: 'cerejeira-milenar', scale: 1.25, color: '#f4a3c0' }, { kind: 'ceu', tint: '#f8c3d6', strength: 0.4, seconds: 14 }, { kind: 'som', sound: 'brilho' }],
+    },
+    {
+      id: 'grande-carpa',
+      name: 'A Grande Carpa',
+      note: 'Num lago do jardim, uma carpa dourada salta e promete boa sorte.',
+      when: [{ kind: 'bordas', terrain: T.Grass, min: 4 }, { kind: 'sorte', chance: 0.18 }],
+      effect: [{ kind: 'kit', kit: 'lago-carpa', scale: 1.3 }, { kind: 'som', sound: 'brilho' }],
+    },
+    {
+      id: 'gato-da-sorte',
+      name: 'Gato da sorte',
+      note: 'Cinquenta peças: um maneki-neko acena num santuário à beira do caminho.',
+      // A partida clássica tem ~68 peças com os bônus de era: 100 nunca chegaria; 50 cai na reta final.
+      when: [{ kind: 'pecas', n: 50 }],
+      effect: [{ kind: 'kit', kit: 'gato-da-sorte', scale: 1.35, color: '#f4eee2' }, { kind: 'som', sound: 'sinos' }],
+    },
+    {
+      id: 'noite-de-lanternas',
+      name: 'Noite das lanternas',
+      note: 'Noite de Obon e da Lua da Colheita: aldeões levam lanternas pelo caminho.',
+      when: [{ kind: 'hora', from: 19, to: 23 }, { kind: 'data' }],
+      holidays: [{ month: 8, day: 13, until: { month: 8, day: 16 } }, { month: 9, day: 15, until: { month: 9, day: 17 } }],
+      effect: [{ kind: 'evento', event: 'procissao', color: '#e8553a' }, { kind: 'ceu', tint: '#ffcf8a', strength: 0.35, seconds: 0 }, { kind: 'som', sound: 'sinos' }],
+    },
+  ],
   boat: 'junk',
   boatColors: ['#5b4030', '#b98a52'],
   lily: '#6fa86a',

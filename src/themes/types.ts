@@ -26,7 +26,8 @@ export type TreeGeo =
   | 'araucaria' // araucária em "candelabro"
   | 'willow' // salgueiro-chorão: ramos pendentes
   | 'umbrella' // pinheiro-manso: tronco alto e copa chata em guarda-sol
-  | 'waxpalm'; // palmeira-de-cera: tronco muito alto e claro, copa pequena
+  | 'waxpalm' // palmeira-de-cera: tronco muito alto e claro, copa pequena
+  | 'niwaki'; // pinheiro podado de jardim: tronco torcido e nuvens de agulhas achatadas (perene)
 
 /** Corpo da casa (as proporções mudam o caráter da vila). */
 export type BodyStyle =
@@ -168,7 +169,7 @@ export interface CropKind {
  * Bichos do pasto. Um tipo novo (renas, ema, crocodilo...) entra só com um `case` em `animalGeometry` (render/lib.ts):
  * o compilador cobra a entrada, e `Theme.animals` e `Theme.fauna` já o aceitam.
  */
-export type AnimalKind = 'sheep' | 'cow' | 'goat' | 'horse' | 'donkey' | 'buffalo' | 'llama' | 'camel' | 'deer' | 'rover';
+export type AnimalKind = 'sheep' | 'cow' | 'goat' | 'horse' | 'donkey' | 'buffalo' | 'llama' | 'camel' | 'deer' | 'rover' | 'heron';
 
 /** Onde uma espécie de `Theme.fauna` aparece: no prado, na mata, no campo de cultivo, na beira do rio ou dentro da água. */
 export type FaunaWhere = 'prado' | 'floresta' | 'campo' | 'margem' | 'agua';
@@ -209,7 +210,7 @@ export type BoatKind =
   | 'paddle' // vapor de roda de pás na popa
   | 'hover';
 /** Como a borda "linha" (índice 5) é desenhada. */
-export type RoadStyle = 'rail' | 'dirt' | 'stone' | 'sand' | 'maglev';
+export type RoadStyle = 'rail' | 'dirt' | 'stone' | 'sand' | 'maglev' | 'stepstone'; // stepstone: terra batida com lajes de passo (tobiishi), sem trilhos nem sulcos paralelos
 /** O que anda pela linha: trem, carroça, caravana de animais, maglev. */
 export type VehicleKind = 'steam' | 'cart' | 'caravan' | 'maglev';
 /** Estrutura construída quando vila encosta em plantação. */
@@ -359,7 +360,12 @@ export interface Theme {
    * sobem com eles. A borda da peça fica na altura 0 (a emenda com a vizinha não muda). `styles` limita às culturas
    * listadas (omitir = todas). A parcela cresce em altura até `levels` × 0,012.
    */
-  terraces?: { levels: number; styles?: CropStyle[] };
+  terraces?: {
+    levels: number;
+    styles?: CropStyle[];
+    /** Multiplica a altura de cada patamar e do beiral (padrão 1 = 12 mm por degrau; o arrozal oriental sobe mais para o degrau ler de longe). */
+    rise?: number;
+  };
   /**
    * Chão pela distância ao rio (várzea): o prado e a plantação perto da água ganham a cor `color`, e a cor volta ao normal
    * a `reach` unidades do rio (1,7 ≈ uma peça de ponta a ponta). Vem de um mapa de distância (render/riverMap.ts) lido pelo
@@ -396,7 +402,18 @@ export interface Theme {
    * morros gramados; 'terraco', 'falesia' e 'dique' são reservados para as próximas etapas e, por ora,
    * valem como 'suave'. `snow` põe neve nos cumes; `rock` troca a cor da rocha (padrão: `rock` do tema).
    */
-  relief?: { amp: number; style: 'suave' | 'serra' | 'terraco' | 'falesia' | 'dique'; snow?: boolean; rock?: string };
+  relief?: {
+    amp: number;
+    style: 'suave' | 'serra' | 'terraco' | 'falesia' | 'dique';
+    snow?: boolean;
+    rock?: string;
+    /** Névoa de pintura em tinta no pé das serras: a rocha desbota para esta cor a partir da base (omitir = rocha cheia até o chão). */
+    mist?: string;
+    /** Serras mais altas e estreitas (multiplica a altura; a largura cai na raiz): picos de tinta. Padrão 1. */
+    tall?: number;
+    /** Árvores que sobem a encosta (as `geo` da mata do tema); omitir = a mata inteira. Pinheiros nas serras do Oriente. */
+    slopeTrees?: TreeGeo[];
+  };
   /** Trava a paisagem numa estação (0 primavera, 1 verão, 2 outono, 3 inverno). A pontuação usa `rules.seasonLock`. */
   season?: 0 | 1 | 2 | 3;
   /** Lanternas ao longo da estrada, acesas à noite. */

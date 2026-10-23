@@ -43,7 +43,7 @@ const BED_DEPTH = 0.048;
 const BANK_W = 0.075;
 export const ROAD_HW = 0.1;
 /** Altura em que veículos andam (maglev flutua sobre a via). */
-export const ROAD_Y = { rail: 0.03, dirt: 0.006, stone: 0.008, sand: 0.006, maglev: 0.075 } as const;
+export const ROAD_Y = { rail: 0.03, dirt: 0.006, stone: 0.008, sand: 0.006, maglev: 0.075, stepstone: 0.007 } as const;
 
 /** spin: pás e rodas; wander: animais; chop/tend/carry: aldeões (golpe de machado, capina, vai e vem);
  * swim: peixe de cardume (gira em volta de um centro, com o raio em `orbit`); bob: barco ancorado. */
@@ -921,6 +921,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const bed = tc(theme.roadBed);
     const det = tc(theme.roadDetail);
     const sleeper = tc(theme.sleeper);
+    const sr = mulberry32((seed ^ 0x57e95) >>> 0);
     for (const p of road.paths) {
       strip(g, p.pts, p.hw * (theme.road === 'sand' ? 1.15 : 1), BED_Y, bed);
       if (theme.road === 'rail') {
@@ -940,6 +941,21 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           });
           strip(g, shifted, 0.013, BED_Y + 0.001, det);
         }
+      } else if (theme.road === 'stepstone') {
+        // Caminho de posta: terra batida com lajes de passo (tobiishi) alternadas de um lado e do outro do eixo, cada uma
+        // um pouco torta, e tufos de capim na beira. Sem sulcos paralelos nem fileiras de dormentes (não lê como trilho).
+        // Gerador à parte: o resto da peça não depende dele.
+        alongPath(p.pts, 0.032, 0.066, (cx, cz, tx, tz, k) => {
+          const o = (k % 2 ? 0.017 : -0.017) + (sr() - 0.5) * 0.012;
+          const sk = (sr() - 0.5) * 0.02, hl = 0.021 + sr() * 0.008;
+          const x = cx - tz * o, z = cz + tx * o;
+          const c = bed.clone().lerp(det, 0.45 + sr() * 0.5);
+          beam(g, [x - tx * hl - tz * sk, z - tz * hl + tx * sk], [x + tx * hl + tz * sk, z + tz * hl - tx * sk], 0.019 + sr() * 0.006, BED_Y, BED_Y + 0.005 + sr() * 0.002, c, shade(c, 0.72));
+        });
+        alongPath(p.pts, 0.05, 0.11, (cx, cz, tx, tz, k) => {
+          const side = k % 2 ? 1 : -1, o = side * (p.hw * 0.92 + sr() * 0.012);
+          D('grass', cx - tz * o, 0, cz + tx * o, sr() * 6, randRange(sr, 0.8, 1.2), shade(tc(pick(sr, theme.grass)), 0.85));
+        });
       } else if (theme.road === 'stone') {
         alongPath(p.pts, 0.012, 0.032, (cx, cz, tx, tz, k) => {
           for (const off of [-0.052, -0.017, 0.018, 0.053]) {
@@ -1299,6 +1315,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       // com um riser de muro (mureta de pedra) e um beiral de 4 mm que guarda a água do arrozal. Só a geometria
       // do chão muda: a borda externa da parcela continua na altura 0 e o rng da peça não gasta nada.
       const terr = theme.terraces && (!theme.terraces.styles || theme.terraces.styles.includes(crop.style)) ? Math.max(1, Math.min(3, Math.round(theme.terraces.levels))) : 1;
+      // `rise` (Theme.terraces.rise) multiplica a altura do patamar e do beiral (1 = 12 mm por degrau).
+      const tH = TERRACE_H * (theme.terraces?.rise ?? 1), tLip = TERRACE_LIP * (theme.terraces?.rise ?? 1);
       const rings: V2[][] = [pts];
       if (terr > 1) {
         const wall = shade(tc(theme.rock).clone().lerp(sc, 0.3), 0.82);
@@ -1306,17 +1324,17 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           const f = TERRACE_SCALE[terr - 2][j - 1];
           const poly = pts.map(([x, z]) => [cx + (x - cx) * f, cz + (z - cz) * f] as V2);
           rings.push(poly);
-          const yLow = h + (j - 1) * TERRACE_H, yHigh = h + j * TERRACE_H;
+          const yLow = h + (j - 1) * tH, yHigh = h + j * tH;
           const tread = shade(sc, 1 + 0.05 * j);
           for (let t = 0; t < sides; t++) {
             const a = poly[t], b = poly[(t + 1) % sides];
             g.tri([cx, yHigh, cz], [a[0], yHigh, a[1]], [b[0], yHigh, b[1]], tread, tread, tread, UP, spIn);
             // Riser: do patamar de baixo até o beiral, de frente para fora.
             const mx = (a[0] + b[0]) / 2 - cx, mz = (a[1] + b[1]) / 2 - cz;
-            g.quad([a[0], yLow, a[1]], [b[0], yLow, b[1]], [b[0], yHigh + TERRACE_LIP, b[1]], [a[0], yHigh + TERRACE_LIP, a[1]], shade(wall, 0.85), shade(wall, 0.85), wall, wall, [mx, 0, mz], SPLAT_WALL);
+            g.quad([a[0], yLow, a[1]], [b[0], yLow, b[1]], [b[0], yHigh + tLip, b[1]], [a[0], yHigh + tLip, a[1]], shade(wall, 0.85), shade(wall, 0.85), wall, wall, [mx, 0, mz], SPLAT_WALL);
             // Beiral: faixa fina no alto do muro.
             const ai: V2 = [cx + (a[0] - cx) * 0.93, cz + (a[1] - cz) * 0.93], bi: V2 = [cx + (b[0] - cx) * 0.93, cz + (b[1] - cz) * 0.93];
-            g.quad([a[0], yHigh + TERRACE_LIP, a[1]], [b[0], yHigh + TERRACE_LIP, b[1]], [bi[0], yHigh + TERRACE_LIP, bi[1]], [ai[0], yHigh + TERRACE_LIP, ai[1]], wall, wall, wall, wall, UP, SPLAT_WALL);
+            g.quad([a[0], yHigh + tLip, a[1]], [b[0], yHigh + tLip, b[1]], [bi[0], yHigh + tLip, bi[1]], [ai[0], yHigh + tLip, ai[1]], wall, wall, wall, wall, UP, SPLAT_WALL);
           }
         }
       }
@@ -1356,7 +1374,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           if (fr() < (1 - edgeT) * 0.55) continue;
           const s = s0 * (isLush ? 1.12 : 1) * (0.45 + 0.55 * edgeT);
           if (isLush && !rowCol) c = c.lerp(LUSH, 0.22);
-          D(`crop:${crop.style}`, x, h + levelAt(x, z) * TERRACE_H, z, yaw, s, c);
+          D(`crop:${crop.style}`, x, h + levelAt(x, z) * tH, z, yaw, s, c);
         }
       }
     }
@@ -1391,9 +1409,11 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       for (const f of [1, 0.78, 0.6]) {
         if (relief) break;
         const s = s0 * f;
-        const sx = s * kx, sz = s * kz;
+        // `Theme.relief.tall` (serras de tinta): mais altas e mais estreitas, sem aumentar a pegada.
+        const tall = kind === 'peak' ? rel.tall ?? 1 : 1;
+        const sx = (s * kx) / Math.sqrt(tall), sz = (s * kz) / Math.sqrt(tall);
         // Altura total até ~0,85 (a câmera baixa não esconde mais que uma casa atrás).
-        const sy = kind === 'peak' ? Math.max(0.75, Math.min(1.05, s * ky * 0.95)) : kh * (0.6 + 0.4 * f);
+        const sy = kind === 'peak' ? Math.max(0.75, Math.min(1.05, s * ky * 0.95)) * tall : kh * (0.6 + 0.4 * f);
         const reach = kind === 'peak' ? PEAK_REACH * PEAK.r * Math.max(sx, sz) : HILL.r * 1.07 * Math.max(sx, sz);
         const maxD = Math.max(0.02, 0.8 - reach);
         for (let t = 0; t < 6 && !relief; t++) {
@@ -1661,13 +1681,16 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const room = (px: number, pz: number, minD: number) => Math.hypot(px, pz) < INR - 0.1 && clear(px, pz) > 0.03 && taken.every(([tx, tz]) => (tx - px) ** 2 + (tz - pz) ** 2 >= minD * minD);
     const forests = edges.filter((e) => e === T.Forest).length;
     const wr = mulberry32((seed ^ RELIEF_SEED ^ 0x77) >>> 0);
+    // `Theme.relief.slopeTrees`: só estas árvores sobem a encosta (pinheiros nas serras do Oriente); omitido, a mata inteira.
+    const slopeOnly = forestKinds.filter(([k]) => rel?.slopeTrees?.includes(k.geo));
+    const slopeKinds = slopeOnly.length ? slopeOnly : forestKinds;
     if (forests > 0) {
       for (let n = Math.round(forests * (kind === 'hill' ? 1.5 : 1) + wr() * 3), tries = 0; n > 0 && tries < 40; tries++) {
         const t = wr() * Math.PI * 2, d = kind === 'peak' ? randRange(wr, 1.1, 1.3) : randRange(wr, 0.25, 0.92);
         if (inShoulder(t, d)) continue;
         const p = onSlope(t, d);
         if (!room(p.x, p.z, 0.07)) continue;
-        const k = weighted(wr, forestKinds);
+        const k = weighted(wr, slopeKinds);
         const sc = randRange(wr, 0.7, 1.05) * TREE_SCALE * (k.geo === 'crystal' ? 1.4 : k.geo === 'cactus' ? 1.1 : 1);
         D(`tree:${k.geo}`, p.x, p.y > 0 ? p.y - 0.004 : 0, p.z, wr() * 6.28, [sc, sc * randRange(wr, 0.9, 1.15), sc], vary(wr, tc(pick(wr, k.colors)), 0.1));
         taken.push([p.x, p.z]);

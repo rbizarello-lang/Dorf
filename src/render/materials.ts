@@ -313,6 +313,8 @@ interface DecoOpts {
   smooth?: boolean;
   /** Pincelada nas partes tingidas: toques nas copas, traços verticais nas paredes. */
   paint?: 'canopy' | 'wall';
+  /** Copa perene (conífera): a estação não a tinge, só a neve. */
+  evergreen?: boolean;
   roughness?: number;
   metalness?: number;
   emissive?: string;
@@ -330,7 +332,10 @@ const snowOn = (base: N3, cap: number): N3 => {
 };
 
 /** Copas: primavera mais clara, outono puxado para ocre ou ferrugem, inverno com neve contida. */
-const seasonFoliage = (base: N3): N3 => {
+const seasonFoliage = (base: N3, evergreen = false): N3 => {
+  // Perene (pinheiros, abetos, ciprestes): a primavera não clareia e o outono não amarela; só a neve vale. Sem isso, a copa
+  // verde-escura puxava 35% para o rosa-pálido da primavera e saía cinza-lavanda (temas de primavera travada).
+  if (evergreen) return snowOn(base, 0.62);
   const spring = float(1).sub(smoothstep(0.05, 0.5, abs(U.season)));
   const autumn = float(1).sub(smoothstep(0.05, 0.5, abs(U.season.sub(2))));
   const fall = mix(vec3(0.851, 0.51, 0.169), vec3(0.722, 0.263, 0.165), step(0.5, hash(instanceIndex)));
@@ -400,7 +405,7 @@ function decoMaterial(o: DecoOpts) {
     base = base.mul(mix(float(1), rows.mul(0.17).add(0.85), roof.mul(smoothstep(15, 6, camDist))));
   }
   // Telhados e paredes: neve contida, para o branco do inverno não apagar a casa.
-  const seasoned = o.paint === 'canopy' ? seasonFoliage(base) : snowOn(base, 0.55);
+  const seasoned = o.paint === 'canopy' ? seasonFoliage(base, o.evergreen) : snowOn(base, 0.55);
   m.colorNode = mix(seasoned, vec3(0.02), U.silhouette);
   // Cada janela acende num momento diferente do anoitecer.
   const lit = smoothstep(0, 0.25, U.night.mul(1.25).sub(hash(instanceIndex).mul(0.5)));
@@ -423,7 +428,7 @@ function decoMaterial(o: DecoOpts) {
   return m;
 }
 
-export type MatKey = 'deco' | 'relief' | 'reliefSoft' | 'foliage' | 'crop' | 'cropFine' | 'crystal' | 'glass' | 'fire';
+export type MatKey = 'deco' | 'relief' | 'reliefSoft' | 'foliage' | 'evergreen' | 'crop' | 'cropFine' | 'crystal' | 'glass' | 'fire';
 
 export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
   return {
@@ -432,6 +437,7 @@ export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
     relief: decoMaterial({ paint: 'wall', rimSun: 0.3 }),
     reliefSoft: decoMaterial({ smooth: true, paint: 'wall', rimSun: 0.3 }),
     foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy' }),
+    evergreen: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', evergreen: true }),
     crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide }),
     cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true }),
     crystal: decoMaterial({ sway: 'tree', roughness: 0.25, metalness: 0.1, emissive: '#3a2a66', emissiveIntensity: 0.6 }),
