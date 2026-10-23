@@ -43,7 +43,9 @@ const BED_DEPTH = 0.048;
 const BANK_W = 0.075;
 export const ROAD_HW = 0.1;
 /** Altura em que veículos andam (maglev flutua sobre a via). */
-export const ROAD_Y = { rail: 0.03, dirt: 0.006, stone: 0.008, sand: 0.006, maglev: 0.075 } as const;
+export const ROAD_Y = { rail: 0.03, dirt: 0.006, stone: 0.008, sand: 0.006, maglev: 0.075, dike: 0.054 } as const;
+/** Altura do topo do dique (`road: 'dike'`): aterro gramado com o caminho de tijolo por cima. */
+const DIKE_H = 0.05;
 
 /** spin: pás e rodas; wander: animais; chop/tend/carry: aldeões (golpe de machado, capina, vai e vem);
  * swim: peixe de cardume (gira em volta de um centro, com o raio em `orbit`); bob: barco ancorado. */
@@ -950,6 +952,35 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
             beam(g, [x - tx * 0.013, z - tz * 0.013], [x + tx * 0.013, z + tz * 0.013], 0.014, BED_Y, BED_Y + 0.004 + rng() * 0.002, c, shade(c, 0.75));
           }
         });
+      } else if (theme.road === 'dike') {
+        // Dique: aterro gramado em dois degraus (talude), caminho de tijolo no topo e estacas na base. A seção é a mesma
+        // em toda borda de via, então a emenda com a vizinha casa; o miolo da junção ganha um montículo.
+        const gr = tc(theme.ground[0]);
+        const slope = gr.clone().multiplyScalar(1.12), foot = gr.clone().multiplyScalar(0.7);
+        for (let k = 0; k < p.pts.length - 1; k++) {
+          beam(g, p.pts[k], p.pts[k + 1], p.hw * 2.3, 0, DIKE_H * 0.45, slope, foot);
+          beam(g, p.pts[k], p.pts[k + 1], p.hw * 1.75, DIKE_H * 0.45, DIKE_H, slope, shade(gr, 0.84));
+        }
+        const side = (pts: V2[], off: number) =>
+          pts.map((q, k) => {
+            const a = pts[Math.max(0, k - 1)], b = pts[Math.min(pts.length - 1, k + 1)];
+            const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+            return [q[0] - ((b[1] - a[1]) / l) * off, q[1] + ((b[0] - a[0]) / l) * off] as V2;
+          });
+        // Caminho de tijolo com meio-fio claro nos dois lados e juntas de argamassa a cada passo (retângulos chatos, sem sorteio).
+        strip(g, p.pts, p.hw * 1.0, DIKE_H + 0.0005, bed);
+        for (const off of [-1.0, 1.0]) strip(g, side(p.pts, p.hw * off), 0.011, DIKE_H + 0.0012, shade(tc(theme.roadBed), 1.25));
+        alongPath(p.pts, 0.03, 0.07, (cx, cz, tx, tz) => {
+          const hw = p.hw * 0.9, d = 0.0035;
+          g.quad([cx - tz * hw - tx * d, DIKE_H + 0.0009, cz + tx * hw - tz * d], [cx - tz * hw + tx * d, DIKE_H + 0.0009, cz + tx * hw + tz * d], [cx + tz * hw + tx * d, DIKE_H + 0.0009, cz - tx * hw + tz * d], [cx + tz * hw - tx * d, DIKE_H + 0.0009, cz - tx * hw - tz * d], det, det, det, det, UP);
+        });
+        // Estacas de madeira ao pé do talude, nos dois lados.
+        alongPath(p.pts, 0.1, 0.26, (cx, cz, tx, tz, k) => {
+          for (const sg of [1, -1]) {
+            const x = cx - tz * p.hw * 2.45 * sg, z = cz + tx * p.hw * 2.45 * sg;
+            beam(g, [x - tx * 0.003, z - tz * 0.003], [x + tx * 0.003, z + tz * 0.003], 0.0035, 0, 0.02 + ((k + (sg > 0 ? 1 : 0)) % 3) * 0.004, tc(theme.sleeper), shade(tc(theme.sleeper), 0.7));
+          }
+        });
       } else if (theme.road === 'sand') {
         alongPath(p.pts, 0.02, 0.028, (cx, cz, tx, tz) => {
           const o = (rng() - 0.5) * 0.08;
@@ -968,7 +999,22 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       }
     }
     // Junção: pátio de cascalho cobrindo o miolo do triângulo de curvas.
-    if (road.idx.length !== 2) disc(g, 0, 0, road.idx.length > 2 ? 0.3 : ROAD_HW * 1.05, BED_Y + 0.001, bed, road.idx.length > 2 ? 18 : 12);
+    if (road.idx.length !== 2) {
+      if (theme.road === 'dike') {
+        // Montículo do dique na junção ou no fim da linha: um tronco de cone baixo, com a pracinha de tijolo no topo.
+        const gr = tc(theme.ground[0]);
+        const r0 = road.idx.length > 2 ? 0.34 : ROAD_HW * 2.3, seg = 16;
+        disc(g, 0, 0, r0 * 0.78, DIKE_H, gr.clone().multiplyScalar(1.02), seg);
+        for (let k = 0; k < seg; k++) {
+          const a0 = (k / seg) * Math.PI * 2, a1 = ((k + 1) / seg) * Math.PI * 2;
+          const p0: V2 = [Math.cos(a0) * r0 * 0.78, Math.sin(a0) * r0 * 0.78], p1: V2 = [Math.cos(a1) * r0 * 0.78, Math.sin(a1) * r0 * 0.78];
+          const q0: V3 = [Math.cos(a0) * r0, 0, Math.sin(a0) * r0], q1: V3 = [Math.cos(a1) * r0, 0, Math.sin(a1) * r0];
+          const nrm: V3 = [Math.cos((a0 + a1) / 2), 0.7, Math.sin((a0 + a1) / 2)];
+          g.quad([p0[0], DIKE_H, p0[1]], [p1[0], DIKE_H, p1[1]], q1, q0, gr, gr, shade(gr, 0.78), shade(gr, 0.78), nrm);
+        }
+        disc(g, 0, 0, r0 * 0.5, DIKE_H + 0.0006, bed, 12);
+      } else disc(g, 0, 0, road.idx.length > 2 ? 0.3 : ROAD_HW * 1.05, BED_Y + 0.001, bed, road.idx.length > 2 ? 18 : 12);
+    }
     if (road.idx.length === 1) {
       // Estação (ou pousada) no fim da linha.
       const [mx, mz] = edgeMid(road.idx[0]);
@@ -1267,7 +1313,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const cz = pts.reduce((s, q) => s + q[1], 0) / sides;
       const h = 0.006 + k * 0.002;
       // De longe a parcela precisa "ler" como a cultura: a terra puxa a cor da planta.
-      const tintAmt = crop.style === 'rice' ? 0.2 : crop.style === 'tulip' ? 0.1 : 0.42;
+      const tintAmt = crop.style === 'rice' ? 0.2 : crop.style === 'tulip' || crop.style === 'bulb' ? 0.1 : 0.42;
       const sc = vary(rng, soil.clone().lerp(tc(crop.colors[0]), tintAmt), 0.08);
       // Sem parede lateral: o leque tem dois anéis, o interno na cor da terra e o externo
       // (bisel de ~0,04, altura 0) misturado ao chão, para a parcela se fundir ao prado.
@@ -1391,9 +1437,11 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       for (const f of [1, 0.78, 0.6]) {
         if (relief) break;
         const s = s0 * f;
-        const sx = s * kx, sz = s * kz;
+        // 'dique': o morro vira um aterro baixo e comprido (diques de pôlder), sem serras.
+        const dike = rel.style === 'dique';
+        const sx = s * kx * (dike ? 1.3 : 1), sz = s * kz * (dike ? 0.3 : 1);
         // Altura total até ~0,85 (a câmera baixa não esconde mais que uma casa atrás).
-        const sy = kind === 'peak' ? Math.max(0.75, Math.min(1.05, s * ky * 0.95)) : kh * (0.6 + 0.4 * f);
+        const sy = kind === 'peak' ? Math.max(0.75, Math.min(1.05, s * ky * 0.95)) : kh * (0.6 + 0.4 * f) * (dike ? 0.2 : 1);
         const reach = kind === 'peak' ? PEAK_REACH * PEAK.r * Math.max(sx, sz) : HILL.r * 1.07 * Math.max(sx, sz);
         const maxD = Math.max(0.02, 0.8 - reach);
         for (let t = 0; t < 6 && !relief; t++) {
@@ -1427,8 +1475,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // Clareira da serraria: as árvores perto dela viram tocos (sem sorteio a mais, para o resto
   // da peça sair igual).
   const clearings = (opts.synergies ?? []).filter((h) => h.kind === 'lumber').map((h) => edgeMid(h.sector));
-  const addTree = (x: number, z: number, r: Rng = rng, small = 1) => {
-    const kind = weighted(r, forestKinds);
+  const addTree = (x: number, z: number, r: Rng = rng, small = 1, only?: (typeof forestKinds)[number][0]) => {
+    const kind = only ?? weighted(r, forestKinds);
     const s = randRange(r, 0.85, 1.25) * TREE_SCALE * small * (kind.geo === 'crystal' ? 1.4 : kind.geo === 'cactus' ? 1.1 : 1);
     const ry = r() * Math.PI * 2;
     const sy = s * randRange(r, 0.9, 1.15);
@@ -1511,7 +1559,22 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         if (edges[(i + 1) % 6] !== T.Forest) d = Math.min(d, Math.abs(x * cbz - z * cbx) / Math.hypot(cbx, cbz));
         return d < 0.16;
       };
-      for (let k = 0, tries = 0; k < n && tries < n * 4; tries++) {
+      // Mata em fileiras (`Theme.forestRows`): 2 ou 3 fileiras retas e paralelas à borda, cada uma de uma espécie só
+      // (alameda de álamos, cortinado de pôlder). O gerador da peça não gasta nada (tudo sai do `frng`).
+      if (theme.forestRows) {
+        const [mx, mz] = edgeMid(i);
+        const ml = Math.hypot(mx, mz), ux = mx / ml, uz = mz / ml, tx = -uz, tz = ux;
+        const rows = 2 + (frng() < 0.5 ? 1 : 0), sp = 0.125 + frng() * 0.025, d0 = 0.3 + frng() * 0.08;
+        for (let rw = 0; rw < rows; rw++) {
+          const only = weighted(frng, forestKinds), dist = d0 + rw * 0.17;
+          for (let sOff = -0.66 + (frng() - 0.5) * sp; sOff <= 0.66; sOff += sp) {
+            const x = ux * dist + tx * sOff + (frng() - 0.5) * 0.008, z = uz * dist + tz * sOff + (frng() - 0.5) * 0.008;
+            if (sectorAt(x, z) !== i || Math.hypot(x, z) > 0.93 || !free(x, z, 0.05) || clear(x, z) < 0.04) continue;
+            addTree(x, z, frng, 1, only);
+          }
+        }
+      }
+      for (let k = 0, tries = 0; !theme.forestRows && k < n && tries < n * 4; tries++) {
         let best: V2 | null = null, bestD = -1;
         for (let c = 0; c < 4; c++) {
           const p = samplePoint(frng, i, 0.1, 0.05);
@@ -1768,7 +1831,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     };
     const inner = ring(0, 0), outer = ring(0.04, 0.04);
     const c0 = theme.crops[0];
-    const sc = tc(c0.soil).clone().lerp(tc(c0.colors[0]), c0.style === 'rice' ? 0.2 : c0.style === 'tulip' ? 0.1 : 0.42);
+    const sc = tc(c0.soil).clone().lerp(tc(c0.colors[0]), c0.style === 'rice' ? 0.2 : c0.style === 'tulip' || c0.style === 'bulb' ? 0.1 : 0.42);
     const edge = sc.clone().lerp(groundCols[i], 0.6);
     const spIn: Splat = [0, 0, 0.6, 0], spOut: Splat = [0, 0, 0.25, 0];
     const [cx, cz] = at(0, INR - ABA_D * 0.4);

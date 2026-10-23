@@ -5,6 +5,7 @@ import type { SiteKind } from '../core/sites';
 import { hillGeometry, peakGeometry } from './relief';
 import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
 import type { EggKit } from '../core/eggs';
+import { brickGateParts, bulbParts, cheeseParts, dikeBoyParts, drawbridgeParts, duckParts, dutchGableParts, poplarParts, tjalkParts, windmillParts } from './kits/holanda';
 import { gatesOf, type AnimalKind, type BoatKind, type BodyStyle, type BridgeStyle, type CenterCrown, type CropStyle, type GateStyle, type HatStyle, type HouseKind, type Landmark, type RoofStyle, type Theme, type TreeGeo, type VehicleKind } from '../themes/types';
 
 // Biblioteca de "kits": geometrias low-poly com cor por vértice, montadas por tema.
@@ -15,7 +16,7 @@ import { gatesOf, type AnimalKind, type BoatKind, type BodyStyle, type BridgeSty
 
 type Col = THREE.ColorRepresentation;
 
-interface Part {
+export interface Part {
   geo: THREE.BufferGeometry;
   color: Col;
   tint?: number;
@@ -424,19 +425,23 @@ function roofGeometry(style: RoofStyle, body: BodyStyle, chimney: boolean, penna
       top = h + r * 0.8;
       break;
     }
-    case 'stepgable': {
-      const rh = 0.085;
+    case 'stepgable':
+    case 'bell':
+    case 'neck': {
+      const rh = style === 'stepgable' ? 0.085 : 0.1;
       const g = new THREE.CylinderGeometry(1, 1, 1, 3, 1).rotateZ(Math.PI / 2).rotateX(-Math.PI / 2);
       g.scale(d + 0.01, rh / 1.5, (w + 0.01) / 1.732).translate(0, h + rh / 3, 0).rotateY(Math.PI / 2);
       parts.push({ geo: g, color: '#fff', tint: 1, bands: roofBands(h, h + rh) });
-      // Empena escalonada na fachada: degraus da cor da parede (tijolo).
-      for (const z of [d / 2 + 0.004, -d / 2 - 0.004]) {
-        for (let s = 0; s < 3; s++) {
-          const sw = w * (1 - s * 0.3);
-          parts.push({ geo: box(sw, rh / 3 + 0.006, 0.012, 0, h + (s * rh) / 3, z), color: '#9a4a32' });
+      // Empena escalonada na fachada: degraus da cor da parede (tijolo). Sino e pescoço: kits/holanda.ts.
+      if (style !== 'stepgable') parts.push(...dutchGableParts(style, w, d, h, rh, '#a04c34', '#e4d8bc'));
+      else
+        for (const z of [d / 2 + 0.004, -d / 2 - 0.004]) {
+          for (let s = 0; s < 3; s++) {
+            const sw = w * (1 - s * 0.3);
+            parts.push({ geo: box(sw, rh / 3 + 0.006, 0.012, 0, h + (s * rh) / 3, z), color: '#9a4a32' });
+          }
         }
-      }
-      top = h + rh;
+      top = style === 'stepgable' ? h + rh : h + rh * 1.4;
       break;
     }
     default: {
@@ -547,6 +552,8 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
         { geo: oct(0.04).scale(1, 2.4, 1).rotateZ(0.35).translate(0.06, 0.09, 0.02), color: '#fff', tint: 1 },
         { geo: oct(0.035).scale(1, 2.2, 1).rotateZ(-0.4).translate(-0.05, 0.08, -0.03), color: '#fff', tint: 1 },
       ]);
+    case 'poplar':
+      return kit(poplarParts(trunk, farTree));
     case 'cypress':
       return kit([T(0.06, 0.016), { geo: jitter(ico(0.1, 0), 0.012, 5).scale(0.42, 2.0, 0.42).translate(0, 0.25, 0), color: '#fff', tint: 1, grad: [0.75, 1.05, 0.05, 0.45] }]);
     case 'olive':
@@ -697,6 +704,7 @@ export const CROP_LAYOUT: Record<CropStyle, CropLayout> = {
   quinoa: { rowGap: 0.05, step: 0.042, scale: [0.9, 1.15], rowColor: true },
   potato: { rowGap: 0.058, step: 0.042, scale: [0.9, 1.1], rowColor: false },
   flax: { rowGap: 0.042, step: 0.03, scale: [0.95, 1.2], rowColor: false },
+  bulb: { rowGap: 0.036, step: 0.028, scale: [1.05, 1.3], rowColor: true },
   mulberry: { rowGap: 0.066, step: 0.05, scale: [0.9, 1.1], rowColor: false },
   hydro: { rowGap: 0.06, step: 0.05, scale: [0.9, 1.1], rowColor: false },
 };
@@ -807,6 +815,8 @@ function cropGeometry(style: CropStyle): THREE.BufferGeometry {
         { geo: oct(0.0055).translate(0.012, 0.042, 0.006), color: '#f4f0f6' },
         { geo: oct(0.0055).translate(-0.01, 0.04, -0.008), color: '#c8b0dc' },
       ]);
+    case 'bulb':
+      return kit(bulbParts());
     case 'flax':
       return kit([
         ...green(tuft(4, 0.075, 0.0035, 0.01, 0.85, 0.004, 35)),
@@ -1019,14 +1029,8 @@ function landmarkGeometry(kind: Landmark, [wall, roof, det]: [string, string, st
 }
 
 function windmillBody(wall: Col, roof: Col, det: Col, win: Col) {
-  return kit([
-    { geo: box(0.12, 0.03, 0.12), color: '#8a7a6a' },
-    { geo: cyl(0.05, 0.075, 0.22, 8, 0, 0.03), color: wall, grad: [0.9, 1.05, 0, 0.25] },
-    { geo: cone(0.062, 0.07, 8, 0, 0.25), color: roof },
-    { geo: box(0.02, 0.04, 0.006, 0, 0.03, 0.073), color: DOOR },
-    { geo: box(0.014, 0.018, 0.006, 0, 0.14, 0.061), color: win, glow: 1 },
-    { geo: box(0.1, 0.006, 0.1, 0, 0.1), color: det },
-  ]);
+  // Moinho holandês (kits/holanda.ts): só a Holanda usa o moinho de vento.
+  return kit(windmillParts(String(wall), String(roof), String(det), String(win), DOOR));
 }
 
 /** Pás do moinho: giram em torno do eixo z, centro em (0,0,0). */
@@ -1089,6 +1093,8 @@ function gateGeometry(style: GateStyle, [main, top]: [string, string]): THREE.Bu
       for (const x of [-0.112, 0.112]) parts.push({ geo: pyramid(0.12, 0.028, 0.05, 0.12).translate(x, 0, 0), color: top });
       return kit(parts);
     }
+    case 'brick':
+      return kit(brickGateParts(main, top));
     case 'inca':
       // Portal de pedra trapezoidal (como o Inti Punku): ombreiras que se inclinam para dentro.
       return kit([
@@ -1138,6 +1144,8 @@ function bridgeGeometry(style: BridgeStyle, [main, det]: [string, string]): THRE
       along((x) => deck(x) + 0.008, 8, -L, L, 0.018, 0.012, -0.04, det);
       return kit(parts);
     }
+    case 'draw':
+      return kit(drawbridgeParts(main, det));
     case 'wood': {
       // Arco alto de madeira: tabuleiro em lombada sobre vigas cruzadas, guarda-corpo pintado.
       // Alto o bastante para os barcos passarem por baixo.
@@ -1248,6 +1256,8 @@ function animalGeometry(kind: AnimalKind): THREE.BufferGeometry {
       return kit([{ geo: box(0.05, 0.022, 0.02, 0, 0.042), color: '#fff', tint: 1 }, { geo: new THREE.SphereGeometry(0.016, 6, 4, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 0.064, 0), color: '#fff', tint: 1 }, { geo: box(0.01, 0.032, 0.01, 0.03, 0.05).rotateZ(-0.5), color: '#fff', tint: 1 }, { geo: box(0.018, 0.01, 0.01, 0.05, 0.075), color: '#fff', tint: 1 }, ...legs(0.018, 0.007, 0.042, '#8a6a4a')]);
     case 'deer':
       return kit([{ geo: box(0.042, 0.018, 0.014, 0, 0.032), color: '#fff', tint: 1 }, { geo: box(0.009, 0.026, 0.009, 0.022, 0.046).rotateZ(-0.3), color: '#fff', tint: 1 }, { geo: box(0.016, 0.009, 0.009, 0.034, 0.066), color: '#fff', tint: 1 }, { geo: cone(0.012, 0.03, 3, 0.03, 0.072, 0).rotateY(0.6), color: '#e8dcc0' }, ...legs(0.015, 0.005, 0.032, '#4a3a2e')]);
+    case 'duck':
+      return kit(duckParts());
     case 'rover':
       return kit([
         { geo: box(0.05, 0.016, 0.03, 0, 0.012), color: '#fff', tint: 1 },
@@ -1315,6 +1325,8 @@ function boatBody(kind: BoatKind, [hullC, sailC]: [string, string]): THREE.Buffe
       }
       return kit([{ geo: g, color: hullC, grad: [0.85, 1.05, 0, 0.04] }, { geo: box(0.01, 0.022, 0.01, 0.0, 0.02), color: sailC }]);
     }
+    case 'tjalk':
+      return kit(tjalkParts(hullC, sailC));
     case 'nile':
       // Barco do Novo Império: pontas recurvadas como umbelas de papiro, vela quadrada mais
       // larga que alta entre duas vergas, remos de governo na popa.
@@ -1427,6 +1439,10 @@ function eggGeometry(kit_: EggKit): THREE.BufferGeometry {
         { geo: box(0.05, 0.004, 0.012, 0.022, 0.02).rotateZ(0.5), color: '#4f8a3a' },
         { geo: box(0.05, 0.004, 0.012, -0.022, 0.016).rotateZ(-0.5), color: '#4f8a3a' },
       ]);
+    case 'queijo':
+      return kit(cheeseParts());
+    case 'menino-dique':
+      return kit(dikeBoyParts());
     case 'estela':
       // Pedra erguida com um anel dourado no alto.
       return kit([

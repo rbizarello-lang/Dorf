@@ -7,9 +7,9 @@
 import type { HouseKind, RoofStyle, Theme } from './types';
 
 /** Telhados trabalhados que, na primeira era, ainda são de palha. Os outros já são do lugar. */
-const EARLY_THATCH = new Set<RoofStyle>(['gable', 'hip', 'stepgable']);
+const EARLY_THATCH = new Set<RoofStyle>(['gable', 'hip', 'stepgable', 'bell', 'neck']);
 /** Telhados que cabem num sobrado (palha, grama, cone e cúpula não). */
-const TALL_ROOFS = new Set<RoofStyle>(['gable', 'hip', 'flat', 'stepgable', 'pagoda', 'steep', 'cross']);
+const TALL_ROOFS = new Set<RoofStyle>(['gable', 'hip', 'flat', 'stepgable', 'bell', 'neck', 'pagoda', 'steep', 'cross']);
 /** Parede de taipa: o tom multiplica a cor sorteada da parede. */
 const ADOBE = '#e6d6b6';
 

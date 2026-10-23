@@ -39,6 +39,20 @@ Os três temas com `rules` variam pouco, de forma coerente com a narrativa: o Eg
 
 ---
 
+## 0. Holanda Dourada (`holanda`): aprofundamento T1 (rodada 3)
+
+Países Baixos, 1600 a 1670: terra ganha da água, plana e medida a régua. A pessoa deve sentir ordem, riqueza tranquila e a cor das flores contra um céu pálido. O tema é dado em `src/themes/holanda.ts`; a geometria nova está em `src/render/kits/holanda.ts` (chamada por um `case` em `lib.ts`).
+
+- **Terrenos.** Prado = *Pôlder* (relevo `dique`: aterros baixos e compridos, sem serras; ovelhas de dia); Floresta = *Alameda* (`forestRows`: 2 ou 3 fileiras retas de uma espécie só, álamo na maioria, com salgueiro, carvalho e bétula); Plantação = *Tulipas* (tulipa, jacinto `bulb`, trigo e cevada, em fileiras de cor); Vila = *Aldeia*; Rio = *Canal* (água verde-turva `#5f8f93`, junco, patos de dia); Estrada = *Dique* (`road: 'dike'`: aterro gramado em dois degraus com caminho de tijolo no topo, estacas na base e um montículo nas junções; os veículos andam em cima).
+- **Casas.** Empena escalonada (a principal), de **pescoço** (`neck`, tijolo, com viga de içamento) e de **sino** (`bell`, arenito claro) como `RoofStyle` novos; casas baixas de duas águas, o celeiro preto-alcatroado (anexo) e o sobrado de empena alta. Tijolo, creme e arenito; nada de parede branca pura. Eras: Aldeia de pôlder, Vila mercante, Cidade das guildas, Século de Ouro (o Paço Municipal).
+- **Marcos.** Moinho de vento novo (torre octogonal afunilada, galeria, boné redondo e rabo; as pás giram no mesmo cubo de antes), portão de cidade de tijolo (`gate: 'brick'`, stadspoort com torrezinha e relógio, nas vias que tocam a vila) e **ponte levadiça de contrapeso** (`bridge: 'draw'`, fechada; a animação de abrir fica para depois).
+- **Bichos e barcos.** Vaca frísia (assinatura), ovelhas, cavalo de tração nas lavouras, patos nos canais (`duck`); barco de carga `tjalk` (fundo chato, quilhas laterais em pá, vela de gávea marrom).
+- **Luz.** Vermeer: sombras frias (`#5a6a7a`), realces âmbar, bruma de canal; sem pólen no ar (a chuva é o clima tocável, `window.__weather('rain')`). Ambiente: vento, sinos ao longe, aves e água.
+- **Easter eggs** (`Theme.eggs`): Tulipomania 1637 (grupo de 7 peças de tulipa: tulipa de ouro), o menino do dedo no dique (peça com 2+ bordas de dique e água, 1 em 5), o queijo gigante (pôlder perfeito, 6 bordas de prado), a Ronda Noturna (22h às 2h, a partir da 30ª peça: fila de aldeões com lanterna) e o Dia do Rei (27 de abril: céu laranja e sinos); a milésima peça solta o bando dourado.
+- **Ficou para depois.** Ponte que abre quando passa um barco (precisa do `Life`); casas geminadas em fita e cais de pedra na aldeia; valas retas pintadas no prado; moinho serrador (paltrok) e de drenagem com parafuso como kits próprios; carrilhão na era III; ciclista no dique (ovo do anacronismo, precisa de evento novo no `Life`); cisnes e garças; estufa de bulbos na sinergia das colmeias; trenó no gelo.
+
+---
+
 ## 1. Egito do Nilo (`egito`)
 
 - **Terrenos.** Prado = *Várzea* (a "Terra Negra" irrigada pela cheia); Floresta = *Palmeiral* (tamareiras, sicômoros e acácias); Plantação = *Lavoura* (trigo-emmer, cevada, papiro, linho); Vila = *Aldeia*; Rio = *Nilo*; Estrada = *Trilha* de areia.
