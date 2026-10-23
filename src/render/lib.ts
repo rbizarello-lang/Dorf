@@ -246,6 +246,7 @@ const BODY: Record<BodyStyle, { w: number; h: number; d: number }> = {
   long: { w: 0.24, h: 0.085, d: 0.11 },
   cube: { w: 0.12, h: 0.1, d: 0.12 },
   tall: { w: 0.1, h: 0.2, d: 0.13 },
+  sobrado: { w: 0.17, h: 0.15, d: 0.12 },
   round: { w: 0.14, h: 0.09, d: 0.14 },
   // Só o corpo principal; o anexo (ANNEX) fica ao lado, no +x.
   annex: { w: 0.12, h: 0.1, d: 0.12 },
@@ -301,12 +302,13 @@ function windowsFor(style: BodyStyle, win: Col, w: number, h: number, d: number,
     doorPart(0.04, 0.058, w / 2);
     return parts;
   }
-  const floors = style === 'tall' ? 3 : 1;
-  const cols = style === 'long' ? [-0.09, -0.05, 0.05, 0.09] : style === 'tall' ? [-0.024, 0.024] : [-0.042, 0.042];
+  const sobrado = style === 'sobrado';
+  const floors = style === 'tall' ? 3 : sobrado ? 2 : 1;
+  const cols = style === 'long' ? [-0.09, -0.05, 0.05, 0.09] : style === 'tall' ? [-0.024, 0.024] : sobrado ? [-0.054, 0, 0.054] : [-0.042, 0.042];
   const ws = style === 'cube' ? 0.026 : 0.03;
   const wh = ws * 1.2;
   for (let f = 0; f < floors; f++) {
-    const y = floors > 1 ? 0.035 + f * 0.058 : h * 0.42;
+    const y = sobrado ? 0.03 + f * 0.066 : floors > 1 ? 0.035 + f * 0.058 : h * 0.42;
     for (const x of cols) {
       if (f === 0 && Math.abs(x) < 0.03 && style !== 'long') continue;
       glass(ws, wh, x, y, fz, 'z');
@@ -314,10 +316,36 @@ function windowsFor(style: BodyStyle, win: Col, w: number, h: number, d: number,
     }
   }
   if (style !== 'tall') {
-    glass(ws, wh, sx, h * 0.42, 0, 'x');
-    glass(ws, wh, -sx, h * 0.42, 0, 'x');
+    for (const y of sobrado ? [0.03, 0.096] : [h * 0.42]) {
+      glass(ws, wh, sx, y, 0, 'x');
+      glass(ws, wh, -sx, y, 0, 'x');
+    }
   }
   doorPart(0.04, style === 'tall' ? 0.062 : 0.056, fz);
+  return parts;
+}
+
+/**
+ * Casario caiado (`trimStyle: 'caiado'`): parede lisa de cal com cunhais nos cantos e cimalha de cor, e no sobrado a cinta
+ * entre os andares e a sacada de ferro sobre a porta. As molduras de janela e porta vêm de `windowsFor` (mesma cor).
+ */
+function caiadoTrim(style: BodyStyle, trim: Col, w: number, h: number, d: number): Part[] {
+  const t = 0.01;
+  const parts: Part[] = [];
+  for (const x of [-w / 2, w / 2]) for (const z of [-d / 2, d / 2]) parts.push({ geo: box(t, h, t, x, 0, z), color: trim });
+  // Cimalha sob o beiral.
+  parts.push({ geo: box(w + 0.006, 0.005, d + 0.006, 0, h - 0.016), color: trim });
+  if (style !== 'sobrado') return parts;
+  parts.push({ geo: box(w + 0.006, 0.006, d + 0.006, 0, 0.07), color: trim });
+  // Sacada de ferro: laje, corrimão e balaústres, na frente (+z), debaixo da janela do meio do andar de cima.
+  const iron = '#2a2622', z0 = d / 2, hw = 0.036;
+  parts.push({ geo: box(hw * 2, 0.004, 0.022, 0, 0.074, z0 + 0.008), color: iron });
+  parts.push({ geo: box(hw * 2, 0.002, 0.002, 0, 0.09, z0 + 0.018), color: iron });
+  for (const x of [-hw, hw]) {
+    parts.push({ geo: box(0.002, 0.002, 0.02, x, 0.09, z0 + 0.008), color: iron });
+    parts.push({ geo: box(0.002, 0.014, 0.002, x, 0.077, z0 + 0.018), color: iron });
+  }
+  for (let i = 0; i < 3; i++) parts.push({ geo: box(0.0015, 0.012, 0.0015, -hw / 2 + i * (hw / 2), 0.078, z0 + 0.018), color: iron });
   return parts;
 }
 
@@ -358,7 +386,7 @@ function wallGeometry(k: HouseKind, win: Col) {
   // Duas faixas de valor: base de pedra 35% mais escura (30% da altura) e reboco em cima.
   const base = (hh: number) => ({ ys: [hh * 0.3], f: [0.65, 1] });
   const parts: Part[] = [{ geo: body, color: k.tone ?? '#ffffff', tint: 1, bands: base(h) }, ...windowsFor(k.body, win, w, h, d, k.bright, k.trim, doorColor(k))];
-  if (k.trim) parts.push(...trimFor(k.body, k.trim, w, h, d));
+  if (k.trim) parts.push(...(k.trimStyle === 'caiado' ? caiadoTrim(k.body, k.trim, w, h, d) : trimFor(k.body, k.trim, w, h, d)));
   if (k.body === 'terrace') parts.push(...terraceWallParts(win, doorColor(k), k.bright));
   if (k.body === 'annex') {
     shift(parts, ANNEX.ox);
@@ -1334,15 +1362,15 @@ function animalGeometry(kind: AnimalKind): THREE.BufferGeometry {
 }
 
 /** Barco com a bandeira da casa na popa (o pano recebe a cor da instância). */
-function boatGeometry(kind: BoatKind, colors: [string, string]): THREE.BufferGeometry {
+function boatGeometry(kind: BoatKind, colors: [string, string], part: 'all' | 'hull' = 'all'): THREE.BufferGeometry {
   const flag = kit([
     { geo: cyl(0.0015, 0.0018, 0.05, 4, -0.04, 0.012), color: '#4a3a30' },
     { geo: flagGeo(0.028, 0.016, 0.052).rotateY(Math.PI).translate(-0.04, 0, 0), color: '#ffffff', tint: 1 },
   ]);
-  return mergeGeometries([boatBody(kind, colors), flag])!;
+  return mergeGeometries([boatBody(kind, colors, part), flag])!;
 }
 
-function boatBody(kind: BoatKind, [hullC, sailC]: [string, string]): THREE.BufferGeometry {
+function boatBody(kind: BoatKind, [hullC, sailC]: [string, string], part: 'all' | 'hull' | 'rig' = 'all'): THREE.BufferGeometry {
   const H = (len: number, w: number, h: number) => ({ geo: hull(len, w, h), color: hullC });
   const mast = (h: number, x = 0) => ({ geo: cyl(0.0025, 0.003, h, 4, x, 0.01), color: '#4a3a30' });
   switch (kind) {
@@ -1391,7 +1419,7 @@ function boatBody(kind: BoatKind, [hullC, sailC]: [string, string]): THREE.Buffe
       return kit([{ geo: g, color: hullC, grad: [0.85, 1.05, 0, 0.04] }, { geo: box(0.01, 0.022, 0.01, 0.0, 0.02), color: sailC }]);
     }
     case 'tjalk':
-      return kit(tjalkParts(hullC, sailC));
+      return kit(tjalkParts(hullC, sailC, part));
     case 'nile':
       // Barco do Novo Império: pontas recurvadas como umbelas de papiro, vela quadrada mais
       // larga que alta entre duas vergas, remos de governo na popa.
@@ -2467,7 +2495,10 @@ export class Lib {
     set('animal', animalGeometry(theme.animals.kind));
     // Fauna extra do tema: um kit por espécie (`fauna:<kind>`), o mesmo desenho do bicho de pasto.
     for (const f of theme.fauna ?? []) if (!this.geos.has(`fauna:${f.kind}`)) set(`fauna:${f.kind}`, animalGeometry(f.kind));
-    set('boat', boatGeometry(theme.boat, theme.boatColors));
+    // O tjalk anda em dois lotes, casco e velame (`boat:rig`), para o `Life` baixar o mastro sob a ponte levadiça.
+    const lowerRig = theme.boat === 'tjalk' && theme.bridge?.style === 'draw';
+    set('boat', boatGeometry(theme.boat, theme.boatColors, lowerRig ? 'hull' : 'all'));
+    if (lowerRig) set('boat:rig', boatBody(theme.boat, theme.boatColors, 'rig'));
     const v = vehicleGeometry(theme.vehicle, theme.vehicleColors, theme.animals.kind);
     set('vehicle:head', v.head);
     set('vehicle:car', v.car);

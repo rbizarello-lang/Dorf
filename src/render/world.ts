@@ -1132,6 +1132,7 @@ export class World {
     seaMap.clear();
     riverMap.clear();
     this.lib.setEra(board.era);
+    this.syncedEra = board.era;
     // Easter eggs de peça: reavaliados na ordem das peças (em silêncio), então o replay mostra os mesmos kits.
     this.eggReset();
     this.feedEggs(board.list);
@@ -1157,6 +1158,8 @@ export class World {
   /** Tempo desde o avanço de era (-1 = parado) e a era que o Centro vai mostrar. */
   private centerAnim = -1;
   private centerNext = 0;
+  /** A era do tabuleiro que o mundo já mostra (rebuild, eraUp e lote instantâneo); os ganchos de depuração não mexem nela. */
+  private syncedEra = 0;
 
   /** O Centro é um objeto avulso sobre a peça inicial, fora dos pools: trocar de era não reconstrói nada. */
   private setCenter(era: number) {
@@ -1215,6 +1218,7 @@ export class World {
    * corre pelo mapa a partir dele.
    */
   eraUp(era: number) {
+    this.syncedEra = era;
     if (this.reducedMotion) {
       this.centerAnim = -1;
       this.setCenter(era);
@@ -1432,6 +1436,7 @@ export class World {
         const h = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
         groundMap.lantern(x, z, 0.28 + 0.2 * h);
       }
+      if (d.key === 'bridge') this.life.addBridge(tmpM);
       if (d.anim === 'spin-z' || d.anim === 'spin-x') this.life.addSpinner(d.key, tmpM, d.anim === 'spin-x' ? 'x' : 'z');
       else if (d.anim === 'wander') this.life.addAnimal(d.key, tmpM, d.color, d.when);
       else if (d.anim === 'chop' || d.anim === 'tend' || d.anim === 'carry') this.life.addWorker(d.key, tmpM, d.color, d.anim);
@@ -1550,6 +1555,14 @@ export class World {
     this.life.sync(board);
     this.fireflies.sync(board);
     this.syncWonder(board, false);
+    // Sem animação não há `eraUp`: o lote termina na era do placar, então o Centro e as casas vão para ela
+    // (antes ficavam na primeira, com o placar na terceira).
+    if (board.era !== this.syncedEra) {
+      this.syncedEra = board.era;
+      this.centerAnim = -1;
+      this.setCenter(board.era);
+      this.setHouseEra(board.era, false);
+    }
   }
 
   // ---------------------------------------------------------------- easter eggs
@@ -1962,6 +1975,19 @@ export class World {
       for (let j = 0; j < p.count; j++) {
         p.mesh.getMatrixAt(j, tmpM);
         all.push({ x: tmpM.elements[12], z: tmpM.elements[14], kind });
+      }
+    }
+    return all[i] ?? null;
+  }
+
+  /** Posição da i-ésima ponte assentada (`window.__bridge`), ou null. */
+  bridgePos(i: number): { x: number; z: number; yaw: number } | null {
+    const all: { x: number; z: number; yaw: number }[] = [];
+    for (const [k, p] of this.pools) {
+      if (poolKey(k) !== 'bridge') continue;
+      for (let j = 0; j < p.count; j++) {
+        p.mesh.getMatrixAt(j, tmpM);
+        all.push({ x: tmpM.elements[12], z: tmpM.elements[14], yaw: Math.atan2(-tmpM.elements[2], tmpM.elements[0]) });
       }
     }
     return all[i] ?? null;

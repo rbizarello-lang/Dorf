@@ -111,6 +111,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `window.__deco(prefixo, i?, zoom?)` | centraliza na i-ésima instância dos kits cuja chave começa com o prefixo (`'gate'`, `'egg:'`, `'wall:'`) e devolve a chave; só enxerga os lotes do mapa, não o `Life` |
 | `window.__egg(id)` | toca os efeitos de evento, céu e som de um easter egg do tema no foco da câmera (o kit na peça só nasce numa jogada). `__stats.eggSky` mostra o quanto do tom de céu do ovo já entrou (0 a 1) |
 | `window.__relief(i?, zoom?)` | centraliza na i-ésima serra ou morro assentado (`Theme.relief`) e devolve `'peak'` ou `'hill'` |
+| `window.__bridge(i?, zoom?)` | centraliza na i-ésima ponte assentada e devolve o giro dela (capturas da ponte levadiça e do mastro baixando) |
 | `window.__site(zoom?)` | centraliza no último sítio achado (ou no primeiro escondido) e devolve qual |
 | `?specials=all` / `window.__special(i?, zoom?)` | põe as peças especiais na partida sem liberá-las; centraliza na i-ésima colocada e devolve qual |
 | `window.__wonder(etapa?, zoom?)` | centraliza no canteiro da maravilha; com `etapa` (0 a 6), mostra a obra nessa etapa |

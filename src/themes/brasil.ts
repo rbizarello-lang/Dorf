@@ -58,15 +58,15 @@ export const brasil: Theme = {
   trunk: '#5a3b2a',
   treesPerSector: [3, 6],
   houses: [
-    // Sobrado caiado de esquadria azul-colonial.
-    { weight: 0.35, body: 'tall', roof: 'colonial', walls: ['#fbf7ee', '#f4eedd', '#fffaf0', '#f1e3c0', '#f2a888', '#bfd8e0'], roofs: ['#b5542f', '#c4623a', '#a44a2c', '#8a4a32', '#d07a48', '#6f8f7a'], trim: '#2f6fa8' },
+    // Sobrado caiado de esquadria azul-colonial (Ouro Preto, Tiradentes): dois andares mais largos que altos, com sacada de ferro.
+    { weight: 0.35, body: 'sobrado', trimStyle: 'caiado', roof: 'colonial', walls: ['#fbf7ee', '#f4eedd', '#fffaf0', '#f1e3c0', '#f2a888', '#bfd8e0'], roofs: ['#b5542f', '#c4623a', '#a44a2c', '#8a4a32', '#d07a48', '#6f8f7a'], trim: '#2f6fa8' },
     // Casa térrea de cores do Cerrado, numa gama menor que a de antes.
-    { weight: 0.35, body: 'cottage', roof: 'colonial', walls: ['#fbf7ee', '#f6e27a', '#8ec3e6', '#f19b8a', '#b9e1a4', '#f1e3c0'], roofs: ['#b5502f', '#c4623a', '#a8452a', '#8a4a32', '#6f9e8e'], trim: '#d19a2e' },
+    { weight: 0.35, body: 'cottage', trimStyle: 'caiado', roof: 'colonial', walls: ['#fbf7ee', '#f6e27a', '#8ec3e6', '#f19b8a', '#b9e1a4', '#f1e3c0'], roofs: ['#b5502f', '#c4623a', '#a8452a', '#8a4a32', '#6f9e8e'], trim: '#d19a2e' },
     // Fazenda: casa comprida com varanda.
-    { weight: 0.2, body: 'long', roof: 'colonial', walls: ['#fbf7ee', '#eee6d6', '#f2a888', '#9fc0d0'], roofs: ['#b5542f', '#c4623a', '#8a4a32', '#d07a48'], trim: '#a8402f' },
+    { weight: 0.2, body: 'long', trimStyle: 'caiado', roof: 'colonial', walls: ['#fbf7ee', '#eee6d6', '#f2a888', '#9fc0d0'], roofs: ['#b5542f', '#c4623a', '#8a4a32', '#d07a48'], trim: '#a8402f' },
     // Paiol e cumeeira cruzada, raros.
-    { weight: 0.08, body: 'annex', roof: 'colonial', walls: ['#fbf7ee', '#eee6d6', '#f2a888', '#9fc0d0'], roofs: ['#b5542f', '#c4623a', '#8a4a32', '#d07a48'], trim: '#a8402f', minor: true },
-    { weight: 0.06, body: 'cottage', roof: 'cross', walls: ['#fbf7ee', '#f1e3c0', '#f2a888', '#f2c88a', '#bfd8e0'], roofs: ['#b5542f', '#c4623a', '#a44a2c', '#8a4a32'], trim: '#d19a2e', minor: true },
+    { weight: 0.08, body: 'annex', trimStyle: 'caiado', roof: 'colonial', walls: ['#fbf7ee', '#eee6d6', '#f2a888', '#9fc0d0'], roofs: ['#b5542f', '#c4623a', '#8a4a32', '#d07a48'], trim: '#a8402f', minor: true },
+    { weight: 0.06, body: 'cottage', trimStyle: 'caiado', roof: 'cross', walls: ['#fbf7ee', '#f1e3c0', '#f2a888', '#f2c88a', '#bfd8e0'], roofs: ['#b5542f', '#c4623a', '#a44a2c', '#8a4a32'], trim: '#2f7a52', minor: true },
   ],
   landmark: 'baroque',
   landmarkChance: 0.13,
