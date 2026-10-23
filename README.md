@@ -140,7 +140,7 @@ O botão de qualidade abre a lista: **Auto**, **Ultra**, **Alta**, **Média** e 
 
 | Época | Tema | O que é |
 |---|---|---|
-| Séculos XVI a XVIII | **Holanda Dourada** (padrão) | Países Baixos, século XVII: pôlderes, canais, moinhos de vento, tulipas |
+| Séculos XVI a XVIII | **Holanda Dourada** (padrão) | Países Baixos, século XVII: diques de tijolo e grama, alamedas de álamos, canais com tjalks, casas de empena de sino e de pescoço, moinhos de vento, faixas de tulipas e jacintos |
 | Antiguidade | **Egito do Nilo** | Novo Império, c. 1300 a.C.: o Nilo, tamareiras, casas de adobe, pilone |
 | Séculos XVI a XVIII | **Terraços do Oriente** | Leste Asiático em paisagem de rolo, da China Song ao Japão Edo: arrozais, bambuzais, torii, pagodes, cerejeiras |
 | Séculos XVI a XVIII | **Brasil Dourado** | Brasil interior, Minas e Cerrado: casario caiado, ipês, buritis, café, Estrada Real |

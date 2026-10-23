@@ -26,7 +26,8 @@ export type TreeGeo =
   | 'araucaria' // araucária em "candelabro"
   | 'willow' // salgueiro-chorão: ramos pendentes
   | 'umbrella' // pinheiro-manso: tronco alto e copa chata em guarda-sol
-  | 'waxpalm'; // palmeira-de-cera: tronco muito alto e claro, copa pequena
+  | 'waxpalm' // palmeira-de-cera: tronco muito alto e claro, copa pequena
+  | 'poplar'; // álamo: coluna estreita e alta de três blocos (alamedas e cortinados de pôlder)
 
 /** Corpo da casa (as proporções mudam o caráter da vila). */
 export type BodyStyle =
@@ -46,6 +47,8 @@ export type RoofStyle =
   | 'thatch' // palha grossa e arredondada
   | 'turf' // grama sobre o telhado (use cor verde)
   | 'stepgable' // empena escalonada holandesa
+  | 'bell' // empena de sino (barroca holandesa): cintura estreita, remate arredondado, em arenito claro
+  | 'neck' // empena de pescoço: ombros em rampa e pescoço reto e alto, de tijolo, com viga de içamento
   | 'steep' // duas águas muito íngreme, com beiral curto (empena alta e estreita)
   | 'cross' // cumeeira cruzada: dois telhados de duas águas em cruz
   | 'cone'; // cônico (cabanas redondas)
@@ -153,7 +156,8 @@ export type CropStyle =
   | 'potato' // batata: touceira baixa com flores (cor da planta = folhagem)
   | 'flax' // linho: hastes finas com flor azul (cor da planta = flor)
   | 'mulberry' // amoreira podada baixa, para a seda
-  | 'hydro'; // hidroponia luminosa (ficção)
+  | 'hydro' // hidroponia luminosa (ficção)
+  | 'bulb'; // jacinto: espiga cônica de florzinhas em fileiras de cor
 
 export interface CropKind {
   style: CropStyle;
@@ -168,7 +172,7 @@ export interface CropKind {
  * Bichos do pasto. Um tipo novo (renas, ema, crocodilo...) entra só com um `case` em `animalGeometry` (render/lib.ts):
  * o compilador cobra a entrada, e `Theme.animals` e `Theme.fauna` já o aceitam.
  */
-export type AnimalKind = 'sheep' | 'cow' | 'goat' | 'horse' | 'donkey' | 'buffalo' | 'llama' | 'camel' | 'deer' | 'rover';
+export type AnimalKind = 'sheep' | 'cow' | 'goat' | 'horse' | 'donkey' | 'buffalo' | 'llama' | 'camel' | 'deer' | 'rover' | 'duck';
 
 /** Onde uma espécie de `Theme.fauna` aparece: no prado, na mata, no campo de cultivo, na beira do rio ou dentro da água. */
 export type FaunaWhere = 'prado' | 'floresta' | 'campo' | 'margem' | 'agua';
@@ -206,10 +210,11 @@ export type BoatKind =
   | 'canoe'
   | 'reedboat'
   | 'nile' // barco do Nilo: pontas recurvadas e vela quadrada larga
+  | 'tjalk' // tjalk holandês: fundo chato, quilhas laterais em pá e vela de gávea marrom
   | 'paddle' // vapor de roda de pás na popa
   | 'hover';
 /** Como a borda "linha" (índice 5) é desenhada. */
-export type RoadStyle = 'rail' | 'dirt' | 'stone' | 'sand' | 'maglev';
+export type RoadStyle = 'rail' | 'dirt' | 'stone' | 'sand' | 'maglev' | 'dike';
 /** O que anda pela linha: trem, carroça, caravana de animais, maglev. */
 export type VehicleKind = 'steam' | 'cart' | 'caravan' | 'maglev';
 /** Estrutura construída quando vila encosta em plantação. */
@@ -223,12 +228,14 @@ export type MillStyle =
 export type GateStyle =
   | 'torii' // dois pilares e duas travessas, a de cima recurvada
   | 'paifang' // três vãos com telhadinhos
-  | 'inca'; // portal trapezoidal de pedra
+  | 'inca' // portal trapezoidal de pedra
+  | 'brick'; // portão de cidade de tijolo (stadspoort): pilares, frontão de degraus e torrezinha com relógio
 /** Ponte de pedestres sobre o rio, entre a vila e a outra margem. */
 export type BridgeStyle =
   | 'stone' // arco de pedra com parapeito
   | 'wood' // arco alto de madeira com guarda-corpo (ponte arco-íris, taikobashi)
-  | 'rope'; // ponte de corda pênsil, tabuado e cabos
+  | 'rope' // ponte de corda pênsil, tabuado e cabos
+  | 'draw'; // ponte levadiça de contrapeso (fechada): tabuleiro baixo, pórticos e correntes
 
 /** Material dos painéis: o tema escolhe, o CSS desenha sem arquivo. */
 export type FrameKind = 'papel' | 'pergaminho' | 'papiro' | 'madeira' | 'seda' | 'washi' | 'metal' | 'pedra';
@@ -317,6 +324,11 @@ export interface Theme {
   forest: { geo: TreeGeo; weight: number; colors: string[] }[];
   trunk: string;
   treesPerSector: [number, number];
+  /**
+   * Mata em fileiras: as árvores de uma peça de floresta se alinham em 2 ou 3 fileiras retas e paralelas (alamedas e
+   * cortinados de pôlder), em vez de se espalharem. Omitir = espalhadas, como sempre foram.
+   */
+  forestRows?: boolean;
 
   // --- vila
   houses: HouseKind[];

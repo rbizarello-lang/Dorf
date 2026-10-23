@@ -1,6 +1,10 @@
+import { T } from '../core/tiles';
 import type { Theme } from './types';
 
 // Holanda Dourada: o tema padrão e o modelo histórico dos demais (pôlderes, canais, moinhos e tulipas, século XVII).
+// T1 (rodada 3): terra ganha da água, plana e medida a régua. A Estrada é um dique (aterro gramado com caminho de tijolo),
+// o Bosque é alameda de álamos em fileira reta, as casas ganham empenas de sino e de pescoço, o canal é turvo e o barco é
+// o tjalk. Luz de Vermeer: sombras frias e realces âmbar. Chuva fina pelo clima tocável (sem pólen no ar).
 
 export const holanda: Theme = {
   id: 'holanda',
@@ -8,8 +12,8 @@ export const holanda: Theme = {
   era: 'Países Baixos · século XVII',
   period: 'moderna',
   tagline: 'Pôlderes, canais, moinhos de vento e faixas de tulipas.',
-  terrainNames: ['Pôlder', 'Bosque', 'Tulipas', 'Aldeia', 'Canal', 'Dique'],
-  terrainColors: ['#7da64e', '#4f7a3a', '#e63946', '#9a4a32', '#6f9fb8', '#8a8070'],
+  terrainNames: ['Pôlder', 'Alameda', 'Tulipas', 'Aldeia', 'Canal', 'Dique'],
+  terrainColors: ['#7da64e', '#4f7a3a', '#e63946', '#9a4a32', '#5f8f93', '#a8744e'],
   bg: '#d3cdc3',
   voidFill: '#dbd5cb',
   voidLine: '#ebe6de',
@@ -23,42 +27,51 @@ export const holanda: Theme = {
   ground: ['#7da64e', '#5b8a44', '#7a6a48', '#a89a86', '#7da64e', '#7da64e'],
   side: '#6e5a48',
   sideDark: '#3c3028',
-  water: '#6f9fb8',
-  bank: '#a9c27a',
-  road: 'stone',
-  roadBed: '#9a9082',
-  roadDetail: '#7a7064',
+  water: '#5f8f93',
+  bank: '#a2b772',
+  road: 'dike',
+  roadBed: '#b0644a',
+  roadDetail: '#7a4636',
   sleeper: '#5a4a3e',
   vehicle: 'cart',
   vehicleColors: ['#6a4a34', '#c9a24a'],
   forest: [
-    // Bosque de valor baixo contra o pólder claro; a bétula fica mais clara e os acentos são raros.
-    // Copa gorda no pólder, álamo esguio nas alamedas e abeto de ponta nas dunas; a bétula (clara) fica como caráter do tema.
-    { geo: 'puff', weight: 0.3, colors: ['#245a4a', '#2d6a50', '#2a5f46'] },
-    { geo: 'oak', weight: 0.2, colors: ['#2f7a52', '#3a8454', '#2b6e4e'] },
-    { geo: 'cypress', weight: 0.2, colors: ['#2d6a50', '#2a5f46'] },
-    { geo: 'spire', weight: 0.15, colors: ['#245a4a', '#1f5240'] },
-    { geo: 'birch', weight: 0.08, colors: ['#5f8f52', '#6c9d5a'] },
-    { geo: 'puff', weight: 0.04, colors: ['#c9803a', '#b8553a', '#8a86b8'] },
+    // Alameda: cada fileira da peça é de uma espécie só (`forestRows`), então o peso é o da fileira. O álamo domina
+    // (a linha de horizonte holandesa); salgueiro, carvalho e bétula quebram a monotonia e o amarelo-outono é raro.
+    { geo: 'poplar', weight: 0.42, colors: ['#3a7a4e', '#2f6e48', '#437f50'] },
+    { geo: 'poplar', weight: 0.14, colors: ['#5f8f52', '#6c9d5a'] },
+    { geo: 'willow', weight: 0.12, colors: ['#5f8a4a', '#6d9852'] },
+    { geo: 'oak', weight: 0.14, colors: ['#2f7a52', '#3a8454', '#2b6e4e'] },
+    { geo: 'puff', weight: 0.1, colors: ['#245a4a', '#2d6a50'] },
+    { geo: 'birch', weight: 0.06, colors: ['#5f8f52', '#6c9d5a'] },
+    { geo: 'puff', weight: 0.02, colors: ['#c9803a', '#b8553a'] },
   ],
+  forestRows: true,
   trunk: '#5a4232',
   treesPerSector: [4, 7],
   houses: [
-    { weight: 0.55, body: 'tall', roof: 'stepgable', walls: ['#d8a888', '#e8dcc4', '#c66a44', '#a85a3c', '#9a4a32', '#f1e6d2', '#e2c9a8'], roofs: ['#d9693c', '#b8442f', '#6f7f94', '#4f5d70', '#c98a4a', '#8a8f94', '#7a3a2a'], trim: '#f1e6d2', chimney: true },
-    { weight: 0.45, body: 'cottage', roof: 'gable', walls: ['#f1e6d2', '#e8dcc4', '#d99a74', '#c66a44', '#b0563a', '#fbf3e6'], roofs: ['#d9693c', '#b8442f', '#6f7f94', '#4f5d70', '#c98a4a', '#8a8f94'], trim: '#f1e6d2', chimney: true },
-    { weight: 0.14, body: 'tall', roof: 'steep', walls: ['#d8a888', '#e8dcc4', '#c66a44', '#a85a3c', '#9a4a32', '#f1e6d2', '#e2c9a8'], roofs: ['#d9693c', '#b8442f', '#6f7f94', '#4f5d70', '#c98a4a', '#8a8f94', '#7a3a2a'], trim: '#f1e6d2', chimney: true, minor: true },
-    { weight: 0.08, body: 'annex', roof: 'gable', walls: ['#f1e6d2', '#e8dcc4', '#d99a74', '#c66a44', '#b0563a', '#fbf3e6'], roofs: ['#d9693c', '#b8442f', '#6f7f94', '#4f5d70', '#c98a4a', '#8a8f94'], trim: '#f1e6d2', chimney: true, minor: true },
-    { weight: 0.06, body: 'cottage', roof: 'cross', walls: ['#f1e6d2', '#e8dcc4', '#d99a74', '#c66a44', '#b0563a', '#fbf3e6'], roofs: ['#d9693c', '#b8442f', '#6f7f94', '#4f5d70', '#c98a4a', '#8a8f94'], trim: '#f1e6d2', chimney: true, minor: true },
+    // Casas de empena: tijolo vermelho e alaranjado, creme e arenito; o preto-alcatroado fica nos celeiros (anexos).
+    // A empena escalonada é a principal; a de pescoço e a de sino são as das ruas ricas do canal.
+    { weight: 0.3, body: 'tall', roof: 'stepgable', walls: ['#d8a888', '#e8dcc4', '#c66a44', '#a85a3c', '#9a4a32', '#f1e6d2', '#e2c9a8'], roofs: ['#d9693c', '#b8442f', '#6f7f94', '#4f5d70', '#c98a4a', '#8a8f94', '#7a3a2a'], trim: '#f1e6d2', chimney: true },
+    { weight: 0.2, body: 'tall', roof: 'neck', walls: ['#e8dcc4', '#d8a888', '#c66a44', '#e2c9a8', '#a85a3c', '#f1e6d2'], roofs: ['#6f7f94', '#4f5d70', '#8a8f94', '#d9693c', '#b8442f', '#5a6470'], trim: '#f1e6d2', chimney: true },
+    { weight: 0.14, body: 'tall', roof: 'bell', walls: ['#c66a44', '#b8643e', '#d8a888', '#a85a3c', '#e2c9a8', '#9a4a32'], roofs: ['#4f5d70', '#6f7f94', '#7a3a2a', '#d9693c', '#8a8f94'], trim: '#e4d8bc', chimney: true },
+    { weight: 0.28, body: 'cottage', roof: 'gable', walls: ['#f1e6d2', '#e8dcc4', '#d99a74', '#c66a44', '#b0563a', '#fbf3e6'], roofs: ['#d9693c', '#b8442f', '#6f7f94', '#4f5d70', '#c98a4a', '#8a8f94'], trim: '#f1e6d2', chimney: true },
+    { weight: 0.1, body: 'tall', roof: 'steep', walls: ['#d8a888', '#e8dcc4', '#c66a44', '#a85a3c', '#9a4a32', '#f1e6d2', '#e2c9a8'], roofs: ['#d9693c', '#b8442f', '#6f7f94', '#4f5d70', '#c98a4a', '#8a8f94', '#7a3a2a'], trim: '#f1e6d2', chimney: true, minor: true },
+    { weight: 0.08, body: 'annex', roof: 'gable', walls: ['#2f2a28', '#3e3530', '#4a3a30', '#e8dcc4', '#c66a44'], roofs: ['#d9693c', '#b8442f', '#8a3a2a', '#5a6470'], trim: '#f1e6d2', chimney: true, minor: true },
   ],
   landmark: 'windmill',
   landmarkChance: 0.2,
-  landmarkColors: ['#6b5a4c', '#3e3530', '#f1e6d2'],
+  landmarkColors: ['#e6dac0', '#4a3a30', '#5a4030'],
   window: '#ffd98a',
   mill: 'windmill',
+  gate: { style: 'brick', colors: ['#a04c34', '#e4d8bc'] },
+  bridge: { style: 'draw', colors: ['#2f2a26', '#f1e6d2'] },
   crops: [
-    { style: 'tulip', weight: 0.6, colors: ['#e63946', '#f4c430', '#f28bb8', '#fbf6ee', '#9b5de5', '#ff7f2a'], soil: '#6b5a3e' },
-    { style: 'wheat', weight: 0.25, colors: ['#e8b54a', '#f0c45c'], soil: '#8a7a50' },
-    { style: 'barley', weight: 0.15, colors: ['#d9c06a', '#cfb45a'], soil: '#857650' },
+    // Faixas de cor em linhas retas: tulipas (o carro-chefe), jacintos e cereais.
+    { style: 'tulip', weight: 0.46, colors: ['#e63946', '#f4c430', '#f28bb8', '#fbf6ee', '#9b5de5', '#ff7f2a'], soil: '#6b5a3e' },
+    { style: 'bulb', weight: 0.26, colors: ['#4a6fd8', '#f28bb8', '#fbf6ee', '#9b5de5', '#f4c430'], soil: '#6b5a3e' },
+    { style: 'wheat', weight: 0.16, colors: ['#e8b54a', '#f0c45c'], soil: '#8a7a50' },
+    { style: 'barley', weight: 0.12, colors: ['#d9c06a', '#cfb45a'], soil: '#857650' },
   ],
   grass: ['#6f9a42', '#7da64e', '#86ae55'],
   bush: ['#5b8a44', '#6a9448'],
@@ -66,22 +79,38 @@ export const holanda: Theme = {
   rock: '#8a847a',
   berry: '#c0283a',
   animals: { kind: 'cow', colors: ['#f2efe8', '#2f2a28', '#f2efe8'] },
-  boat: 'barge',
-  boatColors: ['#5a3a2a', '#c9a24a'],
+  fauna: [
+    // Ovelhas nos diques e nos pastos, cavalos de tração nas parcelas e patos nos canais.
+    { kind: 'sheep', weight: 1, colors: ['#f2efe8', '#e8e2d4', '#f7f4ee'], time: 'dia', where: 'prado', chance: 0.3 },
+    { kind: 'horse', weight: 1, colors: ['#6a4a34', '#2f2a28', '#8a5a38'], time: 'dia', where: 'campo', chance: 0.2 },
+    { kind: 'duck', weight: 1, colors: ['#8a7a5a', '#6a5a40', '#f2efe8'], time: 'dia', where: 'agua', chance: 0.4 },
+  ],
+  boat: 'tjalk',
+  boatColors: ['#2f3a34', '#a8562e'],
   lily: '#5f8a42',
   smoke: '#f4f4f4',
-  weather: { kind: 'pollen', colors: ['#ffffff', '#f3efe0'], density: 0.45 },
+  weather: { kind: 'none', colors: ['#ffffff', '#f3efe0'], density: 0 },
   sparkle: '#fff6d0',
   ui: { accent: '#c2410c', panel: '#fbfaf6', ink: '#27231f', soft: '#6f6558', frame: 'papel', emblem: 'tulipa' },
-  grade: { shadow: '#6a5a3c', light: '#ffd889', saturation: 0.98 },
-  atmos: { haze: 1.2, hazeColor: '#d5e4ee', wind: 1.3, filter: [0.98, 1, 1.04] },
-  synergy: { lumber: 'Serraria', mill: 'Moinho de vento', pasture: 'Pasto de vacas', apiary: 'Colmeias' },
+  // Luz de Vermeer: sombras frias e azuladas, realces âmbar.
+  grade: { shadow: '#5a6a7a', light: '#ffd889', saturation: 1.0 },
+  atmos: { haze: 1.35, hazeColor: '#cfe0e8', wind: 1.3, filter: [0.99, 1, 1.03] },
+  // Relevo de dique: o prado ganha aterros baixos e compridos (sem serras, o país é plano).
+  relief: { amp: 0.9, style: 'dique' },
+  ambience: [
+    { kind: 'vento', weight: 0.7 },
+    { kind: 'sinos', weight: 0.45 },
+    { kind: 'aves', weight: 0.35 },
+    { kind: 'agua', weight: 0.4 },
+  ],
+  synergy: { lumber: 'Moinho serrador', mill: 'Moinho de drenagem', pasture: 'Pasto de vacas', apiary: 'Colmeias' },
+  blessingNames: { cartographers: 'Cartógrafos de Blaeu', builders: 'Mestres de obra', pilgrims: 'Mercadores da Companhia' },
   folk: { skin: '#e8bfa0', hat: 'cap', hatColor: '#f2efe6' },
   music: { scale: [0, 2, 4, 5, 7, 9, 11], timbre: 'bell' },
   wonder: { name: 'Paço Municipal', core: 'civic', colors: ['#e9dcc4', '#4a4f5a', '#b8923f'] },
   eras: ['Aldeia de pôlder', 'Vila mercante', 'Cidade das guildas', 'Século de Ouro'],
   rules: { synergyBonus: { mill: 5 } },
-  // Easter egg de exemplo do mecanismo genérico (src/core/eggs.ts): a milésima peça solta um bando dourado.
+  // Easter eggs (src/core/eggs.ts): três saem da partida (kit na peça), dois do relógio (hora e data).
   eggs: [
     {
       id: 'mil-pecas',
@@ -89,6 +118,45 @@ export const holanda: Theme = {
       note: 'Mil peças: um bando dourado levanta voo sobre o Século de Ouro.',
       when: [{ kind: 'pecas', n: 1000 }],
       effect: [{ kind: 'evento', event: 'bando-dourado' }, { kind: 'som', sound: 'sinos' }],
+    },
+    {
+      id: 'tulipomania',
+      name: 'Tulipomania',
+      note: 'Tulipomania, 1637: um bulbo vale uma casa.',
+      when: [{ kind: 'grupo', terrain: T.Field, min: 7 }],
+      once: true,
+      effect: [{ kind: 'kit', kit: 'bulbo-dourado', scale: 1.8, color: '#f4c430' }, { kind: 'som', sound: 'brilho' }],
+    },
+    {
+      id: 'menino-dique',
+      name: 'O menino do dedo',
+      note: 'Haarlem: um menino segura o dique com o dedo.',
+      when: [{ kind: 'bordas', terrain: T.Rail, min: 2 }, { kind: 'bordas', terrain: T.Water, min: 1 }, { kind: 'sorte', chance: 0.35 }],
+      once: true,
+      effect: [{ kind: 'kit', kit: 'menino-dique', scale: 1.5 }],
+    },
+    {
+      id: 'queijo-gigante',
+      name: 'Queijo gigante',
+      note: 'Um pôlder perfeito, e no meio dele, um queijo do tamanho de uma casa.',
+      when: [{ kind: 'bordas', terrain: T.Grass, min: 6 }, { kind: 'sorte', chance: 0.4 }],
+      once: true,
+      effect: [{ kind: 'kit', kit: 'queijo', scale: 1.6 }],
+    },
+    {
+      id: 'ronda-noturna',
+      name: 'A Ronda Noturna',
+      note: 'A Ronda Noturna: a guarda da cidade passa de lanterna na mão.',
+      when: [{ kind: 'hora', from: 22, to: 2 }, { kind: 'pecas', n: 30, min: true }],
+      effect: [{ kind: 'evento', event: 'procissao' }],
+    },
+    {
+      id: 'dia-do-rei',
+      name: 'Dia do Rei',
+      note: 'Koningsdag: a Holanda inteira se veste de laranja.',
+      when: [{ kind: 'data' }],
+      holidays: [{ month: 4, day: 27 }],
+      effect: [{ kind: 'ceu', tint: '#ff8a2a', strength: 0.3, seconds: 0 }, { kind: 'som', sound: 'sinos' }],
     },
   ],
   ruleNote: 'Moinhos de pôlder: cada moinho de vento (aldeia + tulipas) vale 5 pontos a mais.',
