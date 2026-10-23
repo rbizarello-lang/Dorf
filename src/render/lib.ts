@@ -9,6 +9,7 @@ import { anteaterGeometry, coffeeBloomGeometry, colonialRoof, engenhoGeometry, j
 import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
 import type { EggKit } from '../core/eggs';
 import { brickGateParts, bulbParts, cheeseParts, dikeBoyParts, drawbridgeParts, duckParts, dutchGableParts, poplarParts, tjalkParts, windmillParts } from './kits/holanda';
+import * as inv from './kits/inverno';
 import { gatesOf, type AnimalKind, type BoatKind, type BodyStyle, type BridgeStyle, type CenterCrown, type CropStyle, type GateStyle, type HatStyle, type HouseKind, type Landmark, type RoofStyle, type Theme, type TreeGeo, type VehicleKind } from '../themes/types';
 
 // Biblioteca de "kits": geometrias low-poly com cor por vértice, montadas por tema.
@@ -226,6 +227,9 @@ function trapezoid(wb: number, wt: number, h: number) {
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(v), 3));
   return g;
 }
+
+/** As primitivas que os kits de tema (src/render/kits/) recebem por injeção, sem import em ciclo. */
+const PRIMS: inv.Prims = { kit, box, cyl, cone, oct, ico, jitter, strut, taper, pyramid };
 
 // ---------------------------------------------------------------- casas
 
@@ -710,6 +714,8 @@ export interface CropLayout {
   scale: [number, number];
   /** Cada fileira com uma cor (tulipas, quinoa). */
   rowColor: boolean;
+  /** Fração das posições da grade que ganham planta (omitido = todas): o gelo tem poucos buracos, não uma lavoura. */
+  sparse?: number;
 }
 
 export const CROP_LAYOUT: Record<CropStyle, CropLayout> = {
@@ -733,6 +739,7 @@ export const CROP_LAYOUT: Record<CropStyle, CropLayout> = {
   bulb: { rowGap: 0.036, step: 0.028, scale: [1.05, 1.3], rowColor: true },
   mulberry: { rowGap: 0.066, step: 0.05, scale: [0.9, 1.1], rowColor: false },
   hydro: { rowGap: 0.06, step: 0.05, scale: [0.9, 1.1], rowColor: false },
+  icefield: { rowGap: 0.1, step: 0.09, scale: [0.85, 1.25], rowColor: false, sparse: 0.6 },
 };
 
 function tuft(n: number, h: number, w: number, spread: number, earAt: number, droop = 0, seed = 1): THREE.BufferGeometry[] {
@@ -861,6 +868,8 @@ function cropGeometry(style: CropStyle): THREE.BufferGeometry {
         { geo: cyl(0.003, 0.004, 0.025, 4).rotateZ(0.6).translate(0.006, 0.03, 0), color: '#6a5040' },
         { geo: jitter(ico(0.03, 0), 0.006, 36).scale(1.1, 0.85, 1.1).translate(0, 0.058, 0), color: '#fff', tint: 1, grad: [0.75, 1.08, 0.035, 0.085] },
       ]);
+    case 'icefield':
+      return inv.icefieldGeometry(PRIMS);
     case 'hydro':
       return kit([
         { geo: box(0.05, 0.012, 0.03), color: '#cfd6de' },
@@ -1127,6 +1136,8 @@ function gateGeometry(style: GateStyle, [main, top]: [string, string]): THREE.Bu
       return pylonGateGeometry([main, top]);
     case 'porteira':
       return porteiraGeometry(TOOLS, [main, top]);
+    case 'dragon':
+      return inv.dragonGateGeometry(PRIMS, [main, top]);
     case 'inca':
       // Portal de pedra trapezoidal (como o Inti Punku): ombreiras que se inclinam para dentro.
       return kit([
@@ -1306,6 +1317,12 @@ function animalGeometry(kind: AnimalKind): THREE.BufferGeometry {
       return manedWolfGeometry(TOOLS);
     case 'anteater':
       return anteaterGeometry(TOOLS);
+    case 'reindeer':
+      return inv.reindeerGeometry(PRIMS);
+    case 'moose':
+      return inv.mooseGeometry(PRIMS);
+    case 'fox':
+      return inv.foxGeometry(PRIMS);
     case 'rover':
       return kit([
         { geo: box(0.05, 0.016, 0.03, 0, 0.012), color: '#fff', tint: 1 },
@@ -1455,6 +1472,8 @@ function vehicleGeometry(kind: VehicleKind, [body, det]: [string, string], anima
     case 'oxcart':
       // Carro de boi à frente e, atrás, uma mula de tropa carregada (o comboio da estrada).
       return { head: oxcartGeometry(TOOLS, [body, det]), car: muleGeometry(TOOLS, det) };
+    case 'sled':
+      return inv.sledGeometry(PRIMS, [body, det]);
     case 'caravan': {
       const a = animal === 'camel' || animal === 'llama' || animal === 'horse' || animal === 'donkey' ? animal : 'horse';
       const pack = (x: number, y: number) => [{ geo: box(0.014, 0.014, 0.03, x, y), color: det }];
@@ -1515,6 +1534,8 @@ function eggGeometry(kit_: EggKit): THREE.BufferGeometry {
       return profetasGeometry(TOOLS);
     case 'onca':
       return jaguarGeometry(TOOLS);
+    case 'troll':
+      return inv.trollGeometry(PRIMS);
     case 'estela':
       // Pedra erguida com um anel dourado no alto.
       return kit([
@@ -1830,6 +1851,9 @@ function wonderGeometry(theme: Theme): { base: THREE.BufferGeometry; body: THREE
       add(cyl(0.012, 0.016, 0.04, 6, 0, H + 0.09, 0.14), '#2a2622');
       break;
     }
+    case 'stave':
+      P.push(...inv.staveWonderParts(PRIMS, w.colors, win));
+      break;
     case 'rings': {
       for (let i = 0; i < 6; i++) {
         const r = 0.34 - i * 0.045, y = i * 0.035;
@@ -2408,6 +2432,8 @@ export class Lib {
     gatesOf(theme).forEach((g, i) => set(`gate:${i}`, gateGeometry(g.style, g.colors)));
     if (theme.bridge) set('bridge', bridgeGeometry(theme.bridge.style, theme.bridge.colors));
     for (const c of theme.crops) if (!this.geos.has(`crop:${c.style}`)) set(`crop:${c.style}`, cropGeometry(c.style));
+    // Lago congelado: o pesqueiro (tenda, varal e buraco) que cada parcela de gelo pode ganhar.
+    if (theme.crops.some((c) => c.style === 'icefield')) set('icecamp', inv.iceCampGeometry(PRIMS));
     const sp = specialsFor(theme, theme.houses[0].walls[0], theme.houses[0].roofs[0]);
     for (const [k, g] of Object.entries(sp)) set(k, g);
     if (theme.mill === 'granary') set('mill', sp.granary);
@@ -2458,6 +2484,8 @@ export class Lib {
       if (x.event === 'festa-junina' && !this.geos.has('egg:balao')) set('egg:balao', balloonGeometry());
     }
     for (const e of theme.eggs ?? []) for (const x of e.effect) if (x.kind === 'kit' && !this.geos.has(`egg:${x.kit}`)) set(`egg:${x.kit}`, eggGeometry(x.kit));
+    // Trenó do Natal (ovo 'treno'): só existe nos temas que o pedem.
+    if (theme.eggs?.some((e) => e.effect.some((x) => x.kind === 'evento' && x.event === 'treno'))) set('egg:sled', inv.skySledGeometry(PRIMS, theme.vehicleColors));
     set('coin', coinGeometry());
     set('bird', theme.skyBirds?.kit === 'arara' ? macawGeometry(TOOLS, theme.skyBirds.colors) : birdGeometry());
     set('bird:gold', birdGeometry('#f4c63a', 0.5));
@@ -2501,6 +2529,7 @@ export class Lib {
     if (key === 'tree:crystal') return this.mats.crystal;
     if (key.startsWith('tree:')) return EVERGREEN.has(key.slice(5)) ? this.mats.evergreen : this.mats.foliage;
     if (key === 'bush') return this.mats.foliage;
+    if (key === 'crop:icefield' || key === 'icecamp') return this.mats.ice;
     if (key.startsWith('crop:') || key === 'grass' || key === 'reed' || key === 'flower') return this.mats.crop;
     if (this.domeKeys.has(key)) return this.mats.glass;
     if (key === 'peak') return this.mats.relief;

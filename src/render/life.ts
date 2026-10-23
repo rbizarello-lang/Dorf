@@ -753,9 +753,9 @@ export class Life {
       return;
     }
     const th = this.theme;
-    const cars = th.vehicle === 'cart' ? 1 : 2;
-    const spacing = th.vehicle === 'steam' ? 0.078 : th.vehicle === 'maglev' ? 0.074 : th.vehicle === 'cart' ? 0.058 : th.vehicle === 'oxcart' ? 0.125 : 0.068;
-    // Altura da carga sobre a origem do vagão: caçamba, teto do vagão, teto do maglev. A caravana já leva fardo.
+    const cars = th.vehicle === 'cart' || th.vehicle === 'sled' ? 1 : 2;
+    const spacing = th.vehicle === 'steam' ? 0.078 : th.vehicle === 'maglev' ? 0.074 : th.vehicle === 'cart' ? 0.058 : th.vehicle === 'oxcart' ? 0.125 : th.vehicle === 'sled' ? 0.064 : 0.068;
+    // Altura da carga sobre a origem do vagão: caçamba, teto do vagão, teto do maglev. A caravana e o trenó já levam a carga no kit.
     const lift = th.vehicle === 'cart' ? 0.034 : th.vehicle === 'steam' ? 0.053 : th.vehicle === 'maglev' ? 0.036 : 0;
     const cargo = lift ? this.pool('cargo') : null;
     const coin = this.pool('coin', false);
@@ -804,7 +804,7 @@ export class Life {
         m.trail.unshift({ x: m.x, z: m.z });
         if (m.trail.length > 120) m.trail.length = 120;
       }
-      const bounce = th.vehicle === 'caravan' || th.vehicle === 'oxcart' ? Math.abs(Math.sin(this.time * 7)) * 0.004 : 0;
+      const bounce = th.vehicle === 'caravan' || th.vehicle === 'oxcart' || th.vehicle === 'sled' ? Math.abs(Math.sin(this.time * 7)) * 0.004 : 0;
       q4.setFromAxisAngle(UP, -m.heading);
       m4.compose(v3.set(m.x, roadY + bounce, m.z), q4, s3.setScalar(1));
       head?.set(hi++, m4, this.beast);

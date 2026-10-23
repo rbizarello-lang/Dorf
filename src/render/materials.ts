@@ -106,6 +106,8 @@ export const U = {
   season: uniform(1),
   /** 1 no inverno: neve nas faces viradas para cima e gelo na beira da água. */
   snow: uniform(0),
+  /** Quanto da neve de inverno cobre as parcelas de plantação do chão (Theme.fieldSnow; 1 = tudo, como sempre). */
+  fieldSnow: uniform(1),
   /** Força do vento do tema (1 = o balanço de sempre). */
   gust: uniform(1),
   /** Várzea (Theme.floodplain): 1 liga a cor fértil perto do rio (0 na pilha e nos temas sem ela), alcance em unidades do mundo e a cor. */
@@ -315,6 +317,8 @@ interface DecoOpts {
   paint?: 'canopy' | 'wall';
   /** Copa perene (conífera): a estação não a tinge, só a neve. */
   evergreen?: boolean;
+  /** Quanto da neve de inverno cobre as faces de cima (1 = a de sempre; o gelo do lago congelado quase não leva). */
+  snow?: number;
   roughness?: number;
   metalness?: number;
   emissive?: string;
@@ -325,7 +329,7 @@ interface DecoOpts {
 const SNOW = vec3(0.957, 0.973, 0.984);
 
 /** Neve nas faces de cima. `cap` limita o branco para telhado e copa não sumirem no chão. */
-const snowOn = (base: N3, cap: number): N3 => {
+const snowOn = (base: N3, cap: number | N): N3 => {
   const n = texture(noiseTex, positionWorld.xz.mul(0.7)).r.mul(0.35).add(0.65);
   const k = smoothstep(0.7, 0.9, normalWorld.y).mul(U.snow).mul(n).mul(cap);
   return mix(base, SNOW, k);
@@ -405,7 +409,7 @@ function decoMaterial(o: DecoOpts) {
     base = base.mul(mix(float(1), rows.mul(0.17).add(0.85), roof.mul(smoothstep(15, 6, camDist))));
   }
   // Telhados e paredes: neve contida, para o branco do inverno não apagar a casa.
-  const seasoned = o.paint === 'canopy' ? seasonFoliage(base, o.evergreen) : snowOn(base, 0.55);
+  const seasoned = o.paint === 'canopy' ? seasonFoliage(base, o.evergreen) : snowOn(base, 0.55 * (o.snow ?? 1));
   m.colorNode = mix(seasoned, vec3(0.02), U.silhouette);
   // Cada janela acende num momento diferente do anoitecer.
   const lit = smoothstep(0, 0.25, U.night.mul(1.25).sub(hash(instanceIndex).mul(0.5)));
@@ -428,7 +432,7 @@ function decoMaterial(o: DecoOpts) {
   return m;
 }
 
-export type MatKey = 'deco' | 'relief' | 'reliefSoft' | 'foliage' | 'evergreen' | 'crop' | 'cropFine' | 'crystal' | 'glass' | 'fire';
+export type MatKey = 'deco' | 'relief' | 'reliefSoft' | 'foliage' | 'evergreen' | 'crop' | 'cropFine' | 'ice' | 'crystal' | 'glass' | 'fire';
 
 export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
   return {
@@ -440,6 +444,8 @@ export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
     evergreen: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', evergreen: true }),
     crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide }),
     cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true }),
+    // Lago congelado (rachaduras, buracos e pesqueiro): quase sem neve por cima, para o gelo e a água escura lerem.
+    ice: decoMaterial({ roughness: 0.55, side: THREE.DoubleSide, snow: 0.12 }),
     crystal: decoMaterial({ sway: 'tree', roughness: 0.25, metalness: 0.1, emissive: '#3a2a66', emissiveIntensity: 0.6 }),
     glass: decoMaterial({ roughness: 0.2, metalness: 0.2 }),
     fire: fireMaterial(),
@@ -547,7 +553,8 @@ export function makeGroundMaterial() {
   const nearRiver = float(1).sub(smoothstep(U.floodReach.mul(0.3), U.floodReach, riverD));
   const fertile = nearRiver.mul(U.flood).mul(sp.x.add(sp.z).mul(1.4).min(1)).mul(top).mul(0.92);
   const base = mix(base0, U.floodColor, fertile);
-  const ground = snowOn(base.mul(mix(sideF, detail, top)), 0.85);
+  // `fieldSnow` (Theme.fieldSnow) tira neve só das parcelas de plantação (o gelo do lago congelado); 1 = como sempre.
+  const ground = snowOn(base.mul(mix(sideF, detail, top)), mix(float(0.85), float(0.85).mul(U.fieldSnow), sp.z.min(1)));
   m.colorNode = mix(ground, vec3(1), U.silhouette);
   // Relevo fino do prado e da mata: inclina a normal com o mapa de declive da água.
   const slope = texture(waterTex, p.mul(0.45)).rg.sub(0.5).mul(sp.x.add(sp.y).mul(0.5).add(0.12));

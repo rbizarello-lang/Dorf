@@ -37,7 +37,7 @@ export interface Holiday {
 }
 
 /** Kits decorativos que o efeito 'kit' põe na peça (o desenho está em render/lib.ts, `eggGeometry`). */
-export type EggKit = 'bulbo-dourado' | 'estela' | 'queijo' | 'menino-dique' | 'esfinge' | 'gato' | 'ibis' | 'piramide' | 'cerejeira-milenar' | 'lago-carpa' | 'gato-da-sorte' | 'profetas' | 'onca';
+export type EggKit = 'bulbo-dourado' | 'estela' | 'queijo' | 'menino-dique' | 'esfinge' | 'gato' | 'ibis' | 'piramide' | 'cerejeira-milenar' | 'lago-carpa' | 'gato-da-sorte' | 'profetas' | 'onca' | 'troll'; // troll: troll de pedra com um olho âmbar, de cócoras (Inverno Nórdico)
 
 /** Eventos animados passageiros (render/life.ts). */
 export type EggEvent =
@@ -50,7 +50,11 @@ export type EggEvent =
   /** Balões de São João subindo devagar do foco da câmera, e a fogueira a faiscar. */
   | 'festa-junina'
   /** Bando grande de pássaros do tema (araras) levantando voo da mata. */
-  | 'revoada';
+  | 'revoada'
+  /** Dois corvos (Hugin e Munin) rodando sobre o foco. */
+  | 'corvos'
+  /** Trenó de rena com uma luz vermelha atravessando o céu. */
+  | 'treno';
 
 /** Sons sintetizados do ovo (audio.ts, `Sfx.egg`). */
 export type EggSound = 'sinos' | 'brilho' | 'coro';
@@ -61,7 +65,7 @@ export type EggEffect =
   /** Evento animado passageiro no lugar da peça (ou no foco da câmera, para gatilhos de relógio). */
   | { kind: 'evento'; event: EggEvent; color?: string }
   /** Tom de céu por cima da hora do dia, `seconds` de duração (padrão 20; 0 = enquanto o gatilho valer). */
-  | { kind: 'ceu'; tint: string; strength?: number; seconds?: number }
+  | { kind: 'ceu'; tint: string; strength?: number; seconds?: number; aurora?: number }
   /** Um som. */
   | { kind: 'som'; sound: EggSound };
 

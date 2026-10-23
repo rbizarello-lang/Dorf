@@ -106,7 +106,8 @@ export type WonderCore =
   | 'hall' // grande salão com cumeeiras de dragão
   | 'dome' // cúpula de gomos com lanterna e campanário
   | 'trestle' // ponte ferroviária de cavalete
-  | 'rings'; // terraços circulares em degraus
+  | 'rings' // terraços circulares em degraus
+  | 'stave'; // grande stavkirke: nave, três torres escalonadas, galeria e cabeças de dragão
 
 /** Chapéu dos aldeões. */
 export type HatStyle =
@@ -161,6 +162,7 @@ export type CropStyle =
   | 'flax' // linho: hastes finas com flor azul (cor da planta = flor)
   | 'mulberry' // amoreira podada baixa, para a seda
   | 'coffeebloom' // cafezal em florada: o café com a copa coberta de flores brancas
+  | 'icefield' // lago congelado: rachaduras claras e buracos de pesca no gelo (o campo do Inverno Nórdico)
   | 'hydro' // hidroponia luminosa (ficção)
   | 'bulb'; // jacinto: espiga cônica de florzinhas em fileiras de cor
 
@@ -177,7 +179,7 @@ export interface CropKind {
  * Bichos do pasto. Um tipo novo (renas, ema, crocodilo...) entra só com um `case` em `animalGeometry` (render/lib.ts):
  * o compilador cobra a entrada, e `Theme.animals` e `Theme.fauna` já o aceitam.
  */
-export type AnimalKind = 'sheep' | 'cow' | 'goat' | 'horse' | 'donkey' | 'buffalo' | 'llama' | 'camel' | 'deer' | 'rover' | 'duck' | 'ibis' | 'crocodile' | 'ox' | 'heron' | 'zebu' | 'rhea' | 'maned' | 'anteater';
+export type AnimalKind = 'sheep' | 'cow' | 'goat' | 'horse' | 'donkey' | 'buffalo' | 'llama' | 'camel' | 'deer' | 'rover' | 'duck' | 'ibis' | 'crocodile' | 'ox' | 'heron' | 'zebu' | 'rhea' | 'maned' | 'anteater' | 'reindeer' | 'moose' | 'fox';
 
 /** Peças de chão do prado (`Theme.groundKits`). */
 export type GroundKit = 'cupinzeiro';
@@ -226,7 +228,7 @@ export type BoatKind =
 /** Como a borda "linha" (índice 5) é desenhada. */
 export type RoadStyle = 'rail' | 'dirt' | 'stone' | 'sand' | 'maglev' | 'dike' | 'stepstone'; // stepstone: terra batida com lajes de passo (tobiishi), sem trilhos nem sulcos paralelos
 /** O que anda pela linha: trem, carroça, caravana de animais, maglev. */
-export type VehicleKind = 'steam' | 'cart' | 'caravan' | 'maglev' | 'oxcart';
+export type VehicleKind = 'steam' | 'cart' | 'caravan' | 'maglev' | 'oxcart' | 'sled';
 /** Estrutura construída quando vila encosta em plantação. */
 export type MillStyle =
   | 'windmill' // moinho de vento com pás de pano
@@ -242,7 +244,8 @@ export type GateStyle =
   | 'inca' // portal trapezoidal de pedra
   | 'brick' // portão de cidade de tijolo (stadspoort): pilares, frontão de degraus e torrezinha com relógio
   | 'pylon' // pilone egípcio: duas torres de paredes inclinadas, cornija e travessa
-  | 'porteira'; // porteira de fazenda: mourões, travessa com tabuleta e uma folha aberta
+  | 'porteira' // porteira de fazenda: mourões, travessa com tabuleta e uma folha aberta
+  | 'dragon'; // pórtico de madeira escura com cabeças de dragão nos pilares (nórdico)
 /** Ponte de pedestres sobre o rio, entre a vila e a outra margem. */
 export type BridgeStyle =
   | 'stone' // arco de pedra com parapeito
@@ -457,6 +460,8 @@ export interface Theme {
     /** Árvores que sobem a encosta (as `geo` da mata do tema); omitir = a mata inteira. Pinheiros nas serras do Oriente. */
     slopeTrees?: TreeGeo[];
   };
+  /** Quanto da neve de inverno cobre as parcelas de plantação (1 = tudo, o padrão; 0 = nada). O lago congelado usa um valor baixo: o gelo azul não some sob a neve. */
+  fieldSnow?: number;
   /** Trava a paisagem numa estação (0 primavera, 1 verão, 2 outono, 3 inverno). A pontuação usa `rules.seasonLock`. */
   season?: 0 | 1 | 2 | 3;
   /** Lanternas ao longo da estrada, acesas à noite. */
