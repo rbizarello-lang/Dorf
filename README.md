@@ -143,7 +143,7 @@ O botão de qualidade abre a lista: **Auto**, **Ultra**, **Alta**, **Média** e 
 | Séculos XVI a XVIII | **Holanda Dourada** (padrão) | Países Baixos, século XVII: pôlderes, canais, moinhos de vento, tulipas |
 | Antiguidade | **Egito do Nilo** | Novo Império, c. 1300 a.C.: o Nilo, tamareiras, casas de adobe, pilone |
 | Séculos XVI a XVIII | **Terraços do Oriente** | Leste Asiático em paisagem de rolo, da China Song ao Japão Edo: arrozais, bambuzais, torii, pagodes, cerejeiras |
-| Séculos XVI a XVIII | **Brasil Dourado** | Brasil interior, Minas e Cerrado: casario caiado, ipês, buritis, café, Estrada Real |
+| Séculos XVI a XVIII | **Brasil Dourado** | Brasil interior, Minas e Cerrado: casario caiado de telhado colonial, café em terraço (com florada) e canavial com engenho, cerrado de árvores tortas e cupinzeiros, ema, lobo-guará, tamanduá e araras, carro de boi e tropa de mulas no caminho de pedra, serras de rocha vermelha com mata no topo, a chapada de capim em volta |
 | Séculos XIX a XXI | **Inverno Nórdico** | Escandinávia no inverno: casas longas de turfa, cabanas vermelhas, drakkars no fiorde |
 
 Eram 14 temas. O Jardim Sakura, o Jade Song e o Edo Tranquilo viraram o Terraços do Oriente; o Cerrado Dourado e a Minas Colonial, o Brasil Dourado; a Terra dos Vikings foi para o Inverno Nórdico; Vale Pastel, Colônia Marciana, Toscana, Velho Oeste e Andes saíram. Links com `?theme=` antigo, o tema escolhido e os recordes dos temas fundidos passam para o tema novo; a partida salva de um tema que saiu é descartada. O motivo e o que veio de cada tema estão em [docs/TEMAS.md](docs/TEMAS.md).

@@ -214,6 +214,11 @@ interface Passage {
   color: THREE.Color;
   /** Balanço do passo (altura em unidades do mundo). */
   bob: number;
+  /** Sobe `rise` de altura por unidade andada (balões). */
+  rise: number;
+  /** Solta fumaça da frente da fila (locomotiva), a cada `puff` segundo, a esta altura. */
+  smokeY?: number;
+  puff: number;
 }
 
 export class Life {
@@ -235,6 +240,8 @@ export class Life {
   private bobbers: Bobber[] = [];
   /** Respingo quando um peixe sai ou volta para a água (o World desenha as gotas). */
   onSplash: (x: number, z: number) => void = () => {};
+  /** Fumaça da locomotiva do easter egg (o World solta o rolo de fumaça). */
+  onSmoke: (x: number, y: number, z: number) => void = () => {};
   /** Moeda na parada do mercado: o World solta as faíscas. */
   onTrade: (x: number, z: number) => void = () => {};
   /** Batedor do começo da partida: vai do Centro até a beira, olha o sítio e volta. */
@@ -371,10 +378,12 @@ export class Life {
       }
     }
     if (th.period !== 'futuro' && !this.flocks.some((f) => f.ttl === undefined) && board.list.length >= 6) {
+      // Bandos do tema (Theme.skyBirds, araras): menores, em pares.
+      const sb = th.skyBirds ? (th.skyBirds.n ?? [2, 4]) : null;
       for (let f = 0; f < 3; f++) {
         const t = board.list[Math.floor(Math.random() * board.list.length)];
         const { x, z } = hexToWorld(t.q, t.r);
-        this.flocks.push({ cx: x, cz: z, tx: x, tz: z, r: 1.2 + Math.random() * 1.6, h: 1.5 + Math.random() * 0.8, w: (Math.random() < 0.5 ? -1 : 1) * (0.22 + Math.random() * 0.15), ang: Math.random() * 6, n: 5 + Math.floor(Math.random() * 3), retarget: 10 + Math.random() * 20 });
+        this.flocks.push({ cx: x, cz: z, tx: x, tz: z, r: 1.2 + Math.random() * 1.6, h: 1.5 + Math.random() * 0.8, w: (Math.random() < 0.5 ? -1 : 1) * (0.22 + Math.random() * 0.15), ang: Math.random() * 6, n: sb ? sb[0] + Math.floor(Math.random() * (sb[1] - sb[0] + 1)) : 5 + Math.floor(Math.random() * 3), retarget: 10 + Math.random() * 20 });
       }
     }
   }
@@ -389,7 +398,7 @@ export class Life {
     const others = exits.filter((e) => e !== b);
     const a = others.length ? others[Math.floor(Math.random() * others.length)] : -1;
     const th = this.theme;
-    const speed = folk ? 0.045 + Math.random() * 0.015 : boat ? 0.16 + Math.random() * 0.06 : th.vehicle === 'maglev' ? 0.7 : th.vehicle === 'steam' ? 0.42 : 0.17;
+    const speed = folk ? 0.045 + Math.random() * 0.015 : boat ? 0.16 + Math.random() * 0.06 : th.vehicle === 'maglev' ? 0.7 : th.vehicle === 'steam' ? 0.42 : th.vehicle === 'oxcart' ? 0.13 : 0.17;
     const { x, z } = hexToWorld(tile.q, tile.r);
     const roofs = th.houses.flatMap((h) => h.roofs);
     const shirt = folk ? new THREE.Color(Math.random() < 0.5 ? th.ui.accent : roofs[Math.floor(Math.random() * roofs.length)]) : undefined;
@@ -745,7 +754,7 @@ export class Life {
     }
     const th = this.theme;
     const cars = th.vehicle === 'cart' ? 1 : 2;
-    const spacing = th.vehicle === 'steam' ? 0.078 : th.vehicle === 'maglev' ? 0.074 : th.vehicle === 'cart' ? 0.058 : 0.068;
+    const spacing = th.vehicle === 'steam' ? 0.078 : th.vehicle === 'maglev' ? 0.074 : th.vehicle === 'cart' ? 0.058 : th.vehicle === 'oxcart' ? 0.125 : 0.068;
     // Altura da carga sobre a origem do vagão: caçamba, teto do vagão, teto do maglev. A caravana já leva fardo.
     const lift = th.vehicle === 'cart' ? 0.034 : th.vehicle === 'steam' ? 0.053 : th.vehicle === 'maglev' ? 0.036 : 0;
     const cargo = lift ? this.pool('cargo') : null;
@@ -795,7 +804,7 @@ export class Life {
         m.trail.unshift({ x: m.x, z: m.z });
         if (m.trail.length > 120) m.trail.length = 120;
       }
-      const bounce = th.vehicle === 'caravan' ? Math.abs(Math.sin(this.time * 7)) * 0.004 : 0;
+      const bounce = th.vehicle === 'caravan' || th.vehicle === 'oxcart' ? Math.abs(Math.sin(this.time * 7)) * 0.004 : 0;
       q4.setFromAxisAngle(UP, -m.heading);
       m4.compose(v3.set(m.x, roadY + bounce, m.z), q4, s3.setScalar(1));
       head?.set(hi++, m4, this.beast);
@@ -803,7 +812,7 @@ export class Life {
         const p = trailAt(m.trail, spacing * k);
         if (!p) break;
         q4.setFromAxisAngle(UP, -p.heading);
-        const b2 = th.vehicle === 'caravan' ? Math.abs(Math.sin(this.time * 7 + k)) * 0.004 : 0;
+        const b2 = th.vehicle === 'caravan' || th.vehicle === 'oxcart' ? Math.abs(Math.sin(this.time * 7 + k)) * 0.004 : 0;
         m4.compose(v3.set(p.x, roadY + b2, p.z), q4, s3.setScalar(1));
         car?.set(ci++, m4, this.beast);
         if (cargo && lift) {
@@ -834,21 +843,21 @@ export class Life {
   }
 
   /** Um bando sai do chão em espiral e vai embora; temas sem pássaros (futuro) ficam sem. Dourado = easter egg. */
-  flush(x: number, z: number, gold = false) {
+  flush(x: number, z: number, gold = false, n = gold ? 14 : 9) {
     if (!this.theme || this.theme.period === 'futuro') return;
     if (this.flocks.filter((f) => f.ttl !== undefined).length >= 2) return;
     const w = (Math.random() < 0.5 ? -1 : 1) * 0.9;
-    this.flocks.push({ cx: x, cz: z, tx: x + (Math.random() - 0.5) * 8, tz: z + (Math.random() - 0.5) * 8, r: 0.35, h: 0.25, w, ang: Math.random() * 6, n: gold ? 14 : 9, retarget: 99, vh: 0.55, ttl: gold ? 11 : 7, gold });
+    this.flocks.push({ cx: x, cz: z, tx: x + (Math.random() - 0.5) * 8, tz: z + (Math.random() - 0.5) * 8, r: 0.35, h: 0.25, w, ang: Math.random() * 6, n, retarget: 99, vh: 0.55, ttl: gold ? 11 : 7, gold });
   }
 
   /**
    * Fila de `n` figurantes (instâncias do kit `key`) atravessando de (x0, z0) até (x1, z1) a `speed`
    * unidades por segundo, `spacing` um do outro, e sumindo no fim. Só visual (passa pelo `dt`).
    */
-  passage(key: string, n: number, from: [number, number], to: [number, number], speed = 0.06, spacing = 0.07, y = 0, color = WHITE, bob = 0.004) {
+  passage(key: string, n: number, from: [number, number], to: [number, number], speed = 0.06, spacing = 0.07, y = 0, color = WHITE, bob = 0.004, rise = 0, smokeY?: number) {
     if (!this.pool(key)) return;
     const len = Math.hypot(to[0] - from[0], to[1] - from[1]) || 1;
-    this.passages.push({ key, n, x0: from[0], z0: from[1], dx: (to[0] - from[0]) / len, dz: (to[1] - from[1]) / len, len, speed, spacing, y, t: 0, color: color.clone(), bob });
+    this.passages.push({ key, n, x0: from[0], z0: from[1], dx: (to[0] - from[0]) / len, dz: (to[1] - from[1]) / len, len, speed, spacing, y, t: 0, color: color.clone(), bob, rise, smokeY, puff: 0 });
   }
 
   private updatePassages(dt: number) {
@@ -866,8 +875,16 @@ export class Life {
         const i = idx.get(p.key) ?? 0;
         idx.set(p.key, i + 1);
         q4.setFromAxisAngle(UP, -heading);
-        m4.compose(v3.set(p.x0 + p.dx * d, p.y + Math.abs(Math.sin(this.time * 6 + k)) * p.bob, p.z0 + p.dz * d), q4, s3.setScalar(1));
+        m4.compose(v3.set(p.x0 + p.dx * d, p.y + p.rise * d + Math.abs(Math.sin(this.time * 6 + k)) * p.bob, p.z0 + p.dz * d), q4, s3.setScalar(1));
         pool.set(i, m4, p.color);
+        // A frente da fila (k = 0) solta fumaça pela chaminé, à frente do kit.
+        if (k === 0 && p.smokeY !== undefined) {
+          p.puff -= dt;
+          if (p.puff <= 0) {
+            p.puff = 0.28;
+            this.onSmoke(p.x0 + p.dx * (d + 0.03), p.smokeY, p.z0 + p.dz * (d + 0.03));
+          }
+        }
       }
     }
     this.passages = this.passages.filter((p) => p.t * p.speed - (p.n - 1) * p.spacing <= p.len);

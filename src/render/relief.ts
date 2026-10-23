@@ -70,6 +70,8 @@ export interface PeakOpts {
   snow: boolean;
   /** Cor do pé da serra (o chão de prado do tema: a rocha nasce da terra sem emenda). */
   foot: THREE.ColorRepresentation;
+  /** Mata no alto da serra (essa cor, em facetas fixas) no lugar da neve: a chapada de rocha com a mata no topo. */
+  crown?: THREE.ColorRepresentation;
   /** Versão leve para o zoom aberto: poucas faces, mesma silhueta. */
   far?: boolean;
 }
@@ -83,6 +85,8 @@ export function peakGeometry(o: PeakOpts): THREE.BufferGeometry {
   const m = new Mesh();
   const foot = new THREE.Color(o.foot);
   const snowLine = 0.36;
+  const crown = o.crown !== undefined ? new THREE.Color(o.crown) : null;
+  const crownLine = 0.6;
   PEAK_CONES.forEach(([ang, dist, rs, hs], k) => {
     const ox = Math.cos(ang) * dist * PEAK.r, oz = Math.sin(ang) * dist * PEAK.r;
     const R = PEAK.r * rs, H = PEAK.h * hs;
@@ -109,9 +113,11 @@ export function peakGeometry(o: PeakOpts): THREE.BufferGeometry {
       const yc = (a[1] + b[1] + c[1]) / 3;
       const base = rock(yc).clone();
       const snow = faceTint(yc) === 0;
-      const col = snow ? SNOW.clone().multiplyScalar(0.94 + rng() * 0.08) : base;
+      // Mata no topo: as facetas altas ficam verdes (cor fixa, valor sorteado por faceta, linha irregular).
+      const wood = crown !== null && yc / H > crownLine + (rng() - 0.5) * 0.16;
+      const col = wood ? crown!.clone().multiplyScalar(0.8 + rng() * 0.4) : snow ? SNOW.clone().multiplyScalar(0.94 + rng() * 0.08) : base;
       const vc = (p: V3) => (p[1] < 0.015 ? foot : col);
-      const vt = (p: V3) => (p[1] < 0.015 ? 0 : snow ? 0 : 1);
+      const vt = (p: V3) => (p[1] < 0.015 ? 0 : snow || wood ? 0 : 1);
       m.face(a, b, c, vc(a), vc(b), vc(c), vt(a), vt(b), vt(c), ox, oz);
     };
     for (let ri = 0; ri + 1 < rings.length; ri++) {

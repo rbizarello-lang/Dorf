@@ -37,14 +37,20 @@ export interface Holiday {
 }
 
 /** Kits decorativos que o efeito 'kit' põe na peça (o desenho está em render/lib.ts, `eggGeometry`). */
-export type EggKit = 'bulbo-dourado' | 'estela';
+export type EggKit = 'bulbo-dourado' | 'estela' | 'profetas' | 'onca';
 
 /** Eventos animados passageiros (render/life.ts). */
 export type EggEvent =
   /** Bando de pássaros dourados que sobe em espiral do lugar da peça. */
   | 'bando-dourado'
   /** Fila de aldeões com lanterna cruzando a peça. */
-  | 'procissao';
+  | 'procissao'
+  /** Locomotiva a vapor atravessando a peça pelos trilhos, soltando fumaça. */
+  | 'maria-fumaca'
+  /** Balões de São João subindo devagar do foco da câmera, e a fogueira a faiscar. */
+  | 'festa-junina'
+  /** Bando grande de pássaros do tema (araras) levantando voo da mata. */
+  | 'revoada';
 
 /** Sons sintetizados do ovo (audio.ts, `Sfx.egg`). */
 export type EggSound = 'sinos' | 'brilho' | 'coro';
