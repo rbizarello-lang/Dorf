@@ -76,11 +76,12 @@ export const oriental: Theme = {
   crops: [
     { style: 'rice', weight: 0.5, colors: ['#8fc07a', '#a3ce86', '#7fb26e'], soil: '#7fb0ab' },
     // Arroz maduro num campo drenado: dourado sobre lama, em vez de lâmina d'água.
-    { style: 'rice', weight: 0.1, colors: ['#d9b84a', '#e6c860', '#cfa93e'], soil: '#9a8a5e' },
+    { style: 'rice', weight: 0.1, colors: ['#d9b84a', '#e6c860', '#cfa93e'], soil: '#9a8a5e', dry: true },
     { style: 'tea', weight: 0.4, colors: ['#4f8f4a', '#5f9f55', '#437f44'], soil: '#8a7856' },
   ],
-  // Arrozais em terraço: cada parcela sobe em 3 patamares de muretas de pedra, com a lâmina d'água em cada degrau.
-  terraces: { levels: 3, rise: 2.4 },
+  // Arrozais em curvas de nível do Sudeste Asiático: a parcela inteira vira 2 ou 3 patamares largos, com mureta fina de terra
+  // na frente de cada um e uma lâmina d'água rasa que reflete o céu (o chá sobe os mesmos degraus, sem água).
+  terraces: { levels: 3, rise: 1.3, contour: true, flooded: true },
   grass: ['#93b080', '#a0c08e', '#86a874'],
   bush: ['#5f8f5a', '#4f6f52', '#f4a3c0'],
   flowers: ['#fbf6ee', '#f3c9d2', '#c9b6e0', '#f0b6c4'],

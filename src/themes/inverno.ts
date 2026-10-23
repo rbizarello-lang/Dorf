@@ -71,7 +71,7 @@ export const inverno: Theme = {
   crops: [
     // O lago congelado no lugar da lavoura: gelo azulado com rachaduras e buracos de pesca, e um pesqueiro
     // (tenda, varal) em muitas parcelas. É a primeira cultura: a aba da emenda herda a cor dela.
-    { style: 'icefield', weight: 0.78, colors: ['#d4ebf8', '#c2e0f2', '#e4f3fb'], soil: '#5c96bb' },
+    { style: 'icefield', weight: 0.78, colors: ['#d4ebf8', '#c2e0f2', '#e4f3fb'], soil: '#3f7fb0', rim: '#2b5578', glaze: '#4c8cbc' },
     // Um campo em cada quatro continua de cevada sob a neve (o laço com a economia dos vikings).
     { style: 'barley', weight: 0.22, colors: ['#d9c9a0', '#e6dbc0', '#cbbb92'], soil: '#dfe6ec' },
   ],
