@@ -1,0 +1,91 @@
+:root {
+  --brass: #c9964a;
+  --brass-hi: #f0cf8a;
+  --brass-lo: #6f4d1f;
+  --cream: #ecd9aa;
+  --ink: #1a0f08;
+  --bg-in: #5c4332;
+  --bg-out: #130e0a;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg-out); }
+body {
+  font-family: var(--serif);
+  color: var(--cream);
+  background: radial-gradient(ellipse 80% 70% at 50% 40%, var(--bg-in) 0%, var(--bg-out) 78%);
+  -webkit-font-smoothing: antialiased;
+  touch-action: none;
+}
+canvas#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+canvas#view:active { cursor: grabbing; }
+#ui { position: fixed; inset: 0; pointer-events: none; }
+#ui > * { pointer-events: auto; }
+
+.title { position: absolute; top: 14px; left: 0; right: 0; text-align: center; pointer-events: none; padding: 0 16px; }
+.title h1 { margin: 0; font-weight: 500; font-size: 15px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(236, 217, 170, 0.78); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6); }
+.title h1 span { text-transform: none; letter-spacing: 0.06em; font-style: italic; opacity: 0.8; font-size: 13px; }
+.title p { margin: 5px 0 0; font-size: 12.5px; font-style: italic; letter-spacing: 0.1em; color: rgba(236, 217, 170, 0.5); }
+
+.hint { position: absolute; right: 16px; bottom: 26px; font-size: 11.5px; font-style: italic; letter-spacing: 0.04em; color: rgba(236, 217, 170, 0.38); pointer-events: none; text-align: right; max-width: 190px; }
+
+.panel {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  width: min(900px, calc(100vw - 24px));
+  display: grid; grid-template-columns: 1fr 190px 1fr; align-items: center; gap: 10px;
+  padding: 12px 22px 12px;
+  border-radius: 14px;
+  background:
+    repeating-linear-gradient(98deg, rgba(0, 0, 0, 0.08) 0 2px, rgba(255, 190, 120, 0.025) 2px 5px, rgba(0, 0, 0, 0) 5px 11px),
+    linear-gradient(180deg, #4f2e1b 0%, #3a2112 55%, #2c190d 100%);
+  border: 1px solid #8a6330;
+  box-shadow: 0 0 0 2px #1a0f08, 0 0 0 3px rgba(201, 150, 74, 0.55), 0 18px 40px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 214, 150, 0.22), inset 0 -10px 24px rgba(0, 0, 0, 0.35);
+}
+.group { display: flex; flex-direction: column; align-items: center; gap: 7px; min-width: 0; }
+.cap { font-size: 10.5px; letter-spacing: 0.24em; text-transform: uppercase; color: rgba(236, 217, 170, 0.7); text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.7), 0 1px 0 rgba(255, 220, 160, 0.12); }
+
+.seg { position: relative; display: flex; gap: 0; padding: 3px; border-radius: 10px; background: #1a0f08; box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 214, 150, 0.18); }
+.seg button {
+  all: unset; box-sizing: border-box; cursor: pointer; position: relative; z-index: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 66px; padding: 7px 8px 6px;
+  font: 500 11.5px/1 var(--serif); letter-spacing: 0.04em; color: #cdb98a; border-radius: 8px;
+  background: linear-gradient(180deg, #4a2c19, #35200f);
+  margin: 0 1px;
+  box-shadow: inset 0 1px 0 rgba(255, 214, 150, 0.2), 0 2px 3px rgba(0, 0, 0, 0.55);
+  transition: transform 0.18s, background 0.3s, color 0.3s, box-shadow 0.3s;
+}
+.seg button svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.seg button:hover { color: #f6e6b8; }
+.seg button:focus-visible { outline: 2px solid var(--brass-hi); outline-offset: 1px; }
+.seg button[aria-pressed="true"] {
+  color: #2a1808; transform: translateY(1px);
+  background: linear-gradient(180deg, #f1d58f, #c6954a 55%, #a87a35);
+  box-shadow: inset 0 2px 4px rgba(90, 55, 15, 0.5), 0 0 14px rgba(240, 190, 100, 0.35);
+  text-shadow: 0 1px 0 rgba(255, 240, 200, 0.5);
+}
+.lever button { min-width: 82px; padding: 15px 8px; font-size: 13px; }
+.lever .knob { display: none; }
+
+.dialwrap { display: flex; justify-content: center; margin: -44px 0 -4px; }
+.dial { width: 188px; height: 188px; filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.6)); overflow: visible; }
+.dial .wedge { opacity: 0; cursor: pointer; transition: opacity 0.3s; }
+.dial .wedge:hover { opacity: 0.12; }
+.dial .wedge.on { opacity: 0.2; }
+.dial .lbl { font: 600 8.6px var(--serif); letter-spacing: 0.1em; fill: rgba(222, 196, 140, 0.55); cursor: pointer; transition: fill 0.3s; }
+.dial .lbl.on { fill: #ffe9b4; }
+.dial .lbl:hover { fill: #fff3cf; }
+.dial .needle { transform-origin: 0 0; transition: transform 1.4s cubic-bezier(0.3, 1.45, 0.45, 1); }
+
+@media (max-width: 760px) {
+  .panel { grid-template-columns: 1fr 1fr; grid-template-areas: "dial dial" "hours years"; padding: 8px 10px 10px; gap: 6px 8px; bottom: 8px; }
+  .dialwrap { grid-area: dial; margin: -34px 0 -6px; }
+  .dial { width: 150px; height: 150px; }
+  .hours { grid-area: hours; grid-column: 1 / -1; order: 3; }
+  .years { grid-area: years; grid-column: 1 / -1; order: 4; }
+  .seg button { min-width: 0; flex: 1; padding: 6px 4px 5px; font-size: 10.5px; }
+  .seg { width: 100%; }
+  .lever button { padding: 9px 6px; }
+  .hint { display: none; }
+  .title h1 { font-size: 12px; }
+  .title h1 span { font-size: 11px; display: block; margin-top: 2px; }
+}
