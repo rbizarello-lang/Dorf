@@ -1,0 +1,27 @@
+{
+  "name": "ilha-das-lanternas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ilha das Lanternas: puzzle de cartas e névoa em hexágonos (etapa 1: regras e jogador simulado).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx tests/sim.ts",
+    "shot": "node scripts/shot.mjs",
+    "check": "npm run typecheck && npm run test && npm run build"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/three": "^0.186.0",
+    "playwright-core": "^1.64.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0",
+    "vite-plugin-singlefile": "^2.3.0"
+  }
+}
