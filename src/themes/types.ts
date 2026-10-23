@@ -179,6 +179,14 @@ export interface CropKind {
   colors: string[];
   /** Cor da terra da parcela (em arroz, a lâmina d'água). */
   soil: string;
+  /** Plantação drenada: nos terraços alagados (`Theme.terraces.flooded`) fica sem lâmina d'água (o arroz maduro, dourado sobre lama). */
+  dry?: boolean;
+  /** Margem dura da parcela: o bisel acaba nesta cor (e com o peso cheio da plantação, sem a neve do `fieldSnow`) em vez de se fundir ao chão. */
+  rim?: string;
+  /** Lâmina rasa e espelhada sobre a parcela inteira (o gelo do lago congelado), no material da água; esta é a cor do leito. As parcelas ficam na mesma altura, para se emendarem numa mancha só. */
+  glaze?: string;
+  /** Coluna d'água da lâmina (padrão 0,014): menos fica mais branco (a água rasa congela no inverno), mais fica mais azul e escura. */
+  glazeDepth?: number;
 }
 
 /**
@@ -408,6 +416,17 @@ export interface Theme {
     styles?: CropStyle[];
     /** Multiplica a altura de cada patamar e do beiral (padrão 1 = 12 mm por degrau; o arrozal oriental sobe mais para o degrau ler de longe). */
     rise?: number;
+    /**
+     * Curvas de nível: em vez de anéis concêntricos, a parcela vira 2 ou 3 faixas largas e contínuas, paralelas a uma
+     * direção sorteada pela peça (e levemente curvas), cada uma com uma mureta fina de terra na frente e as fileiras
+     * seguindo a curva. A faixa sobe de frente para o fundo; o miolo fica longe da borda da peça. Padrão: desligado.
+     */
+    contour?: boolean;
+    /**
+     * Só com `contour`: lâmina d'água rasa sobre cada patamar das culturas `rice` (menos as `dry`), no material da água
+     * (reflexo do céu, brilho do sol, cáusticas), com o arroz saindo dela. Padrão: desligado.
+     */
+    flooded?: boolean;
   };
   /**
    * Chão pela distância ao rio (várzea): o prado e a plantação perto da água ganham a cor `color`, e a cor volta ao normal
