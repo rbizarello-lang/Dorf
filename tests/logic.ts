@@ -6,6 +6,7 @@ import { Game } from '../src/core/game';
 import { DIRS, hkey, opposite, unkey, hexToWorld, worldToHex, hexDistance } from '../src/core/hex';
 import { T, isStrict, rotateEdges, type TileDef } from '../src/core/tiles';
 import { mulberry32 } from '../src/core/rng';
+import { cornerLinks, knotColors } from '../src/core/quilt';
 import { MODES, modeRules, type Mode } from '../src/core/modes';
 import { generateSites } from '../src/core/sites';
 import { SPECIAL_KINDS, type SpecialKind } from '../src/core/specials';
@@ -42,6 +43,38 @@ const ORACLE_INF: Record<string, { terrains: T[]; per: number[] }> = {
   apiary: { terrains: [T.Grass, T.Field], per: [1, 1, 1, 2] },
 };
 const ORACLE_INF_CAP = 8;
+
+// Colcha (oráculo): nó de canto = ponto do mapa onde 3 peças se encontram e as três mostram a mesma cor.
+// A posição de cada canto sai da geometria (centro da casa + ponto a 60°·v), sem usar `cornerLinks`.
+const oracleCorners = (p: Placed): number[] => {
+  const base = knotColors(p.def.seed);
+  const out = new Array<number>(6);
+  for (let i = 0; i < 6; i++) out[(i + p.rot) % 6] = base[i];
+  return out;
+};
+const oracleCornerXY = (p: { q: number; r: number }, v: number) => {
+  const w = hexToWorld(p.q, p.r);
+  return [w.x + Math.cos((Math.PI / 3) * v), w.z + Math.sin((Math.PI / 3) * v)];
+};
+/** Para cada canto v da peça `t`: as outras peças que dividem o ponto e a cor delas ali. */
+function oracleCornerSharers(b: Board, t: Placed) {
+  const out: { v: number; others: { p: Placed; color: number }[] }[] = [];
+  for (let v = 0; v < 6; v++) {
+    const [x, z] = oracleCornerXY(t, v);
+    const others: { p: Placed; color: number }[] = [];
+    for (const o of b.list) {
+      if (o === t) continue;
+      const ow = hexToWorld(o.q, o.r), tw = hexToWorld(t.q, t.r);
+      if (Math.hypot(ow.x - tw.x, ow.z - tw.z) > 1.8) continue;
+      for (let u = 0; u < 6; u++) {
+        const [ox, oz] = oracleCornerXY(o, u);
+        if (Math.abs(ox - x) < 1e-6 && Math.abs(oz - z) < 1e-6) others.push({ p: o, color: oracleCorners(o)[u] });
+      }
+    }
+    out.push({ v, others });
+  }
+  return out;
+}
 
 // Math.random determinístico para tornar bestMove reprodutível nos testes.
 function seedMathRandom(seed: number) {
@@ -416,6 +449,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     const foundBefore = b.sites.filter((st) => st.found).length;
 
     game.rot = m.rot;
+    const chk = game.check(m.q, m.r);
     const res = game.place(m.q, m.r);
     if (!res) {
       fail(`seed ${seed}: game.place recusou jogada válida`);
@@ -466,6 +500,24 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     }
     pts += inf;
     assert(res.influence.points === inf, `seed ${seed}: influência ${res.influence.points} != oráculo ${inf}`);
+    // Colcha: nós de canto, recalculados pela geometria do mapa.
+    const knotsExp: { corner: number; color: number }[] = [];
+    const wantsExp: { corner: number; color: number }[] = [];
+    if (rules.knots > 0) {
+      const mine = oracleCorners(res.placed);
+      assert(mine.length === 6 && mine.every((c, _, a) => a.filter((x) => x === c).length === 2) && res.placed.corners.join() === mine.join(), `seed ${seed}: cores dos cantos ${res.placed.corners} != oráculo ${mine}`);
+      for (const { v, others } of oracleCornerSharers(b, res.placed)) {
+        assert(others.length <= 2, `seed ${seed}: ${others.length + 1} peças no mesmo canto`);
+        if (others.length !== 2 || others[0].color !== others[1].color) continue;
+        (mine[v] === others[0].color ? knotsExp : wantsExp).push({ corner: v, color: others[0].color });
+      }
+      pts += knotsExp.length * rules.knots;
+      if (knotsExp.length) inc('nos', knotsExp.length);
+      if (wantsExp.length) inc('cantos_que_pedem', wantsExp.length);
+      assert(JSON.stringify(res.knots) === JSON.stringify(knotsExp), `seed ${seed}: nós ${JSON.stringify(res.knots)} != oráculo ${JSON.stringify(knotsExp)}`);
+      assert(chk !== null && JSON.stringify(chk.knots) === JSON.stringify(knotsExp) && JSON.stringify(chk.wants) === JSON.stringify(wantsExp), `seed ${seed}: prévia dos nós diverge do oráculo`);
+      assert(res.placed.knots.join() === knotsExp.map((k) => k.corner).join(), `seed ${seed}: Placed.knots diverge`);
+    } else assert(res.knots.length === 0 && res.placed.corners.length === 0 && res.placed.knots.length === 0, `seed ${seed}: nós fora da Colcha`);
     if (inf) inc('influencia');
     const perfect = nbs >= 2 && mt === nbs;
     if (perfect) pts += rules.perfectBonus + (oBless.has('surveyors') ? ORACLE_BLESS.perfect : 0);
@@ -772,6 +824,8 @@ function replay(log: GameLog, upTo = log.moves.length) {
 // ------------------------------------------------------------------ execução
 
 const N_GAMES = Number(process.argv[2] ?? 300);
+const BASE_MODES = MODES.filter((m) => m.id !== 'colcha');
+const QUILT = MODES.find((m) => m.id === 'colcha')!;
 const t0 = Date.now();
 const logs: GameLog[] = [];
 const POLICIES: Policy[] = ['greedy', 'quest', 'random', 'worst'];
@@ -780,14 +834,28 @@ for (let g = 0; g < N_GAMES; g++) {
   const policy = POLICIES[Math.floor(g / THEMES.length) % POLICIES.length];
   const seed = 1000 + g * 7919;
   seedMathRandom(seed ^ 0xabcdef);
-  // Um quinto das partidas em cada modo alternativo (o resto no clássico).
-  const mode = g % 5 === 4 ? MODES[1 + Math.floor(g / 5) % (MODES.length - 1)] : MODES[0];
+  // Um quinto das partidas em cada modo alternativo (o resto no clássico). A Colcha tem o bloco dela mais abaixo,
+  // para não mexer em quais partidas caem em cada modo.
+  const mode = g % 5 === 4 ? BASE_MODES[1 + Math.floor(g / 5) % (BASE_MODES.length - 1)] : BASE_MODES[0];
   // Um terço das partidas com todas as peças especiais liberadas e um terço só com a primeira.
   const specials = g % 3 === 1 ? [...SPECIAL_KINDS] : g % 3 === 2 ? [SPECIAL_KINDS[0]] : [];
   const lg = simulate(seed, themeIdx, g < 60, policy, mode, specials);
   (lg as GameLog & { policy?: string }).policy = policy;
   inc('partidas_' + policy);
   inc('modo_' + mode.id);
+  logs.push(lg);
+}
+// Colcha: partidas à parte (sementes 900000 em diante), com as quatro políticas e todos os temas.
+for (let g = 0; g < Math.max(40, Math.floor(N_GAMES / 10)); g++) {
+  const themeIdx = g % THEMES.length;
+  const policy = POLICIES[Math.floor(g / THEMES.length) % POLICIES.length];
+  const seed = 900000 + g * 7919;
+  seedMathRandom(seed ^ 0xabcdef);
+  const specials = g % 3 === 1 ? [...SPECIAL_KINDS] : g % 3 === 2 ? [SPECIAL_KINDS[0]] : [];
+  const lg = simulate(seed, themeIdx, g < 20, policy, QUILT, specials);
+  (lg as GameLog & { policy?: string }).policy = policy;
+  inc('partidas_' + policy);
+  inc('modo_colcha');
   logs.push(lg);
 }
 // Partida rápida: a pilha de 30 nunca cresce, então colocadas + descartadas ≤ 30 em toda partida.
@@ -952,6 +1020,42 @@ if (contBad) fail(`continuação pós-replay divergiu em ${contBad} partidas`);
       else if (a[i].seed !== c[i].seed || a[i].edges.join() !== c[i].edges.join()) bad++;
     }
     if (specials !== 6) bad++;
+  }
+  // A Colcha não mexe na sequência de peças: as mesmas peças com e sem nós.
+  for (let seed = 1; seed <= 50; seed++) {
+    const g1 = new Game(seed, { ...DEFAULT_RULES, startTiles: 200 });
+    const g2 = new Game(seed, { ...DEFAULT_RULES, startTiles: 200, knots: 25 });
+    const a = g1.upcoming(60), c = g2.upcoming(60);
+    if (g1.current?.seed !== g2.current?.seed || a.some((t, i) => t.seed !== c[i].seed || t.edges.join() !== c[i].edges.join())) bad++;
+  }
+  // Cores dos cantos: 2 de cada uma das 3, e os 90 arranjos possíveis aparecem.
+  {
+    const seen = new Set<string>();
+    for (let seed = 1; seed <= 20000; seed++) {
+      const c = knotColors(seed * 977);
+      if (c.length !== 6 || [0, 1, 2].some((k) => c.filter((x) => x === k).length !== 2) || knotColors(seed * 977).join() !== c.join()) bad++;
+      seen.add(c.join(''));
+    }
+    if (seen.size !== 90) bad++;
+  }
+  // Os dois vizinhos de cada canto, vistos pela geometria: o mesmo ponto do mapa, com o canto certo em cada um.
+  {
+    const cornerAt = (q: number, r: number, v: number) => {
+      const w = hexToWorld(q, r);
+      return [w.x + Math.cos((Math.PI / 3) * v), w.z + Math.sin((Math.PI / 3) * v)];
+    };
+    for (const [q, r] of [[0, 0], [3, -5], [-4, 2]]) {
+      for (let v = 0; v < 6; v++) {
+        const [x, z] = cornerAt(q, r, v);
+        for (const [d, c] of cornerLinks(v)) {
+          const [ox, oz] = cornerAt(q + DIRS[d][0], r + DIRS[d][1], c);
+          if (Math.abs(ox - x) > 1e-9 || Math.abs(oz - z) > 1e-9) bad++;
+        }
+        // e os dois vizinhos são vizinhos entre si
+        const [[da], [db]] = cornerLinks(v);
+        if (hexDistance(DIRS[da][0], DIRS[da][1], DIRS[db][0], DIRS[db][1]) !== 1) bad++;
+      }
+    }
   }
   console.log(`Sítios: ${total} gerações conferidas, erros ${bad}`);
   if (bad) fail(`sítios: ${bad} erros de geração`);

@@ -1888,6 +1888,28 @@ function wonderGeometry(theme: Theme): { base: THREE.BufferGeometry; body: THREE
 const GOLD = '#d9b44a';
 const FIRE = '#ff9a3c';
 
+/** Botão de lã da Colcha: aro escuro, corpo na cor da instância e dois furos. ~50 faces. */
+function buttonGeometry() {
+  const hole = (x: number) => new THREE.CircleGeometry(0.0085, 4).rotateX(-Math.PI / 2).translate(x, 0.0146, 0);
+  return kit([
+    { geo: new THREE.CircleGeometry(0.062, 8).rotateX(-Math.PI / 2).translate(0, 0.002, 0), color: '#3a2b24' },
+    { geo: new THREE.CylinderGeometry(0.045, 0.05, 0.014, 8).translate(0, 0.007, 0), color: '#fff', tint: 1 },
+    { geo: hole(-0.014), color: '#3a2b24' },
+    { geo: hole(0.014), color: '#3a2b24' },
+  ]);
+}
+
+/** Nó amarrado: duas fitas cruzadas e um miolo dourado, no vértice onde as três peças se encontram. */
+function knotGeometry() {
+  const ribbon = (ry: number) => new THREE.BoxGeometry(0.2, 0.012, 0.04).rotateY(ry).translate(0, 0.018, 0);
+  return kit([
+    { geo: ribbon(0), color: GOLD, glow: 0.35 },
+    { geo: ribbon(Math.PI / 3), color: GOLD, glow: 0.35 },
+    { geo: ribbon(-Math.PI / 3), color: GOLD, glow: 0.35 },
+    { geo: new THREE.OctahedronGeometry(0.048, 0).scale(1, 0.55, 1).translate(0, 0.03, 0), color: '#f6dc86', glow: 0.5 },
+  ]);
+}
+
 /** Flâmula triangular apontando para +x, com a base em x = 0 e o meio em y. */
 const flagGeo = (len: number, h: number, y: number) =>
   new THREE.CylinderGeometry(h / 2, h / 2, 0.002, 3).rotateX(Math.PI / 2).rotateZ(Math.PI / 2).scale(len / (0.75 * h), 1, 1).translate(len / 3, y, 0);
@@ -2496,6 +2518,8 @@ export class Lib {
     set('pennant', pennantGeometry(theme.trunk));
     set('fire', fireGeometry());
     set('lantern', lanternGeometry());
+    set('botao', buttonGeometry());
+    set('no', knotGeometry());
     set('scaffold', scaffoldGeometry(theme.trunk));
     const wonder = wonderGeometry(theme);
     set('wonder:base', wonder.base);
@@ -2559,7 +2583,7 @@ export class Lib {
 
   /** Plantas e capim não projetam sombra (economia grande, quase invisível). */
   castsShadow(key: string) {
-    return !(key.startsWith('crop:') || key === 'grass' || key === 'reed' || key === 'flower' || key === 'lily' || key === 'fire' || key === 'lantern');
+    return !(key.startsWith('crop:') || key === 'grass' || key === 'reed' || key === 'flower' || key === 'lily' || key === 'fire' || key === 'lantern' || key === 'botao');
   }
 }
 

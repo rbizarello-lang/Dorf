@@ -4,6 +4,7 @@ import { LOOKOUT_MOVES, SITE_REWARD, type Site, type SiteKind } from './sites';
 import { SPECIALS, type SpecialKind } from './specials';
 import { SEASON_BONUS, SEASON_KIND, seasonAt } from './seasons';
 import { INFLUENCE, INFLUENCE_CAP, SYN_KINDS, type SynHit, type SynKind, synergyOf } from './synergy';
+import { cornerLinks, knotColors, rotateCorners, type KnotHit } from './quilt';
 import { payRoutes, type RouteHit, type RoutePost } from './routes';
 import { T, isStrict, rotateEdges, type QuestKind, type TileDef } from './tiles';
 
@@ -64,6 +65,8 @@ export interface Rules {
   exactQuestTiles: number;
   closeQuestTiles: number;
   countQuestTiles: number;
+  /** Colcha: pontos por nó de canto (3 peças com o mesmo botão no mesmo canto, src/core/quilt.ts). 0 = sem nós. */
+  knots: number;
 }
 
 export const DEFAULT_RULES: Rules = {
@@ -98,6 +101,7 @@ export const DEFAULT_RULES: Rules = {
   exactQuestTiles: 7,
   closeQuestTiles: 6,
   countQuestTiles: 5,
+  knots: 0,
 };
 
 export interface Placed {
@@ -118,6 +122,10 @@ export interface Placed {
   site?: SiteKind;
   /** Canteiro da maravilha (o meio da peça fica livre para ela). */
   wonder?: boolean;
+  /** Cor do botão de cada canto, já girada (posição no mundo). Vazio fora da Colcha. */
+  corners: number[];
+  /** Cantos em que esta peça amarrou um nó quando foi colocada (posição no mundo). */
+  knots: number[];
 }
 
 export interface Quest {
@@ -163,6 +171,10 @@ export interface Check {
   wonder: boolean;
   /** Influência das construções vizinhas: pontos (já com o teto) e quanto cada tipo deu. */
   influence: { points: number; kinds: { kind: SynKind; points: number }[] };
+  /** Colcha: nós que a peça amarraria (as duas vizinhas do canto e a peça mostram a mesma cor). */
+  knots: KnotHit[];
+  /** Colcha: cantos cujas duas vizinhas já mostram a mesma cor, mas a peça mostra outra (a cor que o canto pede). */
+  wants: KnotHit[];
 }
 
 export interface PlaceResult {
@@ -191,6 +203,8 @@ export interface PlaceResult {
   influence: Check['influence'];
   /** Rotas pagas nesta jogada (modo Estrada Real). Vazio no clássico. */
   routes: RouteHit[];
+  /** Nós amarrados nesta jogada (modo Colcha). Vazio nos outros modos. */
+  knots: KnotHit[];
 }
 
 export class Board {
@@ -235,7 +249,8 @@ export class Board {
     return this.quests.filter((q) => q.state === 'active');
   }
 
-  check(q: number, r: number, edges: readonly T[]): Check {
+  /** `corners`: a cor do botão de cada canto da peça (só na Colcha); sem ela, não há nós. */
+  check(q: number, r: number, edges: readonly T[], corners?: readonly number[]): Check {
     const edgeState = [0, 0, 0, 0, 0, 0];
     const occupied = this.tiles.has(hkey(q, r));
     let neighbors = 0;
@@ -264,7 +279,25 @@ export class Board {
     const R = this.rules;
     const lastEra = R.eraScores.length > 1 && this.era === R.eraScores.length - 1;
     const wonder = !this.wonder && R.wonderStages > 0 && lastEra && eraMark === null && edges.filter((e) => e === T.Village).length >= 2;
-    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, synergies, site: this.siteAt(q, r), eraMark, wonder, influence: this.influenceAt(q, r, edges) };
+    const knots: KnotHit[] = [];
+    const wants: KnotHit[] = [];
+    if (corners && R.knots > 0) this.knotsAt(q, r, corners, knots, wants);
+    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, synergies, site: this.siteAt(q, r), eraMark, wonder, influence: this.influenceAt(q, r, edges), knots, wants };
+  }
+
+  /**
+   * Nós de canto de uma peça em (q, r): nos cantos onde as duas vizinhas já estão colocadas, a cor
+   * delas tem de ser a mesma. Se a peça mostra essa cor ali, o nó se amarra; se não, o canto "pede" a cor.
+   */
+  private knotsAt(q: number, r: number, corners: readonly number[], knots: KnotHit[], wants: KnotHit[]) {
+    for (let v = 0; v < 6; v++) {
+      const [[da, ca], [db, cb]] = cornerLinks(v);
+      const a = this.get(q + DIRS[da][0], r + DIRS[da][1]);
+      const b = this.get(q + DIRS[db][0], r + DIRS[db][1]);
+      if (!a || !b || a.corners[ca] !== b.corners[cb]) continue;
+      const color = a.corners[ca];
+      (corners[v] === color ? knots : wants).push({ corner: v, color });
+    }
   }
 
   /**
@@ -312,6 +345,7 @@ export class Board {
       if (p.eraMark !== undefined) c.eraMark = p.eraMark;
       if (p.site) c.site = p.site;
       if (p.wonder) c.wonder = true;
+      c.knots = p.knots.slice();
     }
     b.score = this.score;
     b.perfects = this.perfects;
@@ -335,7 +369,8 @@ export class Board {
   /** Coloca sem pontuar (peça inicial, reconstrução de estado). */
   placeRaw(q: number, r: number, def: TileDef, rot: number): Placed {
     const key = hkey(q, r);
-    const p: Placed = { q, r, key, def, rot, edges: rotateEdges(def.edges, rot), index: this.list.length, closed: false, synergies: [] };
+    const corners = this.rules.knots > 0 ? rotateCorners(knotColors(def.seed), rot) : [];
+    const p: Placed = { q, r, key, def, rot, edges: rotateEdges(def.edges, rot), index: this.list.length, closed: false, synergies: [], corners, knots: [] };
     this.tiles.set(key, p);
     this.list.push(p);
     this.frontier.delete(key);
@@ -348,9 +383,9 @@ export class Board {
 
   place(q: number, r: number, def: TileDef, rot: number): PlaceResult {
     const edges = rotateEdges(def.edges, rot);
-    const c = this.check(q, r, edges);
-    const placed = this.placeRaw(q, r, def, rot);
     const R = this.rules;
+    const c = this.check(q, r, edges, R.knots > 0 ? rotateCorners(knotColors(def.seed), rot) : undefined);
+    const placed = this.placeRaw(q, r, def, rot);
     let points = c.matches * R.matchPoints;
     const perfect = c.neighbors >= 2 && c.matches === c.neighbors;
     if (perfect) {
@@ -358,6 +393,9 @@ export class Board {
       this.perfects++;
     }
     placed.synergies = c.synergies;
+    // Colcha: cada canto com a mesma cor nas três peças amarra um nó.
+    placed.knots = c.knots.map((k) => k.corner);
+    points += c.knots.length * R.knots;
     // A peça especial tem a sua construção no meio: o marco da era e a maravilha esperam a próxima.
     if (c.eraMark !== null && !def.special) {
       placed.eraMark = c.eraMark;
@@ -510,7 +548,7 @@ export class Board {
       eraUp = this.era;
       this.markPending = this.era;
     }
-    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special, influence: c.influence, routes };
+    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special, influence: c.influence, routes, knots: c.knots };
   }
 
   blessed(id: BlessingId) {

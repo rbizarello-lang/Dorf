@@ -7,6 +7,7 @@ import { Game } from '../src/core/game';
 import { DIRS, hexDistance, hkey, opposite, unkey } from '../src/core/hex';
 import { MODES, modeRules, type Mode } from '../src/core/modes';
 import { mulberry32 } from '../src/core/rng';
+import { knotColors, rotateCorners } from '../src/core/quilt';
 import { previewRoutes } from '../src/core/routes';
 import { SITE_REWARD } from '../src/core/sites';
 import { synergyOf } from '../src/core/synergy';
@@ -15,13 +16,14 @@ import { THEMES, type Theme } from '../src/themes/themes';
 
 const rulesFor = (t: Theme, mode: Mode, seed: number): Rules => ({ ...DEFAULT_RULES, ...(mode.daily ? {} : t.rules), ...modeRules(mode, seed) });
 
-type Player = 'guloso' | 'missoes' | 'rotas' | 'explorador';
-const PLAYERS: Player[] = ['guloso', 'missoes', 'rotas', 'explorador'];
+type Player = 'guloso' | 'missoes' | 'rotas' | 'explorador' | 'costureiro';
+const PLAYERS: Player[] = ['guloso', 'missoes', 'rotas', 'explorador', 'costureiro'];
 const PLAYER_NAME: Record<Player, string> = {
   guloso: 'guloso',
   missoes: 'persegue missões',
   rotas: 'busca rotas',
   explorador: 'caça sítios',
+  costureiro: 'caça nós',
 };
 
 interface Buckets {
@@ -34,6 +36,7 @@ interface Buckets {
   especiais: number;
   maravilha: number;
   rotas: number;
+  nos: number;
   sobras: number;
   cercados: number;
   demais: number;
@@ -61,6 +64,7 @@ const emptyBuckets = (): Buckets => ({
   especiais: 0,
   maravilha: 0,
   rotas: 0,
+  nos: 0,
   sobras: 0,
   cercados: 0,
   demais: 0,
@@ -77,9 +81,10 @@ function addBuckets(b: Buckets, res: PlaceResult, rules: Rules) {
   const especiais = res.special?.points ?? 0;
   const maravilha = res.wonder?.done ? rules.wonderPoints : 0;
   const rotas = res.routes.reduce((a, h) => a + h.points, 0);
+  const nos = res.knots.length * rules.knots;
   const sobras = res.leftoverBonus ?? 0;
   const cercados = res.closed.length * rules.closedBonus;
-  const known = missoes + bordas + perfeitos + interacoes + influencia + sitios + especiais + maravilha + rotas + sobras + cercados;
+  const known = missoes + bordas + perfeitos + interacoes + influencia + sitios + especiais + maravilha + rotas + nos + sobras + cercados;
   b.missoes += missoes;
   b.bordas += bordas;
   b.perfeitos += perfeitos;
@@ -89,6 +94,7 @@ function addBuckets(b: Buckets, res: PlaceResult, rules: Rules) {
   b.especiais += especiais;
   b.maravilha += maravilha;
   b.rotas += rotas;
+  b.nos += nos;
   b.sobras += sobras;
   b.cercados += cercados;
   b.demais += res.points - known;
@@ -187,9 +193,30 @@ function siteMove(game: Game, def: TileDef, rand: () => number) {
   return best;
 }
 
+/**
+ * O guloso, mas um nó de canto pesa mais que um encaixe (quem joga vê os botões e a prévia dourada).
+ * Só faz diferença na Colcha; nos outros modos a nota é a do guloso.
+ */
+function knotMove(game: Game, def: TileDef, rand: () => number) {
+  const b = game.board;
+  const kc = b.rules.knots > 0 ? knotColors(def.seed) : null;
+  let best: { q: number; r: number; rot: number; score: number } | null = null;
+  for (const k of b.frontier) {
+    const [q, r] = unkey(k);
+    for (let rot = 0; rot < 6; rot++) {
+      const c = b.check(q, r, rotateEdges(def.edges, rot), kc ? rotateCorners(kc, rot) : undefined);
+      if (!c.valid) continue;
+      const score = greedyScore(c.matches, c.neighbors, rand) + c.knots.length * 12;
+      if (!best || score > best.score) best = { q, r, rot, score };
+    }
+  }
+  return best;
+}
+
 function choose(game: Game, player: Player, rand: () => number) {
   const def = game.current;
   if (!def) return null;
+  if (player === 'costureiro') return knotMove(game, def, rand);
   if (player === 'guloso') return game.bestMove(rand);
   if (player === 'missoes') return questMove(game, def, rand);
   if (player === 'explorador') return siteMove(game, def, rand);
@@ -294,6 +321,7 @@ const modes = MODES.filter((m) => m.id !== 'zen');
 const modeRows: Row[] = [];
 for (const mode of modes) {
   for (const player of PLAYERS) {
+    if (player === 'costureiro' && mode.id !== 'colcha') continue;
     const samples: Sample[] = [];
     for (let seed = 1; seed <= N; seed++) samples.push(play(seed, padrao, mode, player));
     modeRows.push(summarize(mode.name, PLAYER_NAME[player], samples));
@@ -324,8 +352,8 @@ function scoreTable(rows: Row[]) {
 }
 
 function sourceTable(rows: Row[]) {
-  const keys: (keyof Buckets)[] = ['missoes', 'bordas', 'perfeitos', 'interacoes', 'influencia', 'sitios', 'especiais', 'maravilha', 'rotas', 'sobras', 'cercados', 'demais'];
-  const names = ['Missões', 'Bordas', 'Perfeitos', 'Interações', 'Influência', 'Sítios', 'Especiais', 'Maravilha', 'Rotas', 'Sobras', 'Cercados', 'Demais'];
+  const keys: (keyof Buckets)[] = ['missoes', 'bordas', 'perfeitos', 'interacoes', 'influencia', 'sitios', 'especiais', 'maravilha', 'rotas', 'nos', 'sobras', 'cercados', 'demais'];
+  const names = ['Missões', 'Bordas', 'Perfeitos', 'Interações', 'Influência', 'Sítios', 'Especiais', 'Maravilha', 'Rotas', 'Nós', 'Sobras', 'Cercados', 'Demais'];
   const head = `| | Jogador | ${names.join(' | ')} | Rotas/partida |`;
   const sep = `|---|---|${names.map(() => '---:').join('|')}|---:|`;
   const body = rows.map((r) => {

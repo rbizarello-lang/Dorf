@@ -4,7 +4,7 @@ import { T } from './tiles';
 // Versões alternativas do jogo. Um modo é dado: muda regras e o que a interface oferece
 // (desfazer, semente do dia). As regras finais são padrão ← tema ← modo.
 
-export type ModeId = 'classico' | 'zen' | 'diario' | 'exploradores' | 'rotas' | 'rapida';
+export type ModeId = 'classico' | 'zen' | 'diario' | 'exploradores' | 'rotas' | 'rapida' | 'colcha';
 
 export interface Mode {
   id: ModeId;
@@ -66,6 +66,15 @@ export const MODES: readonly Mode[] = [
     // (a média do Clássico chega a ~100). Sem missões, sítios, maravilha e cartas, que só dão peças.
     rules: { startTiles: 30, fixedStack: true, questChance: 0, sites: 0, wonderStages: 0, blessings: false },
     undos: 1,
+  },
+  {
+    id: 'colcha',
+    name: 'Colcha',
+    tagline: 'Cada peça traz botões de lã nos cantos. Quando três peças mostram a mesma cor no mesmo canto, o nó se amarra e rende pontos.',
+    // Nós de canto: segunda camada de encaixe, independente do terreno (src/core/quilt.ts). O resto é o Clássico.
+    rules: { knots: 15 },
+    undos: 3,
+    more: true,
   },
 ];
 

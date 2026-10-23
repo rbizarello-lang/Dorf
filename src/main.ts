@@ -216,6 +216,8 @@ let turns: TurnNote[] = [];
 let tradeMarks: RouteMark[] = [];
 /** Rota que a peça da vez renderia na casa do fantasma. */
 let routePeek: RouteHit[] = [];
+/** Colcha: nós que a jogada na casa do fantasma amarraria. */
+let knotPeek = 0;
 let scorePeek: number | null = null;
 /** "Onde encaixa": as melhores casas da peça atual. Valem só para a jogada e o giro em que foram pedidas. */
 let hints: { q: number; r: number; rot: number; points: number }[] | null = null;
@@ -512,6 +514,7 @@ function updateGhost() {
   if (!game.current || !hover || !game.board.frontier.has(hkey(hover.q, hover.r)) || hud.modalOpen || capture.stage !== 'play') {
     world.clearGhost();
     routePeek = [];
+    knotPeek = 0;
     scorePeek = null;
     routePeekAt = '';
     hud.confirm.hidden = true;
@@ -805,6 +808,7 @@ function refreshTradeMarks() {
 function refreshRoutePeek() {
   if (!hover || !game.current) {
     routePeek = [];
+    knotPeek = 0;
     scorePeek = null;
     routePeekAt = '';
     return;
@@ -815,6 +819,7 @@ function refreshRoutePeek() {
   const peek = game.preview(hover.q, hover.r);
   scorePeek = peek ? peek.points : null;
   routePeek = peek?.routes ?? [];
+  knotPeek = peek?.knots.length ?? 0;
 }
 
 function announce(res: PlaceResult) {
@@ -848,7 +853,17 @@ function announce(res: PlaceResult) {
       sfx.note(7 + k * 2, 0, 0.5, 0.08);
     }, 250 + k * 160));
   });
-  if (res.synergies.length || res.placed.eraMark !== undefined) sfx.hammer(0.3);
+  // Colcha: um aviso por nó, no canto onde ele se amarrou.
+  res.knots.forEach((k, i) => {
+    const c = world.cornerPoint(res.placed, k.corner);
+    const p = world.project(c.x, 0.3, c.z);
+    synTimers.push(window.setTimeout(() => {
+      hud.floater(p.x, p.y, `Nó +${game.rules.knots}`, 'syn');
+      sfx.note(9 + i * 2, 0, 0.5, 0.08);
+    }, 200 + i * 140));
+  });
+  if (res.synergies.length || res.knots.length || res.placed.eraMark !== undefined) sfx.hammer(0.3);
+  if (res.knots.length) notes.push({ text: `${res.knots.length > 1 ? `${res.knots.length} nós amarrados` : 'Nó amarrado'}: +${res.knots.length * game.rules.knots}`, kind: 'good' });
   if (res.placed.eraMark !== undefined) notes.push({ text: `Marco da era: ${eraName(res.placed.eraMark)}`, kind: 'good' });
   for (const t of res.closed) {
     const p = screenOf(t.q, t.r);
@@ -919,6 +934,7 @@ function showHelp(tab = 'basico') {
         <li>Cercar uma peça com 6 vizinhas encaixadas rende <b>+${R.closedTiles} peça</b>.</li>
         <li>A cada 20 jogadas a estação muda (primavera, verão, outono, inverno) e uma interação rende +3: colmeias, moinho, serraria e pasto, nessa ordem.</li>
         <li>Com o fantasma sobre a casa, a etiqueta mostra os pontos da jogada antes de colocar.</li>
+        ${R.knots ? `<li><b>Colcha</b>: cada peça traz um botão de lã em cada canto, de três cores (vermelho, azul e marfim). Num canto se encontram até três peças: quando as três mostram a mesma cor ali, o <b>nó se amarra</b> (+${R.knots}) e um nó dourado aparece. Os botões não impedem jogada nenhuma, só premiam. Com o fantasma sobre a casa, um anel dourado marca o canto que amarra, e um anel colorido marca o canto que pede aquela cor: gire a peça (<kbd>R</kbd>) até casar.</li>` : ''}
         ${R.routes ? `<li><b>Estrada Real</b>: mercados e portos da mesma rede rendem pela distância, uma vez. 2 casas valem 22, 4 valem 54 e 6 valem 96 e devolvem uma peça. A etiqueta marca cada um no mapa, e a prévia soma a rota no total.</li>` : ''}
         <li>A partida acaba quando a pilha esvazia. <kbd>U</kbd> desfaz a última jogada (o número de vezes depende do modo).</li>
       </ul>`,
@@ -1741,7 +1757,8 @@ function step(now: number) {
   if (scorePeek !== null && hover) {
     const s = screenOf(hover.q, hover.r, 0.55);
     const route = routePeek.length ? ` · ${routePeek.map(routeLabel).join(' · ')}` : '';
-    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${route}`, color: theme.ui.accent, kind: 'score' });
+    const knots = knotPeek ? ` · ${knotPeek} nó${knotPeek > 1 ? 's' : ''}` : '';
+    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${knots}${route}`, color: theme.ui.accent, kind: 'score' });
   }
   // Influência das construções: o ganho aparece com o fantasma numa casa contornada.
   const inf = hover && game.current && !st ? game.board.influenceAt(hover.q, hover.r, game.current.edges) : null;
@@ -2116,6 +2133,31 @@ function start(data: unknown) {
     world.rig.target.set(x, 0, z);
     place(best.q, best.r);
   }
+  return best.n;
+};
+
+// Colcha: põe o fantasma na jogada com mais nós de canto (desempate: mais cantos que pedem cor) e devolve quantos nós.
+(window as unknown as { __ghostKnot: (commit?: boolean) => number }).__ghostKnot = (commit) => {
+  if (!game.current) return 0;
+  let best: { q: number; r: number; rot: number; n: number; w: number } | null = null;
+  for (const k of game.board.frontier) {
+    const [q, r] = [(k >> 13) - 4096, (k & 8191) - 4096];
+    for (let rot = 0; rot < 6; rot++) {
+      game.rot = rot;
+      const c = game.check(q, r)!;
+      if (c.valid && (!best || c.knots.length > best.n || (c.knots.length === best.n && c.wants.length > best.w))) best = { q, r, rot, n: c.knots.length, w: c.wants.length };
+    }
+  }
+  game.rot = 0;
+  rotSteps = 0;
+  if (!best) return 0;
+  hover = { q: best.q, r: best.r };
+  while (game.rot !== best.rot) rotate(1);
+  updateGhost();
+  const { x, z } = hexToWorld(best.q, best.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  if (commit) place(best.q, best.r);
   return best.n;
 };
 

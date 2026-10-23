@@ -4,6 +4,7 @@ import { unkey } from './hex';
 import { mulberry32, type Rng } from './rng';
 import { generateSites } from './sites';
 import { type SpecialKind, specialSlots, specialTile } from './specials';
+import { knotColors, rotateCorners } from './quilt';
 import { routePosts } from './routes';
 import { T, generateTile, rotateEdges, type TileDef } from './tiles';
 
@@ -107,9 +108,14 @@ export class Game {
     this.rot = (this.rot + dir + 6) % 6;
   }
 
+  /** Cores dos cantos da peça atual com o giro atual (só na Colcha). */
+  currentCorners() {
+    return this.current && this.rules.knots > 0 ? rotateCorners(knotColors(this.current.seed), this.rot) : undefined;
+  }
+
   check(q: number, r: number) {
     const edges = this.currentEdges();
-    return edges ? this.board.check(q, r, edges) : null;
+    return edges ? this.board.check(q, r, edges, this.currentCorners()) : null;
   }
 
   /**
@@ -225,12 +231,14 @@ export class Game {
     const def = this.current;
     if (!def) return null;
     let best: Move | null = null;
+    // Colcha: o guloso também prefere o canto que amarra nó (6 de nota: dois encaixes).
+    const kc = this.rules.knots > 0 ? knotColors(def.seed) : null;
     for (const k of this.board.frontier) {
       const [q, r] = unkey(k);
       for (let rot = 0; rot < 6; rot++) {
-        const c = this.board.check(q, r, rotateEdges(def.edges, rot));
+        const c = this.board.check(q, r, rotateEdges(def.edges, rot), kc ? rotateCorners(kc, rot) : undefined);
         if (!c.valid) continue;
-        const score = c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) + rand() * 0.5;
+        const score = c.knots.length * 6 + c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) + rand() * 0.5;
         if (!best || score > best.score) best = { q, r, rot, score };
       }
     }

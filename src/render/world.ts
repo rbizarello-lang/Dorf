@@ -4,7 +4,8 @@ import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Board, Check, PlaceResult, Placed } from '../core/board';
 import { EggTracker, phaseOfTod, type EggSpec } from '../core/eggs';
-import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey } from '../core/hex';
+import { DIRS, corner, edgeMid, hexToWorld, hkey, opposite, unkey } from '../core/hex';
+import { knotColors } from '../core/quilt';
 import { seasonAt } from '../core/seasons';
 import type { SiteKind } from '../core/sites';
 import type { SynHit, SynKind } from '../core/synergy';
@@ -26,7 +27,7 @@ import { SkyEnv } from './sky';
 import { FX, Fireflies, Sprites, Weather } from './fx';
 import { LiveTile } from './liveTile';
 import { PreviewView } from './preview';
-import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type BuildOpts, type TileBuild } from './tileBuilder';
+import { KNOT_PALETTE, TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type BuildOpts, type TileBuild } from './tileBuilder';
 import { NIGHT_LIGHT } from './nightLight';
 
 export type { Quality };
@@ -552,6 +553,11 @@ export class World {
   private hoverRing: THREE.Mesh;
   private hoverMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.9, depthWrite: false, fog: false });
   private markers: THREE.Mesh[] = [];
+  /** Colcha: anéis nos cantos do fantasma (dourado = nó que se amarra; cor do botão = a cor que o canto pede). */
+  private cornerMarks: THREE.Mesh[] = [];
+  private cornerLocal: THREE.Vector3[] = [];
+  /** A partida tem nós de canto (Colcha): as peças ganham botões nos cantos. O jogo liga antes de montar o mapa. */
+  quilt = false;
   /** Anéis dourados que se abrem em volta da peça (encaixe perfeito, nova era); cada um com o próprio material para apagar sozinho. */
   private halos: { mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicNodeMaterial>; t: number; dur: number; grow: number }[] = [];
   /** Posição das marcas de borda relativa ao fantasma (elas acompanham a peça flutuando). */
@@ -701,6 +707,16 @@ export class World {
       m.visible = false;
       this.markers.push(m);
       this.markerLocal.push(new THREE.Vector3());
+      this.scene.add(m);
+    }
+
+    const ring = new THREE.RingGeometry(0.085, 0.125, 16).rotateX(-Math.PI / 2);
+    for (let i = 0; i < 6; i++) {
+      const m = new THREE.Mesh(ring, new THREE.MeshBasicNodeMaterial({ fog: false, transparent: true, opacity: 0.95, depthWrite: false }));
+      m.visible = false;
+      m.renderOrder = 3;
+      this.cornerMarks.push(m);
+      this.cornerLocal.push(new THREE.Vector3());
       this.scene.add(m);
     }
 
@@ -1055,13 +1071,19 @@ export class World {
 
   // ---------------------------------------------------------------- mapa
 
-  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; eggs?: BuildOpts['eggs'] }) {
+  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; eggs?: BuildOpts['eggs']; corners?: readonly number[]; knots?: readonly number[] }) {
     return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, special: def.special, ...extra });
   }
 
   /** Peça do mapa já colocada: a inicial reserva o Centro, e a do marco o ergue. */
   private buildPlaced(p: Placed) {
-    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths: this.settleWidths(p), eggs: this.eggKits.get(p.key) });
+    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths: this.settleWidths(p), eggs: this.eggKits.get(p.key), ...this.quiltOf(p.def, p.rot, p.knots) });
+  }
+
+  /** Colcha: botões dos cantos e nós amarrados na orientação de origem da peça (a de `buildTile`). */
+  private quiltOf(def: TileDef, rot: number, tied: readonly number[]) {
+    if (!this.quilt) return {};
+    return { corners: knotColors(def.seed), knots: tied.map((v) => (v - rot + 6) % 6) };
   }
 
   /**
@@ -1115,6 +1137,7 @@ export class World {
 
   rebuild(board: Board) {
     this.board = board;
+    this.quilt = board.rules.knots > 0;
     this.applySeason();
     for (const c of this.chunks.values()) c.dispose(this.staticRoot);
     this.chunks.clear();
@@ -1520,7 +1543,8 @@ export class World {
     // Ovos de peça desta jogada: o kit entra na peça; o resto (evento, céu, som) dispara quando ela assenta.
     if (this.board) this.feedEggs(this.board.list, p.index + 1, true);
     const eggs = this.eggKits.get(p.key);
-    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${eggs?.map((e) => e.kit).join('+') ?? ''}`;
+    const quilt = this.quiltOf(p.def, p.rot, p.knots);
+    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${eggs?.map((e) => e.kit).join('+') ?? ''}${quilt.knots ? `|q${quilt.knots.join('')}` : ''}`;
     let live: LiveTile;
     let y0 = 1.2;
     if (this.ghost && this.ghost.def === p.def && this.ghost.sig === sig) {
@@ -1529,7 +1553,7 @@ export class World {
       this.ghost = null;
       this.ghostKey = '';
     } else {
-      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths, eggs }), sig, this.lib, this.quality !== 'low');
+      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths, eggs, ...quilt }), sig, this.lib, this.quality !== 'low');
       this.scene.add(live.group);
       this.dropGhost();
     }
@@ -1538,6 +1562,7 @@ export class World {
     live.group.position.set(x, y0, z);
     this.hoverRing.visible = false;
     for (const m of this.markers) m.visible = false;
+    for (const m of this.cornerMarks) m.visible = false;
     this.drops.push({ live, placed: p, t: 0, y0, landed: false, hold: live.has(BUILDS) ? SCAFFOLD_DOWN + 0.3 : 0.55, cleared: false });
   }
 
@@ -1714,11 +1739,12 @@ export class World {
     const mark = check.valid && !def.special ? (check.eraMark ?? undefined) : undefined;
     const site = check.valid ? check.site?.kind : undefined;
     const wonder = check.valid && check.wonder && !def.special ? true : undefined;
-    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}`;
+    const quilt = this.quiltOf(def, rot, check.valid ? check.knots.map((k) => k.corner) : []);
+    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}${quilt.knots ? `|q${quilt.knots.join('')}` : ''}`;
     const key = `${def.seed}:${this.theme.id}:${sig}`;
     if (!this.ghost || this.ghostKey !== key) {
       const old = this.ghost;
-      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site, wonder, widths }), sig, this.lib, this.quality !== 'low');
+      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site, wonder, widths, ...quilt }), sig, this.lib, this.quality !== 'low');
       this.ghostKey = key;
       this.scene.add(this.ghost.group);
       if (old && old.def === def) {
@@ -1751,12 +1777,24 @@ export class World {
       m.rotation.y = -(Math.PI / 6 + (Math.PI / 3) * i) + Math.PI / 2;
       (m.material as THREE.MeshBasicNodeMaterial).color.set(s === 1 ? '#ffffff' : s === 4 ? '#ffc83d' : '#ff4a3d');
     }
+    // Colcha: anel dourado no canto que amarra o nó; anel da cor do botão onde o canto pede essa cor.
+    const marks: ({ corner: number; color: number; tie: boolean })[] = this.quilt && check.valid ? [...check.knots.map((k) => ({ ...k, tie: true })), ...check.wants.map((k) => ({ ...k, tie: false }))] : [];
+    for (let v = 0; v < 6; v++) {
+      const m = this.cornerMarks[v];
+      const k = marks.find((x) => x.corner === v);
+      m.visible = !!k;
+      if (!k) continue;
+      const [cx, cz] = corner(v);
+      this.cornerLocal[v].set(cx, 0.045, cz);
+      (m.material as THREE.MeshBasicNodeMaterial).color.set(k.tie ? '#ffc83d' : KNOT_PALETTE[k.color]);
+    }
   }
 
   clearGhost() {
     if (this.ghost) this.ghost.group.visible = false;
     this.hoverRing.visible = false;
     for (const m of this.markers) m.visible = false;
+    for (const m of this.cornerMarks) m.visible = false;
   }
 
   dropGhost() {
@@ -1810,6 +1848,10 @@ export class World {
       const w = hexToWorld(t.q, t.r);
       this.burst(w.x, w.z, 'sparkle', 16);
     }
+    for (const k of res.knots) {
+      const c = this.cornerPoint(res.placed, k.corner);
+      this.burst(c.x, c.z, 'sparkle', 14, 0.05);
+    }
     for (const q of res.questsDone) {
       const w = hexToWorld(q.anchor.q, q.anchor.r);
       this.burst(w.x, w.z, 'sparkle', 40);
@@ -1824,6 +1866,13 @@ export class World {
         this.flushBirds(x, z);
       }
     }
+  }
+
+  /** Ponto do mapa (x, z) do canto `v` de uma peça colocada. */
+  cornerPoint(p: Placed, v: number) {
+    const w = hexToWorld(p.q, p.r);
+    const [cx, cz] = corner(v);
+    return { x: w.x + cx, z: w.z + cz };
   }
 
   /** Bando de pássaros que levanta voo do lugar (marcos da partida). */
@@ -2247,6 +2296,7 @@ export class World {
       g.rotation.x = THREE.MathUtils.clamp(this.ghostVel.y * lean, -0.22, 0.22);
       g.rotation.z = THREE.MathUtils.clamp(-this.ghostVel.x * lean, -0.22, 0.22);
       for (let i = 0; i < 6; i++) if (this.markers[i].visible) this.markers[i].position.copy(g.position).add(this.markerLocal[i]);
+      for (let i = 0; i < 6; i++) if (this.cornerMarks[i].visible) this.cornerMarks[i].position.copy(g.position).add(this.cornerLocal[i]);
     }
 
     this.stepHalos(dt);

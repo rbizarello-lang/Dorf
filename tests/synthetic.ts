@@ -10,6 +10,7 @@ import { timelineSvg, type TurnNote } from '../src/ui/minimap';
 import { monumentsDue } from '../src/ui/progress';
 import { DAILY_RULES, dailyDate, dailyRule, dailySeed, modeRules, MODES } from '../src/core/modes';
 import { shareLine, shareUrl, terrainPoints } from '../src/core/share';
+import { knotColors, rotateCorners } from '../src/core/quilt';
 
 const rules: Rules = { ...DEFAULT_RULES };
 let bad = 0;
@@ -338,6 +339,60 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
   b.placeRaw(-1, 1, land(T.Field), 0);
   const tp = terrainPoints(b, { matchPoints: 10, matchBonus: { [T.Forest]: 3 } });
   ok(tp.length === 2 && tp[0][0] === T.Forest && tp[0][1] === 13 && tp[1][0] === T.Field && tp[1][1] === 10, 'terrenos que mais pontuaram: floresta 13, plantação depois');
+}
+
+// ---- 12) Colcha: nós de canto montados à mão
+{
+  console.log('Cenário 12: nós de canto');
+  // Canto 0 da casa (0,0): divide com o vizinho da direção 0 (canto 4 dele) e o da direção 5 (canto 2 dele).
+  const grass = (seed: number): TileDef => ({ edges: [T.Grass, T.Grass, T.Grass, T.Grass, T.Grass, T.Grass], seed, quest: null });
+  // Acha peças A (em (1,0)) e B (em (1,-1)) cujos botões nesse canto têm a cor 0, e a peça N com um giro que mostra cor 0 em seu canto 0.
+  let sa = 1, sb = 1;
+  while (knotColors(sa)[4] !== 0) sa++;
+  while (knotColors(sb)[2] !== 0) sb++;
+  let sn = 1, rotOk = -1, rotBad = -1;
+  while (rotOk < 0) {
+    for (let rot = 0; rot < 6; rot++) {
+      const c = rotateCorners(knotColors(sn), rot)[0];
+      if (c === 0 && rotOk < 0) rotOk = rot;
+      if (c !== 0 && rotBad < 0) rotBad = rot;
+    }
+    if (rotOk < 0 || rotBad < 0) { sn++; rotOk = -1; rotBad = -1; }
+  }
+  const make = (knots: number) => {
+    const b = new Board({ ...DEFAULT_RULES, knots, influence: false });
+    b.placeRaw(1, 0, grass(sa), 0);
+    b.placeRaw(1, -1, grass(sb), 0);
+    b.computeGroups();
+    return b;
+  };
+  const kc = (rot: number) => rotateCorners(knotColors(sn), rot);
+  const edges = grass(sn).edges;
+  const b1 = make(15);
+  const chk = b1.check(0, 0, edges, kc(rotOk));
+  ok(chk.knots.length === 1 && chk.knots[0].corner === 0 && chk.knots[0].color === 0 && chk.wants.length === 0, 'cor igual nas três peças: o canto 0 amarra um nó');
+  const chkBad = b1.check(0, 0, edges, kc(rotBad));
+  ok(chkBad.knots.length === 0 && chkBad.wants.length === 1 && chkBad.wants[0].color === 0, 'cor diferente: sem nó, e o canto pede a cor 0');
+  const res = b1.place(0, 0, grass(sn), rotOk);
+  // 2 encaixes de grama (20) + perfeito (20) + nó (15)
+  ok(res.points === 55 && res.knots.length === 1 && b1.get(0, 0)!.knots.join() === '0', `a jogada com nó vale 55 (deu ${res.points})`);
+  const b2 = make(15);
+  const resBad = b2.place(0, 0, grass(sn), rotBad);
+  ok(resBad.points === 40 && resBad.knots.length === 0, `a mesma jogada sem nó vale 40 (deu ${resBad.points})`);
+  const b0 = make(0);
+  const res0 = b0.place(0, 0, grass(sn), rotOk);
+  ok(res0.points === 40 && res0.knots.length === 0 && b0.get(0, 0)!.corners.length === 0, 'fora da Colcha (knots 0) o nó não existe e a jogada vale 40');
+  // Sem a terceira peça no canto (só um vizinho), não há nó.
+  const single = new Board({ ...DEFAULT_RULES, knots: 15 });
+  single.placeRaw(1, 0, grass(sa), 0);
+  ok(single.check(0, 0, edges, kc(rotOk)).knots.length === 0, 'canto com só uma vizinha não amarra');
+  // A prévia (clone) não amarra nada no tabuleiro de verdade.
+  const g = new Game(5, { ...DEFAULT_RULES, knots: 15 });
+  const before = g.board.list.length;
+  const m = g.bestMove(() => 0.5)!;
+  g.rot = m.rot;
+  const pv = g.preview(m.q, m.r)!;
+  ok(g.board.list.length === before && pv.points > 0 && g.board.list.every((p) => p.knots.length === 0), 'prévia não mexe nos nós do tabuleiro');
 }
 
 console.log(bad ? `\n${bad} FALHA(S)` : '\nTodos os cenários sintéticos passaram');

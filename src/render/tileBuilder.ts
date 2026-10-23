@@ -114,6 +114,10 @@ export interface BuildOpts {
   special?: SpecialKind;
   /** Canteiro da maravilha: o meio da peça fica livre (a maravilha é um objeto à parte, no World). */
   wonder?: boolean;
+  /** Colcha: cor do botão de cada canto, na orientação de origem (`knotColors`). */
+  corners?: readonly number[];
+  /** Colcha: cantos (orientação de origem) em que esta peça amarrou um nó: o nó dourado fica no vértice. */
+  knots?: readonly number[];
   /** Easter eggs de kit desta peça (`Theme.eggs`, efeito 'kit'): decididos pelo jogo, pela partida, nunca pelo relógio. */
   eggs?: { id: string; kit: EggKit; scale?: number; color?: string }[];
 }
@@ -163,6 +167,8 @@ class Buf {
 
 const UP: V3 = [0, 1, 0];
 const WHITE = new THREE.Color(1, 1, 1);
+/** Botões da Colcha (vermelho, azul, marfim): iguais em todos os temas, como o fio da costura. Ver src/core/quilt.ts. */
+export const KNOT_PALETTE = ['#cf3b33', '#2c63bd', '#f1ece0'].map((c) => new THREE.Color(c));
 /** Terraços (Theme.terraces): altura de cada patamar, altura do beiral sobre ele e o tamanho de cada patamar de cima em relação à parcela (2 e 3 patamares). */
 const TERRACE_H = 0.012;
 const TERRACE_LIP = 0.004;
@@ -1164,6 +1170,20 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   }
 
   if (opts.wonder) reserved.push([0, 0, 0.6]);
+
+  // --- Colcha: um botão de lã em cada canto (dentro da peça) e, nos cantos amarrados, o nó dourado no vértice.
+  if (opts.corners) {
+    for (let v = 0; v < 6; v++) {
+      const [cx, cz] = corner(v);
+      const x = cx * 0.84, z = cz * 0.84;
+      D('botao', x, 0, z, v * 0.7, 1, KNOT_PALETTE[opts.corners[v]] ?? WHITE);
+      reserved.push([x, z, 0.075]);
+      if (opts.knots?.includes(v)) {
+        D('no', cx, 0, cz, Math.PI / 6 + v * 1.047, 1, WHITE);
+        reserved.push([cx, cz, 0.1]);
+      }
+    }
+  }
 
   // --- Sítio descoberto: no meio da peça ou no meio de um setor sem rio nem estrada (sem sorteio).
   if (opts.site) {
