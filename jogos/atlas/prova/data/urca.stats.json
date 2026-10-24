@@ -1,0 +1,129 @@
+{
+  "fonte": {
+    "release": "2026-10-21.0",
+    "quando": "2026-10-24T11:15:43.304Z"
+  },
+  "recorte": {
+    "s": -22.957,
+    "w": -43.17,
+    "n": -22.9422,
+    "e": -43.154
+  },
+  "projecao": {
+    "lat0": -22.9496,
+    "lon0": -43.162000000000006,
+    "mPorGrauLat": 110743.29161012519,
+    "mPorGrauLon": 102560.57579157015
+  },
+  "largura_m": 1641,
+  "altura_m": 1639,
+  "predios": {
+    "lidos": 3756,
+    "dentro": 901,
+    "porFonte": {
+      "o": {
+        "n": 483,
+        "comAltura": 194,
+        "comAndares": 270
+      },
+      "m": {
+        "n": 144,
+        "comAltura": 0,
+        "comAndares": 0
+      }
+    },
+    "google_excluidos": 273,
+    "subterraneos": 0,
+    "pequenos": 1,
+    "mantidos": 627,
+    "comAltura": 194,
+    "comAndares": 270,
+    "comAlturaOuAndares": 270,
+    "semNenhum": 357,
+    "comFormaDeTelhado": 0,
+    "comClasse": 268,
+    "nomeados": 19,
+    "alturaMediana": 6,
+    "alturaP10": 4,
+    "alturaP90": 15,
+    "alturaMax": 30,
+    "areaMediana": 142,
+    "areaMedianaComAltura": 120,
+    "areaMedianaSemAltura": 154,
+    "alturaPorAndarMediana": 3,
+    "alturaPorAndarForaDe2a6m": 1,
+    "comAlturaEAndares": 194,
+    "alturaMenorQue2m": 0,
+    "alturaMaiorQue60m": 0
+  },
+  "ruas": {
+    "lidas": 1155,
+    "porClasse": {
+      "unknown": 3,
+      "service": 32,
+      "footway": 62,
+      "steps": 28,
+      "tertiary": 46,
+      "path": 10,
+      "residential": 37,
+      "cycleway": 1,
+      "funicular": 1,
+      "living_street": 5
+    },
+    "mantidas": 225
+  },
+  "agua": {
+    "poligonos": 5,
+    "porTipo": {
+      "piscina": 1,
+      "lago": 1,
+      "water": 1,
+      "mar": 2
+    },
+    "linhas": 0
+  },
+  "terra": {
+    "arvoresOSM": 146,
+    "poligonos": 15,
+    "porClasse": {
+      "wood": 4,
+      "bare_rock": 3,
+      "shrubbery": 2,
+      "beach": 4,
+      "scrub": 1,
+      "land": 1
+    },
+    "uso": 62,
+    "picos": 2,
+    "penhascos": 7
+  },
+  "infra": {
+    "bancos": 15,
+    "postes": 0,
+    "fontes": 1,
+    "miradouros": 12,
+    "cabos": 2,
+    "estacoes": 4,
+    "pieres": 0,
+    "muros": 6
+  },
+  "relevo": {
+    "fonte": "Terrarium z15 (Mapzen/AWS)",
+    "bytesPNG": 705307,
+    "passo_m": 6,
+    "nx": 275,
+    "ny": 275,
+    "min": -30,
+    "max": 391.6,
+    "picosCalibrados": [
+      "Morro da Urca: 202.1 m no relevo, 220 m no OSM, +17.9",
+      "Pão de Açúcar: 304.6 m no relevo, 392 m no OSM, +87.4"
+    ]
+  },
+  "arquivo": {
+    "bytes": 332788,
+    "relevoBytes": 201668,
+    "prediosBytes": 70733,
+    "ruasBytes": 19405
+  }
+}
