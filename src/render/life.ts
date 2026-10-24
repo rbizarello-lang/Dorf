@@ -259,6 +259,14 @@ export class Life {
     return own * LEVEL_STEP - drop;
   }
 
+  /** Inclinação (rad, positiva subindo) da via em (x, z) no sentido `heading`: a derivada da rampa, para o veículo acompanhá-la. */
+  private roadPitch(x: number, z: number, heading: number): number {
+    const [q, r] = worldToHex(x, z);
+    if (!this.levelOf(q, r)) return 0;
+    const h = 0.03, dx = Math.cos(heading) * h, dz = Math.sin(heading) * h;
+    return Math.atan2(this.roadLift(x + dx, z + dz) - this.roadLift(x - dx, z - dz), 2 * h);
+  }
+
   private root = new THREE.Group();
   private pools = new Map<string, AnimPool>();
   private spinners: Spinner[] = [];
@@ -765,7 +773,7 @@ export class Life {
     } else {
       const [dq, dr] = DIRS[m.b];
       const n = board.tiles.get(hkey(m.tile.q + dq, m.tile.r + dr));
-      // Relevo: o barco não sobe nem desce a corredeira (a queda é da etapa seguinte): vizinha em outro nível é fim de linha.
+      // Relevo: o barco não sobe nem desce a corredeira (a queda é da etapa seguinte): vizinha em outro nível é fim de linha (a queda é a etapa seguinte).
       if (n && n.edges[opposite(m.b)] === terr && !(m.boat && this.levelOf(n.q, n.r) !== this.levelOf(m.tile.q, m.tile.r))) {
         const entry = opposite(m.b);
         const exits = strictEdges(n, terr).filter((e) => e !== entry);
@@ -864,6 +872,8 @@ export class Life {
       const bounce = th.vehicle === 'caravan' || th.vehicle === 'oxcart' || th.vehicle === 'sled' ? Math.abs(Math.sin(this.time * 7)) * 0.004 : 0;
       q4.setFromAxisAngle(UP, -m.heading);
       m4.compose(v3.set(m.x, roadY + bounce + this.roadLift(m.x, m.z), m.z), q4, s3.setScalar(1));
+      const pitch = this.roadPitch(m.x, m.z, m.heading);
+      if (pitch) m4.multiply(m4b.makeRotationZ(pitch));
       head?.set(hi++, m4, this.beast);
       for (let k = 1; k <= cars; k++) {
         const p = trailAt(m.trail, spacing * k);
@@ -871,6 +881,8 @@ export class Life {
         q4.setFromAxisAngle(UP, -p.heading);
         const b2 = th.vehicle === 'caravan' || th.vehicle === 'oxcart' ? Math.abs(Math.sin(this.time * 7 + k)) * 0.004 : 0;
         m4.compose(v3.set(p.x, roadY + b2 + this.roadLift(p.x, p.z), p.z), q4, s3.setScalar(1));
+        const cp = this.roadPitch(p.x, p.z, p.heading);
+        if (cp) m4.multiply(m4b.makeRotationZ(cp));
         car?.set(ci++, m4, this.beast);
         if (cargo && lift) {
           // Maior que o desenho do kit: de longe a carga precisa ler em cima do vagão.
