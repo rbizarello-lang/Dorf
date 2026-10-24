@@ -1,0 +1,36 @@
+import { T } from '../src/core/tiles';
+import { THEMES } from '../src/themes/themes';
+
+const lin = (c: number) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+const rgb = (h: string) => { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
+const labv = (r: number, g: number, b: number): [number, number, number] => {
+  const R = lin(r), G = lin(g), B = lin(b);
+  const x = (R * 0.4124 + G * 0.3576 + B * 0.1805) / 0.95047, y = R * 0.2126 + G * 0.7152 + B * 0.0722, z = (R * 0.0193 + G * 0.1192 + B * 0.9505) / 1.08883;
+  const f = (t: number) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+  return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+};
+const avg = (hs: string[]) => { const a = hs.map(rgb); return labv(a.reduce((s, c) => s + c[0], 0) / a.length, a.reduce((s, c) => s + c[1], 0) / a.length, a.reduce((s, c) => s + c[2], 0) / a.length); };
+const lab = (h: string) => avg([h]);
+for (const th of THEMES) {
+  const seen = {
+    prado: lab(th.ground[T.Grass]),
+    mata: avg(th.forest.flatMap((f) => f.colors)),
+    campo: avg(th.crops.flatMap((c) => c.colors)),
+    vila: lab(th.ground[T.Village]),
+    rio: lab(th.water),
+    estrada: lab(th.roadBed),
+  };
+  const ground = { prado: lab(th.ground[T.Grass]), mata: lab(th.ground[T.Forest]), campo: lab(th.ground[T.Field]), vila: lab(th.ground[T.Village]), rio: lab(th.water), estrada: lab(th.roadBed) };
+  for (const [nome, s] of [['chão', ground], ['visto', seen]] as const) {
+    const k = Object.keys(s) as (keyof typeof s)[];
+    const Ls = k.map((n) => `${n} ${s[n][0].toFixed(0)}`).join(' ');
+    const pairs: string[] = [];
+    let min = 99, minP = '';
+    for (let i = 0; i < k.length; i++) for (let j = i + 1; j < k.length; j++) {
+      const d = Math.abs(s[k[i]][0] - s[k[j]][0]);
+      if (d < min) { min = d; minP = `${k[i]}/${k[j]}`; }
+    }
+    void pairs;
+    console.log(`${th.id.padEnd(9)} ${nome.padEnd(5)} L: ${Ls}  | ΔL mín ${min.toFixed(1)} (${minP})`);
+  }
+}
