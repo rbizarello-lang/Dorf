@@ -11,6 +11,9 @@ export const PEAK = { r: 0.5, h: 0.85 };
 /** Morro: raio da base e altura do topo, com a escala 1. */
 export const HILL = { r: 0.45, h: 0.24 };
 
+/** Cachoeira (R3): quanto a lâmina avança além da borda da peça alta até tocar a água da baixa (o anel de espuma gira em volta desse ponto). */
+export const FALL_D = 0.076;
+
 /** Cumes da serra, sempre os mesmos: [ângulo do centro, distância (em PEAK.r), raio e altura (fração do principal)]. */
 export const PEAK_CONES: readonly [number, number, number, number][] = [
   [0, 0, 1, 1],

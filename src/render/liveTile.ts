@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import type { TileDef } from '../core/tiles';
+import { foamGeometry, sheetGeometry } from './falls';
 import { instGeometry, setInstColor, type Lib } from './lib';
 import { decoMatrix, type Deco, type TileBuild } from './tileBuilder';
 
@@ -12,6 +13,7 @@ export class LiveTile {
   readonly inner = new THREE.Group();
   private readonly groundGeo: THREE.BufferGeometry;
   private readonly waterGeo: THREE.BufferGeometry;
+  private readonly fallGeos: THREE.BufferGeometry[] = [];
   private readonly meshes: { mesh: THREE.InstancedMesh; items: Deco[] }[] = [];
 
   constructor(
@@ -36,6 +38,21 @@ export class LiveTile {
     this.waterGeo.computeVertexNormals();
     const water = new THREE.Mesh(this.waterGeo, lib.water);
     this.inner.add(ground, water);
+    // Cachoeira (R3): a lâmina da queda e a espuma da bacia andam com a peça.
+    if (build.fall.pos.length) {
+      const g = sheetGeometry(build.fall.pos, build.fall.nrm, build.fall.dat);
+      const sheet = new THREE.Mesh(g, lib.fall);
+      sheet.receiveShadow = true;
+      this.fallGeos.push(g);
+      this.inner.add(sheet);
+    }
+    if (build.foam.pos.length) {
+      const g = foamGeometry(build.foam.pos, build.foam.dat);
+      const foam = new THREE.Mesh(g, lib.foam);
+      foam.renderOrder = 1;
+      this.fallGeos.push(g);
+      this.inner.add(foam);
+    }
     const byKey = new Map<string, Deco[]>();
     for (const d of build.decos) {
       let arr = byKey.get(d.key);
@@ -92,6 +109,7 @@ export class LiveTile {
     this.group.parent?.remove(this.group);
     this.groundGeo.dispose();
     this.waterGeo.dispose();
+    for (const g of this.fallGeos) g.dispose();
     for (const { mesh } of this.meshes) {
       mesh.geometry.dispose();
       mesh.dispose();

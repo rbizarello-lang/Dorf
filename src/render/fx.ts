@@ -1,10 +1,11 @@
 import * as THREE from 'three/webgpu';
-import { abs, attribute, cos, float, fract, length, max, mix, positionGeometry, sin, smoothstep, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
+import { abs, attribute, clamp, cos, exp, float, fract, length, max, mix, positionGeometry, sin, smoothstep, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
 import type { Board } from '../core/board';
 import { hexToWorld } from '../core/hex';
 import { T } from '../core/tiles';
 import type { Theme, WeatherKind } from '../themes/types';
-import { U, noiseTex } from './materials';
+import { FALL, U, noiseTex } from './materials';
+import { FALL_D } from './relief';
 import { P } from './post';
 
 // Efeitos de partículas, todos em "sprites" voltados para a câmera:
@@ -154,6 +155,29 @@ class SpriteLayer {
   }
 }
 
+/**
+ * Espuma da bacia de uma cachoeira (R3), sobre a água da peça baixa. Atributo `fdat`: x = distância à borda da peça, y = lado,
+ * z = meia-largura do rio, w = semente. Linha de impacto onde a lâmina toca a água e rastro rendado que a correnteza leva
+ * para dentro da peça; transparente, sem escrever profundidade, com um fio de desvio para não brigar com a água.
+ */
+export function makeFoamMaterial() {
+  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const d = attribute('fdat', 'vec4');
+  const b = d.x, s = d.y, W = d.z;
+  const t = U.time;
+  const across = abs(s).div(W);
+  const hit = exp(b.sub(FALL_D).div(0.03).pow2().negate()).mul(float(1).sub(smoothstep(0.55, 1, across).mul(0.6)));
+  const wake = float(1).sub(smoothstep(FALL_D, 0.21, b)).mul(smoothstep(0.015, 0.06, b)).mul(0.62);
+  // O rendado anda para dentro da peça (b cresce): a coordenada soma o tempo com sinal negativo.
+  const q = vec2(s.mul(5.5).add(d.w.mul(13)), b.mul(7).sub(t.mul(0.45)));
+  const n = texture(noiseTex, q).b.mul(0.6).add(texture(noiseTex, q.mul(1.9).add(vec2(0.4, t.mul(-0.2)))).b.mul(0.4));
+  const lace = smoothstep(0.34, 0.6, n);
+  const side = float(1).sub(smoothstep(0.72, 1, across));
+  m.opacityNode = clamp(hit.mul(0.55).add(hit.mul(lace).mul(0.45)).add(wake.mul(lace)), 0, 1).mul(side).mul(0.92);
+  m.colorNode = (FALL.foam as N).mul(FX.ambient);
+  return m;
+}
+
 const WHITE = new THREE.Color(1, 1, 1);
 const SPLASH = new THREE.Color(0.95, 0.97, 1);
 
@@ -199,6 +223,12 @@ export class Sprites {
       const sp = 0.05 + Math.random() * 0.08;
       this.glow.add({ x: x + Math.cos(a) * 0.01, y: y + 0.005, z: z + Math.sin(a) * 0.01, vx: Math.cos(a) * sp, vy: 0.35 + Math.random() * 0.25, vz: Math.sin(a) * sp, age: 0, life: 0.45 + Math.random() * 0.2, size: 0.012 + Math.random() * 0.01, grow: -0.4, color: SPLASH, alpha: 0.9, drag: 0.5, gravity: 2.2, seed: Math.random() });
     }
+  }
+
+  /** Névoa do pé de uma cachoeira: uma bola mole e clara que sobe devagar e se afasta da queda (`nx`, `nz` = saída). */
+  mist(x: number, y: number, z: number, nx: number, nz: number, color: THREE.Color) {
+    const sp = 0.012 + Math.random() * 0.02;
+    this.soft.add({ x: x + (Math.random() - 0.5) * 0.12, y, z: z + (Math.random() - 0.5) * 0.12, vx: -nx * sp + (Math.random() - 0.5) * 0.02, vy: 0.05 + Math.random() * 0.05, vz: -nz * sp + (Math.random() - 0.5) * 0.02, age: 0, life: 1.6 + Math.random() * 0.8, size: 0.06 + Math.random() * 0.04, grow: 1.7, color, alpha: 0.32, drag: 0.8, gravity: -0.015, seed: Math.random() });
   }
 
   /** Um rolo de fumaça de chaminé: três bolas claras (a cor do tema puxada para o branco) em fila, que sobem e derivam com o vento. */

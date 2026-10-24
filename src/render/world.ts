@@ -27,6 +27,8 @@ import { SkyEnv } from './sky';
 import { FX, Fireflies, Sprites, Weather } from './fx';
 import { LiveTile } from './liveTile';
 import { PreviewView } from './preview';
+import { FallLayer } from './falls';
+import { FALL_D } from './relief';
 import { LEVEL_STEP, TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type BuildOpts, type TileBuild } from './tileBuilder';
 import { NIGHT_LIGHT } from './nightLight';
 
@@ -509,6 +511,8 @@ export class World {
   timeOfDay: TimeOfDay = 'day';
 
   private readonly staticRoot = new THREE.Group();
+  /** Cachoeiras assentadas (R3): lâmina e espuma de todas as peças, em duas malhas. */
+  readonly falls: FallLayer;
   private chunks = new Map<number, Chunk>();
   private pools = new Map<string, Pool>();
   private board: Board | null = null;
@@ -630,6 +634,8 @@ export class World {
     this.renderer.info.autoReset = false;
 
     this.scene.add(this.staticRoot);
+    this.falls = new FallLayer(this.lib);
+    this.staticRoot.add(this.falls.group);
     // Névoa por altura com bruma e névoa rasteira (atmosphere.ts) no lugar do THREE.Fog.
     (this.scene as THREE.Scene & { fogNode?: THREE.Node }).fogNode = fogNode;
     this.life = new Life(this.lib, this.scene);
@@ -1173,6 +1179,7 @@ export class World {
     this.applySeason();
     for (const c of this.chunks.values()) c.dispose(this.staticRoot);
     this.chunks.clear();
+    this.falls.clear();
     for (const p of this.pools.values()) p.dispose();
     this.pools.clear();
     for (const d of this.drops) d.live.dispose();
@@ -1479,6 +1486,7 @@ export class World {
     const m = tileMatrix(p.q, p.r, p.rot, this.heightOf(p.q, p.r));
     this.chunkFor(p.q, p.r).append(b, m);
     groundMap.add(b, m, this.waterColor);
+    this.falls.append(b, m);
     seaMap.add(p.q, p.r);
     if (this.theme.floodplain && b.water.length) riverMap.add(b.water, m, this.theme.floodplain.reach);
     for (const d of b.decos) {
@@ -1923,6 +1931,32 @@ export class World {
   }
 
   private smokeCursor = 0;
+
+  /** Névoa no pé das quedas à vista: 2 a 4 bolas vivas por queda, sorteadas pelo `dt` do mundo (parado no modo foto). */
+  private spawnMist(dt: number) {
+    const spots = this.falls.spots;
+    if (!spots.length || dt <= 0 || this.rig.dist > 24) return;
+    const tx = this.rig.target.x, tz = this.rig.target.z;
+    const reach = this.rig.dist * 1.2 + 3;
+    const f0 = this.theme.relief?.fall;
+    const col = tc(f0?.mist ?? f0?.foam ?? '#f4f9ff');
+    for (const f of spots) {
+      if (this.sprites.count > 380) return;
+      if (Math.abs(f.x - tx) > reach || Math.abs(f.z - tz) > reach) continue;
+      if (Math.random() >= dt * 1.8) continue;
+      // Casa vizinha vazia: a queda segue até o mar (ou o vazio); com a peça baixa assentada, a névoa sobe da água dela.
+      const [nq, nr] = worldToHex(f.x + f.nx * 0.5, f.z + f.nz * 0.5);
+      const y = this.board?.tiles.has(hkey(nq, nr)) ? f.y + WATER_Y - f.drop : -TILE_T - 0.1;
+      this.sprites.mist(f.x + f.nx * FALL_D, y + 0.012, f.z + f.nz * FALL_D, f.nx, f.nz, col);
+    }
+  }
+
+  /** Distância (no plano) de (x, z) à cachoeira mais próxima; Infinity se o mapa não tem nenhuma. */
+  nearestFall(x: number, z: number): number {
+    let best = Infinity;
+    for (const f of this.falls.spots) best = Math.min(best, Math.hypot(f.x + f.nx * FALL_D * 0.5 - x, f.z + f.nz * FALL_D * 0.5 - z));
+    return best;
+  }
 
   private spawnSmoke(dt: number) {
     const n = this.chimneys.length / 4;
@@ -2450,6 +2484,7 @@ export class World {
     this.life.update(dt);
     this.life.wakes(this.rig.target.x, this.rig.target.z);
     this.spawnSmoke(dt);
+    this.spawnMist(dt);
     this.sprites.update(dt);
     this.updateFxUniforms();
     this.slots.visible = this.slotCount > 0 && this.showSlots;
