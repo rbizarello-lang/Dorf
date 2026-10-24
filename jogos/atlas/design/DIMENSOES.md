@@ -47,7 +47,7 @@ Critérios (todos tirados do que o Roger pediu): é visível na maquete? Tem bas
 | 2 | Uma ou duas lojas abertas. Um carrinho. Um barco saindo. |
 | 3 | Comércio de bairro funcionando: toldos, vitrines acesas de dia, uma entrega. |
 | 4 | Movimento: feira montada, carga no cais, oficinas de porta aberta, fumaça de forno. |
-| 5 | Transbordando: vitrines acesas até tarde, barracas na calçada, carga empilhada, prédios mais altos. |
+| 5 | Transbordando: vitrines acesas até tarde, barracas na calçada, carga empilhada, prédios que sobem até o teto de 8 andares (nunca arranha-céu). |
 
 Num vilarejo isolado, o degrau 4 é a queijaria aberta e o rebanho no pasto, não uma rua cheia.
 
@@ -122,11 +122,11 @@ Como não existe carta de ganho sem custo, o lugar não tem um "estado ideal" qu
 
 ## Como as escolhas se acumulam numa personalidade
 
-1. **Cada lugar nasce com um jeito.** A Santa Teresa do Rio nasce com Memória 4 e Convivência 3. Uma vila alpina nasce com Sossego 5. O jeito vem da ficha do lugar e é o ponto de partida do jogador.
+1. **Cada bairro nasce com um jeito.** A Santa Teresa do Rio nasce com Memória 4 e Convivência 3. Uma vila alpina nasce com Sossego 5. O jeito vem da ficha do bairro e é o ponto de partida do jogador. Os degraus são do bairro, e não da cidade: as obras de um bairro não mexem nos degraus do vizinho.
 2. **Cada obra mexe em degraus.** O ganho sobe um degrau e o custo desce um. Uma grande obra sobe dois e desce um. Os degraus ficam entre 1 e 5.
-3. **Cartas que ultrapassariam o limite não aparecem.** Num lugar já no máximo de Sossego, nenhum morador pede mais sossego. Quase toda carta ali custa sossego, e o jogo vira "quanto abrir".
+3. **Cartas que ultrapassariam o limite não aparecem.** Num bairro já no máximo de Sossego, nenhum morador pede mais sossego. Quase toda carta ali custa sossego, e o jogo vira "quanto abrir".
 4. **Cada obra deixa uma marca** (praça, bonde, feira, árvores, casario restaurado, mesa comprida). As marcas aparecem como detalhes na maquete e, depois, viajam para outros lugares (`FORMA.md`).
-5. **A personalidade é o par de dimensões mais alto.** O jogo olha as duas dimensões com os maiores degraus. Em empate, vale a mais recente. O apelido só muda depois de duas visitas seguidas com o mesmo par, para não piscar.
+5. **A personalidade de um bairro é o par de dimensões mais alto.** O jogo olha as duas dimensões com os maiores degraus. Em empate, vale a mais recente. O apelido só muda depois de duas visitas seguidas com o mesmo par, para não piscar.
 
 ### Os nomes
 
@@ -142,6 +142,15 @@ Cada par tem um nome por tipo de lugar. Nenhum é melhor que outro.
 | Sossego + Memória | recanto antigo | vila-museu | relicário silencioso |
 
 Quando uma só dimensão passa muito das outras (quatro degraus acima da segunda), o nome é: Sustento, "colmeia". Convivência, "praça viva". Sossego, "refúgio". Memória, "relicário". Se as quatro ficam dentro de um degrau, o lugar é um "mosaico".
+
+### Do bairro à cidade
+
+Uma cidade como o Rio tem um apelido para cada bairro (Copacabana pode ser "centro de feira" enquanto a Urca é "recanto antigo"). O minimapa pinta cada bairro com a cor da sua personalidade, e a cidade ganha um retrato de conjunto:
+
+- Se quatro ou mais bairros compartilham o mesmo par, a cidade ganha esse nome também (uma "cidade-jardim" inteira).
+- Se há pelo menos três pares diferentes entre os bairros, a cidade é um "mosaico". Não é um prêmio de consolação: nas metrópoles é o retrato mais comum, e o mais bonito de ver no minimapa.
+
+Os lugares pequenos (uma vila de um ou dois bairros) têm só o apelido do bairro.
 
 ### Como a personalidade se mostra
 

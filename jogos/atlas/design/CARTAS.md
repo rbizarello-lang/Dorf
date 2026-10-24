@@ -1,6 +1,6 @@
 # Atlas: as cartas
 
-As cartas são o centro das escolhas. Cada uma é um pedido de um morador com nome, curto, com uma ação clara no fim. Este arquivo define o formato, a divisão entre o texto escrito antes e o toque do Claude, e traz 16 cartas de exemplo mais 2 que abrem lugares novos.
+As cartas são o centro das escolhas. Cada uma é um pedido de um morador com nome, curto, com uma ação clara no fim. Este arquivo define o formato, a divisão entre o texto escrito antes e o toque do Claude, e traz 16 cartas de exemplo, 2 que abrem lugares novos e 1 que abre um bairro. Cada carta vale num **bairro** (um pedaço do mapa comprimido do lugar), e não no lugar inteiro.
 
 ## 1. O formato de uma carta
 
@@ -8,6 +8,7 @@ Uma carta tem sempre estas partes, nesta ordem:
 
 | Parte | O que é |
 |---|---|
+| **Bairro** | O bairro onde a obra acontece. A carta só vale ali, e o efeito não passa para o vizinho. |
 | **Remetente** | Um morador com nome, ofício e um jeito de falar. Aparece com o rosto na carta e, depois, na rua. |
 | **Texto** | De 2 a 4 linhas, na voz do remetente. A última linha é o pedido. |
 | **A escolha** | Dois botões: **Atender** (com o nome da obra, em poucas palavras) e **Agora não**. |
@@ -86,13 +87,13 @@ Cada lugar tem de dois a três moradores que voltam, com o rosto na carta e roti
 
 | Lugar | Quem volta |
 |---|---|
-| Rio, Santa Teresa e Arcos da Lapa | **Dona Zilda**, ceramista de 74 anos, mora num casarão da ladeira e quer o bondinho de volta. **Marina**, arquiteta de 31, quer praça e sombra. **Doutor Alceu**, dono de prédios, sorriso largo, quer subir andares. |
+| Rio de Janeiro (Santa Teresa, Lapa e Centro) | **Dona Zilda**, ceramista de 74 anos, mora num casarão da ladeira e quer o bondinho de volta. **Marina**, arquiteta de 31, quer praça e sombra. **Doutor Alceu**, dono de prédios, sorriso largo, quer subir andares. |
 | Bergen, Bryggen e o porto | **Ingrid**, peixeira, direta, "peixe não espera". **Olav**, carpinteiro de 68, fala pouco, conserta casas de madeira. **Kari**, professora, leva a turma ao morro e quer silêncio. |
 | Koh Panyi, Tailândia | **Capitão Hassan**, barqueiro, fala do mar. **Aisah**, guarda as histórias da vila. **Nok**, menina de 11 anos, capitã do time de futebol da vila. |
 | Gimmelwald, Suíça | **Annelies**, queijeira. **Hans**, pastor de 70 anos, lembra como se fazia. **Lukas**, 24 anos, voltou para a aldeia e quer vida nela. |
 | Em qualquer lugar | **Teodoro**, o viajante de chapéu e mala remendada, que traz notícias de outros lugares e abre caminhos. |
 
-Os nomes das vilas (Koh Panyi, Gimmelwald) pedem revisão de alguém que conheça a região antes de qualquer versão pública. Os moradores são todos inventados. Nenhum é pessoa real.
+Moradores pertencem a um bairro, mas as ideias deles viajam pela cidade (uma marca de um bairro pode virar carta em outro). Os nomes das vilas (Koh Panyi, Gimmelwald) pedem revisão de alguém que conheça a região antes de qualquer versão pública. Os moradores são todos inventados. Nenhum é pessoa real.
 
 ### Pequenos arcos
 
@@ -107,9 +108,10 @@ Quando o jogador atende três cartas do mesmo morador, ele traz um **arco**: uma
 
 Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilarejo e um lugar quase desabitado. Para cada carta: o texto-modelo (sem o toque do Claude), o botão, as setas, o tempo e o que muda. As dimensões são Sustento, Convivência, Sossego e Memória.
 
-### 4.1 Rio de Janeiro: Santa Teresa e os Arcos da Lapa (metrópole)
+### 4.1 Rio de Janeiro: Santa Teresa, Lapa e Centro (metrópole, só escala humana)
 
-**Jeito de nascença:** Memória 4, Convivência 3, Sustento 3, Sossego 2. Começa como bairro boêmio.
+**Bairros do lugar (8):** Santa Teresa e Lapa, Centro, Aterro do Flamengo, Urca e Pão de Açúcar, Corcovado, Copacabana, Ipanema, Leblon. Os exemplos abaixo são de Santa Teresa e Lapa e do Centro.
+**Jeito de nascença:** Santa Teresa e Lapa: Memória 4, Convivência 3, Sustento 3, Sossego 2, começa como bairro boêmio. Centro: Sustento 4, Memória 3, Convivência 2, Sossego 1.
 **Quem escreve:** Dona Zilda, Marina, Doutor Alceu.
 
 **R1. Marina: praça no lugar do estacionamento**
@@ -117,6 +119,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Dá para botar ali uma praça, com banco, sombra e um canto para as crianças.
 > Os bares vão reclamar da falta de vaga. Posso desenhar?
 
+- **Bairro:** Santa Teresa (o Largo).
 - **Atender:** Abrir a praça.
 - **Efeitos:** sobe Convivência; desce Sustento.
 - **Obra:** média (um sol).
@@ -128,21 +131,23 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Se você deixar, ele volta a passar pelos Arcos.
 > Só aviso que o ferro ranga e a fila de turista vai chegar. Topa?
 
+- **Bairro:** Santa Teresa e Lapa (os Arcos).
 - **Atender:** Religar o bonde.
 - **Efeitos:** sobe Memória; desce Sossego.
 - **Obra:** grande (dois sóis).
 - **Na maquete:** trilhos brilham nas ladeiras; um bonde de madeira e ferro, cor de mel, cruza os Arcos com gente no estribo; o sino toca; há fila na parada e rangido de ferro no som.
 - **Marca que deixa:** bonde. É a ideia que o Teodoro pode levar a outras ladeiras.
 
-**R3. Doutor Alceu: a avenida sobe alguns andares**
-> Caro visitante, a avenida lá embaixo merece prédios à altura da vista.
+**R3. Doutor Alceu: a avenida sobe alguns andares (até o teto de oito)**
+> Caro visitante, a avenida do Centro merece prédios à altura do movimento.
 > Quatro andares a mais, comércio no térreo, gente de terno almoçando.
 > Sei que os casarões vão perder a luz da tarde. Posso assinar?
 
+- **Bairro:** Centro.
 - **Atender:** Liberar mais andares.
 - **Efeitos:** sobe Sustento; desce Memória.
 - **Obra:** grande (dois sóis).
-- **Na maquete:** três prédios baixos ganham andares de vidro e concreto, com vitrines acesas no térreo. A sombra longa cai sobre o casario. Um guindaste aparece durante a obra.
+- **Na maquete:** três prédios baixos ganham andares de vidro e concreto, com vitrines acesas no térreo. A sombra longa cai sobre o casario. Um guindaste aparece durante a obra. O teto é de oito andares: a obra nunca vira arranha-céu.
 - **Se recusada duas vezes:** ele volta com a versão de dois andares (obra pequena, custo menor).
 
 **R4. Marina: árvores nas ladeiras**
@@ -150,6 +155,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Quero oito árvores na calçada, oitis e mangueiras. As mesas dos bares vão ter que recuar.
 > Em compensação, o passarinho volta. Topa?
 
+- **Bairro:** Santa Teresa.
 - **Atender:** Plantar as árvores.
 - **Efeitos:** sobe Sossego; desce Convivência.
 - **Obra:** pequena (uma lua).
@@ -158,6 +164,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 
 ### 4.2 Bergen, Noruega: Bryggen e o porto (cidade média)
 
+**Bairros do lugar (3):** Bryggen (o casario), o Porto e o Mercado, o morro do funicular.
 **Jeito de nascença:** Memória 4, Sustento 3, Convivência 3, Sossego 2. Começa como cartão-postal. Chove com frequência, e a chuva faz parte do desenho.
 **Quem escreve:** Ingrid, Olav, Kari.
 
@@ -166,6 +173,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Leva tempo e não dá para pôr letreiro novo nem trocar as janelas.
 > Mas elas ficam de pé mais cem anos. Começo pelo telhado?
 
+- **Bairro:** Bryggen.
 - **Atender:** Restaurar do jeito antigo.
 - **Efeitos:** sobe Memória; desce Sustento.
 - **Obra:** grande (dois sóis).
@@ -177,6 +185,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Minha banca vende o dia todo. Mas é buzina, fumaça e fila na ladeira.
 > Peixe não espera. Posso dizer que sim?
 
+- **Bairro:** o Porto e o Mercado.
 - **Atender:** Receber o navio.
 - **Efeitos:** sobe Sustento; desce Sossego.
 - **Obra:** média (um sol).
@@ -188,6 +197,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Eu cobriria tudo de vidro, com mesa comprida e lanterna, aberto até tarde.
 > Fica lindo, mas o galpão de tábua some. Constrói?
 
+- **Bairro:** o Porto e o Mercado.
 - **Atender:** Construir o mercado coberto.
 - **Efeitos:** sobe Convivência; desce Memória.
 - **Obra:** grande (dois sóis).
@@ -199,6 +209,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Se só barco elétrico entrar no porto, a baía fica quieta.
 > Os pescadores vão chiar com a espera para recarregar. Posso falar com eles?
 
+- **Bairro:** o Porto e o Mercado.
 - **Atender:** Só barcos elétricos.
 - **Efeitos:** sobe Sossego; desce Sustento.
 - **Obra:** média (um sol).
@@ -207,6 +218,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 
 ### 4.3 Koh Panyi, Tailândia (vilarejo)
 
+**Bairros do lugar (2):** a Vila (as palafitas), o Píer e a baía.
 **Jeito de nascença:** as quatro dimensões em 3. Começa como mosaico.
 **Quem escreve:** Capitão Hassan, Aisah, Nok.
 
@@ -215,6 +227,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Se eu alongar o píer, cabe o dobro de barcos.
 > Mas já tem casa virando loja de lembrancinha. Alongo?
 
+- **Bairro:** o Píer e a baía.
 - **Atender:** Alongar o píer.
 - **Efeitos:** sobe Sustento; desce Memória.
 - **Obra:** média (um sol).
@@ -226,6 +239,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Com mais tábuas e tambores dá para jogar cinco contra cinco, e a vila inteira vem torcer.
 > Só que as tábuas saem do estoque do cais de pesca. Pode ser?
 
+- **Bairro:** a Vila.
 - **Atender:** Aumentar o campinho.
 - **Efeitos:** sobe Convivência; desce Sustento.
 - **Obra:** pequena (uma lua).
@@ -237,6 +251,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Se combinarmos silêncio depois das nove, a baía vira um espelho.
 > Mas o cais deixa de ser o ponto de encontro das noites. Combinamos?
 
+- **Bairro:** o Píer e a baía.
 - **Atender:** Silêncio depois das 21h.
 - **Efeitos:** sobe Sossego; desce Convivência.
 - **Obra:** pequena (uma lua).
@@ -248,6 +263,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Vai ter fila de visitante, passo na tábua e conversa alta.
 > Mas as crianças vão saber de onde vieram. Posso abrir a porta?
 
+- **Bairro:** a Vila.
 - **Atender:** Abrir a casa-museu.
 - **Efeitos:** sobe Memória; desce Sossego.
 - **Obra:** média (um sol).
@@ -256,6 +272,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 
 ### 4.4 Gimmelwald, Suíça (lugar quase desabitado)
 
+**Bairros do lugar (2):** a Aldeia, o Pasto alto.
 **Jeito de nascença:** Sossego 5, Memória 4, Convivência 2, Sustento 2. Começa como relicário silencioso.
 **Quem escreve:** Annelies, Hans, Lukas.
 **Detalhe de desenho:** o Sossego já está no teto, então nenhuma carta aqui sobe Sossego. Quase todas custam Sossego, e o jogo vira "quanto abrir".
@@ -265,6 +282,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Se eu abrir a queijaria para eles provarem, vendo o verão inteiro.
 > Mas vem bota na tábua, conversa em outra língua, e o sino da vaca se perde. Abro?
 
+- **Bairro:** a Aldeia.
 - **Atender:** Abrir a queijaria.
 - **Efeitos:** sobe Sustento; desce Sossego.
 - **Obra:** pequena (uma lua).
@@ -276,6 +294,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Eu queria refazer o desfile. Dia de festa é dia sem fazer feno, e o inverno não perdoa.
 > Faço?
 
+- **Bairro:** o Pasto alto.
 - **Atender:** Refazer o desfile.
 - **Efeitos:** sobe Memória; desce Sustento.
 - **Obra:** média (um sol).
@@ -287,6 +306,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Eu queria uma mesa comprida na praça, sexta à noite, com sopa e violão.
 > Vai ter risada, e eu sei que o vale acorda cedo. Posso montar?
 
+- **Bairro:** a Aldeia.
 - **Atender:** Mesa comprida de sexta.
 - **Efeitos:** sobe Convivência; desce Sossego.
 - **Obra:** pequena (uma lua).
@@ -298,6 +318,7 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 > Podia virar sala de encontros, com lareira e jogos de tabuleiro.
 > Mas ele é a cara da aldeia, e a aldeia mudaria um pouco. Topa?
 
+- **Bairro:** a Aldeia.
 - **Atender:** Fazer do celeiro uma sala de encontros.
 - **Efeitos:** sobe Convivência; desce Memória.
 - **Obra:** grande (dois sóis).
@@ -319,28 +340,45 @@ Quatro lugares de perfis diferentes: uma metrópole, uma cidade média, um vilar
 
 **Exemplo de mesa difícil.** Na 5ª visita à Santa Teresa, a mesa traz o bonde (R2), os andares (R3) e as árvores (R4). Bonde mais árvores: Memória sobe, Convivência desce, e o Sossego fica onde estava (o bonde tira, as árvores põem). Árvores mais andares: o bairro ganha sombra e comércio, e o casario perde a luz. Nenhuma combinação é boa ou má, mas cada uma desenha um bairro diferente.
 
-## 5. As 2 cartas que abrem lugares novos
+## 5. As cartas que abrem lugares e bairros novos
 
-Seguem a regra 6: o ganho é o caminho novo, o custo é a escolha gasta. As setas são especiais: uma bússola sobe, uma vaga desce. O lugar novo acende no atlas na visita seguinte, depois de a caravana viajar uma noite.
+Seguem a regra 6: o ganho é o caminho novo, o custo é a escolha gasta. As setas são especiais: uma bússola sobe, uma vaga desce. O lugar ou o bairro novo ganha cor no atlas na visita seguinte, depois de a caravana viajar uma noite.
+
+### Duas cartas que abrem lugares novos
 
 **A1. Teodoro, o viajante (em Gimmelwald): uma vila sobre o mar**
 > Venho descendo os Alpes a pé, visitante, e do outro lado existe uma vila pendurada sobre o mar, com barcos puxados até a praça.
 > Os moradores de lá também vivem entre a montanha e a água.
 > Se você me der uma vaga na sua visita, eu levo o seu nome até lá. Vamos?
 
+- **Bairro:** a Aldeia.
 - **Atender:** Abrir o caminho para a vila.
 - **Efeitos:** sobe o caminho novo; desce uma obra a menos nesta visita.
-- **Abre:** Manarola (Cinque Terre, Itália).
+- **Abre:** Manarola (Cinque Terre, Itália), um lugar pequeno de um bairro.
 - **Na maquete:** Teodoro parte pela trilha. No atlas, uma linha pontilhada cresce até a Itália.
 
-**A2. Ingrid (em Bergen): uma carta do Brooklyn**
-> Chegou carta da minha prima, que mora do outro lado do mar, no Brooklyn.
-> Diz que a ponte de lá tem mais gente do que peixe no meu mercado, e que tem saudade de peixe seco.
-> Se mandar uma caravana com a carga, ela mostra o bairro. Manda?
+**A2. Ingrid (em Bergen): uma carta das ilhas do norte**
+> Chegou carta da minha prima, que mora lá no norte, nas ilhas onde o mar encosta na montanha.
+> Diz que as casas vermelhas ficam sobre estacas, que o peixe seca ao vento em varais, e que o vapor-correio passa por lá toda semana.
+> Se mandar uma caravana com a carga, ela mostra a vila. Manda?
 
+- **Bairro:** o Porto e o Mercado.
 - **Atender:** Mandar a caravana.
 - **Efeitos:** sobe o caminho novo; desce uma obra a menos nesta visita.
-- **Abre:** Nova York, Brooklyn (DUMBO e a Ponte do Brooklyn).
-- **Na maquete:** uma carroça-barco com caixas de peixe seco sai do cais. No atlas, o navio atravessa o oceano.
+- **Abre:** Reine, nas Lofoten (Noruega), um lugar pequeno de um ou dois bairros.
+- **Na maquete:** uma carroça-barco com caixas e sacos sai do cais. No atlas, o vapor-correio sobe a costa.
 
-Há três jeitos de uma carta abrir um lugar: **viajante** (A1), **morador com parente** (A2) e **caravana entre lugares** (descrita em `FORMA.md`). O mesmo formato vale para qualquer recorte do atlas.
+### Uma carta que abre um bairro
+
+**A3. Marina: o Corcovado**
+> A gente vê o Corcovado daqui de cima toda manhã, com a nuvem na cabeça do Cristo.
+> O trenzinho sobe pela mata, e lá embaixo, no Cosme Velho, tem um pedaço de bairro que ninguém olha.
+> Se você me der uma vaga, eu abro o caminho até lá. Vamos?
+
+- **Bairro:** Santa Teresa e Lapa.
+- **Atender:** Abrir o caminho até o Corcovado.
+- **Efeitos:** sobe o caminho novo; desce uma obra a menos nesta visita.
+- **Abre:** o bairro Corcovado (o trem, a mata e o Cristo), no mapa do Rio.
+- **Na maquete:** o esboço a lápis do Corcovado ganha cor, e um trenzinho sobe pela encosta.
+
+Há três jeitos de uma carta abrir um lugar: **viajante** (A1), **morador com parente** (A2) e **caravana entre lugares** (descrita em `FORMA.md`). Dentro de uma cidade, o bairro vizinho abre por um morador que convida (A3) ou por uma ligação que se constrói (um trem, uma barca, um túnel). O mesmo formato vale para qualquer bairro ou lugar do atlas.
