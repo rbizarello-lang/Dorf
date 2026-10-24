@@ -5,6 +5,7 @@ import { SPECIALS, type SpecialKind } from './specials';
 import { SEASON_BONUS, SEASON_KIND, seasonAt } from './seasons';
 import { INFLUENCE, INFLUENCE_CAP, SYN_KINDS, type SynHit, type SynKind, synergyOf } from './synergy';
 import { payRoutes, type RouteHit, type RoutePost } from './routes';
+import { STARTER_PROFILE, heightFit, tileProfile, worldHeights } from './relief';
 import { T, isStrict, rotateEdges, type QuestKind, type TileDef } from './tiles';
 
 export interface Rules {
@@ -64,6 +65,11 @@ export interface Rules {
   exactQuestTiles: number;
   closeQuestTiles: number;
   countQuestTiles: number;
+  /** Modo Relevo: cada peça traz alturas por borda (src/core/relief.ts) e a altura entra no encaixe (1 degrau vale, 2 não). */
+  relief: boolean;
+  /** Relevo: pontos por borda com degrau de 1 nível entre terras (o mirante) e a mais por degrau de rio (a cachoeira). */
+  stepPoints: number;
+  fallPoints: number;
 }
 
 export const DEFAULT_RULES: Rules = {
@@ -98,6 +104,9 @@ export const DEFAULT_RULES: Rules = {
   exactQuestTiles: 7,
   closeQuestTiles: 6,
   countQuestTiles: 5,
+  relief: false,
+  stepPoints: 0,
+  fallPoints: 0,
 };
 
 export interface Placed {
@@ -118,6 +127,9 @@ export interface Placed {
   site?: SiteKind;
   /** Canteiro da maravilha (o meio da peça fica livre para ela). */
   wonder?: boolean;
+  /** Relevo: nível de cada borda (mundo) e do pico no meio; só com `rules.relief`. */
+  heights?: number[];
+  hill?: number;
 }
 
 export interface Quest {
@@ -154,6 +166,11 @@ export interface Check {
   matches: number;
   /** Por borda: 0 sem vizinho, 1 encaixa, 2 não encaixa, 3 conflito (rio/trilho), 4 interação. */
   edgeState: number[];
+  /** Relevo, por borda: 0 sem vizinho (ou sem relevo), 1 mesma altura, 2 degrau de 1 nível, 3 alto demais. */
+  heightState: number[];
+  /** Relevo: bordas com degrau (mirante) e, dessas, as de rio (cachoeira). */
+  steps: number;
+  falls: number;
   synergies: SynHit[];
   /** Sítio ainda escondido nesta posição (a prévia mostra a recompensa). */
   site: Site | null;
@@ -170,6 +187,9 @@ export interface PlaceResult {
   points: number;
   matches: number;
   neighbors: number;
+  /** Relevo: degraus e cachoeiras desta jogada. */
+  steps?: number;
+  falls?: number;
   perfect: boolean;
   closed: Placed[];
   synergies: SynHit[];
@@ -235,8 +255,21 @@ export class Board {
     return this.quests.filter((q) => q.state === 'active');
   }
 
-  check(q: number, r: number, edges: readonly T[]): Check {
+  /** Alturas (mundo) de uma peça de mão girada `rot`, ou undefined fora do modo Relevo. */
+  heightsOf(def: TileDef, rot: number): number[] | undefined {
+    return this.rules.relief ? worldHeights(tileProfile(def.edges, def.seed), rot) : undefined;
+  }
+
+  /** `check` de uma peça de mão com o giro dado (bordas e alturas juntas). */
+  checkDef(q: number, r: number, def: TileDef, rot: number): Check {
+    return this.check(q, r, rotateEdges(def.edges, rot), this.heightsOf(def, rot));
+  }
+
+  check(q: number, r: number, edges: readonly T[], heights?: readonly number[]): Check {
     const edgeState = [0, 0, 0, 0, 0, 0];
+    const heightState = [0, 0, 0, 0, 0, 0];
+    let steps = 0;
+    let falls = 0;
     const occupied = this.tiles.has(hkey(q, r));
     let neighbors = 0;
     let matches = 0;
@@ -248,6 +281,15 @@ export class Board {
       neighbors++;
       const a = edges[i];
       const b = n.edges[opposite(i)];
+      if (heights && n.heights) {
+        const hs = heightFit(heights[i], n.heights[opposite(i)], a);
+        heightState[i] = hs;
+        if (hs === 3) conflict = true;
+        else if (hs === 2 && a !== T.Rail && b !== T.Rail) {
+          steps++;
+          if (a === T.Water && b === T.Water) falls++;
+        }
+      }
       if (a === b) {
         matches++;
         edgeState[i] = 1;
@@ -264,7 +306,7 @@ export class Board {
     const R = this.rules;
     const lastEra = R.eraScores.length > 1 && this.era === R.eraScores.length - 1;
     const wonder = !this.wonder && R.wonderStages > 0 && lastEra && eraMark === null && edges.filter((e) => e === T.Village).length >= 2;
-    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, synergies, site: this.siteAt(q, r), eraMark, wonder, influence: this.influenceAt(q, r, edges) };
+    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, heightState, steps, falls, synergies, site: this.siteAt(q, r), eraMark, wonder, influence: this.influenceAt(q, r, edges) };
   }
 
   /**
@@ -336,6 +378,11 @@ export class Board {
   placeRaw(q: number, r: number, def: TileDef, rot: number): Placed {
     const key = hkey(q, r);
     const p: Placed = { q, r, key, def, rot, edges: rotateEdges(def.edges, rot), index: this.list.length, closed: false, synergies: [] };
+    if (this.rules.relief) {
+      const prof = this.list.length === 0 ? STARTER_PROFILE : tileProfile(def.edges, def.seed);
+      p.heights = worldHeights(prof, rot);
+      p.hill = prof.c;
+    }
     this.tiles.set(key, p);
     this.list.push(p);
     this.frontier.delete(key);
@@ -348,7 +395,7 @@ export class Board {
 
   place(q: number, r: number, def: TileDef, rot: number): PlaceResult {
     const edges = rotateEdges(def.edges, rot);
-    const c = this.check(q, r, edges);
+    const c = this.check(q, r, edges, this.heightsOf(def, rot));
     const placed = this.placeRaw(q, r, def, rot);
     const R = this.rules;
     let points = c.matches * R.matchPoints;
@@ -364,6 +411,8 @@ export class Board {
       this.markPending = null;
     }
     points += c.synergies.length * R.synergyPoints;
+    // Relevo: o degrau entre terras rende (mirante) e o de rio rende mais (cachoeira).
+    points += c.steps * R.stepPoints + c.falls * R.fallPoints;
     // A peça do centro não é jogada: a primeira jogada de quem joga é a segunda peça.
     const seasonKind = R.seasonBonus ? SEASON_KIND[seasonAt(Math.max(0, placed.index - 1), R.seasonLock)] : null;
     for (const h of c.synergies) {
@@ -510,7 +559,7 @@ export class Board {
       eraUp = this.era;
       this.markPending = this.era;
     }
-    return { placed, points, matches: c.matches, neighbors: c.neighbors, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special, influence: c.influence, routes };
+    return { placed, points, matches: c.matches, neighbors: c.neighbors, steps: c.steps, falls: c.falls, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special, influence: c.influence, routes };
   }
 
   blessed(id: BlessingId) {

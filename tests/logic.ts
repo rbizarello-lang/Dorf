@@ -9,6 +9,7 @@ import { mulberry32 } from '../src/core/rng';
 import { MODES, modeRules, type Mode } from '../src/core/modes';
 import { generateSites } from '../src/core/sites';
 import { SPECIAL_KINDS, type SpecialKind } from '../src/core/specials';
+import { STARTER_PROFILE, tileProfile, worldHeights } from '../src/core/relief';
 import { THEMES } from '../src/themes/themes';
 
 const rulesFor = (t: { rules?: Partial<Rules> }, mode: Mode | undefined, seed: number): Rules => ({ ...DEFAULT_RULES, ...(mode?.daily ? {} : t.rules), ...(mode ? modeRules(mode, seed) : {}) });
@@ -62,8 +63,22 @@ function assert(cond: boolean, msg: string) {
 
 // ------------------------------------------------------------------ oráculos
 
+/**
+ * Alturas (mundo) de uma peça de mão no modo Relevo. O perfil vem do gerador (src/core/relief.ts, conferido à parte em
+ * `checkProfiles`); a regra de encaixe e a pontuação abaixo são reescritas aqui, sem chamar o Board.
+ */
+function oHeights(b: Board, def: TileDef, rot: number): number[] | undefined {
+  return b.rules.relief ? worldHeights(tileProfile(def.edges, def.seed), rot) : undefined;
+}
+
+/** Altura da borda `i` da peça colocada `n`, como o oráculo a guardou: a inicial é plana no nível 1. */
+function oPlacedHeights(b: Board, n: Placed): number[] {
+  const prof = n.index === 0 ? STARTER_PROFILE : tileProfile(n.def.edges, n.def.seed);
+  return worldHeights(prof, n.rot);
+}
+
 /** Validade por força bruta, independente de Board.check. */
-function oracleValid(b: Board, q: number, r: number, edges: readonly T[]) {
+function oracleValid(b: Board, q: number, r: number, edges: readonly T[], heights?: readonly number[]) {
   if (b.tiles.has(hkey(q, r))) return false;
   let neighbors = 0;
   for (let i = 0; i < 6; i++) {
@@ -72,6 +87,10 @@ function oracleValid(b: Board, q: number, r: number, edges: readonly T[]) {
     neighbors++;
     const a = edges[i];
     const c = n.edges[(i + 3) % 6];
+    if (heights) {
+      const d = Math.abs(heights[i] - oPlacedHeights(b, n)[(i + 3) % 6]);
+      if (d > 1 || (d === 1 && a === T.Rail)) return false;
+    }
     if (a === c) continue;
     if (a === T.Water || a === T.Rail || c === T.Water || c === T.Rail) return false;
   }
@@ -88,7 +107,7 @@ function oracleFrontier(b: Board): Set<number> {
 function oracleAnyMove(b: Board, def: TileDef) {
   for (const k of oracleFrontier(b)) {
     const [q, r] = unkey(k);
-    for (let rot = 0; rot < 6; rot++) if (oracleValid(b, q, r, rotateEdges(def.edges, rot))) return true;
+    for (let rot = 0; rot < 6; rot++) if (oracleValid(b, q, r, rotateEdges(def.edges, rot), oHeights(b, def, rot))) return true;
   }
   return false;
 }
@@ -183,7 +202,7 @@ function chooseMove(game: Game, policy: Policy, rnd: () => number): { q: number;
   for (const k of game.board.frontier) {
     const [q, r] = unkey(k);
     for (let rot = 0; rot < 6; rot++) {
-      const c = game.board.check(q, r, rotateEdges(def.edges, rot));
+      const c = game.board.checkDef(q, r, def, rot);
       if (!c.valid) continue;
       all.push({ q, r, rot, score: c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) });
     }
@@ -219,7 +238,7 @@ function questMove(game: Game, def: TileDef, rnd: () => number) {
     const [q, r] = unkey(k);
     for (let rot = 0; rot < 6; rot++) {
       const edges = rotateEdges(def.edges, rot);
-      const c = b.check(q, r, edges);
+      const c = b.checkDef(q, r, def, rot);
       if (!c.valid) continue;
       let score = c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) + rnd() * 0.5;
       for (let i = 0; i < 6; i++) {
@@ -381,11 +400,12 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     // Marco da era: a primeira peça com vila depois de um avanço.
     // A peça especial tem a construção dela no meio: o marco espera a próxima peça com vila.
     const expectedMark = pendingMark !== null && !cur.special && edges.some((e) => e === T.Village) ? pendingMark : null;
-    assert(oracleValid(b, m.q, m.r, edges), `seed ${seed}: bestMove inválida pelo oráculo`);
+    assert(oracleValid(b, m.q, m.r, edges, oHeights(b, cur, m.rot)), `seed ${seed}: bestMove inválida pelo oráculo`);
     // Estado prévio para o oráyculo de pontuação
     const closedBefore = new Set(b.list.filter((t) => oracleClosed(b, t)).map((t) => t.index));
     // vizinhos/encaixes pelo oráculo
-    let nbs = 0, mt = 0, syn = 0;
+    let nbs = 0, mt = 0, syn = 0, oSteps = 0, oFalls = 0;
+    const hts = oHeights(b, cur, m.rot);
     const synKinds: string[] = [];
     // Interações (oráculo próprio): bordas comuns diferentes que formam um dos 4 pares.
     const SYN_PAIRS = [
@@ -399,6 +419,10 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       if (!n) continue;
       nbs++;
       const a = edges[i], c = n.edges[(i + 3) % 6];
+      if (hts && Math.abs(hts[i] - oPlacedHeights(b, n)[(i + 3) % 6]) === 1) {
+        oSteps++;
+        if (a === T.Water && c === T.Water) oFalls++;
+      }
       if (c === a) mt++;
       else {
         const pair = SYN_PAIRS.findIndex(([x, y]) => (a === x && c === y) || (a === y && c === x));
@@ -428,7 +452,12 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     assert(b.tiles.size === b.list.length, `seed ${seed}: tiles.size != list.length`);
 
     // --- pontuação esperada (inclui os bônus do tema, recalculados aqui)
-    let pts = mt * rules.matchPoints + syn * rules.synergyPoints;
+    let pts = mt * rules.matchPoints + syn * rules.synergyPoints + oSteps * rules.stepPoints + oFalls * rules.fallPoints;
+    if (rules.relief) {
+      assert((res.steps ?? 0) === oSteps && (res.falls ?? 0) === oFalls, `seed ${seed}: degraus ${res.steps}/${res.falls} != oráculo ${oSteps}/${oFalls}`);
+      inc('relevo_degraus', oSteps);
+      inc('relevo_cachoeiras', oFalls);
+    }
     // Estação (cópia de src/core/seasons.ts): a cada 20 jogadas, +3 numa interação.
     const seasonLock = rules.seasonLock;
     const season = seasonLock === 0 || seasonLock === 1 || seasonLock === 2 || seasonLock === 3 ? seasonLock : Math.floor((log.moves.length - 1) / 20) % 4;
@@ -775,13 +804,15 @@ const N_GAMES = Number(process.argv[2] ?? 300);
 const t0 = Date.now();
 const logs: GameLog[] = [];
 const POLICIES: Policy[] = ['greedy', 'quest', 'random', 'worst'];
+// Os modos de antes do Relevo: a mistura das 600 partidas (e a saída delas) não muda com o modo novo.
+const OLD_MODES = MODES.filter((m) => m.id !== 'relevo');
 for (let g = 0; g < N_GAMES; g++) {
   const themeIdx = g % THEMES.length;
   const policy = POLICIES[Math.floor(g / THEMES.length) % POLICIES.length];
   const seed = 1000 + g * 7919;
   seedMathRandom(seed ^ 0xabcdef);
   // Um quinto das partidas em cada modo alternativo (o resto no clássico).
-  const mode = g % 5 === 4 ? MODES[1 + Math.floor(g / 5) % (MODES.length - 1)] : MODES[0];
+  const mode = g % 5 === 4 ? OLD_MODES[1 + Math.floor(g / 5) % (OLD_MODES.length - 1)] : OLD_MODES[0];
   // Um terço das partidas com todas as peças especiais liberadas e um terço só com a primeira.
   const specials = g % 3 === 1 ? [...SPECIAL_KINDS] : g % 3 === 2 ? [SPECIAL_KINDS[0]] : [];
   const lg = simulate(seed, themeIdx, g < 60, policy, mode, specials);
@@ -789,6 +820,20 @@ for (let g = 0; g < N_GAMES; g++) {
   inc('partidas_' + policy);
   inc('modo_' + mode.id);
   logs.push(lg);
+}
+// Modo Relevo: partidas à parte, com o oráculo de encaixe de altura e de degraus (cobrem os 5 temas e as 4 políticas).
+{
+  const relevo = MODES.find((m) => m.id === 'relevo')!;
+  for (let g = 0; g < 60; g++) {
+    const themeIdx = g % THEMES.length;
+    const policy = POLICIES[Math.floor(g / THEMES.length) % POLICIES.length];
+    const seed = 500000 + g * 7919;
+    seedMathRandom(seed ^ 0xabcdef);
+    const lg = simulate(seed, themeIdx, g < 20, policy, relevo, g % 3 === 1 ? [...SPECIAL_KINDS] : []);
+    (lg as GameLog & { policy?: string }).policy = policy;
+    inc('modo_relevo');
+    logs.push(lg);
+  }
 }
 // Partida rápida: a pilha de 30 nunca cresce, então colocadas + descartadas ≤ 30 em toda partida.
 {

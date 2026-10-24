@@ -109,7 +109,7 @@ export class Game {
 
   check(q: number, r: number) {
     const edges = this.currentEdges();
-    return edges ? this.board.check(q, r, edges) : null;
+    return this.current && edges ? this.board.checkDef(q, r, this.current, this.rot) : null;
   }
 
   /**
@@ -123,8 +123,7 @@ export class Game {
   private previewAt(q: number, r: number, rot: number): PlaceResult | null {
     const def = this.current;
     if (!def) return null;
-    const edges = rotateEdges(def.edges, rot);
-    if (!this.board.check(q, r, edges).valid) return null;
+    if (!this.board.checkDef(q, r, def, rot).valid) return null;
     const board = this.board.clone();
     const res = board.place(q, r, def, rot);
     if (this.rules.endOnSites && board.sites.length && board.sitesLeft() === 0) {
@@ -189,7 +188,7 @@ export class Game {
   hasAnyMove(def: TileDef) {
     for (const k of this.board.frontier) {
       const [q, r] = unkey(k);
-      for (let rot = 0; rot < 6; rot++) if (this.board.check(q, r, rotateEdges(def.edges, rot)).valid) return true;
+      for (let rot = 0; rot < 6; rot++) if (this.board.checkDef(q, r, def, rot).valid) return true;
     }
     return false;
   }
@@ -228,7 +227,7 @@ export class Game {
     for (const k of this.board.frontier) {
       const [q, r] = unkey(k);
       for (let rot = 0; rot < 6; rot++) {
-        const c = this.board.check(q, r, rotateEdges(def.edges, rot));
+        const c = this.board.checkDef(q, r, def, rot);
         if (!c.valid) continue;
         const score = c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) + rand() * 0.5;
         if (!best || score > best.score) best = { q, r, rot, score };

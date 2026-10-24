@@ -119,7 +119,7 @@ function questMove(game: Game, def: TileDef, rand: () => number) {
     const [q, r] = unkey(k);
     for (let rot = 0; rot < 6; rot++) {
       const edges = rotateEdges(def.edges, rot);
-      const c = b.check(q, r, edges);
+      const c = b.checkDef(q, r, def, rot);
       if (!c.valid) continue;
       let score = greedyScore(c.matches, c.neighbors, rand);
       for (let i = 0; i < 6; i++) {
@@ -148,7 +148,7 @@ function routeMove(game: Game, def: TileDef, rand: () => number) {
     const [q, r] = unkey(k);
     for (let rot = 0; rot < 6; rot++) {
       const edges = rotateEdges(def.edges, rot);
-      const c = b.check(q, r, edges);
+      const c = b.checkDef(q, r, def, rot);
       if (!c.valid) continue;
       let score = greedyScore(c.matches, c.neighbors, rand);
       if (b.rules.routes) {
@@ -178,7 +178,7 @@ function siteMove(game: Game, def: TileDef, rand: () => number) {
     }
     for (let rot = 0; rot < 6; rot++) {
       const edges = rotateEdges(def.edges, rot);
-      const c = b.check(q, r, edges);
+      const c = b.checkDef(q, r, def, rot);
       if (!c.valid) continue;
       const score = greedyScore(c.matches, c.neighbors, rand) + pull;
       if (!best || score > best.score) best = { q, r, rot, score };

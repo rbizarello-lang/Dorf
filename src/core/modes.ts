@@ -4,7 +4,7 @@ import { T } from './tiles';
 // Versões alternativas do jogo. Um modo é dado: muda regras e o que a interface oferece
 // (desfazer, semente do dia). As regras finais são padrão ← tema ← modo.
 
-export type ModeId = 'classico' | 'zen' | 'diario' | 'exploradores' | 'rotas' | 'rapida';
+export type ModeId = 'classico' | 'zen' | 'diario' | 'exploradores' | 'rotas' | 'rapida' | 'relevo';
 
 export interface Mode {
   id: ModeId;
@@ -66,6 +66,15 @@ export const MODES: readonly Mode[] = [
     // (a média do Clássico chega a ~100). Sem missões, sítios, maravilha e cartas, que só dão peças.
     rules: { startTiles: 30, fixedStack: true, questChance: 0, sites: 0, wonderStages: 0, blessings: false },
     undos: 1,
+  },
+  {
+    id: 'relevo',
+    name: 'Relevo',
+    tagline: 'Cada peça traz a sua altura: baixa, alta, em rampa, com morro. A altura das bordas também precisa encaixar (1 degrau vale e rende pontos, 2 não).',
+    // Sem maravilha: o canteiro pede o meio da peça plano, e aqui a peça pode ter degraus.
+    rules: { relief: true, stepPoints: 3, fallPoints: 5, wonderStages: 0 },
+    undos: 3,
+    more: true,
   },
 ];
 
