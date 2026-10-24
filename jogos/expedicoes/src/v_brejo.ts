@@ -6,7 +6,7 @@ import { boardwalk, walk } from './structs';
 import { curve, distPoly, fbm, hex, meshAt, mount, mulberry32, scatter, smooth, type V2 } from './common';
 import { mistTexture } from './tex';
 
-export const BREJO = { R: 7.3, WL: 0.1 };
+export const BREJO = { R: 7.3, WL: 0.2 };
 const LAGOON = { x: 0.3, z: 0.2 };
 const lagoonR = (th: number): number => 2.9 + 0.5 * Math.sin(3 * th + 1) + 0.35 * Math.sin(5 * th + 2) + 0.2 * Math.sin(2 * th);
 const CH: V2[][] = [
@@ -27,10 +27,10 @@ export function brejoH(x: number, z: number): number {
   const d = sdf(x, z);
   const depth = smooth(0.35, -0.55, d);
   const hump = fbm(x * 0.4, z * 0.4, 5);
-  return 0.46 + 0.14 * hump - depth * 1.0 - (1 - smooth(0.6, 0.0, Math.abs(d))) * 0;
+  return 0.12 + 0.55 * hump - depth * 1.05;
 }
 
-const MUD = hex(0x4a4430), MOSS = hex(0x667c3e), MOSS2 = hex(0x4f6a3a), BANK = hex(0x8a8a4c), PEAT = hex(0x3e3626), SILT = hex(0x6b6244);
+const MUD = hex(0x4a4430), MOSS = hex(0x5d7a3a), MOSS2 = hex(0x486637), BANK = hex(0x8a8450), PEAT = hex(0x3e3626), SILT = hex(0x6b6244);
 
 export function buildBrejo(S: Stage, mini: boolean): Island {
   const r = mulberry32(21);
@@ -40,7 +40,7 @@ export function buildBrejo(S: Stage, mini: boolean): Island {
     color: (x, z, h, _s, out) => {
       const n = fbm(x * 1.1, z * 1.1, 8);
       if (h < BREJO.WL - 0.05) { out.copy(MUD).lerp(PEAT, smooth(0.0, -0.6, h)); return; }
-      const w = smooth(0.46, 0.14, h);
+      const w = smooth(0.42, 0.2, h);
       out.copy(MOSS).lerp(MOSS2, n);
       out.lerp(BANK, smooth(0.62, 0.8, n) * 0.6);
       out.lerp(SILT, w * 0.8);
@@ -48,7 +48,7 @@ export function buildBrejo(S: Stage, mini: boolean): Island {
     },
     strata: [{ color: 0x3a2d22, depth: 0.3 }, { color: 0x6b4e35, depth: 0.3 }, { color: 0x6c6a5c, depth: 0.35 }, { color: 0x4a5148, depth: 0.4 }, { color: 0x2f3a3a, depth: 9 }],
   });
-  const water = isl.water({ level: BREJO.WL, deep: new THREE.Color(0x1b3a38), shallow: new THREE.Color(0x66906a), alpha: 0.86, foam: 0.12, wave: 0.006, speed: 0.5, nr: mini ? 26 : 50, ns: mini ? 80 : 150 });
+  const water = isl.water({ level: BREJO.WL, deep: new THREE.Color(0x16302f), shallow: new THREE.Color(0x4d7a5e), alpha: 0.92, env: 0.3, foam: 0.15, wave: 0.006, speed: 0.5, nr: mini ? 26 : 50, ns: mini ? 80 : 150 });
   mount(S, isl, [water]);
   const inside = (x: number, z: number, m = 0.4): boolean => isl.inside(x, z) > m;
   const wet = (x: number, z: number): number => BREJO.WL - brejoH(x, z); // profundidade da água
@@ -69,9 +69,9 @@ export function buildBrejo(S: Stage, mini: boolean): Island {
     if (!mini) {
       // janela acesa: brilho na frente da casa
       const fx = Math.sin(yaw), fz = Math.cos(yaw);
-      S.glow(x + fx * 0.5, BREJO.WL + 0.98, z + fz * 0.5, 1.15, 0xffb360, 0.2);
+      S.glow(x + fx * 0.5, BREJO.WL + 0.98, z + fz * 0.5, 1.7, 0xffb360, 0.2);
       const lx = x + Math.cos(yaw) * -0.5 + fx * 0.55, lz = z - Math.sin(yaw) * -0.5 + fz * 0.55;
-      S.glow(lx, BREJO.WL + 0.97, lz, 0.75, 0xffc479, 0.4);
+      S.glow(lx, BREJO.WL + 0.97, lz, 1.1, 0xffc479, 0.4);
       S.smoke(x + Math.cos(yaw) * 0.22 - Math.sin(yaw) * -0.14 * 0, BREJO.WL + 1.58, z, 0.38 + r() * 0.15);
     }
   });
@@ -79,7 +79,7 @@ export function buildBrejo(S: Stage, mini: boolean): Island {
   // ---- passarelas: ligam as casas e a margem; lanternas nos postes ----
   const deckY = (x: number, z: number): number => {
     const h = brejoH(x, z);
-    const w = smooth(0.46, 0.2, h);
+    const w = smooth(0.46, 0.24, h);
     return (h + 0.13) * (1 - w) + (BREJO.WL + 0.62) * w;
   };
   const pileY = (x: number, z: number): number => brejoH(x, z) - 0.05;
@@ -112,10 +112,10 @@ export function buildBrejo(S: Stage, mini: boolean): Island {
 
   // ---- vegetação: juncos nas margens, vitórias-régias nas águas rasas, salgueiros nas ilhotas ----
   const reeds: { it: ReturnType<Stage['put']>; ph: number }[] = [];
-  const reedPts = scatter(r, mini ? 30 : 230, 0, 0, BREJO.R, (x, z) => inside(x, z, 0.2) && Math.abs(sdf(x, z) - 0.05) < 0.4 && walks.every((w) => distPoly(x, z, w) > 0.5), 0.16, 8);
+  const reedPts = scatter(r, mini ? 30 : 230, 0, 0, BREJO.R, (x, z) => inside(x, z, 0.2) && (brejoH(x, z) > BREJO.WL - 0.2 && brejoH(x, z) < BREJO.WL + 0.18) && walks.every((w) => distPoly(x, z, w) > 0.5), 0.16, 8);
   for (const [x, z] of reedPts) {
-    const tall = r() < 0.4;
-    const it = S.put(tall ? 'reedT' : 'reed', x, Math.max(brejoH(x, z), BREJO.WL - 0.12), z, r() * 6, 0.8 + r() * 0.6, { col: S.tone(0.85 + r() * 0.3) });
+    const tall = r() < 0.22;
+    const it = S.put(tall ? 'reedT' : 'reed', x, Math.max(brejoH(x, z), BREJO.WL - 0.12), z, r() * 6, 0.42 + r() * 0.4, { col: S.tone(0.85 + r() * 0.3) });
     reeds.push({ it, ph: r() * 6 });
   }
   if (!mini) {
@@ -143,7 +143,7 @@ export function buildBrejo(S: Stage, mini: boolean): Island {
     { pts: curve([[-2.7, -1.9], [-1.0, -3.2], [0.4, -3.5], [0.8, -2.4], [-0.6, -1.8], [-2.0, -1.5], [-2.7, -1.9]], 6), sp: 0.22, ph: 2 },
     { pts: curve([[6.5, 5.1], [5.0, 4.2], [3.8, 3.0], [3.0, 2.0], [4.0, 3.2], [5.2, 4.4], [6.5, 5.1]], 6), sp: 0.2, ph: 4 },
   ];
-  const boats = routes.map((rt) => { const it = S.put('flat', 0, BREJO.WL, 0, 0, 1.15); S.glow(0, 0, 0, 0.7, 0xffc479, 0.5); return { it, g: S.pools.get('glow')!.items[S.pools.get('glow')!.items.length - 1], rt }; });
+  const boats = routes.map((rt) => { const it = S.put('flat', 0, BREJO.WL, 0, 0, 1.5); S.glow(0, 0, 0, 0.7, 0xffc479, 0.5); return { it, g: S.pools.get('glow')!.items[S.pools.get('glow')!.items.length - 1], rt }; });
   const lens: number[][] = routes.map((rt) => { const c = [0]; for (let i = 1; i < rt.pts.length; i++) c.push(c[i - 1] + Math.hypot(rt.pts[i][0] - rt.pts[i - 1][0], rt.pts[i][1] - rt.pts[i - 1][1])); return c; });
 
   // ---- vaga-lumes ----
@@ -153,8 +153,8 @@ export function buildBrejo(S: Stage, mini: boolean): Island {
   const mistTex = mistTexture(11);
   const mists: THREE.Mesh[] = [];
   for (let i = 0; i < 3; i++) {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(BREJO.R * 2.3, BREJO.R * 2.3), new THREE.MeshBasicMaterial({ map: mistTex, transparent: true, depthWrite: false, opacity: 0.5, color: 0xdfe8d8 }));
-    m.rotation.x = -Math.PI / 2; m.position.set(S.P.x, S.P.y + 0.2 + i * 0.28, S.P.z); m.renderOrder = 3 + i;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(BREJO.R * 2.4, BREJO.R * 2.4), new THREE.MeshBasicMaterial({ map: mistTex, transparent: true, depthWrite: false, opacity: 0.5, color: 0xdfe8d8 }));
+    m.rotation.x = -Math.PI / 2; m.position.set(S.P.x, S.P.y + 0.32 + i * 0.3, S.P.z); m.renderOrder = 3 + i;
     S.group.add(m); mists.push(m);
   }
 
@@ -203,8 +203,8 @@ export function buildBrejo(S: Stage, mini: boolean): Island {
     });
     mists.forEach((m, i) => {
       const mat = m.material as THREE.MeshBasicMaterial;
-      mat.opacity = Math.min(0.75, 0.42 * smooth(0, 1, 1) * (0.9 - i * 0.18) * (0.75 + 0.25 * (1 - e.night * 0.4)));
-      mat.color.setRGB(0.88 - e.night * 0.5, 0.92 - e.night * 0.42, 0.85 - e.night * 0.2);
+      mat.opacity = 0.3 * (0.95 - i * 0.25) * (0.8 + 0.2 * (1 - e.night * 0.4));
+      mat.color.setRGB(0.55 - e.night * 0.33, 0.68 - e.night * 0.3, 0.58 - e.night * 0.1);
       m.rotation.z += e.dt * (0.008 + i * 0.005) * (i % 2 ? -1 : 1);
     });
   });

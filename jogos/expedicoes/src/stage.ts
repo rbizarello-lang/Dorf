@@ -51,6 +51,8 @@ export class Stage {
   private billQ = new THREE.Quaternion();
   /** Quanto os brilhos aparecem à noite (para o mapa, com os postos sempre acesos). */
   glowMin = 0;
+  /** Miniaturas do mapa: as peças pequenas não projetam sombra (corta draw calls). */
+  noCast = false;
 
   constructor(readonly name: string) { this.group.name = name; }
 
@@ -68,7 +70,7 @@ export class Stage {
     const def = KITS[kit];
     if (!def) throw new Error('kit desconhecido: ' + kit);
     const mat = def.mat === 'lit' ? MATS.lit : def.mat === 'metal' ? MATS.metal : def.mat === 'sail' ? MATS.sail : def.mat === 'beam' ? MATS.beam : def.mat === 'puff' ? MATS.puff : MATS.glow;
-    p = new Pool(def.mat === 'glow' ? PLANE : geoOf(kit), mat, def.cap ?? 600, { cast: def.cast ?? true, receive: def.receive ?? true, name: kit });
+    p = new Pool(def.mat === 'glow' ? PLANE : geoOf(kit), mat, def.cap ?? 600, { cast: this.noCast ? false : (def.cast ?? true), receive: def.receive ?? true, name: kit });
     if (def.mat === 'glow') { p.billboard = this.billQ; p.always = true; p.mesh.renderOrder = 6; }
     if (def.mat === 'puff') p.mesh.renderOrder = 4;
     this.pools.set(kit, p);

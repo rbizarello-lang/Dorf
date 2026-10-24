@@ -4,9 +4,9 @@ import * as THREE from 'three';
 const C = (h: string): THREE.Color => new THREE.Color(h);
 export const HOURS = ['dia', 'entardecer', 'noite'] as const;
 export const HOUR_NAMES = ['Dia', 'Entardecer', 'Noite'];
-export const VIEWS = ['mapa', 'brejo', 'serra', 'costa', 'capital'] as const;
+export const VIEWS = ['mapa', 'brejo', 'serra', 'costa', 'capital', 'chegada'] as const;
 export type ViewId = (typeof VIEWS)[number];
-export const VIEW_NAMES: Record<ViewId, string> = { mapa: 'Mapa da província', brejo: 'Posto no brejo', serra: 'Posto na serra', costa: 'Posto na costa', capital: 'Capital' };
+export const VIEW_NAMES: Record<ViewId, string> = { mapa: 'Mapa da província', brejo: 'Posto no brejo', serra: 'Posto na serra', costa: 'Posto na costa', capital: 'Capital', chegada: 'Chegada' };
 
 const dir = (azDeg: number, elDeg: number): THREE.Vector3 => {
   const az = (azDeg * Math.PI) / 180, el = (elDeg * Math.PI) / 180;
@@ -56,5 +56,6 @@ export const MOODS: Record<ViewId, Mood> = {
   brejo: { sun: C('#f0f4c8'), sky: C('#cfe6d0'), bgIn: C('#3d4a34'), bgOut: C('#0e130d'), mist: 1.0, exposure: 0.98, shadow: 10, center: new THREE.Vector3(0, 0, 0) },
   serra: { sun: C('#e4eeff'), sky: C('#cfe0f6'), bgIn: C('#46566a'), bgOut: C('#0d1118'), mist: 0.55, exposure: 1.0, shadow: 10, center: new THREE.Vector3(0, 1, 0) },
   costa: { sun: C('#fff1d0'), sky: C('#cfe9f4'), bgIn: C('#4f6b73'), bgOut: C('#0c1316'), mist: 0.2, exposure: 0.97, shadow: 10, center: new THREE.Vector3(0, 0.6, 0) },
+  chegada: { sun: C('#fff0d6'), sky: C('#ffe9cc'), bgIn: C('#5a3f2c'), bgOut: C('#120d09'), mist: 0.1, exposure: 1.0, shadow: 16, center: new THREE.Vector3(0, 0, 0) },
   capital: { sun: C('#fff0d4'), sky: C('#d8e8f8'), bgIn: C('#5c4332'), bgOut: C('#130e0a'), mist: 0.3, exposure: 0.95, shadow: 11, center: new THREE.Vector3(0, 0.4, 0) },
 };

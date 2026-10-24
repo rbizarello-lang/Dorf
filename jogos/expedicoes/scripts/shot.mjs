@@ -1,7 +1,7 @@
-// Capturas do diorama: sobe o dist/ num servidor estático próprio, abre no Chromium (SwiftShader, sem GPU),
+// Capturas das Expedições: sobe o dist/ num servidor estático próprio, abre no Chromium (SwiftShader, sem GPU),
 // tira PNGs 1280x800 e imprime erros do console e os draw calls/triângulos de cada uma.
 // Uso: npm run build && node scripts/shot.mjs [nome ...]        (sem nomes: todas)
-//      node scripts/shot.mjs "nome::season=2&hour=tarde&zoom=2"  (captura avulsa)
+//      node scripts/shot.mjs "nome::view=serra&hour=noite&zoom=2"  (captura avulsa)
 import { createServer } from 'node:http';
 import { readFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -13,12 +13,14 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
 const out = process.env.OUT || join(root, 'docs', 'screens');
 const SHOTS = {
-  primavera: 'season=0&hour=tarde&year=1&yaw=28',
-  verao: 'season=1&hour=tarde&year=1&yaw=28',
-  outono: 'season=2&hour=manha&year=1&yaw=28',
-  'inverno-noite': 'season=3&hour=noite&year=1&yaw=28',
-  ano3: 'season=1&hour=tarde&year=3&yaw=28',
-  perto: 'season=2&hour=tarde&year=1&yaw=12&zoom=2.1&pitch=46',
+  mapa: 'view=mapa&hour=dia&week=4',
+  brejo: 'view=brejo&hour=dia',
+  serra: 'view=serra&hour=dia',
+  costa: 'view=costa&hour=dia',
+  'capital-semana1': 'view=capital&week=1&hour=dia',
+  'capital-semana4': 'view=capital&week=4&hour=dia',
+  'brejo-noite': 'view=brejo&hour=noite',
+  chegada: 'view=chegada&hour=dia',
 };
 const want = process.argv.slice(2);
 for (const w of want) { const k = w.indexOf('::'); if (k > 0) SHOTS[w.slice(0, k)] = w.slice(k + 2); }

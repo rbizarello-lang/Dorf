@@ -165,6 +165,7 @@ export function buildCapital(S: Stage, mini: boolean): Island {
   const extra: [number, number, string][] = [[-2.8, 3.0, 'capHouse2'], [3.0, 3.1, 'capCot'], [-4.8, -3.6, 'capHouse'], [4.2, -0.3, 'capCot2'], [-0.8, 4.6, 'capCot'], [2.4, -4.9, 'capHouse2']];
   for (const [x, z, k] of extra) if (dryok(x, z, 0)) home(true, k, x, z, face(x, z, 0, 0.1) + (r() - 0.5) * 0.3, 0.95);
 
+  const PS = S.P.s;
   const g4 = new THREE.Group();
   S.group.add(g4);
   g4.position.set(S.P.x, S.P.y, S.P.z); g4.rotation.y = S.P.yaw; g4.scale.setScalar(S.P.s);
@@ -255,7 +256,7 @@ export function buildCapital(S: Stage, mini: boolean): Island {
       g4Scale += Math.sign(target - g4Scale) * Math.min(Math.abs(target - g4Scale), e.dt / 1.4);
       wk.v = g4Scale; isl.recolor();
     }
-    g4.scale.set(S.P.s, Math.max(1e-3, g4Scale) * S.P.s, S.P.s); g4.visible = g4Scale > 0.005;
+    g4.scale.set(PS, Math.max(1e-3, g4Scale) * PS, PS); g4.visible = g4Scale > 0.005;
     for (const q of emit) q.em.str = q.base * (q.four ? Math.min(1, Math.max(0, (g4Scale - 0.6) / 0.4)) : 1);
   });
   return isl;

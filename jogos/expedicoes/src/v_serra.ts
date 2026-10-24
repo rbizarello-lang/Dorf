@@ -13,8 +13,8 @@ const PADS: [number, number, number, number][] = [[-0.3, 1.2, 2.3, 0.95], [-2.4,
 
 export function serraH(x: number, z: number): number {
   // maciço ao fundo (norte), vale ao sul
-  const peak1 = 4.3 * Math.exp(-((x + 1.6) ** 2 / 9 + (z + 5.0) ** 2 / 8));
-  const peak2 = 3.1 * Math.exp(-((x - 2.6) ** 2 / 6 + (z + 4.4) ** 2 / 5));
+  const peak1 = 3.3 * Math.exp(-((x + 1.6) ** 2 / 9 + (z + 5.0) ** 2 / 8));
+  const peak2 = 2.4 * Math.exp(-((x - 2.6) ** 2 / 6 + (z + 4.4) ** 2 / 5));
   const ridge = 1.7 * smooth(-1.0, -6.0, z);
   const east = 1.9 * smooth(4.3, 6.5, x) * smooth(-4.5, -1.0, z) ;
   let h = 0.35 + peak1 + peak2 + ridge * 0.6 + east + (fbm(x * 0.45, z * 0.45, 4) - 0.5) * 0.9 * (0.4 + smooth(-1, -4, z));
@@ -111,17 +111,17 @@ export function buildSerra(S: Stage, mini: boolean): Island {
   meshAt(S, ropeBridge(A, B, 0.3));
 
   // ---- pinheiros: vale e encostas baixas ----
-  const pines = scatter(r, mini ? 30 : 170, 0, 0, SERRA.R, (x, z) => {
+  const pines = scatter(r, mini ? 30 : 105, 0, 0, SERRA.R, (x, z) => {
     const h = serraH(x, z);
-    return ins(x, z, 0.35) && free(x, z, 0.1) && h > 0.1 && h < 2.4 && Math.hypot(x - cx, z - cz) > 3.1 && distPoly(x, z, RAIL) > 0.6 && Math.hypot(x - mx, z - mz) > 1.4;
+    return ins(x, z, 0.35) && free(x, z, 0.1) && h > 0.1 && h < 2.4 && Math.hypot(x - cx, z - cz) > 3.7 && distPoly(x, z, RAIL) > 0.6 && Math.hypot(x - mx, z - mz) > 1.4;
   }, 0.55, 12);
   for (const [x, z] of pines) {
     const h = serraH(x, z);
     const big = r() < 0.5 ? 'pineS' : 'pineD';
-    S.put(big === 'pineD' && h > 1.2 ? 'pineS' : big, x, h - 0.04, z, r() * 6, 0.85 + r() * 0.8, { col: S.tone(0.88 + r() * 0.2) });
+    S.put(big === 'pineD' && h > 1.2 ? 'pineS' : big, x, h - 0.04, z, r() * 6, 0.6 + r() * 0.65, { col: S.tone(0.88 + r() * 0.2) });
   }
   // rochas altas e montes de neve
-  for (const [x, z] of scatter(r, mini ? 8 : 46, 0, 0, SERRA.R, (x, z) => ins(x, z, 0.4) && free(x, z) && serraH(x, z) > 1.0, 0.5, 8)) S.put('rockBig', x, serraH(x, z) - 0.05, z, r() * 6, 0.7 + r() * 0.9, { col: S.tone(0.8 + r() * 0.3) });
+  for (const [x, z] of scatter(r, mini ? 6 : 20, 0, 0, SERRA.R, (x, z) => ins(x, z, 0.4) && free(x, z) && serraH(x, z) > 1.0, 0.5, 8)) S.put('rockBig', x, serraH(x, z) - 0.05, z, r() * 6, 0.45 + r() * 0.55, { col: S.tone(0.8 + r() * 0.3) });
   if (!mini) for (const [x, z] of scatter(r, 60, 0, 0, SERRA.R, (x, z) => ins(x, z, 0.4) && free(x, z) && serraH(x, z) < 1.8, 0.3, 8)) S.put('mound', x, serraH(x, z) - 0.02, z, r() * 6, 0.6 + r() * 0.9);
 
   if (mini) return isl;

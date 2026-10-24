@@ -161,7 +161,7 @@ export function chalet(seed: number, long: boolean, snow = true): Built {
   g.add(gable(D + 0.42, RH, W + 0.34), 0x474d58, { ry: Math.PI / 2, y: 0.76, grad: [0.74, 1] });
   for (let k = 0; k < 3; k++) g.add(gable(D + 0.43 - k * 0.1, 0.05, W + 0.35), k % 2 ? 0x3d434d : 0x535a66, { ry: Math.PI / 2, y: 0.76 + 0.13 + k * 0.17, grad: [1, 1] });
   if (snow) {
-    g.add(gable(D + 0.5, RH * 0.62, W + 0.42), 0xf3f8fc, { ry: Math.PI / 2, y: 0.76 + RH * 0.38 + 0.02, grad: [0.9, 1], jit: 0.02 });
+    g.add(gable(D + 0.46, RH * 0.46, W + 0.38), 0xf3f8fc, { ry: Math.PI / 2, y: 0.76 + RH * 0.54 + 0.02, grad: [0.9, 1], jit: 0.02 });
     g.box(W + 0.5, 0.06, 0.08, 0xf3f8fc, { y: 0.76 + RH - 0.01, grad: [1, 1] });
   }
   // chaminé de pedra

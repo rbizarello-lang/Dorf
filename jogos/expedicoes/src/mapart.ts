@@ -175,13 +175,13 @@ export function mapTexture(): THREE.CanvasTexture {
   label('?', 9.0, -4.8, 60, 'rgba(235,222,190,0.5)');
 
   // cartucho do título
-  g.save(); g.translate(X(-8.2), Z(-5.3));
+  g.save(); g.translate(X(-6.0), Z(-5.3));
   g.fillStyle = 'rgba(240,226,184,0.88)'; g.strokeStyle = INK; g.lineWidth = 3;
   g.beginPath(); g.roundRect(-3 * PX / 2 * 1.1, -0.55 * PX, 3.3 * PX, 1.1 * PX, 16); g.fill(); g.stroke();
   g.lineWidth = 1.2; g.beginPath(); g.roundRect(-3 * PX / 2 * 1.1 + 8, -0.55 * PX + 8, 3.3 * PX - 16, 1.1 * PX - 16, 11); g.stroke();
   g.restore();
-  label('PROVÍNCIA', -8.2, -5.5, 30, INK, 7, false);
-  label('de Alvorada', -8.2, -5.1, 32, '#5a1c10');
+  label('PROVÍNCIA', -6.0, -5.5, 30, INK, 7, false);
+  label('de Alvorada', -6.0, -5.1, 32, '#5a1c10');
   // rosa dos ventos
   g.save(); g.translate(X(8.4), Z(-4.9));
   const R0 = 0.78 * PX;

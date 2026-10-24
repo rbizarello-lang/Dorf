@@ -23,6 +23,7 @@ export interface MapHandle { capital: { x: number; z: number }; spots: Record<'c
 
 export function buildMap(S: Stage, o: MapOpts): MapHandle {
   const { x: ox, z: oz, s } = o;
+  S.noCast = true;
   const root = new THREE.Group();
   root.position.set(ox, 0, oz); root.scale.setScalar(s);
   S.group.add(root);
@@ -68,7 +69,7 @@ export function buildMap(S: Stage, o: MapOpts): MapHandle {
   }
 
   // miniaturas: o chão assenta no pergaminho
-  const mini = (id: 'capital' | 'brejo' | 'serra' | 'costa', pos: V2, sc: number, base: number, yaw: number, build: (S: Stage, mini: boolean) => unknown): { x: number; z: number } => {
+  const mini = (_id: string, pos: V2, sc: number, base: number, yaw: number, build: (S: Stage, mini: boolean) => unknown): { x: number; z: number } => {
     const w = W(pos[0], pos[1]);
     S.at(w.x, 0.03 + (0.6 - base) * sc * s, w.z, yaw, sc * s);
     build(S, true);
@@ -93,7 +94,7 @@ export function buildMap(S: Stage, o: MapOpts): MapHandle {
   // bruma sobre a terra incógnita
   const tex = mistTexture(21);
   const mists: { m: THREE.Mesh; sp: number }[] = [];
-  for (const [mx, mz, w, d, op] of [[-9.2, 0, 4.6, 10, 0.75], [9.6, -3.5, 4.2, 6, 0.7], [0, -6.0, 18, 3.2, 0.6], [-4, 6.1, 10, 3, 0.55], [5, 6.2, 8, 3, 0.55], [-9, -5, 5, 5, 0.8], [9, 5.5, 5, 4, 0.7]] as number[][]) {
+  for (const [mx, mz, w, d, op] of [[-9.6, 0, 3.4, 9, 0.5], [9.8, -3.5, 3.2, 6, 0.45], [0, -6.4, 16, 2.4, 0.4], [-4, 6.4, 10, 2.2, 0.38], [5, 6.4, 8, 2.2, 0.38], [-9.4, -5.4, 4, 3.5, 0.55], [9.4, 5.8, 4, 3, 0.45]] as number[][]) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: op, color: 0xd9ccb4 }));
     m.rotation.x = -Math.PI / 2; m.position.set(ox + mx * s, 0.5 * s + 0.25, oz + mz * s); m.scale.setScalar(s); m.renderOrder = 4;
     S.group.add(m); mists.push({ m, sp: 0.01 + Math.random() * 0.01 });
@@ -101,8 +102,8 @@ export function buildMap(S: Stage, o: MapOpts): MapHandle {
 
   // caravana: carroça e dois bois
   const parked = W(1.5, 2.65);
-  const wag = S.put('wagon', 0, 0, 0, 0, 0.62 * s);
-  const ox1 = S.put('ox', 0, 0, 0, 0, 0.56 * s), ox2 = S.put('ox', 0, 0, 0, 0, 0.56 * s);
+  const wag = S.put('wagon', 0, 0, 0, 0, 1.0 * s);
+  const ox1 = S.put('ox', 0, 0, 0, 0, 0.85 * s), ox2 = S.put('ox', 0, 0, 0, 0, 0.85 * s);
   const route = ROUTES.serra.map(([x, z]) => W(x, z));
   const lens = [0]; for (let i = 1; i < route.length; i++) lens.push(lens[i - 1] + Math.hypot(route[i].x - route[i - 1].x, route[i].z - route[i - 1].z));
   const dust: PItem[] = [];
@@ -119,8 +120,8 @@ export function buildMap(S: Stage, o: MapOpts): MapHandle {
   const sparkle: PItem[] = [];
   if (o.arrival) {
     place(parked.x, parked.z, -0.35, 0);
-    for (const w of [W(2.6, 0.9), spots.brejo, parked]) sparkle.push(S.glow(w.x + (w === spots.brejo ? 0.2 * s : 0), 0.9 * s, w.z - (w === spots.brejo ? 0.2 * s : 0), 1.7 * s, 0xffe08a, 2));
-    sparkle.push(S.glow(spots.capital.x + 0.5 * s, 1.6 * s, spots.capital.z + 0.1 * s, 1.4 * s, 0xfff0b0, 2));
+    for (const w of [W(2.6, 0.9), spots.brejo, parked]) sparkle.push(S.glow(w.x + (w === spots.brejo ? 0.2 * s : 0), 0.9 * s, w.z - (w === spots.brejo ? 0.2 * s : 0), 3.0 * s, 0xffe08a, 2));
+    sparkle.push(S.glow(spots.capital.x + 0.5 * s, 1.6 * s, spots.capital.z + 0.1 * s, 2.6 * s, 0xfff0b0, 2));
   }
   S.anims.push((e: Env) => {
     for (const q of mists) q.m.rotation.z += e.dt * q.sp;

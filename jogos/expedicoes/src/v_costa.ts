@@ -4,7 +4,7 @@ import type { Stage, Env } from './stage';
 import { MATS } from './stage';
 import { Island } from './island';
 import { pier, walk } from './structs';
-import { curve, distPoly, face, fbm, hex, meshAt, mount, mulberry32, scatter, smooth, type V2 } from './common';
+import { curve, distPoly, fbm, hex, meshAt, mount, mulberry32, scatter, smooth, type V2 } from './common';
 
 export const COSTA = { R: 7.4 };
 const coastC = (x: number, z: number): number => x + 0.55 * z - (2.5 + 0.45 * Math.sin(1.3 * z + 0.5) + 0.3 * Math.sin(2.3 * x));
@@ -84,7 +84,7 @@ export function buildCosta(S: Stage, mini: boolean): Island {
   }
   if (!mini) for (const [x, z] of scatter(r, 14, 0, 0, COSTA.R, (x, z) => ins(x, z, 0.5) && coastC(x, z) > -1.1 && coastC(x, z) < -0.4 && costaH(x, z) > 0.12, 0.5)) S.put('rock', x, costaH(x, z), z, r() * 6, 0.7 + r() * 0.8);
   // rochedos no mar
-  for (const [x, z] of [[4.9, 3.4], [3.3, 5.3], [5.9, 0.2]] as V2[]) if (ins(x, z, 0.8)) S.put('rockBig', x, -0.25, z, r() * 6, 1.1 + r() * 0.4);
+  for (const [x, z] of [[4.9, 3.4], [3.3, 5.3], [5.9, 0.2]] as V2[]) if (ins(x, z, 0.8)) S.put('rockBig', x, -0.25, z, r() * 6, 0.75 + r() * 0.3);
 
   // ---- cais ----
   // início na praia, onde o terreno cruza 0.18 andando em direção ao mar

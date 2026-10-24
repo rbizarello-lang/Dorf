@@ -50,6 +50,7 @@ export function mount(S: Stage, isl: Island, waters: Water[]): void {
   isl.group.rotation.y = yaw;
   isl.group.scale.setScalar(s);
   S.group.add(isl.group);
+  if (S.noCast) isl.terrain.castShadow = true;
   for (const w of waters) {
     w.mesh.position.set(x, y, z);
     w.mesh.rotation.y = yaw;

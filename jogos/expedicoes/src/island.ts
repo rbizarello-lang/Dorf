@@ -1,6 +1,7 @@
 // O bloco de terra de um diorama: relevo contínuo por função de altura, contorno irregular (nada de grade),
 // corte lateral em camadas, base de nogueira com filete de latão e uma superfície de água com espuma.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { mulberry32, smooth, vnoise } from './rng';
 import { walnutTexture } from './tex';
 
@@ -30,6 +31,7 @@ export interface WaterSpec {
   foam?: number; wave?: number; speed?: number;
   /** Faixa de ondas quebrando (costa). */
   surf?: number;
+  env?: number;
   nr?: number; ns?: number;
 }
 export interface Water { mesh: THREE.Mesh; update(t: number): void; mat: THREE.MeshStandardMaterial }
@@ -168,11 +170,11 @@ export class Island {
     g.setIndex(idx);
     this.fixWinding(g, (x, z) => [x, z]);
     const m = new THREE.Mesh(g, SIDE);
-    m.receiveShadow = true; m.castShadow = true;
+    m.receiveShadow = true;
     this.group.add(m);
   }
 
-  private ringWall(scale: number, y0: number, y1: number, mat: THREE.Material, uv = true): THREE.Mesh {
+  private ringWall(scale: number, y0: number, y1: number, _mat: THREE.Material, uv = true): THREE.BufferGeometry {
     const { ns } = this;
     const pos: number[] = [], nor: number[] = [], uvs: number[] = [], idx: number[] = [];
     for (let j = 0; j <= ns; j++) {
@@ -189,14 +191,14 @@ export class Island {
     if (uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     g.setIndex(idx);
     this.fixWinding(g, (x, z) => [x, z]);
-    const m = new THREE.Mesh(g, mat);
-    m.receiveShadow = true;
-    return m;
+    const ng = g.toNonIndexed();
+    if (!uv) ng.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(ng.attributes.position.count * 2), 2));
+    return ng;
   }
 
   private buildPlinth(): void {
     const b = this.spec.base;
-    this.group.add(this.ringWall(1.07, b - 0.6, b, WALNUT));
+    const wall = this.ringWall(1.07, b - 0.6, b, WALNUT);
     // prateleira de nogueira em volta do corte
     const { ns } = this;
     const pos: number[] = [], nor: number[] = [], uvs: number[] = [], idx: number[] = [];
@@ -219,12 +221,12 @@ export class Island {
     const a = new THREE.Vector3(), bb = new THREE.Vector3(), c = new THREE.Vector3();
     a.fromBufferAttribute(p, ix.getX(0)); bb.fromBufferAttribute(p, ix.getX(1)); c.fromBufferAttribute(p, ix.getX(2));
     if (bb.sub(a).cross(c.sub(a)).y < 0) for (let t = 0; t < ix.count; t += 3) { const x = ix.getX(t + 1); ix.setX(t + 1, ix.getX(t + 2)); ix.setX(t + 2, x); }
-    const shelf = new THREE.Mesh(g, WALNUT);
-    shelf.receiveShadow = true;
-    this.group.add(shelf);
+    const wood = new THREE.Mesh(mergeGeometries([wall, g.toNonIndexed()], false)!, WALNUT);
+    wood.receiveShadow = true;
+    this.group.add(wood);
     // filete de latão
-    this.group.add(this.ringWall(1.073, b - 0.2, b + 0.015, BRASS, false));
-    this.group.add(this.ringWall(1.073, b - 0.62, b - 0.56, BRASS, false));
+    const br = new THREE.Mesh(mergeGeometries([this.ringWall(1.073, b - 0.2, b + 0.015, BRASS, false), this.ringWall(1.073, b - 0.62, b - 0.56, BRASS, false)], false)!, BRASS);
+    this.group.add(br);
   }
 
   /** Superfície de água com profundidade por vértice (alfa), espuma na beira e uma parede translúcida no corte. */
@@ -287,7 +289,7 @@ export class Island {
       }
       if (dn > up) for (let t = 0; t < ix.count; t += 3) { const x = ix.getX(t + 1); ix.setX(t + 1, ix.getX(t + 2)); ix.setX(t + 2, x); }
     }
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, roughness: 0.1, metalness: 0.15, envMapIntensity: 1.7, depthWrite: false });
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, roughness: 0.12, metalness: 0.1, envMapIntensity: ws.env ?? 0.85, depthWrite: false });
     const mesh = new THREE.Mesh(g, mat);
     mesh.renderOrder = 2; mesh.receiveShadow = true;
     const amp = ws.wave ?? 0.012, sp = ws.speed ?? 1, foam = ws.foam ?? 0.6, surf = ws.surf ?? 0;
