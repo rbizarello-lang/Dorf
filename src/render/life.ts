@@ -259,6 +259,23 @@ export class Life {
     return own * LEVEL_STEP - drop;
   }
 
+  /** Inclinação (rad, positiva subindo) da via em (x, z) no sentido `heading`: a derivada da rampa, para o veículo acompanhá-la. */
+  private roadPitch(x: number, z: number, heading: number): number {
+    const [q, r] = worldToHex(x, z);
+    if (!this.levelOf(q, r)) return 0;
+    const h = 0.03, dx = Math.cos(heading) * h, dz = Math.sin(heading) * h;
+    return Math.atan2(this.roadLift(x + dx, z + dz) - this.roadLift(x - dx, z - dz), 2 * h);
+  }
+
+  /**
+   * Quanto o barco para antes de uma queda, contado da borda para dentro: 0 se a vizinha está no mesmo nível; antes do
+   * lábio na peça alta e antes da espuma na bacia da peça baixa (R3). O fim de linha do barco é esse ponto.
+   */
+  private fallPull(tile: Placed, e: number): number {
+    const d = this.levelOf(tile.q + DIRS[e][0], tile.r + DIRS[e][1]) - this.levelOf(tile.q, tile.r);
+    return d < 0 ? 0.18 : d > 0 ? 0.27 : 0;
+  }
+
   private root = new THREE.Group();
   private pools = new Map<string, AnimPool>();
   private spinners: Spinner[] = [];
@@ -642,7 +659,12 @@ export class Life {
    * tileBuilder (mesmas bordas locais e semente) e gira com a peça. */
   private setRoute(m: Mover) {
     const { x: cx, z: cz } = hexToWorld(m.tile.q, m.tile.r);
-    const end = (e: number): [number, number] => (e < 0 ? [0, 0] : edgeMid(e));
+    const end = (e: number): [number, number] => {
+      if (e < 0) return [0, 0];
+      const [mx, mz] = edgeMid(e);
+      const pull = m.boat ? this.fallPull(m.tile, e) : 0;
+      return pull ? [mx * (1 - pull / INR), mz * (1 - pull / INR)] : [mx, mz];
+    };
     let pts: [number, number][];
     if (m.a < 0 || m.b < 0) pts = [end(m.a), end(m.b)];
     else if (!m.boat) {
@@ -765,7 +787,7 @@ export class Life {
     } else {
       const [dq, dr] = DIRS[m.b];
       const n = board.tiles.get(hkey(m.tile.q + dq, m.tile.r + dr));
-      // Relevo: o barco não sobe nem desce a corredeira (a queda é da etapa seguinte): vizinha em outro nível é fim de linha.
+      // Relevo: o barco não sobe nem desce a cachoeira: vizinha em outro nível é fim de linha (a rota já acaba antes do lábio, `fallPull`).
       if (n && n.edges[opposite(m.b)] === terr && !(m.boat && this.levelOf(n.q, n.r) !== this.levelOf(m.tile.q, m.tile.r))) {
         const entry = opposite(m.b);
         const exits = strictEdges(n, terr).filter((e) => e !== entry);
@@ -864,6 +886,8 @@ export class Life {
       const bounce = th.vehicle === 'caravan' || th.vehicle === 'oxcart' || th.vehicle === 'sled' ? Math.abs(Math.sin(this.time * 7)) * 0.004 : 0;
       q4.setFromAxisAngle(UP, -m.heading);
       m4.compose(v3.set(m.x, roadY + bounce + this.roadLift(m.x, m.z), m.z), q4, s3.setScalar(1));
+      const pitch = this.roadPitch(m.x, m.z, m.heading);
+      if (pitch) m4.multiply(m4b.makeRotationZ(pitch));
       head?.set(hi++, m4, this.beast);
       for (let k = 1; k <= cars; k++) {
         const p = trailAt(m.trail, spacing * k);
@@ -871,6 +895,8 @@ export class Life {
         q4.setFromAxisAngle(UP, -p.heading);
         const b2 = th.vehicle === 'caravan' || th.vehicle === 'oxcart' ? Math.abs(Math.sin(this.time * 7 + k)) * 0.004 : 0;
         m4.compose(v3.set(p.x, roadY + b2 + this.roadLift(p.x, p.z), p.z), q4, s3.setScalar(1));
+        const cp = this.roadPitch(p.x, p.z, p.heading);
+        if (cp) m4.multiply(m4b.makeRotationZ(cp));
         car?.set(ci++, m4, this.beast);
         if (cargo && lift) {
           // Maior que o desenho do kit: de longe a carga precisa ler em cima do vagão.

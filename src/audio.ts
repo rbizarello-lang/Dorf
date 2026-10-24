@@ -34,6 +34,8 @@ export interface Ambience {
   village: number;
   rail: number;
   near: number;
+  /** Cachoeira (R3): 0 sem nenhuma por perto, 1 ao pé de uma; o jogo tira da distância do foco da câmera à mais próxima. */
+  fall: number;
 }
 
 /** O que a peça colocada tem, para o som de assentar (respingo, folhas, trilho). */
@@ -59,9 +61,9 @@ export class Sfx {
   private era = 0;
   private plucks = new Map<number, AudioBuffer>();
   /** Som de ambiente: vento e água em laço contínuo, pássaros, grilos e vila sorteados. */
-  private amb: { bus: GainNode; wind: GainNode; windF: BiquadFilterNode; water: GainNode } | null = null;
+  private amb: { bus: GainNode; wind: GainNode; windF: BiquadFilterNode; water: GainNode; fall: GainNode } | null = null;
   private noise: AudioBuffer | null = null;
-  private mix: Ambience = { open: 0, forest: 0, water: 0, village: 0, rail: 0, near: 0 };
+  private mix: Ambience = { open: 0, forest: 0, water: 0, village: 0, rail: 0, near: 0, fall: 0 };
   private nextGust = 0;
   /** Sons de ambiente que o tema pede (Theme.ambience), somados ao ambiente por proximidade. */
   private themeAmb: readonly AmbienceSpec[] = [];
@@ -180,7 +182,31 @@ export class Sfx {
     water.gain.value = 0;
     waterSrc.connect(hp).connect(lp).connect(babble).connect(water).connect(bus);
     waterSrc.start(0, 0.7);
-    this.amb = { bus, wind, windF, water };
+    // Cachoeira: ruído largo e grave (passa-banda perto de 700 Hz, sem os agudos do rio), com o volume balançando devagar.
+    const fallSrc = ctx.createBufferSource();
+    fallSrc.buffer = this.noiseBuffer(ctx);
+    fallSrc.loop = true;
+    fallSrc.loopStart = 0.3;
+    const fbp = ctx.createBiquadFilter();
+    fbp.type = 'bandpass';
+    fbp.frequency.value = 700;
+    fbp.Q.value = 0.45;
+    const flp = ctx.createBiquadFilter();
+    flp.type = 'lowpass';
+    flp.frequency.value = 2600;
+    const roar = ctx.createGain();
+    roar.gain.value = 0.85;
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 0.37;
+    const lfoDepth = ctx.createGain();
+    lfoDepth.gain.value = 0.12;
+    lfo.connect(lfoDepth).connect(roar.gain);
+    lfo.start();
+    const fall = ctx.createGain();
+    fall.gain.value = 0;
+    fallSrc.connect(fbp).connect(flp).connect(roar).connect(fall).connect(bus);
+    fallSrc.start(0, 0.3);
+    this.amb = { bus, wind, windF, water, fall };
   }
 
   /** Ajusta os laços à paisagem e sorteia os sons soltos da próxima fração de segundo. */
@@ -191,6 +217,8 @@ export class Sfx {
     const night = this.mood === 'night';
     a.wind.gain.setTargetAtTime(0.05 + 0.07 * m.open + 0.1 * (1 - m.near), t, 1.2);
     a.water.gain.setTargetAtTime(0.14 * m.water * (0.35 + 0.65 * m.near), t, 0.8);
+    // A queda ouve-se de mais longe que o rio, e some ao se afastar a câmera (a distância já entra em `fall`).
+    a.fall.gain.setTargetAtTime(0.2 * m.fall * (0.4 + 0.6 * m.near), t, 0.6);
     if (t > this.nextGust) {
       this.nextGust = t + 1.5 + Math.random() * 3;
       a.windF.frequency.setTargetAtTime(260 + Math.random() * 520, t, 1.4);

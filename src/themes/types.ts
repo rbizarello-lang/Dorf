@@ -487,9 +487,15 @@ export interface Theme {
     /**
      * Níveis de altura do tabuleiro (R2): 0 ou omitido = plano (como antes); 1 ou 2 = platôs de até esse nível (`core/relief.ts`,
      * função só da semente), a peça assenta na altura da casa e a parede de rocha (`rock`) desce até o fundo comum.
-     * Estrada e trilho descem em rampa e o rio, em corredeira, até a vizinha mais baixa. Só aparência: regras e replay não mudam.
+     * Estrada e trilho descem em rampa até a vizinha mais baixa e o rio cai em cachoeira (`fall`). Só aparência: regras e replay não mudam.
      */
     levels?: 0 | 1 | 2;
+    /**
+     * Cachoeira (R3) onde o rio passa de uma casa alta para uma mais baixa (só com `levels`): `tint` = cor da água que cai
+     * (padrão: a água do tema, mais clara), `foam` = cor das faixas e da espuma da bacia (padrão: branco azulado) e `mist` =
+     * cor da névoa do pé da queda (padrão: a da espuma). Tudo opcional.
+     */
+    fall?: { tint?: string; foam?: string; mist?: string };
   };
   /** Quanto da neve de inverno cobre as parcelas de plantação (1 = tudo, o padrão; 0 = nada). O lago congelado usa um valor baixo: o gelo azul não some sob a neve. */
   fieldSnow?: number;

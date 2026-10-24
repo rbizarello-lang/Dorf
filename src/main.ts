@@ -1603,6 +1603,8 @@ function updateAmbience(now: number) {
     village: share(T.Village, 2.5),
     rail: share(T.Rail, 4),
     near: tiles ? THREE.MathUtils.clamp(1 - (world.rig.dist - world.rig.minDist) / 20, 0, 1) : 0,
+    // Cachoeira: 1 a menos de uma casa do foco, cai até 0 a seis casas (a distância no plano até a queda mais próxima).
+    fall: THREE.MathUtils.clamp(1 - (world.nearestFall(world.rig.target.x, world.rig.target.z) - 1.5) / 9, 0, 1),
   });
 }
 
@@ -1869,11 +1871,18 @@ function start(data: unknown) {
     world.rig.tilt = world.rig.goalTilt = pitchDeg * THREE.MathUtils.DEG2RAD - world.rig.basePitch(world.rig.goalDist);
   }
   if (params.has('focus')) (window as unknown as { __focus: (t: number) => boolean }).__focus(Number(params.get('focus')));
-  // ?step=rail ou ?step=water.1 (a i-ésima borda entre níveis): centraliza na rampa ou na corredeira.
+  // ?step=rail ou ?step=water.1 (a i-ésima borda entre níveis): centraliza na rampa ou na cachoeira.
   if (params.has('step')) {
     const [k, i] = (params.get('step') ?? '').split('.');
     (window as unknown as { __step: (kind: string, i: number) => unknown }).__step(k === 'water' ? 'water' : 'rail', Number(i) || 0);
   }
+  // ?at=3,-3: centraliza na casa (q, r) (capturas de uma peça específica; combine com ?zoom=).
+  if (params.has('at')) {
+    const [q, r] = (params.get('at') ?? '').split(',').map(Number);
+    if (Number.isInteger(q) && Number.isInteger(r)) (window as unknown as { __goto: (q: number, r: number) => void }).__goto(q, r);
+  }
+  // ?fall=1: centraliza na i-ésima cachoeira assentada (de frente, vista da casa mais baixa).
+  if (params.has('fall')) (window as unknown as { __fall: (i: number) => unknown }).__fall(Number(params.get('fall')) || 0);
   if (!special && !store.get('seenHelp') && !(resumed && moves.length)) showHelp();
   requestAnimationFrame((t) => {
     last = t;
@@ -1986,7 +1995,7 @@ function start(data: unknown) {
   if (zoom) world.rig.dist = world.rig.goalDist = zoom;
   return b.yaw;
 };
-// Relevo: centraliza na i-ésima borda de estrada (`rail`) ou de rio (`water`) entre níveis diferentes (a rampa ou a corredeira),
+// Relevo: centraliza na i-ésima borda de estrada (`rail`) ou de rio (`water`) entre níveis diferentes (a rampa ou a cachoeira),
 // vista da peça alta; devolve { q, r, edge, de, para } ou null (capturas).
 (window as unknown as { __step: (kind?: 'rail' | 'water', i?: number, zoom?: number) => unknown }).__step = (kind = 'rail', i = 0, zoom) => {
   const terr = kind === 'water' ? T.Water : T.Rail;
@@ -2011,6 +2020,27 @@ function start(data: unknown) {
   if (zoom) world.rig.dist = world.rig.goalDist = zoom;
   return h;
 };
+// Cachoeira (R3): centraliza na i-ésima queda assentada, de frente, vista da casa mais baixa; devolve { x, z, drop, w } ou null.
+(window as unknown as { __fall: (i?: number, zoom?: number) => unknown }).__fall = (i = 0, zoom) => {
+  const f = world.falls.spots[i];
+  if (!f) return null;
+  const x = f.x + f.nx * 0.05, z = f.z + f.nz * 0.05;
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  world.rig.yaw = world.rig.goalYaw = Math.atan2(f.nx, f.nz) + 0.4;
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return { x: f.x, z: f.z, drop: f.drop, w: f.w };
+};
+// Centraliza a câmera na casa (q, r).
+(window as unknown as { __goto: (q: number, r: number, zoom?: number) => void }).__goto = (q, r, zoom) => {
+  const { x, z } = hexToWorld(q, r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+};
+// Relevo: as peças assentadas com o nível da casa e as bordas (conferir onde há vila em platô, rio entre níveis etc.).
+(window as unknown as { __tiles: () => { q: number; r: number; level: number; edges: number[] }[] }).__tiles = () =>
+  game.board.list.map((p) => ({ q: p.q, r: p.r, level: world.levelOf(p.q, p.r), edges: [...p.edges] }));
 // Relevo: as casas vazias da fronteira com o nível e o ponto da tela onde cada uma aparece (teste do clique por nível).
 (window as unknown as { __cells: () => { q: number; r: number; level: number; x: number; y: number }[] }).__cells = () =>
   [...game.board.frontier].map((k) => {

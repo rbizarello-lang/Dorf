@@ -7,6 +7,8 @@ import type { TileBuild } from './tileBuilder';
 // Ao lado vai a cobertura (R8): 255 onde alguma peça já pintou. Os mipmaps do RGB, que tem 0 no
 // vazio, saem multiplicados pela cobertura; dividir um pelo outro dá a cor média só das peças
 // (a costura de cor entre peças, em makeGroundMaterial).
+// A altura do chão (R8, `HEIGHT_RANGE` = 255) fica numa terceira textura: em platô de nível 1 ou 2 os materiais medem o
+// ponto a partir do chão da casa (poças de lampião e luz rebatida), não do y absoluto.
 // Uma textura só, alinhada ao mundo, cobre o tabuleiro inteiro. Como os blocos estáticos, só
 // cresce: cada peça que assenta pinta a sua parte, rasterizada na CPU a partir da geometria.
 
@@ -14,6 +16,8 @@ import type { TileBuild } from './tileBuilder';
 export const GROUND_SIZE = 1024;
 export const GROUND_EXTENT = 51.2;
 const TEXEL = (GROUND_EXTENT * 2) / GROUND_SIZE;
+/** Altura do chão que o byte 255 da textura de alturas representa (o platô mais alto, nível 2, tem 0,6). */
+export const HEIGHT_RANGE = 1;
 /** Raio da poça de luz de um lampião (desvio da gaussiana, em unidades do mundo). */
 const LANTERN_SIGMA = 0.17;
 
@@ -24,6 +28,9 @@ export class GroundMap {
   readonly texture: THREE.DataTexture;
   readonly cover = new Uint8Array(GROUND_SIZE * GROUND_SIZE);
   readonly coverTexture: THREE.DataTexture;
+  /** Altura do chão da casa (peça) em cada texel, em fração de `HEIGHT_RANGE`; 0 onde não há peça. */
+  readonly height = new Uint8Array(GROUND_SIZE * GROUND_SIZE);
+  readonly heightTexture: THREE.DataTexture;
   private dirty = false;
 
   constructor() {
@@ -44,11 +51,19 @@ export class GroundMap {
     c.colorSpace = THREE.NoColorSpace;
     c.needsUpdate = true;
     this.coverTexture = c;
+    const h = new THREE.DataTexture(this.height, GROUND_SIZE, GROUND_SIZE, THREE.RedFormat, THREE.UnsignedByteType);
+    h.wrapS = h.wrapT = THREE.ClampToEdgeWrapping;
+    h.magFilter = h.minFilter = THREE.LinearFilter;
+    h.generateMipmaps = false;
+    h.colorSpace = THREE.NoColorSpace;
+    h.needsUpdate = true;
+    this.heightTexture = h;
   }
 
   clear() {
     this.data.fill(0);
     this.cover.fill(0);
+    this.height.fill(0);
     this.dirty = true;
   }
 
@@ -84,6 +99,7 @@ export class GroundMap {
     this.dirty = false;
     this.texture.needsUpdate = true;
     this.coverTexture.needsUpdate = true;
+    this.heightTexture.needsUpdate = true;
   }
 
   /**
@@ -92,6 +108,7 @@ export class GroundMap {
    */
   private raster(pos: Float32Array, m: THREE.Matrix4, colorAt: (vertex: number, out: THREE.Color) => void) {
     const e = m.elements;
+    const level = to8(e[13] / HEIGHT_RANGE);
     const c0 = new THREE.Color(), c1 = new THREE.Color(), c2 = new THREE.Color();
     const u = [0, 0, 0], v = [0, 0, 0];
     for (let t = 0; t < pos.length; t += 9) {
@@ -127,6 +144,7 @@ export class GroundMap {
           this.data[i + 1] = to8(c0.g * w0 + c1.g * w1 + c2.g * w2);
           this.data[i + 2] = to8(c0.b * w0 + c1.b * w1 + c2.b * w2);
           this.cover[py * GROUND_SIZE + px] = 255;
+          this.height[py * GROUND_SIZE + px] = level;
         }
       }
     }

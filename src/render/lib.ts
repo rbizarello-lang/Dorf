@@ -6,7 +6,8 @@ import { hillGeometry, peakGeometry } from './relief';
 import { awningRoofParts, catGeometry, crocodileGeometry, ibisGeometry, mesaGeometry, miniPyramidGeometry, oxGeometry, pylonGateGeometry, shadufGeometry, sphinxGeometry, terraceWallParts, TERRACE } from './kits/egito';
 import { ancientBlossomGeometry, heronGeometry, koiPondGeometry, luckyCatGeometry, niwakiGeometry } from './kits/oriental';
 import { anteaterGeometry, coffeeBloomGeometry, colonialRoof, engenhoGeometry, jaguarGeometry, macawGeometry, manedWolfGeometry, muleGeometry, oxcartGeometry, porteiraGeometry, profetasGeometry, rheaGeometry, termiteMoundGeometry, zebuGeometry, type KitTools } from './kits/brasil';
-import { U, makeDecoMaterials, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
+import { makeFoamMaterial } from './fx';
+import { FALL, U, makeDecoMaterials, makeFallMaterial, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
 import type { EggKit } from '../core/eggs';
 import { brickGateParts, bulbParts, cheeseParts, dikeBoyParts, drawbridgeParts, duckParts, dutchGableParts, poplarParts, tjalkParts, windmillParts } from './kits/holanda';
 import * as inv from './kits/inverno';
@@ -2381,6 +2382,9 @@ function lanternGeometry(): THREE.BufferGeometry {
 export class Lib {
   readonly ground = makeGroundMaterial();
   readonly water = makeWaterMaterial();
+  /** Cachoeira (R3): lâmina d'água (opaca) e espuma da bacia (transparente). */
+  readonly fall = makeFallMaterial();
+  readonly foam = makeFoamMaterial();
   readonly mats: Record<MatKey, THREE.Material> = makeDecoMaterials();
   readonly geos = new Map<string, THREE.BufferGeometry>();
   houseMeta: HouseMeta[] = [];
@@ -2414,6 +2418,8 @@ export class Lib {
     this.litKeys.clear();
     const set = (k: string, g: THREE.BufferGeometry | null) => g && this.geos.set(k, g);
     U.water.value.set(theme.water);
+    FALL.tint.value.set(theme.relief?.fall?.tint ?? new THREE.Color(theme.water).lerp(new THREE.Color('#ffffff'), 0.28));
+    FALL.foam.value.set(theme.relief?.fall?.foam ?? '#f4f9ff');
     U.sparkle.value.set(theme.sparkle);
     U.glow.value.set(theme.window);
 

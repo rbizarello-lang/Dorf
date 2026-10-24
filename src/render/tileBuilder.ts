@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu';
 import { corner, edgeMid, INR } from '../core/hex';
 import type { DayPhase, EggKit } from '../core/eggs';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
-import { HILL, hillProfile, PEAK, PEAK_CONES, PEAK_REACH } from './relief';
+import { FALL_D, HILL, hillProfile, PEAK, PEAK_CONES, PEAK_REACH } from './relief';
 import type { SynKind } from '../core/synergy';
 import type { SiteKind } from '../core/sites';
 import type { SpecialKind } from '../core/specials';
@@ -17,11 +17,18 @@ import { CROP_LAYOUT, type HouseMeta } from './lib';
 export const TILE_T = 0.28;
 /** Altura de um nível de relevo (R2): `Theme.relief.levels` e `core/relief.ts`. Vizinhos diferem 1 nível, então o degrau é 0,3. */
 export const LEVEL_STEP = 0.3;
-/** Comprimento da rampa de estrada e trilho (e da corredeira do rio) na peça alta, contado da borda para dentro. */
+/** Comprimento da rampa de estrada e trilho na peça alta, contado da borda para dentro. */
 export const RAMP_ROAD = 0.62;
-const RAMP_WATER = 0.52;
+/**
+ * Cachoeira (R3): onde o rio passa para uma casa mais baixa, a peça alta termina o leito num lábio de pedra na borda
+ * (o fundo sobe até `LIP_Y` nos últimos `FALL_LIP`) e a lâmina cai até o nível da vizinha, `FALL_D` (relief.ts) além da borda; a peça
+ * baixa abre a bacia de espuma no pé. As duas metades saem dos níveis (da semente), então não dependem da ordem das jogadas.
+ */
+const FALL_LIP = 0.16;
 /** Superfície da água: abaixo do chão, dentro do leito escavado. */
 export const WATER_Y = -0.02;
+/** Fundo do rio no lábio da cachoeira: 12 mm de água por cima. */
+const LIP_Y = WATER_Y - 0.012;
 const BED_Y = 0.004;
 export const RIVER_HW = 0.19;
 /** Meia-largura do rio na borda (estreito, normal, largo), com o peso de cada uma. */
@@ -91,6 +98,15 @@ export interface TileBuild {
   decos: Deco[];
   /** Pontos de onde sai fumaça de chaminé, de 4 em 4: x, y, z e o tipo de casa (a era muda a altura). */
   chimneys: number[];
+  /**
+   * Cachoeira (R3). `fall` = lâmina d'água vertical das quedas desta peça (opaca, posição, normal e `fdat` = [altura 0 a 1
+   * do lábio ao nível da vizinha (passa de 1 na extensão até o chão), lado em unidades do mundo, semente, altura total] por vértice); `foam` = anel de espuma da bacia, na água desta peça
+   * (transparente; `fdat` = [distância à borda, lado, meia-largura, semente]); `falls` = de 6 em 6, por queda: x e z do lábio,
+   * saída (nx, nz), meia-largura e altura da queda (névoa, som e câmera).
+   */
+  fall: { pos: Float32Array; nrm: Float32Array; dat: Float32Array };
+  foam: { pos: Float32Array; dat: Float32Array };
+  falls: number[];
 }
 
 export interface BuildOpts {
@@ -121,8 +137,8 @@ export interface BuildOpts {
   wonder?: boolean;
   /**
    * Relevo (R2): nível desta casa e o das 6 vizinhas, na orientação de origem. A peça é desenhada na altura 0 local
-   * (o World a levanta `own · LEVEL_STEP`); aqui ela só ganha a parede até o fundo comum e as rampas de estrada e rio
-   * rumo à vizinha mais baixa. Sem isto (pilha, galeria) ou com `own` 0, a peça sai como sempre.
+   * (o World a levanta `own · LEVEL_STEP`); aqui ela só ganha a parede até o fundo comum, as rampas de estrada rumo à
+   * vizinha mais baixa e a cachoeira onde o rio muda de nível. Sem isto (pilha, galeria) ou com `own` 0, a peça sai como sempre.
    */
   levels?: { own: number; nb: readonly number[] };
   /** Easter eggs de kit desta peça (`Theme.eggs`, efeito 'kit'): decididos pelo jogo, pela partida, nunca pelo relógio. */
@@ -617,8 +633,7 @@ class WaterBuf {
   flow: number[] = [];
   bed: number[] = [];
   private cache = new Map<string, [number, number]>();
-  /** `ramp` (R2): quanto o chão e a água descem nesse ponto (corredeira rumo à vizinha mais baixa); a coluna de água fica a mesma. */
-  constructor(private field: { at: (x: number, z: number) => [number, number] }, private ramp: ((x: number, z: number) => number) | null = null) {}
+  constructor(private field: { at: (x: number, z: number) => [number, number] }) {}
 
   private attr(x: number, z: number) {
     const k = `${x.toFixed(4)},${z.toFixed(4)}`;
@@ -628,18 +643,15 @@ class WaterBuf {
   }
 
   tri(a: { p: V3; c: THREE.Color }, b: { p: V3; c: THREE.Color }, c: { p: V3; c: THREE.Color }) {
-    const rw = this.ramp;
-    const drop = (v: { p: V3 }) => (rw ? rw(v.p[0], v.p[2]) : 0);
-    if (Math.min(a.p[1] - drop(a), b.p[1] - drop(b), c.p[1] - drop(c)) > WATER_Y - 1e-4) return;
+    if (Math.min(a.p[1], b.p[1], c.p[1]) > WATER_Y - 1e-4) return;
     // Sempre virado para cima.
     const cross = (b.p[0] - a.p[0]) * (c.p[2] - a.p[2]) - (b.p[2] - a.p[2]) * (c.p[0] - a.p[0]);
     for (const v of cross > 0 ? [a, c, b] : [a, b, c]) {
       const [x, y, z] = v.p;
       const [fx, fz] = this.attr(x, z);
-      const w = drop(v);
-      this.pos.push(x, WATER_Y + w, z);
+      this.pos.push(x, WATER_Y, z);
       this.flow.push(fx, fz);
-      this.bed.push(v.c.r, v.c.g, v.c.b, WATER_Y - (y - w));
+      this.bed.push(v.c.r, v.c.g, v.c.b, WATER_Y - y);
     }
   }
 }
@@ -1014,8 +1026,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const field = hasWater ? waterField(shape, water.paths, widths, flow, seed) : null;
   /** Distância até a água ou a via mais próxima (negativa dentro): a decoração desvia. */
   const clear = (x: number, z: number) => Math.min(road.paths.length ? distToPaths(x, z, road.paths) : Infinity, field ? field.e(x, z) - (shape.lake ? BANK_EXTRA : 0) : Infinity);
-  // --- Relevo (R2): peça mais alta que a vizinha. Estrada, trilho e rio descem em rampa até a borda, no nível dela
-  // (`rampR`, `rampW`: 0 ou negativo, função só da peça, da borda e da vizinha, então a emenda casa em qualquer ordem).
+  // --- Relevo (R2): peça mais alta que a vizinha. Estrada e trilho descem em rampa até a borda, no nível dela
+  // (`rampR`: 0 ou negativo, função só da peça, da borda e da vizinha, então a emenda casa em qualquer ordem).
+  // O rio não desce em rampa: termina num lábio de pedra e cai (cachoeira, R3).
   const lv = opts.levels && opts.levels.own > 0 ? opts.levels : null;
   const dropOf = (e: number) => (lv && e >= 0 ? Math.max(0, lv.own - lv.nb[e]) * LEVEL_STEP : 0);
   /** Comprimento do traçado e quanto cada ponta desce: a descida acompanha o arco desde a borda (`len` de rampa). */
@@ -1041,24 +1054,45 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     };
   };
   const rampR = lv && road.idx.length ? mkRamp(road.paths, road.idx.length === 2 ? [[road.idx[0], road.idx[1]]] : road.idx.length > 2 ? road.idx.map((i, j) => [i, road.idx[(j + 1) % road.idx.length]]) : road.idx.map((i) => [i, -1]), 0.085, 0.13, RAMP_ROAD) : null;
-  const rampW = lv && hasWater ? mkRamp(water.paths, water.paths.length === 1 && water.idx.length === 2 ? [[water.idx[0], water.idx[1]]] : water.idx.map((i) => [i, -1]), BANK_W + 0.03, 0.12, RAMP_WATER) : null;
-  const hasRamp = !!(rampR || rampW);
+  const hasRamp = !!rampR;
   /** Quanto o chão desce neste ponto por causa das rampas (0 se não há). */
-  const rampY = (x: number, z: number) => (hasRamp ? (rampR ? rampR(x, z) : 0) + (rampW ? rampW(x, z) : 0) : 0);
-  /** Altura do chão: 0, exceto no leito e nas margens dos rios e nas rampas. */
-  const groundY = (x: number, z: number) => (field ? field.ground(x, z) : 0) + rampY(x, z);
+  const rampY = (x: number, z: number) => (rampR ? rampR(x, z) : 0);
+  // --- Cachoeira (R3): bordas de rio que dão numa casa mais baixa (esta peça tem o lábio) ou mais alta (tem a bacia).
+  const fallHi: number[] = [], fallLo: number[] = [];
+  if (opts.levels && hasWater) {
+    for (const i of water.idx) {
+      if (opts.levels.nb[i] < opts.levels.own) fallHi.push(i);
+      else if (opts.levels.nb[i] > opts.levels.own) fallLo.push(i);
+    }
+  }
+  /** Distância de (x, z) à borda `i` (0 na borda, cresce para dentro). */
+  const edgeDist = (i: number, x: number, z: number) => {
+    const [mx, mz] = edgeMid(i);
+    return INR - (x * mx + z * mz) / INR;
+  };
+  /** O fundo do rio sobe até o lábio de pedra nos últimos `FALL_LIP` de uma borda de queda. */
+  const lipBed = (x: number, z: number, y: number) => {
+    if (!fallHi.length || y >= LIP_Y) return y;
+    let k = 0;
+    for (const i of fallHi) {
+      const b = edgeDist(i, x, z);
+      if (b < FALL_LIP) k = Math.max(k, 1 - smooth(0.02, FALL_LIP, b));
+    }
+    return y + (LIP_Y - y) * k;
+  };
+  /** Altura do chão: 0, exceto no leito e nas margens dos rios, no lábio da cachoeira e nas rampas. */
+  const groundY = (x: number, z: number) => lipBed(x, z, (field ? field.ground(x, z) : 0) + rampY(x, z));
   const bank = tc(theme.bank);
   const waterSide = tc(theme.water).clone().lerp(bank, 0.25);
   const waterDeep = shade(tc(theme.water), 0.55);
-  // Na corredeira a água corre mais (mais veloz no meio da descida, igual à da vizinha nas pontas).
-  const chute = rampW ? Math.max(0, ...water.idx.map((i) => dropOf(i))) : 0;
-  const wField = field && chute > 0 ? { at: (x: number, z: number): [number, number] => {
+  // Perto do lábio a água acelera (mais veloz que a do rio, igual à da vizinha longe da borda).
+  const wField = field && fallHi.length ? { at: (x: number, z: number): [number, number] => {
     const [fx, fz] = field.at(x, z);
-    const u = Math.min(1, -rampW!(x, z) / chute);
-    const k = 1 + 2.2 * 4 * u * (1 - u);
+    let k = 1;
+    for (const i of fallHi) k = Math.max(k, 1 + 1.6 * (1 - smooth(0, 0.5, edgeDist(i, x, z))));
     return [fx * k, fz * k];
   } } : field;
-  const wb = wField ? new WaterBuf(wField, rampW ? (x, z) => rampY(x, z) : null) : null;
+  const wb = wField ? new WaterBuf(wField) : null;
   // Lâmina d'água dos patamares alagados (Theme.terraces.flooded): vai para o mesmo mesh da água dos rios.
   const pad = theme.terraces?.flooded || theme.crops.some((c) => c.glaze) ? new PaddyBuf() : null;
 
@@ -1193,7 +1227,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         // Corte da água na lateral (só aparece na beira aberta do mapa, como num aquário), na altura da água da rampa.
         const r0 = rampY(x0, z0), r1 = rampY(x1, z1);
         const w0 = WATER_Y + r0, w1 = WATER_Y + r1;
-        if (hasWater && (y0 - r0 < WATER_Y - 0.001 || y1 - r1 < WATER_Y - 0.001)) {
+        if (hasWater && !fallHi.includes(i) && (y0 - r0 < WATER_Y - 0.001 || y1 - r1 < WATER_Y - 0.001)) {
           const c0 = Math.min(y0, w0), c1 = Math.min(y1, w1);
           g.quad([x0, w0, z0], [x1, w1, z1], [x1, c1, z1], [x0, c0, z0], waterSide, waterSide, waterDeep, waterDeep, [mx * 1.01, 0, mz * 1.01]);
         }
@@ -2519,6 +2553,118 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     }
   }
 
+  // --- Cachoeira (R3). Peça alta: lábio de pedra, lâmina d'água até o nível da vizinha e pedras nos dois lados. Peça baixa:
+  // anel de espuma na água e pedras na bacia. Cada lado sai só dos níveis, então a emenda casa em qualquer ordem. Gerador à parte.
+  const fallPos: number[] = [], fallNrm: number[] = [], fallDat: number[] = [], foamPos: number[] = [], foamDat: number[] = [], falls: number[] = [];
+  if (fallHi.length || fallLo.length) {
+    const fr = mulberry32((seed ^ 0xfa11c0) >>> 0);
+    const rockFall = tc(theme.relief?.rock ?? theme.rock);
+    /** Ponto a `b` da borda `i` (para dentro) e `s` ao lado do meio dela. */
+    const onEdge = (i: number, b: number, s: number): V2 => {
+      const [mx, mz] = edgeMid(i);
+      const k = 1 - b / INR;
+      return [mx * k - (mz / INR) * s, mz * k + (mx / INR) * s];
+    };
+    const sheetRows = [-0.045, 0, 0.02, 0.04, 0.056, 0.068, FALL_D];
+    const COLS = 8;
+    for (const i of fallHi) {
+      const [mx, mz] = edgeMid(i);
+      const nx = mx / INR, nz = mz / INR, tx = -nz, tz = nx;
+      const drop = (opts.levels!.own - opts.levels!.nb[i]) * LEVEL_STEP;
+      const Wf = widths[i] + 0.012;
+      const seedF = fr();
+      // Lábio de pedra: laje atravessando o rio na borda, com o topo um fio acima do fundo (a água corre sobre ela) e um
+      // beiral de 7 mm além da borda; a lâmina sai dela.
+      const c = onEdge(i, 0.02, 0);
+      const lipTop = tc(theme.relief?.rock ?? theme.rock).clone().lerp(WHITE, 0.12);
+      beam(g, [c[0] - tx * (Wf + 0.03), c[1] - tz * (Wf + 0.03)], [c[0] + tx * (Wf + 0.03), c[1] + tz * (Wf + 0.03)], 0.027, -0.1, LIP_Y + 0.004, lipTop, shade(rockFall, 0.5));
+      // Lâmina: curva de lançamento (horizontal no lábio, vertical no pé), um pouco mais larga embaixo.
+      const rows = sheetRows.map((o) => {
+        const f = Math.max(0, o) / FALL_D;
+        const slope = (-drop * 2 * Math.max(0, o)) / (FALL_D * FALL_D);
+        const nl = Math.hypot(slope, 1);
+        return { o, y: WATER_Y - 0.003 - drop * f * f, no: -slope / nl, ny: 1 / nl, v: f * f, half: Wf * (1 + 0.04 * f * f) };
+      });
+      // A lâmina segue vertical até o chão do mundo: com a casa vizinha já assentada o resto fica embaixo da água dela (escondido);
+      // com a casa vazia a queda continua até o mar (ou o vazio) e ganha a espuma dele, que a peça baixa depois cobre.
+      const floorY = -(opts.levels!.own * LEVEL_STEP) - TILE_T - 0.1 - 0.005;
+      const last = rows[rows.length - 1];
+      const vEnd = (WATER_Y - 0.003 - floorY) / drop;
+      rows.push({ ...last, y: floorY, v: vEnd });
+      const vert = (r: (typeof rows)[number], j: number) => {
+        const sj = (j / COLS * 2 - 1) * r.half;
+        return { p: [mx + nx * r.o + tx * sj, r.y, mz + nz * r.o + tz * sj] as V3, n: [nx * r.no, r.ny, nz * r.no] as V3, d: [r.v, sj, seedF, vEnd] };
+      };
+      for (let k = 0; k + 1 < rows.length; k++) {
+        for (let j = 0; j < COLS; j++) {
+          const a = vert(rows[k], j), b = vert(rows[k], j + 1), c2 = vert(rows[k + 1], j), d2 = vert(rows[k + 1], j + 1);
+          for (const tri of [[a, c2, b], [b, c2, d2]]) {
+            let [p0, p1, p2] = tri;
+            const ux = p1.p[0] - p0.p[0], uy = p1.p[1] - p0.p[1], uz = p1.p[2] - p0.p[2];
+            const vx = p2.p[0] - p0.p[0], vy = p2.p[1] - p0.p[1], vz = p2.p[2] - p0.p[2];
+            const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+            if (cx * p0.n[0] + cy * p0.n[1] + cz * p0.n[2] < 0) [p1, p2] = [p2, p1];
+            for (const q of [p0, p1, p2]) {
+              fallPos.push(...q.p);
+              fallNrm.push(...q.n);
+              fallDat.push(...q.d);
+            }
+          }
+        }
+      }
+      falls.push(mx, mz, nx, nz, Wf, drop);
+      const seaY = floorY + 0.009;
+      const sq = [[0, -Wf * 1.4], [0, Wf * 1.4], [0.24, -Wf * 1.4], [0.24, Wf * 1.4]].map(([b, sj]) => {
+        const [x, z] = onEdge(i, -b, sj);
+        return { p: [x, seaY, z] as V3, d: [b, sj, Wf * 1.4, seedF] };
+      });
+      for (const [a, b, c2] of [[sq[0], sq[1], sq[2]], [sq[1], sq[3], sq[2]]]) {
+        for (const v of [a, b, c2]) {
+          foamPos.push(...v.p);
+          foamDat.push(...v.d);
+        }
+      }
+      // Pedras nos dois lados do lábio.
+      for (const sg of [-1, 1]) {
+        const [x, z] = onEdge(i, 0.06 + fr() * 0.04, sg * (Wf + 0.045 + fr() * 0.03));
+        D('rock', x, 0, z, fr() * 6, randRange(fr, 1.4, 2.1), vary(fr, rockFall, 0.1));
+      }
+    }
+    for (const i of fallLo) {
+      const Wf = widths[i] + 0.012;
+      const seedF = fr();
+      // Anel de espuma na bacia: um retângulo sobre a água, que o material recorta (linha de impacto + rastro rendado).
+      const q = [[0, -Wf], [0, Wf], [0.22, -Wf], [0.22, Wf]].map(([b, sj]) => {
+        const [x, z] = onEdge(i, b, sj);
+        return { p: [x, WATER_Y + 0.004, z] as V3, d: [b, sj, Wf, seedF] };
+      });
+      for (const [a, b, c2] of [[q[0], q[2], q[1]], [q[1], q[2], q[3]]]) {
+        for (const v of [a, b, c2]) {
+          foamPos.push(...v.p);
+          foamDat.push(...v.d);
+        }
+      }
+      for (const sg of [-1, 1]) {
+        const [x, z] = onEdge(i, 0.1 + fr() * 0.08, sg * (Wf + 0.04 + fr() * 0.03));
+        D('rock', x, 0, z, fr() * 6, randRange(fr, 1, 1.5), vary(fr, rockFall, 0.1));
+      }
+      // Peixes só na bacia: dois nadando em círculo logo depois da espuma, onde a água é larga e funda o bastante.
+      const [fx, fz] = onEdge(i, 0.27, 0);
+      const R = Math.min(0.07, -field!.e(fx, fz) - 0.05);
+      const fishRoll = fr();
+      if (R >= 0.045 && fishRoll < 0.75) {
+        const fishCol = tc(theme.water).clone().multiplyScalar(0.3);
+        const w = fr() < 0.5 ? 1 : -1;
+        const a0 = fr() * Math.PI * 2;
+        for (let k = 0; k < 2; k++) {
+          const a = a0 + k * Math.PI;
+          D('fish', fx + Math.cos(a) * R, WATER_Y + 0.004, fz + Math.sin(a) * R, yawTo(-Math.sin(a) * w, Math.cos(a) * w), 1, fishCol, 'swim');
+          decos[decos.length - 1].orbit = R * w;
+        }
+      }
+    }
+  }
+
   // Uma peça de vila em cada quatro tem um aldeão levando um saco da primeira casa ao meio da peça.
   const home = houses.find((h) => h.sector >= 0);
   if (home && (seed >>> 0) % 4 === 0) {
@@ -2536,6 +2682,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     wbed: new Float32Array([...(wb?.bed ?? []), ...(pad?.bed ?? [])]),
     decos,
     chimneys,
+    fall: { pos: new Float32Array(fallPos), nrm: new Float32Array(fallNrm), dat: new Float32Array(fallDat) },
+    foam: { pos: new Float32Array(foamPos), dat: new Float32Array(foamDat) },
+    falls,
   };
 }
 

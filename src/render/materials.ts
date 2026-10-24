@@ -60,7 +60,7 @@ import {
   vec4,
   vertexColor,
 } from 'three/tsl';
-import { GROUND_EXTENT, GROUND_SIZE, groundMap } from './groundMap';
+import { GROUND_EXTENT, GROUND_SIZE, HEIGHT_RANGE, groundMap } from './groundMap';
 import { auroraSky } from './aurora';
 import { RIVER_DMAX, riverMap } from './riverMap';
 import { SEA_DMAX, seaMap } from './seaMap';
@@ -229,20 +229,23 @@ const GROUND_TEXEL = (GROUND_EXTENT * 2) / GROUND_SIZE;
 const extraLight = Fn(() => {
   const p = positionWorld;
   const uv = p.xz.div(GROUND_EXTENT * 2).add(0.5);
+  // Altura do ponto acima do chão da casa (R3): em platô de nível 1 ou 2 o y absoluto sobe 0,3 ou 0,6 e as poças dos lampiões
+  // e o rebatimento sumiriam. No nível 0 o chão vale 0 e a conta é a de sempre.
+  const py = p.y.sub(texture(groundMap.heightTexture, uv).level(float(0)).r.mul(HEIGHT_RANGE));
   // Só acima do chão (as laterais das peças olham para o vazio, não para o chão) e dentro do
   // mapa: fora dele, a borda esticada riscaria o chão com poças de lampião.
-  const above = smoothstep(-0.03, 0.02, p.y).mul(step(max(abs(p.x), abs(p.z)), GROUND_EXTENT));
+  const above = smoothstep(-0.03, 0.02, py).mul(step(max(abs(p.x), abs(p.z)), GROUND_EXTENT));
   // Quanto mais alto o ponto, mais largo o pedaço de chão que ele vê (um nível por dobra).
-  const lod = log2(max(p.y, 0.02).mul(2 / GROUND_TEXEL)).max(0);
+  const lod = log2(max(py, 0.02).mul(2 / GROUND_TEXEL)).max(0);
   const ground = texture(groundMap.texture, uv).level(lod).rgb;
   const bounce = ground.mul(U.bounce).mul(float(1).sub(normalWorld.y).mul(0.5));
   // Lampiões: perto do chão, mais no chão que nas paredes, tremulando devagar.
   const pool = texture(groundMap.texture, uv).level(float(0.5)).a;
   const flicker = texture(noiseTex, p.xz.mul(0.5).add(vec2(U.time.mul(0.37), U.time.mul(-0.29)))).g.mul(0.5).add(0.75);
-  const lamp = U.glow.mul(U.lamps.mul(pool).mul(flicker).mul(smoothstep(0.5, 0, p.y)).mul(normalWorld.y.mul(0.7).add(0.3)));
+  const lamp = U.glow.mul(U.lamps.mul(pool).mul(flicker).mul(smoothstep(0.5, 0, py)).mul(normalWorld.y.mul(0.7).add(0.3)));
   // Halo: a mesma luz dos lampiões lida num nível grosso do mapa, então a poça vira uma
   // mancha larga que alcança o chão, a água e as paredes ao redor (sem custo de passe).
-  const halo = U.glow.mul(U.halo.mul(texture(groundMap.texture, uv).level(float(3.5)).a).mul(smoothstep(0.9, 0, p.y)).mul(normalWorld.y.mul(0.5).add(0.5)));
+  const halo = U.glow.mul(U.halo.mul(texture(groundMap.texture, uv).level(float(3.5)).a).mul(smoothstep(0.9, 0, py)).mul(normalWorld.y.mul(0.5).add(0.5)));
   return bounce.add(lamp).add(halo).mul(above);
 });
 
@@ -834,6 +837,46 @@ export function makeWaterMaterial() {
   const kernel = min(dot(dnx, dnx).add(dot(dny, dny)).mul(0.5), 0.18);
   m.roughnessNode = mix(float(0.05 ** 4).add(kernel).sqrt().sqrt(), float(0.6), foam);
   ssrMask.set(m, mix(float(0.065), float(0.2), foam));
+  m.receivedShadowNode = shadowWithClouds;
+  return m;
+}
+
+/** Cores da cachoeira (Theme.relief.fall): o World as põe ao trocar de tema. */
+export const FALL = {
+  tint: uniform(new THREE.Color('#9fd3ee')),
+  foam: uniform(new THREE.Color('#f4f9ff')),
+};
+
+/**
+ * Lâmina d'água de uma cachoeira (R3). Atributo `fdat` por vértice: x = altura de 0 (lábio) a 1 (pé), y = lado em unidades
+ * do mundo, z = semente da queda. Fios alongados que escorrem em duas velocidades, faixas brancas mais largas, e mais branco
+ * no lábio (água rasa e rápida) e no pé (respingo). O mesmo material de pedra, sol e sombra dos outros: sem GLSL.
+ */
+export function makeFallMaterial() {
+  const m = new LitMaterial({ roughness: 0.32, metalness: 0, side: THREE.DoubleSide });
+  m.positionNode = displaced();
+  const d = attribute('fdat', 'vec4');
+  const t = U.time;
+  const y = positionWorld.y;
+  const lat = d.y.add(d.z.mul(9.7));
+  // Os padrões andam para baixo: a coordenada vertical soma o tempo, então a feição fixa em v desce com o relógio.
+  const sA = texture(noiseTex, vec2(lat.mul(2.4), y.mul(0.5).add(t.mul(1.1)))).b;
+  const sB = texture(noiseTex, vec2(lat.mul(3.7).add(0.37), y.mul(0.8).add(t.mul(1.7)).add(0.21))).b;
+  const strand = smoothstep(0.38, 0.7, sA.mul(0.55).add(sB.mul(0.45)));
+  const band = smoothstep(0.62, 0.9, texture(noiseTex, vec2(lat.mul(1.1).add(0.6), y.mul(0.22).add(t.mul(0.55)))).g);
+  const v = d.x;
+  const lip = smoothstep(0.35, 0, v);
+  // Respingo no pé: na água da vizinha (v = 1) e, onde a casa vizinha ainda está vazia e a queda segue até o mar, no fim dela.
+  const foot = smoothstep(0.7, 1, v).mul(float(1).sub(smoothstep(1.12, 1.4, v))).max(smoothstep(0.82, 1, v.div(d.w)));
+  const tint = FALL.tint as N;
+  const body = mix(tint.mul(0.82), tint.mul(1.22), strand);
+  const white = clamp(band.mul(0.55).add(lip.mul(0.5)).add(foot.mul(0.75)).add(strand.mul(0.16)), 0, 1);
+  const col = mix(body, FALL.foam as N, white);
+  m.colorNode = col;
+  // Um pouco de luz própria: de costas para o sol a queda ficava cinza; à noite ela apaga junto com o resto.
+  m.emissiveNode = col.mul(float(0.24).mul(float(1).sub(U.night.mul(0.85))));
+  // Rugosidade: espuma é fosca.
+  m.roughnessNode = mix(float(0.28), float(0.7), white);
   m.receivedShadowNode = shadowWithClouds;
   return m;
 }
