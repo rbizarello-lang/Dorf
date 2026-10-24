@@ -5,7 +5,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Board, Check, PlaceResult, Placed } from '../core/board';
 import { EggTracker, phaseOfTod, type EggSpec } from '../core/eggs';
 import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey, worldToHex } from '../core/hex';
-import { levelAt } from '../core/relief';
+import { levelAt, tileProfile, worldHeights } from '../core/relief';
 import { seasonAt } from '../core/seasons';
 import type { SiteKind } from '../core/sites';
 import type { SynHit, SynKind } from '../core/synergy';
@@ -768,7 +768,7 @@ export class World {
     this.clearGhost();
     // Mapa refeito do zero (outra partida, desfazer, fim de um vídeo): a onda de uma era passada não continua.
     U.eraWave.value.w = 0;
-    this.reliefMax = this.levelsEnabled ? theme.relief?.levels ?? 0 : 0;
+    this.reliefMax = this.levelsEnabled ? (this.pieceRelief ? 2 : theme.relief?.levels ?? 0) : 0;
     this.levelCache.clear();
     this.rebuild(board);
   }
@@ -1076,10 +1076,30 @@ export class World {
   /** Nível máximo do tema atual (0 = tabuleiro plano). */
   private reliefMax = 0;
   private levelCache = new Map<number, number>();
+  /** Modo Relevo: a altura é da peça (`Placed.heights`), não da casa; os platôs da semente ficam desligados. */
+  pieceRelief = false;
+  /** Relevo por peça: nível-base da peça da vez (a casa vazia sob o ponteiro é aceita nesse plano). */
+  private handLevel = 0;
+
+  setPieceRelief(on: boolean) {
+    this.pieceRelief = on;
+    this.reliefMax = this.levelsEnabled ? (on ? 2 : this.theme?.relief?.levels ?? 0) : 0;
+    this.levelCache.clear();
+  }
+
+  /** Topo da peça assentada em (q, r): o maior nível entre os setores e o pico (para o clique). */
+  private topOf(q: number, r: number): number {
+    const p = this.board?.get(q, r);
+    return p?.heights ? Math.max(p.hill ?? 0, ...p.heights) : 0;
+  }
 
   /** Nível (0 a 2) da casa (q, r): função pura da semente, vale para casas ainda vazias. */
   levelOf(q: number, r: number): number {
     if (!this.reliefMax) return 0;
+    if (this.pieceRelief) {
+      const h = this.board?.get(q, r)?.heights;
+      return h ? Math.min(...h) : 0;
+    }
     const k = hkey(q, r);
     let l = this.levelCache.get(k);
     if (l === undefined) this.levelCache.set(k, (l = levelAt(this.reliefSeed, q, r, this.reliefMax)));
@@ -1098,9 +1118,33 @@ export class World {
     return this.heightOf(q, r);
   }
 
-  /** Níveis da casa e das 6 vizinhas, na orientação de origem da peça (`BuildOpts.levels`); sem relevo, indefinido. */
-  private levelsFor(q: number, r: number, rot: number): BuildOpts['levels'] {
+  /**
+   * Níveis da casa e das 6 vizinhas, na orientação de origem da peça (`BuildOpts.levels`); sem relevo, indefinido.
+   * No modo Relevo a peça traz as alturas: os setores sobem acima do menor deles, e só as vizinhas colocadas ANTES contam
+   * para a queda e a rampa (assim a peça sai igual no jogo e na reconstrução, em qualquer ordem).
+   */
+  private levelsFor(q: number, r: number, rot: number, def?: TileDef): BuildOpts['levels'] {
     if (!this.reliefMax) return undefined;
+    if (this.pieceRelief) {
+      const here = this.board?.get(q, r);
+      let hw: number[], c: number, idx = Infinity;
+      if (here?.heights) (hw = here.heights), (c = here.hill ?? Math.max(...hw)), (idx = here.index);
+      else if (def) {
+        const prof = tileProfile(def.edges, def.seed);
+        (hw = worldHeights(prof, rot)), (c = prof.c);
+      } else return undefined;
+      const own = Math.min(...hw);
+      const nb: number[] = [], placed: boolean[] = [], sec: number[] = [];
+      for (let s = 0; s < 6; s++) {
+        const w = (s + rot) % 6;
+        sec.push(hw[w] - own);
+        const n = this.board?.get(q + DIRS[w][0], r + DIRS[w][1]);
+        const known = !!n && n.index < idx && !!n.heights;
+        nb.push(known ? n!.heights![opposite(w)] : hw[w]);
+        placed.push(known);
+      }
+      return { own, nb, sec, hill: c - own, placed };
+    }
     const own = this.levelOf(q, r);
     return { own, nb: [0, 1, 2, 3, 4, 5].map((s) => {
       const [dq, dr] = DIRS[(s + rot) % 6];
@@ -1114,7 +1158,7 @@ export class World {
 
   /** Peça do mapa já colocada: a inicial reserva o Centro, e a do marco o ergue. */
   private buildPlaced(p: Placed) {
-    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths: this.settleWidths(p), eggs: this.eggKits.get(p.key), levels: this.levelsFor(p.q, p.r, p.rot) });
+    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths: this.settleWidths(p), eggs: this.eggKits.get(p.key), levels: this.levelsFor(p.q, p.r, p.rot, p.def) });
   }
 
   /**
@@ -1123,14 +1167,15 @@ export class World {
    * nunca mudam; se duas correntezas opostas se encontram, a peça nova vira remanso.
    */
   private flows = new Map<number, number[]>();
-  private flowAt(q: number, r: number, edges: readonly T[]) {
+  private flowAt(q: number, r: number, edges: readonly T[], ownLevel?: number, idx = Infinity) {
     const known = [0, 0, 0, 0, 0, 0];
-    const own = this.levelOf(q, r);
+    const own = ownLevel ?? this.levelOf(q, r);
     for (let i = 0; i < 6; i++) {
       if (edges[i] !== T.Water) continue;
       // Relevo (R2): a água só desce. Onde a vizinha é mais baixa ela sai, onde é mais alta ela entra, sem olhar a ordem
       // (a vizinha chega à mesma conclusão pelo nível, então as duas concordam).
-      const nl = this.levelOf(q + DIRS[i][0], r + DIRS[i][1]);
+      const nb = this.pieceRelief ? this.board?.get(q + DIRS[i][0], r + DIRS[i][1]) : undefined;
+      const nl = this.pieceRelief ? (nb && nb.index < idx ? this.levelOf(nb.q, nb.r) : own) : this.levelOf(q + DIRS[i][0], r + DIRS[i][1]);
       if (nl !== own) {
         known[i] = own > nl ? 1 : -1;
         continue;
@@ -1143,7 +1188,7 @@ export class World {
 
   /** Registra a correnteza de uma peça colocada e devolve a versão na orientação de origem. */
   private settleFlow(p: Placed) {
-    const wf = this.flowAt(p.q, p.r, p.edges);
+    const wf = this.flowAt(p.q, p.r, p.edges, undefined, p.index);
     this.flows.set(p.key, wf);
     return flowBase(wf, p.rot);
   }
@@ -1588,8 +1633,8 @@ export class World {
     // Ovos de peça desta jogada: o kit entra na peça; o resto (evento, céu, som) dispara quando ela assenta.
     if (this.board) this.feedEggs(this.board.list, p.index + 1, true);
     const eggs = this.eggKits.get(p.key);
-    const lvs = this.levelsFor(p.q, p.r, p.rot);
-    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${eggs?.map((e) => e.kit).join('+') ?? ''}|${lvs ? `${lvs.own}${lvs.nb.join('')}` : ''}`;
+    const lvs = this.levelsFor(p.q, p.r, p.rot, p.def);
+    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${eggs?.map((e) => e.kit).join('+') ?? ''}|${lvs ? `${lvs.own}${lvs.nb.join('')}${lvs.sec?.join('') ?? ''}${lvs.placed?.map(Number).join('') ?? ''}` : ''}`;
     let live: LiveTile;
     const ly = this.heightOf(p.q, p.r);
     let y0 = ly + 1.2;
@@ -1785,16 +1830,16 @@ export class World {
 
   setGhost(def: TileDef, rot: number, angle: number, q: number, r: number, check: Check) {
     const syn = check.valid ? synBase(check.synergies, rot) : [];
-    const flow = flowBase(this.flowAt(q, r, rotateEdges(def.edges, rot)), rot);
+    const lvs = this.levelsFor(q, r, rot, def);
+    const flow = flowBase(this.flowAt(q, r, rotateEdges(def.edges, rot), this.pieceRelief ? lvs?.own : undefined), rot);
     const widths = flowBase(this.widthsAt(q, r, def, rot), rot);
     // O fantasma já mostra o marco da era que a peça ergueria.
     // A peça especial não ergue marco nem começa a maravilha (Board.place): o fantasma também não.
     const mark = check.valid && !def.special ? (check.eraMark ?? undefined) : undefined;
     const site = check.valid ? check.site?.kind : undefined;
     const wonder = check.valid && check.wonder && !def.special ? true : undefined;
-    const lvs = this.levelsFor(q, r, rot);
     const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}`;
-    const key = `${def.seed}:${this.theme.id}:${sig}:${lvs ? `${lvs.own}${lvs.nb.join('')}` : ''}`;
+    const key = `${def.seed}:${this.theme.id}:${sig}:${lvs ? `${lvs.own}${lvs.nb.join('')}${lvs.sec?.join('') ?? ''}${lvs.placed?.map(Number).join('') ?? ''}` : ''}`;
     if (!this.ghost || this.ghostKey !== key) {
       const old = this.ghost;
       this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site, wonder, widths, levels: lvs }), sig, this.lib, this.quality !== 'low');
@@ -1806,7 +1851,7 @@ export class World {
         this.ghost.inner.rotation.y = old.inner.rotation.y;
       } else {
         const { x, z } = hexToWorld(q, r);
-        this.ghost.group.position.set(x, 0.5 + this.heightOf(q, r), z);
+        this.ghost.group.position.set(x, 0.5 + (lvs ? lvs.own * LEVEL_STEP : 0), z);
         this.ghost.inner.rotation.y = -angle;
         this.ghostPrev.copy(this.ghost.group.position);
         this.ghostVel.set(0, 0);
@@ -1816,7 +1861,7 @@ export class World {
     this.ghost.group.visible = true;
     this.ghostAngle = angle;
     const { x, z } = hexToWorld(q, r);
-    const ly = this.heightOf(q, r);
+    const ly = lvs ? lvs.own * LEVEL_STEP : 0;
     this.ghostTarget.set(x, 0.32 + ly, z);
     this.hoverRing.visible = true;
     this.hoverRing.position.set(x, -0.1 + ly, z);
@@ -1824,12 +1869,13 @@ export class World {
     for (let i = 0; i < 6; i++) {
       const m = this.markers[i];
       const s = check.edgeState[i];
-      m.visible = s === 1 || s === 3 || s === 4;
+      const hs = check.heightState[i];
+      m.visible = s === 1 || s === 3 || s === 4 || hs >= 2;
       if (!m.visible) continue;
       const [mx, mz] = edgeMid(i);
       this.markerLocal[i].set(mx * 0.93, 0.03, mz * 0.93);
       m.rotation.y = -(Math.PI / 6 + (Math.PI / 3) * i) + Math.PI / 2;
-      (m.material as THREE.MeshBasicNodeMaterial).color.set(s === 1 ? '#ffffff' : s === 4 ? '#ffc83d' : '#ff4a3d');
+      (m.material as THREE.MeshBasicNodeMaterial).color.set(hs === 3 ? '#ff4a3d' : hs === 2 ? '#6fd0ff' : s === 1 ? '#ffffff' : s === 4 ? '#ffc83d' : '#ff4a3d');
     }
   }
 
@@ -2012,7 +2058,10 @@ export class World {
       const hit = this.ray.ray.intersectPlane(this.pickPlane, this.groundHit);
       if (!hit) continue;
       const [q, r] = worldToHex(hit.x, hit.z);
-      if (l === 0 || this.levelOf(q, r) >= l) return [q, r];
+      if (l === 0) return [q, r];
+      if (this.pieceRelief) {
+        if (this.board?.get(q, r) ? this.topOf(q, r) >= l : l <= this.handLevel) return [q, r];
+      } else if (this.levelOf(q, r) >= l) return [q, r];
     }
     return null;
   }
@@ -2152,7 +2201,17 @@ export class World {
   }
 
   setPreview(def: TileDef | null, angle: number, stack: number) {
-    this.preview.set(def, () => this.build(def!, []), angle, stack);
+    // Relevo por peça: a pilha mostra o relevo da peça da vez (setores em degraus acima do menor, sem vizinhas).
+    let levels: BuildOpts['levels'];
+    this.handLevel = 0;
+    if (def && this.pieceRelief) {
+      const prof = tileProfile(def.edges, def.seed);
+      const lo = Math.min(...prof.h);
+      this.handLevel = lo;
+      const sec = prof.h.map((v) => v - lo);
+      levels = { own: 0, nb: sec, sec, hill: prof.c - lo, placed: sec.map(() => false) };
+    }
+    this.preview.set(def, () => this.build(def!, [], undefined, { levels }), angle, stack);
   }
 
   /** Depuração visual: todos os kits do tema lado a lado (?gallery). */

@@ -324,6 +324,8 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   game = new Game(seed, rulesFor(rulesTheme, seed), specials ?? forcedSpecials ?? (mode.daily ? [] : progress.unlocked));
   // Os níveis de altura (relevo) saem só da semente: o mundo os lê daqui até a próxima partida.
   world.reliefSeed = seed;
+  // Modo Relevo: a altura é da peça (perfil sorteado com ela), não da casa.
+  world.setPieceRelief(game.rules.relief);
   // Partida nova (não um replay do desfazer ou do save): ainda não entrou no progresso.
   if (!replay.length) committed = false;
   undone = undos;
@@ -560,6 +562,10 @@ function place(q: number, r: number) {
   if (!check?.valid) {
     if (check && !check.occupied && check.neighbors > 0) {
       sfx.invalid();
+      if (check.heightState.includes(3)) {
+        hud.toast('Altura demais: a borda só encaixa com no máximo 1 degrau de diferença.', 'bad');
+        return;
+      }
       const [water, rail] = [theme.terrainNames[4], theme.terrainNames[5]];
       hud.toast(`${water} só encosta em ${water.toLowerCase()}, e ${rail.toLowerCase()} só em ${rail.toLowerCase()}.`, 'bad');
     }

@@ -140,7 +140,18 @@ export interface BuildOpts {
    * (o World a levanta `own · LEVEL_STEP`); aqui ela só ganha a parede até o fundo comum, as rampas de estrada rumo à
    * vizinha mais baixa e a cachoeira onde o rio muda de nível. Sem isto (pilha, galeria) ou com `own` 0, a peça sai como sempre.
    */
-  levels?: { own: number; nb: readonly number[] };
+  levels?: {
+    own: number;
+    nb: readonly number[];
+    /**
+     * Relevo por peça (modo Relevo): quanto cada setor sobe acima de `own` (níveis, ≥ 0) e o pico do meio. Os degraus entre
+     * setores viram paredes de penhasco dentro da peça; a parede de fora é de penhasco em toda borda acima do nível 0.
+     */
+    sec?: readonly number[];
+    hill?: number;
+    /** Relevo por peça: vizinhas já assentadas ANTES desta (só elas contam para queda e rampa; `nb` das outras é a borda). */
+    placed?: readonly boolean[];
+  };
   /** Easter eggs de kit desta peça (`Theme.eggs`, efeito 'kit'): decididos pelo jogo, pela partida, nunca pelo relógio. */
   eggs?: { id: string; kit: EggKit; scale?: number; color?: string }[];
 }
@@ -1025,12 +1036,43 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const flow = opts.flow ?? resolveFlow(edges);
   const field = hasWater ? waterField(shape, water.paths, widths, flow, seed) : null;
   /** Distância até a água ou a via mais próxima (negativa dentro): a decoração desvia. */
-  const clear = (x: number, z: number) => Math.min(road.paths.length ? distToPaths(x, z, road.paths) : Infinity, field ? field.e(x, z) - (shape.lake ? BANK_EXTRA : 0) : Infinity);
+  const clear = (x: number, z: number) => Math.min(road.paths.length ? distToPaths(x, z, road.paths) : Infinity, field ? field.e(x, z) - (shape.lake ? BANK_EXTRA : 0) : Infinity, cliffLine(x, z) - 0.02);
   // --- Relevo (R2): peça mais alta que a vizinha. Estrada e trilho descem em rampa até a borda, no nível dela
   // (`rampR`: 0 ou negativo, função só da peça, da borda e da vizinha, então a emenda casa em qualquer ordem).
   // O rio não desce em rampa: termina num lábio de pedra e cai (cachoeira, R3).
-  const lv = opts.levels && opts.levels.own > 0 ? opts.levels : null;
-  const dropOf = (e: number) => (lv && e >= 0 ? Math.max(0, lv.own - lv.nb[e]) * LEVEL_STEP : 0);
+  const secs = opts.levels?.sec;
+  const hill = opts.levels?.hill ?? 0;
+  const hasSec = !!secs && (hill > 0 || secs.some((v) => v > 0));
+  const lv = opts.levels && (opts.levels.own > 0 || hasSec) ? opts.levels : null;
+  /** Nível da borda `e` (o do setor): `own` mais o quanto o setor sobe. */
+  const edgeLv = (e: number) => (lv ? lv.own + (secs?.[e] ?? 0) : 0);
+  const dropOf = (e: number) => (lv && e >= 0 ? Math.max(0, edgeLv(e) - lv.nb[e]) * LEVEL_STEP : 0);
+  /** Subida do chão no setor `i` à fração `t` (0 no meio, 1 a partir de 1/4 do caminho): do pico do meio ao nível do setor. */
+  const secLift = (i: number, t: number) => (hill + ((secs?.[i] ?? 0) - hill) * Math.min(1, t * 4)) * LEVEL_STEP;
+  /** Subida do chão num ponto (x, z) da peça: a mesma conta dos vértices do chão, para a decoração assentar nele. */
+  const liftAt = (x: number, z: number) => {
+    if (!hasSec) return 0;
+    let bi = 0, bd = -Infinity;
+    for (let i = 0; i < 6; i++) {
+      const [mx, mz] = edgeMid(i);
+      const d = x * mx + z * mz;
+      if (d > bd) (bd = d), (bi = i);
+    }
+    return secLift(bi, bd / (INR * INR));
+  };
+  /** Distância do ponto às linhas do meio aos cantos onde os setores vizinhos têm níveis diferentes (a decoração desvia). */
+  const cliffLine = (x: number, z: number) => {
+    if (!hasSec) return Infinity;
+    let m = Infinity;
+    for (let i = 0; i < 6; i++) {
+      if (secs![i] === secs![(i + 5) % 6]) continue;
+      const [cx, cz] = corner(i);
+      const L2 = cx * cx + cz * cz;
+      const u = Math.max(0, Math.min(1, (x * cx + z * cz) / L2));
+      m = Math.min(m, Math.hypot(x - cx * u, z - cz * u));
+    }
+    return m;
+  };
   /** Comprimento do traçado e quanto cada ponta desce: a descida acompanha o arco desde a borda (`len` de rampa). */
   const mkRamp = (paths: Path[], ends: number[][], reach: number, fade: number, len: number) => {
     const items = paths
@@ -1061,8 +1103,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const fallHi: number[] = [], fallLo: number[] = [];
   if (opts.levels && hasWater) {
     for (const i of water.idx) {
-      if (opts.levels.nb[i] < opts.levels.own) fallHi.push(i);
-      else if (opts.levels.nb[i] > opts.levels.own) fallLo.push(i);
+      if (opts.levels.nb[i] < edgeLv(i)) fallHi.push(i);
+      else if (opts.levels.nb[i] > edgeLv(i)) fallLo.push(i);
     }
   }
   /** Distância de (x, z) à borda `i` (0 na borda, cresce para dentro). */
@@ -1144,7 +1186,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       let v = vs.get(k);
       if (!v) {
         const x = (a / N) * A[0] + (b / N) * B[0], z = (a / N) * A[1] + (b / N) * B[1];
-        v = { p: [x, groundY(x, z), z], ...topColor(i, a, b, x, z) };
+        v = { p: [x, groundY(x, z) + (hasSec ? secLift(i, (a + b) / N) : 0), z], ...topColor(i, a, b, x, z) };
         vs.set(k, v);
       }
       return v;
@@ -1159,6 +1201,23 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           g.tri(p1.p, p3.p, p2.p, p1.c, p3.c, p2.c, UP, p1.s, p3.s, p2.s);
           wb?.tri(p1, p3, p2);
         }
+      }
+    }
+
+    // --- Relevo por peça: parede de penhasco entre este setor e o anterior, do pico do meio ao canto, onde os níveis diferem.
+    if (hasSec && secs![i] !== secs![(i + 5) % 6]) {
+      const hi = secs![i] > secs![(i + 5) % 6];
+      const rr = tc(theme.relief?.rock ?? theme.rock).clone().lerp(tc(theme.sideDark), 0.15);
+      const px = -A[1], pz = A[0];
+      const toward = (px * (A[0] + B[0]) + pz * (A[1] + B[1]) >= 0 ? 1 : -1) * (hi ? -1 : 1);
+      const nrmW: V3 = [px * toward, 0, pz * toward];
+      for (let k = 0; k < N; k++) {
+        const pk = V(k, 0).p, pk1 = V(k + 1, 0).p;
+        const yi = (kk: number, sec: number) => groundY(0, 0) + secLift(sec, kk / N);
+        const ia = yi(k, secs![(i + 5) % 6]), ib = yi(k + 1, secs![(i + 5) % 6]), ja = yi(k, secs![i]), jb = yi(k + 1, secs![i]);
+        if (Math.abs(ia - ja) < 1e-4 && Math.abs(ib - jb) < 1e-4) continue;
+        const top = (u: number, v: number) => (u > v ? rr.clone().multiplyScalar(0.95) : rr.clone().multiplyScalar(0.62));
+        g.quad([pk[0], ia, pk[2]], [pk1[0], ib, pk1[2]], [pk1[0], jb, pk1[2]], [pk[0], ja, pk[2]], top(ia, ja), top(ib, jb), top(jb, ib), top(ja, ia), nrmW);
       }
     }
 
@@ -1181,7 +1240,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     // Relevo (R2): a parede desce até o fundo comum (`floor`, o mesmo de uma peça no nível 0), qualquer que seja a
     // vizinha, então não há fresta em nenhuma ordem de colocação. Onde a vizinha é mais baixa é um penhasco (`cliff`):
     // o solo raso por cima e a rocha em camadas (cor do tema) até o chão.
-    const cliff = !!lv && lv.nb[i] < lv.own;
+    const Lw = (secs?.[i] ?? 0) * LEVEL_STEP;
+    const cliff = !!lv && (lv.placed ? edgeLv(i) > 0 : lv.nb[i] < lv.own);
     const floor = -TILE_T - (lv?.own ?? 0) * LEVEL_STEP;
     const rockC = tc(theme.relief?.rock ?? theme.rock);
     for (let k = 0; k < N; k++) {
@@ -1196,7 +1256,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           const q = Math.min(r, m);
           return [y, b, m, q, Math.min(-TILE_T, q)];
         };
-        const A = cut(y0, rockY[k]), B = cut(y1, rockY[k + 1]);
+        const A = cut(y0 - Lw, rockY[k]).map((v) => v + Lw), B = cut(y1 - Lw, rockY[k + 1]).map((v) => v + Lw);
         const flat = (j: number) => A[j - 1] - A[j] > 1e-4 || B[j - 1] - B[j] > 1e-4;
         const layer = (j: number, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, cd: THREE.Color) => {
           if (flat(j)) g.quad([x0, A[j - 1], z0], [x1, B[j - 1], z1], [x1, B[j], z1], [x0, A[j], z0], ca, cb, cc, cd, nrm);
@@ -1206,10 +1266,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         if (cliff) {
           // Rocha em camadas: faixas de ~0,13 com o valor sorteado por faixa e por trecho, mais escura para baixo.
           const rr = rockC.clone().lerp(sideDark, 0.15);
-          const edgesAbs = [-0.11];
+          const edgesAbs = [-0.11 + Lw];
           while (edgesAbs[edgesAbs.length - 1] - 0.13 > floor + 0.04) edgesAbs.push(edgesAbs[edgesAbs.length - 1] - 0.13);
           edgesAbs.push(floor);
-          const depth = (y: number) => 1 - 0.38 * Math.min(1, Math.max(0, (-0.11 - y) / (-0.11 - floor)));
+          const depth = (y: number) => 1 - 0.38 * Math.min(1, Math.max(0, (-0.11 + Lw - y) / (-0.11 + Lw - floor)));
           for (let j = 0; j + 1 < edgesAbs.length; j++) {
             const ta = Math.min(A[2], edgesAbs[j]), tb = Math.min(B[2], edgesAbs[j]);
             const bot = edgesAbs[j + 1];
@@ -1247,6 +1307,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     }
   }
 
+  const groundEnd = g.pos.length;
   // --- Lugares reservados para construções especiais (a decoração desvia deles).
   const reserved: [number, number, number][] = [];
   const taken: V2[] = [];
@@ -2570,7 +2631,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     for (const i of fallHi) {
       const [mx, mz] = edgeMid(i);
       const nx = mx / INR, nz = mz / INR, tx = -nz, tz = nx;
-      const drop = (opts.levels!.own - opts.levels!.nb[i]) * LEVEL_STEP;
+      const drop = (edgeLv(i) - opts.levels!.nb[i]) * LEVEL_STEP;
       const Wf = widths[i] + 0.012;
       const seedF = fr();
       // Lábio de pedra: laje atravessando o rio na borda, com o topo um fio acima do fundo (a água corre sobre ela) e um
@@ -2624,6 +2685,19 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           foamDat.push(...v.d);
         }
       }
+      // Relevo por peça: a vizinha baixa já está assentada, então a espuma também cai na água dela (e não só no fundo do mundo).
+      if (opts.levels!.placed?.[i]) {
+        const nq = [[0, -Wf * 1.2], [0, Wf * 1.2], [0.22, -Wf * 1.2], [0.22, Wf * 1.2]].map(([b, sj]) => {
+          const [x, z] = onEdge(i, -b, sj);
+          return { p: [x, WATER_Y - drop + 0.004, z] as V3, d: [b, sj, Wf * 1.2, seedF] };
+        });
+        for (const [a2, b2, c3] of [[nq[0], nq[1], nq[2]], [nq[1], nq[3], nq[2]]]) {
+          for (const v of [a2, b2, c3]) {
+            foamPos.push(...v.p);
+            foamDat.push(...v.d);
+          }
+        }
+      }
       // Pedras nos dois lados do lábio.
       for (const sg of [-1, 1]) {
         const [x, z] = onEdge(i, 0.06 + fr() * 0.04, sg * (Wf + 0.045 + fr() * 0.03));
@@ -2642,6 +2716,40 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         for (const v of [a, b, c2]) {
           foamPos.push(...v.p);
           foamDat.push(...v.d);
+        }
+      }
+      // Relevo por peça: a vizinha alta foi assentada antes e não sabia desta peça (sem lábio nem lâmina): a lâmina entra por
+      // aqui, saindo da borda na altura da água dela e caindo até a água desta peça.
+      if (opts.levels!.placed?.[i]) {
+        const [mx, mz] = edgeMid(i);
+        const nx = mx / INR, nz = mz / INR, tx = -nz, tz = nx;
+        const drop = (opts.levels!.nb[i] - edgeLv(i)) * LEVEL_STEP;
+        const rows = sheetRows.map((o) => {
+          const f = Math.max(0, o) / FALL_D;
+          const slope = (-drop * 2 * Math.max(0, o)) / (FALL_D * FALL_D);
+          const nl = Math.hypot(slope, 1);
+          return { o, y: WATER_Y - 0.003 + drop - drop * f * f, no: slope / nl, ny: 1 / nl, v: f * f, half: Wf * (1 + 0.04 * f * f) };
+        });
+        const vert = (r: (typeof rows)[number], j: number) => {
+          const sj = (j / COLS * 2 - 1) * r.half;
+          return { p: [mx - nx * r.o + tx * sj, r.y, mz - nz * r.o + tz * sj] as V3, n: [nx * r.no, r.ny, nz * r.no] as V3, d: [r.v, sj, seedF, 1] };
+        };
+        for (let k = 0; k + 1 < rows.length; k++) {
+          for (let j = 0; j < COLS; j++) {
+            const a2 = vert(rows[k], j), b2 = vert(rows[k], j + 1), c2 = vert(rows[k + 1], j), d2 = vert(rows[k + 1], j + 1);
+            for (const tri of [[a2, c2, b2], [b2, c2, d2]]) {
+              let [p0, p1, p2] = tri;
+              const ux = p1.p[0] - p0.p[0], uy = p1.p[1] - p0.p[1], uz = p1.p[2] - p0.p[2];
+              const vx = p2.p[0] - p0.p[0], vy = p2.p[1] - p0.p[1], vz = p2.p[2] - p0.p[2];
+              const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+              if (cx * p0.n[0] + cy * p0.n[1] + cz * p0.n[2] < 0) [p1, p2] = [p2, p1];
+              for (const q of [p0, p1, p2]) {
+                fallPos.push(...q.p);
+                fallNrm.push(...q.n);
+                fallDat.push(...q.d);
+              }
+            }
+          }
         }
       }
       for (const sg of [-1, 1]) {
@@ -2671,6 +2779,13 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const l = Math.hypot(home.x, home.z) || 1;
     const wx = home.x - (home.x / l) * 0.07, wz = home.z - (home.z / l) * 0.07;
     D('folk:sack', wx, 0, wz, yawTo(-home.x, -home.z), 1, shirt(6), 'carry');
+  }
+
+  // Relevo por peça: o que foi posto depois do chão (decalques, ruas, praça) e a decoração sobem com o setor onde estão.
+  if (hasSec) {
+    for (let k = groundEnd; k < g.pos.length; k += 3) g.pos[k + 1] += liftAt(g.pos[k], g.pos[k + 2]);
+    for (const d of decos) d.y += liftAt(d.x, d.z);
+    for (let k = 0; k < chimneys.length; k += 4) chimneys[k + 1] += liftAt(chimneys[k], chimneys[k + 2]);
   }
 
   return {
