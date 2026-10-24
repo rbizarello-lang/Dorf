@@ -60,7 +60,7 @@ import {
   vec4,
   vertexColor,
 } from 'three/tsl';
-import { GROUND_EXTENT, GROUND_SIZE, groundMap } from './groundMap';
+import { GROUND_EXTENT, GROUND_SIZE, HEIGHT_RANGE, groundMap } from './groundMap';
 import { auroraSky } from './aurora';
 import { RIVER_DMAX, riverMap } from './riverMap';
 import { SEA_DMAX, seaMap } from './seaMap';
@@ -229,20 +229,23 @@ const GROUND_TEXEL = (GROUND_EXTENT * 2) / GROUND_SIZE;
 const extraLight = Fn(() => {
   const p = positionWorld;
   const uv = p.xz.div(GROUND_EXTENT * 2).add(0.5);
+  // Altura do ponto acima do chão da casa (R3): em platô de nível 1 ou 2 o y absoluto sobe 0,3 ou 0,6 e as poças dos lampiões
+  // e o rebatimento sumiriam. No nível 0 o chão vale 0 e a conta é a de sempre.
+  const py = p.y.sub(texture(groundMap.heightTexture, uv).level(float(0)).r.mul(HEIGHT_RANGE));
   // Só acima do chão (as laterais das peças olham para o vazio, não para o chão) e dentro do
   // mapa: fora dele, a borda esticada riscaria o chão com poças de lampião.
-  const above = smoothstep(-0.03, 0.02, p.y).mul(step(max(abs(p.x), abs(p.z)), GROUND_EXTENT));
+  const above = smoothstep(-0.03, 0.02, py).mul(step(max(abs(p.x), abs(p.z)), GROUND_EXTENT));
   // Quanto mais alto o ponto, mais largo o pedaço de chão que ele vê (um nível por dobra).
-  const lod = log2(max(p.y, 0.02).mul(2 / GROUND_TEXEL)).max(0);
+  const lod = log2(max(py, 0.02).mul(2 / GROUND_TEXEL)).max(0);
   const ground = texture(groundMap.texture, uv).level(lod).rgb;
   const bounce = ground.mul(U.bounce).mul(float(1).sub(normalWorld.y).mul(0.5));
   // Lampiões: perto do chão, mais no chão que nas paredes, tremulando devagar.
   const pool = texture(groundMap.texture, uv).level(float(0.5)).a;
   const flicker = texture(noiseTex, p.xz.mul(0.5).add(vec2(U.time.mul(0.37), U.time.mul(-0.29)))).g.mul(0.5).add(0.75);
-  const lamp = U.glow.mul(U.lamps.mul(pool).mul(flicker).mul(smoothstep(0.5, 0, p.y)).mul(normalWorld.y.mul(0.7).add(0.3)));
+  const lamp = U.glow.mul(U.lamps.mul(pool).mul(flicker).mul(smoothstep(0.5, 0, py)).mul(normalWorld.y.mul(0.7).add(0.3)));
   // Halo: a mesma luz dos lampiões lida num nível grosso do mapa, então a poça vira uma
   // mancha larga que alcança o chão, a água e as paredes ao redor (sem custo de passe).
-  const halo = U.glow.mul(U.halo.mul(texture(groundMap.texture, uv).level(float(3.5)).a).mul(smoothstep(0.9, 0, p.y)).mul(normalWorld.y.mul(0.5).add(0.5)));
+  const halo = U.glow.mul(U.halo.mul(texture(groundMap.texture, uv).level(float(3.5)).a).mul(smoothstep(0.9, 0, py)).mul(normalWorld.y.mul(0.5).add(0.5)));
   return bounce.add(lamp).add(halo).mul(above);
 });
 
