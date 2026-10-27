@@ -60,3 +60,16 @@ Pedido do Roger: a altura deixa de ser enfeite da casa e passa a ser da PEÇA. C
 - Oráculo independente: `tests/logic.ts` (encaixe de altura, degraus e quedas recalculados sem o Board); perfis em `tests/relief.ts`.
 - Equilíbrio: `npm run balance` contra o Clássico (resultados no relatório).
 - Desenho: setores em degraus, penhasco nas bordas altas, fantasma com marcas de altura, pilha mostra o relevo.
+
+## Resultado do protótipo (tema Holanda, 40 partidas por jogador)
+
+| Modo | Jogador | Média | p50 | Peças | Travadas |
+|---|---|---:|---:|---:|---:|
+| Clássico | guloso | 4.492 | 4.903 | 100 | 0,0% |
+| Relevo | guloso | 3.650 | 3.489 | 81 | 0,0% |
+| Clássico | persegue missões | 6.221 | 5.889 | 113 | 0,0% |
+| Relevo | persegue missões | 4.918 | 4.688 | 99 | 0,0% |
+
+- Sem partidas travadas; o Relevo rende ~20% menos (sem maravilha e com a pilha esvaziando antes, porque a altura corta jogadas).
+- Desenho: 300 peças em Alta, 118 draw calls e 1,07 milhão de triângulos (Clássico: 165 e 1,48 milhão): dentro do orçamento.
+- Limites conhecidos: o rio emenda a queda só do lado da peça colocada depois (sem lábio de pedra se a alta veio primeiro); a correnteza ainda é decidida no render, então rio morro acima vira remanso.
