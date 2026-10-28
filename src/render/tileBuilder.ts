@@ -1175,7 +1175,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
    * a espessura da ilha. A malha é uma faixa paralela à normal da borda mais um leque de 30° em cada canto, que fica dentro da
    * casa vizinha (o limite dela com a casa do lado é o raio do canto).
    */
-  const skirtFor = (i: number, V: (a: number, b: number) => { p: V3; c: THREE.Color; s: Splat }, mouth: readonly boolean[]) => {
+  const skirtFor = (i: number, V: (a: number, b: number) => { p: V3; c: THREE.Color; s: Splat }) => {
     const sp = spec!, own0 = sp.own!;
     const [mx, mz] = edgeMid(i);
     const nrm: V3 = [mx / INR, 0, mz / INR];
@@ -1222,10 +1222,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     cols.push(...wedge((i + 1) % 6, bN, hbOf(bN), true));
     const same = (a: V3, b: V3) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) < 1e-7;
     const UPH: V3 = [0, 1, 0];
-    // Numa borda de rio, a boca da água (e a margem inclinada) fica com a parede de sempre: a saia só cobre a terra dos dois lados.
-    const skipSeg = (j: number) => (j < 2 ? mouth[0] : j >= 2 + N ? mouth[N] : mouth[j - 2] || mouth[j - 1]);
     for (let j = 0; j + 1 < cols.length; j++) {
-      if (skipSeg(j)) continue;
       const a = cols[j], b = cols[j + 1];
       for (let m = 0; m < M; m++) {
         const p0 = a[m], p1 = b[m], p2 = b[m + 1], p3 = a[m + 1];
@@ -1296,13 +1293,13 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const rockC = tc(theme.relief?.rock ?? theme.rock);
     // Borda de terra virada para o vazio com altura: em vez de um paredão, uma saia (encosta arredondada que desce do lado de fora).
     const skirted = !!spec && !hidden && !lv?.placed?.[i] && Array.from({ length: N + 1 }, (_, k) => V(N - k, k).p[1] / LEVEL_STEP + spec.own!).some((hb) => hb > SKIRT_MIN);
-    // Rio: as colunas da boca (perto da água) seguem com a parede, e a saia só cobre as margens de terra.
+    // Rio: a saia desce também sob a boca da água (o leito segue pela encosta); só o corte de vidro da água fica na beira, como num aquário.
     const mouth = Array.from({ length: N + 1 }, (_, k) => {
       if (!skirted || edges[i] !== T.Water || !field) return false;
       const [x, , z] = V(N - k, k).p;
       return field.e(x, z) < 0.09;
     });
-    if (skirted) skirtFor(i, V, mouth);
+    if (skirted) skirtFor(i, V);
     for (let k = 0; k < N && !hidden; k++) {
       if (skirted && !(mouth[k] || mouth[k + 1])) continue;
       const v0 = V(N - k, k), v1 = V(N - k - 1, k + 1);
@@ -1322,9 +1319,11 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         const layer = (j: number, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, cd: THREE.Color) => {
           if (flat(j)) g.quad([x0, A[j - 1], z0], [x1, B[j - 1], z1], [x1, B[j], z1], [x0, A[j], z0], ca, cb, cc, cd, nrm);
         };
-        layer(1, l0, l1, l1, l0);
-        layer(2, side, side, midC, midC);
-        if (cliff) {
+        if (!skirted) layer(1, l0, l1, l1, l0);
+        if (!skirted) layer(2, side, side, midC, midC);
+        if (skirted) {
+          // A saia já cobre a lateral: aqui só o corte da água (abaixo).
+        } else if (cliff) {
           // Rocha em camadas: faixas de ~0,13 com o valor sorteado por faixa e por trecho, mais escura para baixo.
           const rr = rockC.clone().lerp(sideDark, 0.15);
           // Faixas horizontais (grade fixa de 0,13 sob o nível da peça) do topo da parede, que segue o perfil da borda, até o fundo.
