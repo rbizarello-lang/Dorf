@@ -9,7 +9,8 @@ import { mulberry32 } from '../src/core/rng';
 import { MODES, modeRules, type Mode } from '../src/core/modes';
 import { generateSites } from '../src/core/sites';
 import { SPECIAL_KINDS, type SpecialKind } from '../src/core/specials';
-import { STARTER_PROFILE, tileProfile, worldHeights } from '../src/core/relief';
+import { STARTER_PROFILE, levelAt, tileProfile, worldHeights } from '../src/core/relief';
+import { generateHiddenSprings } from '../src/core/water';
 import { THEMES } from '../src/themes/themes';
 
 const rulesFor = (t: { rules?: Partial<Rules> }, mode: Mode | undefined, seed: number): Rules => ({ ...DEFAULT_RULES, ...(mode?.daily ? {} : t.rules), ...(mode ? modeRules(mode, seed) : {}) });
@@ -80,7 +81,7 @@ function oPlacedHeights(b: Board, n: Placed): number[] {
 
 /**
  * Águas que descem (oráculo próprio, sem importar src/core/water.ts): nascente = peça de rio com 1 ou 2 bordas de água, nível ≥ 1 e o
- * hash da semente abaixo de 0,3; o curso desce de água para água vizinha no mesmo nível ou abaixo; o mar é lago (3+ bordas) ou nível 0.
+ * hash da semente abaixo de 0,3 (ou pousada numa das casas de nascente escondida); o curso desce de água para água vizinha no mesmo nível ou abaixo; o mar é lago (3+ bordas) ou nível 0.
  * Devolve quantas peças têm água corrente e quantas nascentes chegaram ao mar.
  */
 function oWater(b: Board) {
@@ -90,6 +91,8 @@ function oWater(b: Board) {
   const nw = (e: E) => e.t.edges.filter((x) => x === T.Water).length;
   const spring = (e: E) => {
     if (e.level < 1 || e.t.index === 0 || nw(e) < 1 || nw(e) > 2) return false;
+    // Nascente escondida: a peça pousou numa das casas sorteadas pela semente (a lista vem do gerador, conferido em `checkHiddenSprings`).
+    if (b.springSites.some((s) => s.q === e.t.q && s.r === e.t.r)) return true;
     let h = Math.imul((e.t.def.seed ^ 0x5b21d) | 0, 2654435761);
     h = Math.imul(h ^ (h >>> 15), 2246822519);
     return ((h ^ (h >>> 13)) >>> 0) / 4294967296 < 0.3;
@@ -478,6 +481,9 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     const foundBefore = b.sites.filter((st) => st.found).length;
 
     const wBefore = rules.springs ? oWater(b) : null;
+    // Nascente escondida (oráculo próprio): peça de rio, 1 ou 2 bordas de água, nível ≥ 1, sobre uma casa sorteada; rende `hiddenSpringPoints`.
+    const nWater = edges.filter((e) => e === T.Water).length;
+    const hiddenHere = !!rules.springs && !!hts && nWater >= 1 && nWater <= 2 && hts[edges.indexOf(T.Water)] >= 1 && b.springSites.some((s) => s.q === m.q && s.r === m.r);
     game.rot = m.rot;
     const res = game.place(m.q, m.r);
     if (!res) {
@@ -502,12 +508,21 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       const wAfter = oWater(b);
       const dF = wAfter.flowing - wBefore.flowing, dS = wAfter.reached - wBefore.reached;
       assert(dF >= 0 && dS >= 0, `seed ${seed}: a água corrente encolheu (${dF}/${dS})`);
-      pts += dF * rules.flowPoints + dS * rules.seaPoints;
+      pts += dF * rules.flowPoints + dS * rules.seaPoints + (hiddenHere ? rules.hiddenSpringPoints : 0);
+      assert((res.water?.hidden ?? false) === hiddenHere && (res.placed.hiddenSpring ?? false) === hiddenHere, `seed ${seed}: nascente escondida ${res.water?.hidden} != oráculo ${hiddenHere}`);
+      if (hiddenHere) inc('agua_escondidas');
       waterTiles = dS * rules.seaTiles;
       assert((res.water?.flowing ?? 0) === dF && (res.water?.seas ?? 0) === dS, `seed ${seed}: água ${res.water?.flowing}/${res.water?.seas} != oráculo ${dF}/${dS}`);
       inc('agua_correntes', dF);
       inc('agua_mares', dS);
       if (res.water?.spring) inc('agua_nascentes');
+    }
+    // Nascentes escondidas reveladas (oráculo próprio): casa ainda vazia com uma peça de água em qualquer das 6 vizinhas.
+    if (rules.springs && rules.relief) {
+      const expected = b.springSites.filter((st) => !b.tiles.has(hkey(st.q, st.r)) && DIRS.some(([dq, dr]) => b.list.some((t) => t.q === st.q + dq && t.r === st.r + dr && t.edges.includes(T.Water)))).map((st) => `${st.q},${st.r}`).sort();
+      const got = b.revealedSprings().map((st) => `${st.q},${st.r}`).sort();
+      assert(expected.join('|') === got.join('|'), `seed ${seed}: nascentes reveladas ${got} != oráculo ${expected}`);
+      inc('agua_reveladas', got.length);
     }
     // Estação (cópia de src/core/seasons.ts): a cada 20 jogadas, +3 numa interação.
     const seasonLock = rules.seasonLock;
@@ -1051,6 +1066,41 @@ if (contBad) fail(`continuação pós-replay divergiu em ${contBad} partidas`);
   }
   console.log(`Sítios: ${total} gerações conferidas, erros ${bad}`);
   if (bad) fail(`sítios: ${bad} erros de geração`);
+}
+
+// Nascentes escondidas: o gerador é determinístico, fica nas casas de altura máxima da semente, a 4 a 12 casas do Centro, sem
+// duas coladas, e não mexe na sequência de peças (a mesma semente dá as mesmas peças com e sem elas).
+{
+  let bad = 0, total = 0;
+  const relevo = MODES.find((m) => m.id === 'relevo')!;
+  for (let seed = 1; seed <= 150; seed++) {
+    const a = generateHiddenSprings(seed * 7919, 4), a2 = generateHiddenSprings(seed * 7919, 4);
+    if (JSON.stringify(a) !== JSON.stringify(a2)) bad++;
+    total += a.length;
+    if (a.length > 4) bad++;
+    for (const [i, st] of a.entries()) {
+      const d = hexDistance(st.q, st.r, 0, 0);
+      if (d < 4 || d > 12 || levelAt(seed * 7919, st.q, st.r, 2) !== 2) bad++;
+      for (const o of a.slice(i + 1)) if (hexDistance(st.q, st.r, o.q, o.r) < 4) bad++;
+    }
+    if (generateHiddenSprings(seed, 0).length !== 0) bad++;
+    // Mesma sequência de peças, com e sem nascentes escondidas.
+    const rs = rulesFor(THEMES[0], relevo, seed);
+    const g1 = new Game(seed, rs), g0 = new Game(seed, { ...rs, hiddenSprings: 0 });
+    if (JSON.stringify(g1.board.springSites) !== JSON.stringify(generateHiddenSprings(seed, 4))) bad++;
+    if (g0.board.springSites.length !== 0) bad++;
+    for (let i = 0; i < 12 && g1.current && g0.current; i++) {
+      if (JSON.stringify(g1.current) !== JSON.stringify(g0.current)) bad++;
+      const m = g1.bestMove(mulberry32(seed + i));
+      if (!m) break;
+      g1.rot = g0.rot = m.rot;
+      g1.place(m.q, m.r);
+      g0.place(m.q, m.r);
+    }
+  }
+  console.log(`Nascentes escondidas: ${total} casas em 150 sementes, erros ${bad}`);
+  if (total < 150 * 3) fail(`nascentes escondidas: poucas casas (${total})`);
+  if (bad) fail(`nascentes escondidas: ${bad} erros de geração`);
 }
 
 // Prévia da jogada: o total mostrado no fantasma tem de ser o que `place` paga depois,

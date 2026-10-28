@@ -6,7 +6,7 @@ import { SEASON_BONUS, SEASON_KIND, seasonAt } from './seasons';
 import { INFLUENCE, INFLUENCE_CAP, SYN_KINDS, type SynHit, type SynKind, synergyOf } from './synergy';
 import { payRoutes, type RouteHit, type RoutePost } from './routes';
 import { STARTER_PROFILE, heightFit, tileProfile, worldHeights } from './relief';
-import { isSpring, waterState, type WaterState, type WaterTile } from './water';
+import { hiddenSpringAt, isSpring, springEligible, springRevealed, waterState, type SpringSite, type WaterState, type WaterTile } from './water';
 import { T, isStrict, rotateEdges, type QuestKind, type TileDef } from './tiles';
 
 export interface Rules {
@@ -76,6 +76,9 @@ export interface Rules {
   flowPoints: number;
   seaPoints: number;
   seaTiles: number;
+  /** Nascentes escondidas no mapa (src/core/water.ts) e os pontos de quem acha uma com uma peça de rio. */
+  hiddenSprings: number;
+  hiddenSpringPoints: number;
 }
 
 export const DEFAULT_RULES: Rules = {
@@ -117,6 +120,8 @@ export const DEFAULT_RULES: Rules = {
   flowPoints: 0,
   seaPoints: 0,
   seaTiles: 0,
+  hiddenSprings: 0,
+  hiddenSpringPoints: 0,
 };
 
 export interface Placed {
@@ -142,6 +147,8 @@ export interface Placed {
   hill?: number;
   /** Águas que descem: esta peça de rio é uma nascente. */
   spring?: boolean;
+  /** A nascente era uma das escondidas no mapa (a peça pousou sobre ela). */
+  hiddenSpring?: boolean;
 }
 
 export interface Quest {
@@ -181,7 +188,7 @@ export interface Check {
   /** Relevo, por borda: 0 sem vizinho (ou sem relevo), 1 mesma altura, 2 degrau de 1 nível, 3 alto demais. */
   heightState: number[];
   /** Águas que descem: o que a peça traria à água (pontos, se corre ou fica parada, se o curso chega ao mar); só com `rules.springs` e água na peça. */
-  water?: { gain: number; flows: boolean; sea: boolean; spring: boolean };
+  water?: { gain: number; flows: boolean; sea: boolean; spring: boolean; hidden: boolean };
   /** Relevo: bordas com degrau (mirante) e, dessas, as de rio (cachoeira). */
   steps: number;
   falls: number;
@@ -205,7 +212,7 @@ export interface PlaceResult {
   steps?: number;
   falls?: number;
   /** Águas que descem: pontos da água corrente desta jogada, nascente nova, peças com água corrente a mais e chegadas ao mar. */
-  water?: { points: number; flowing: number; seas: number; spring: boolean };
+  water?: { points: number; flowing: number; seas: number; spring: boolean; hidden: boolean };
   perfect: boolean;
   closed: Placed[];
   synergies: SynHit[];
@@ -244,6 +251,8 @@ export class Board {
   markPending: number | null = null;
   /** Sítios do mapa (preenchidos pelo Game a partir da semente). */
   sites: Site[] = [];
+  /** Nascentes escondidas do mapa (preenchidas pelo Game a partir da semente; só no modo Relevo com águas que descem). */
+  springSites: SpringSite[] = [];
   /** Jogadas restantes em que o mirante mostra as próximas peças. */
   lookout = 0;
   /** Maravilha: peça do canteiro e etapa (pronta quando chega a `rules.wonderStages`). */
@@ -373,12 +382,30 @@ export class Board {
   /** O que uma peça de rio traria à água em (q, r): pontos, se a água dela corre e se o curso chega ao mar. */
   private waterIf(q: number, r: number, edges: readonly T[], level: number, def: TileDef) {
     const R = this.rules;
-    const spring = isSpring(def.seed, edges, level);
+    const kind = this.springKind(q, r, edges, level, def.seed);
+    const spring = kind !== null;
     const before = this.waterNow();
     const after = this.waterNow({ q, r, edges, level, spring });
     const flowing = after.flow.size - before.flow.size;
     const seas = after.reached.size - before.reached.size;
-    return { gain: flowing * R.flowPoints + seas * R.seaPoints, flows: after.flow.has(hkey(q, r)), sea: seas > 0, spring };
+    const hidden = kind === 'hidden';
+    return { gain: flowing * R.flowPoints + seas * R.seaPoints + (hidden ? R.hiddenSpringPoints : 0), flows: after.flow.has(hkey(q, r)), sea: seas > 0, spring, hidden };
+  }
+
+  /**
+   * Como uma peça de rio em (q, r) nasce: 'hidden' se pousa sobre uma das nascentes escondidas do mapa, 'seen' se é a nascente
+   * sorteada pela própria peça, ou null. Só vale com `rules.springs` e peça elegível (rio no nível 1 ou mais, 1 ou 2 bordas de água).
+   */
+  springKind(q: number, r: number, edges: readonly T[], level: number, seed: number): 'hidden' | 'seen' | null {
+    if (!this.rules.springs || !springEligible(edges, level)) return null;
+    if (hiddenSpringAt(this.springSites, q, r)) return 'hidden';
+    return isSpring(seed, edges, level) ? 'seen' : null;
+  }
+
+  /** Nascentes escondidas já reveladas e ainda sem peça em cima (uma peça com água encostou nelas): o mapa mostra a marca. */
+  revealedSprings(): SpringSite[] {
+    const hasWater = (q: number, r: number) => !!this.get(q, r)?.edges.includes(T.Water);
+    return this.springSites.filter((s) => !this.get(s.q, s.r) && springRevealed(this.springSites, s.q, s.r, hasWater));
   }
 
   /**
@@ -388,6 +415,7 @@ export class Board {
    */
   clone(): Board {
     const b = new Board(this.rules);
+    b.springSites = this.springSites;
     for (const p of this.list) {
       const c = b.placeRaw(p.q, p.r, p.def, p.rot);
       c.closed = p.closed;
@@ -423,7 +451,11 @@ export class Board {
       const prof = this.list.length === 0 ? STARTER_PROFILE : tileProfile(def.edges, def.seed);
       p.heights = worldHeights(prof, rot);
       p.hill = prof.c;
-      if (this.rules.springs && this.list.length > 0 && p.edges.includes(T.Water)) p.spring = isSpring(def.seed, p.edges, p.heights[0]);
+      if (this.list.length > 0 && p.edges.includes(T.Water)) {
+        const kind = this.springKind(q, r, p.edges, p.heights[0], def.seed);
+        if (kind) p.spring = true;
+        if (kind === 'hidden') p.hiddenSpring = true;
+      }
     }
     this.tiles.set(key, p);
     this.list.push(p);
@@ -463,7 +495,7 @@ export class Board {
       const after = this.waterNow();
       const flowing = after.flow.size - waterBefore.flow.size;
       const seas = after.reached.size - waterBefore.reached.size;
-      water = { points: flowing * R.flowPoints + seas * R.seaPoints, flowing, seas, spring: !!placed.spring };
+      water = { points: flowing * R.flowPoints + seas * R.seaPoints + (placed.hiddenSpring ? R.hiddenSpringPoints : 0), flowing, seas, spring: !!placed.spring, hidden: !!placed.hiddenSpring };
       points += water.points;
       seaTilesGain = seas * R.seaTiles;
     }

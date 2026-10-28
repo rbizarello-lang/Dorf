@@ -8,7 +8,9 @@
 //
 // Tudo é função do tabuleiro (peças, bordas e níveis): sem estado guardado, então replay, desfazer e prévia batem sempre.
 // Os pontos são a diferença entre o total depois e antes, e o total só cresce com peças novas.
-import { DIRS, hkey, opposite } from './hex';
+import { DIRS, hexDistance, hkey, opposite } from './hex';
+import { levelAt } from './relief';
+import { mulberry32 } from './rng';
 import { T } from './tiles';
 
 export interface WaterTile {
@@ -32,14 +34,70 @@ export interface WaterState {
 export const SPRING_CHANCE = 0.3;
 const SALT = 0x5b21d;
 
-/** A peça (semente `seed`, bordas `edges`, nível `level`) é nascente? Hash puro da semente da peça. */
-export function isSpring(seed: number, edges: readonly T[], level: number): boolean {
+/** Uma peça de rio no nível 1 ou mais, com 1 ou 2 bordas de água (nem lago nem terra seca), pode ser nascente. */
+export function springEligible(edges: readonly T[], level: number): boolean {
   if (level < 1) return false;
   const n = edges.filter((e) => e === T.Water).length;
-  if (n < 1 || n > 2) return false;
+  return n >= 1 && n <= 2;
+}
+
+/** A peça (semente `seed`, bordas `edges`, nível `level`) é nascente? Hash puro da semente da peça. */
+export function isSpring(seed: number, edges: readonly T[], level: number): boolean {
+  if (!springEligible(edges, level)) return false;
   let h = Math.imul((seed ^ SALT) | 0, 2654435761);
   h = Math.imul(h ^ (h >>> 15), 2246822519);
   return ((h ^ (h >>> 13)) >>> 0) / 4294967296 < SPRING_CHANCE;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Nascentes escondidas: além das que vêm na peça (`isSpring`, o sorteio da própria peça), o mapa guarda casas onde brota uma
+// nascente que ninguém vê. Saem da semente por um gerador à parte (como os sítios), nas casas de altura máxima do relevo da
+// semente (`levelAt` = 2: é no alto que a água nasce), então não mexem na sequência de peças. A casa só se revela quando uma
+// peça com água encosta nela (vizinha) ou pousa nela; uma peça de rio no nível 1 ou mais, com 1 ou 2 bordas de água, que
+// pouse ali vira a nascente. Revelar é função do tabuleiro (sem estado): replay, desfazer e prévia batem sempre.
+// ---------------------------------------------------------------------------------------------------------------------
+
+export interface SpringSite {
+  q: number;
+  r: number;
+}
+
+/** Faixas de distância do Centro (em casas) onde as nascentes escondidas aparecem, da mais perto à mais longe. */
+const SPRING_RINGS: ReadonlyArray<readonly [number, number]> = [[4, 6], [5, 8], [7, 10], [9, 12]];
+/** Distância mínima entre duas nascentes escondidas. */
+const SPRING_GAP = 4;
+
+/** `count` casas de nascente escondida para a semente `seed`: puro e determinístico, e mexe só no próprio gerador. */
+export function generateHiddenSprings(seed: number, count: number): SpringSite[] {
+  if (count <= 0) return [];
+  const rng = mulberry32((seed ^ 0x3c6ef372) >>> 0);
+  const out: SpringSite[] = [];
+  for (let i = 0; i < count; i++) {
+    const [lo, hi] = SPRING_RINGS[Math.min(SPRING_RINGS.length - 1, i)];
+    const cands: SpringSite[] = [];
+    for (let q = -hi; q <= hi; q++) {
+      for (let r = Math.max(-hi, -q - hi); r <= Math.min(hi, -q + hi); r++) {
+        const d = hexDistance(q, r, 0, 0);
+        if (d < lo || d > hi || levelAt(seed, q, r, 2) !== 2) continue;
+        if (out.some((s) => hexDistance(s.q, s.r, q, r) < SPRING_GAP)) continue;
+        cands.push({ q, r });
+      }
+    }
+    // Sorteia sempre (mesmo sem candidata), para o resto do gerador não depender de quantas houve.
+    const pick = rng();
+    if (cands.length) out.push(cands[Math.floor(pick * cands.length)]);
+  }
+  return out;
+}
+
+/** A casa (q, r) é de uma nascente escondida? */
+export const hiddenSpringAt = (sites: readonly SpringSite[], q: number, r: number) => sites.some((s) => s.q === q && s.r === r);
+
+/** A nascente escondida da casa (q, r) já se revelou? Com uma peça de água vizinha dela (ou em cima: aí ela já virou nascente). */
+export function springRevealed(sites: readonly SpringSite[], q: number, r: number, hasWater: (q: number, r: number) => boolean): boolean {
+  if (!hiddenSpringAt(sites, q, r)) return false;
+  if (hasWater(q, r)) return true;
+  return DIRS.some(([dq, dr]) => hasWater(q + dq, r + dr));
 }
 
 const waterEdges = (t: WaterTile) => t.edges.filter((e) => e === T.Water).length;

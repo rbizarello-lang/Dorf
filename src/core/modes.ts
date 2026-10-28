@@ -72,7 +72,7 @@ export const MODES: readonly Mode[] = [
     name: 'Relevo',
     tagline: 'Cada peça traz a sua altura: baixa, alta, em rampa, com morro. A altura das bordas também precisa encaixar (1 degrau vale e rende pontos, 2 não).',
     // Sem maravilha: o canteiro pede o meio da peça plano, e aqui a peça pode ter degraus.
-    rules: { relief: true, stepPoints: 3, fallPoints: 5, wonderStages: 0, springs: true, flowPoints: 8, seaPoints: 60, seaTiles: 2, waterChance: 0.24 },
+    rules: { relief: true, stepPoints: 3, fallPoints: 5, wonderStages: 0, springs: true, flowPoints: 8, seaPoints: 60, seaTiles: 2, waterChance: 0.24, hiddenSprings: 4, hiddenSpringPoints: 30 },
     undos: 3,
     more: true,
   },

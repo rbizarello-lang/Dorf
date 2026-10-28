@@ -3,6 +3,7 @@ import { Board, type PlaceResult, type Rules } from './board';
 import { unkey } from './hex';
 import { mulberry32, type Rng } from './rng';
 import { generateSites } from './sites';
+import { generateHiddenSprings } from './water';
 import { type SpecialKind, specialSlots, specialTile } from './specials';
 import { routePosts } from './routes';
 import { T, generateTile, rotateEdges, type TileDef } from './tiles';
@@ -51,6 +52,7 @@ export class Game {
     this.board.placeRaw(0, 0, starter, 0);
     this.board.computeGroups();
     this.board.sites = generateSites(seed, rules.sites, rules.siteScale);
+    if (rules.relief && rules.springs) this.board.springSites = generateHiddenSprings(seed, rules.hiddenSprings);
     this.stack = rules.startTiles;
     this.current = this.draw();
     this.next = this.draw();
