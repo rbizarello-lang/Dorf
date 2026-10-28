@@ -319,6 +319,11 @@ interface DecoOpts {
   sway?: 'tree' | 'crop';
   /** Metade fina das plantas (chaves com "~"): cada instância afunda no chão quando `U.fine` cai. */
   fade?: boolean;
+  /**
+   * Casas assentadas no chão (kits tingidos): oclusão de contato nos primeiros centímetros da parede, desgaste e umidade no pé,
+   * leve gradiente de altura e, com `shingles`, variação de cor telha a telha.
+   */
+  grounded?: boolean;
   /** Fiadas de telha nas superfícies inclinadas tingidas (telhados), só de perto. */
   shingles?: boolean;
   /** Contorno luminoso nas bordas das copas, na cor do sol. */
@@ -468,7 +473,31 @@ function decoMaterial(o: DecoOpts) {
   if (o.shingles) {
     const roof = smoothstep(0.3, 0.45, normalWorld.y).mul(smoothstep(0.97, 0.9, normalWorld.y)).mul(tint);
     const rows = smoothstep(0.25, 0.6, abs(fract(positionWorld.y.mul(72)).sub(0.5)).mul(2));
-    base = base.mul(mix(float(1), rows.mul(0.17).add(0.85), roof.mul(smoothstep(15, 6, camDist))));
+    const near = roof.mul(smoothstep(15, 6, camDist));
+    base = base.mul(mix(float(1), rows.mul(0.17).add(0.85), near));
+    if (o.grounded) {
+      // Cada telha tem o seu tom (valor ±9%, algumas bem mais escuras) e um desvio quente ou frio; fileiras alternadas.
+      const row = floor(positionWorld.y.mul(72));
+      const col = floor(positionGeometry.x.add(positionGeometry.z).mul(46).add(row.mul(0.5)));
+      const hs = hash(col.add(row.mul(37)).add(instanceIndex.mul(3)));
+      const old = step(0.92, hs);
+      const tile = hs.sub(0.5).mul(0.32).sub(old.mul(0.14));
+      base = base.mul(mix(vec3(1), vec3(tile.add(1), tile.mul(0.8).add(1), tile.mul(0.55).add(1)), near));
+    }
+  }
+  if (o.grounded) {
+    // Parede assentada: só nas faces de lado dos kits tingidos (o telhado visto de cima e as peças chatas ficam de fora).
+    const y = positionGeometry.y;
+    const sideK = tint.mul(smoothstep(0.6, 0.25, abs(normalWorld.y)));
+    const n = texture(noiseTex, vec2(positionGeometry.x.add(positionGeometry.z).mul(5.5), y.mul(2.5)).add(hash(instanceIndex).mul(3))).g;
+    // Oclusão de contato: os primeiros ~3 cm escurecem, sem recortar a janela (que é mais alta).
+    const contactAo = mix(float(0.38), float(1), smoothstep(0, 0.05, y));
+    // Umidade e desgaste: o pé escurece e esverdeia, com borda irregular (ruído), subindo mais onde o ruído é alto.
+    const damp = float(1).sub(smoothstep(0.02, 0.1, y.add(n.sub(0.5).mul(0.07))));
+    const stain = mix(vec3(1), vec3(0.58, 0.67, 0.52), damp.mul(0.72));
+    // Gradiente leve de altura: a parede clareia para cima (a luz do céu chega mais ao beiral).
+    const rise = mix(float(0.9), float(1.05), smoothstep(0.02, 0.22, y));
+    base = mix(base, base.mul(contactAo).mul(stain).mul(rise), sideK);
   }
   // Telhados e paredes: neve contida, para o branco do inverno não apagar a casa.
   const seasoned = o.paint === 'canopy' ? seasonFoliage(base, o.evergreen) : snowOn(base, 0.55 * (o.snow ?? 1));
@@ -506,7 +535,7 @@ export type MatKey = 'deco' | 'relief' | 'reliefSoft' | 'foliage' | 'evergreen' 
 
 export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
   return {
-    deco: decoMaterial({ shingles: true, paint: 'wall', rimSun: 0.3 }),
+    deco: decoMaterial({ shingles: true, grounded: true, paint: 'wall', rimSun: 0.3 }),
     // Serra (faces planas) e morro (normais suaves): sem as fileiras de telha do `deco`, que listrariam a rocha.
     relief: decoMaterial({ paint: 'wall', rimSun: 0.3, rock: true }),
     reliefSoft: decoMaterial({ smooth: true, paint: 'wall', rimSun: 0.3 }),
@@ -645,7 +674,9 @@ export function makeGroundMaterial() {
   const dirtK = smoothstep(0.97, 0.82, ny).mul(top).mul(sp.x.add(sp.y).min(1));
   const rockK = smoothstep(0.78, 0.6, ny).mul(top).mul(sp.x.add(sp.y).min(1));
   const slopeTone = mix(mix(vec3(1), vec3(1.18, 0.92, 0.68), dirtK.mul(0.8)), vec3(0.86, 0.88, 0.95), rockK.mul(0.7));
-  const ground = snowOn(base.mul(mix(sideF, detail.mul(cavity).mul(slopeTone), top)).mul(gusted), mix(float(0.85), float(0.85).mul(U.fieldSnow), sp.z.min(1)));
+  // Sombra de contato das casas (mapa do chão): escurece o chão colado à parede; 0 na pilha, que não tem mapa.
+  const contact = texture(groundMap.shadeTexture, positionWorld.xz.div(GROUND_EXTENT * 2).add(0.5)).r.mul(U.seam).mul(top);
+  const ground = snowOn(base.mul(mix(sideF, detail.mul(cavity).mul(slopeTone), top)).mul(gusted).mul(mix(vec3(1), vec3(0.5, 0.52, 0.58), contact.mul(0.85))), mix(float(0.85), float(0.85).mul(U.fieldSnow), sp.z.min(1)));
   m.colorNode = mix(ground, vec3(1), U.silhouette);
   // Micro-relevo: três escalas do mapa de declive (a mesma textura da água) inclinam a normal, então a luz rasante lê tufos de
   // capim, folhiço, torrões e pedregulhos; as escalas finas somem com a distância (cintilariam). Nos campos, sulcos na direção do pincel.

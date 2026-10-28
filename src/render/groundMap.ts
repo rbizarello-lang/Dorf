@@ -31,6 +31,9 @@ export class GroundMap {
   /** Altura do chão da casa (peça) em cada texel, em fração de `HEIGHT_RANGE`; 0 onde não há peça. */
   readonly height = new Uint8Array(GROUND_SIZE * GROUND_SIZE);
   readonly heightTexture: THREE.DataTexture;
+  /** Sombra de contato em volta das casas (0 a 255): o chão escurece junto da parede (material do chão). */
+  readonly shade = new Uint8Array(GROUND_SIZE * GROUND_SIZE);
+  readonly shadeTexture: THREE.DataTexture;
   private dirty = false;
 
   constructor() {
@@ -58,12 +61,20 @@ export class GroundMap {
     h.colorSpace = THREE.NoColorSpace;
     h.needsUpdate = true;
     this.heightTexture = h;
+    const sh = new THREE.DataTexture(this.shade, GROUND_SIZE, GROUND_SIZE, THREE.RedFormat, THREE.UnsignedByteType);
+    sh.wrapS = sh.wrapT = THREE.ClampToEdgeWrapping;
+    sh.magFilter = sh.minFilter = THREE.LinearFilter;
+    sh.generateMipmaps = false;
+    sh.colorSpace = THREE.NoColorSpace;
+    sh.needsUpdate = true;
+    this.shadeTexture = sh;
   }
 
   clear() {
     this.data.fill(0);
     this.cover.fill(0);
     this.height.fill(0);
+    this.shade.fill(0);
     this.dirty = true;
   }
 
@@ -93,6 +104,22 @@ export class GroundMap {
     this.dirty = true;
   }
 
+  /** Soma a sombra de contato de uma casa em (x, z): mancha macia de desvio `sigma` e força `amp` (0 a 1) no centro. */
+  contact(x: number, z: number, amp: number, sigma: number) {
+    const cu = (x + GROUND_EXTENT) / TEXEL - 0.5, cv = (z + GROUND_EXTENT) / TEXEL - 0.5;
+    const r = Math.ceil((2.5 * sigma) / TEXEL);
+    const k = (TEXEL * TEXEL) / (2 * sigma * sigma);
+    const u0 = Math.round(cu), v0 = Math.round(cv);
+    for (let v = Math.max(0, v0 - r); v <= Math.min(GROUND_SIZE - 1, v0 + r); v++) {
+      for (let u = Math.max(0, u0 - r); u <= Math.min(GROUND_SIZE - 1, u0 + r); u++) {
+        const g = amp * Math.exp(-((u - cu) ** 2 + (v - cv) ** 2) * k);
+        const i = v * GROUND_SIZE + u;
+        this.shade[i] = to8(1 - (1 - this.shade[i] / 255) * (1 - g));
+      }
+    }
+    this.dirty = true;
+  }
+
   /** Envia a textura se algo mudou (uma vez por quadro). */
   flush() {
     if (!this.dirty) return;
@@ -100,6 +127,7 @@ export class GroundMap {
     this.texture.needsUpdate = true;
     this.coverTexture.needsUpdate = true;
     this.heightTexture.needsUpdate = true;
+    this.shadeTexture.needsUpdate = true;
   }
 
   /**

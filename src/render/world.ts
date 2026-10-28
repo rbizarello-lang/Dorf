@@ -1498,6 +1498,8 @@ export class World {
         const x = tmpM.elements[12], z = tmpM.elements[14];
         const h = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
         groundMap.lantern(x, z, 0.28 + 0.2 * h);
+        // Sombra de contato: o chão escurece em volta da casa (0 draw call; o material do chão lê o mapa).
+        groundMap.contact(x, z, 0.65, 0.13 * tmpM.getMaxScaleOnAxis());
       }
       if (d.key === 'bridge') this.life.addBridge(tmpM);
       if (d.anim === 'spin-z' || d.anim === 'spin-x') this.life.addSpinner(d.key, tmpM, d.anim === 'spin-x' ? 'x' : 'z');
