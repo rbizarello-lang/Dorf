@@ -566,7 +566,7 @@ export function makeGroundMaterial() {
   const lean = float(1).sub(normalWorld.y);
   const band = floor(positionWorld.y.mul(9).add(texture(noiseTex, p.mul(0.7)).g.mul(1.6)));
   const rockTone = hash(band.add(17)).mul(0.34).add(0.78).mul(texture(noiseTex, vec2(p.x.mul(2.3).add(p.y), positionWorld.y.mul(11))).b.mul(0.22).add(0.9));
-  const rockK = smoothstep(0.1, 0.22, lean.add(grain.sub(0.5).mul(0.07))).mul(smoothstep(0.35, 0.55, normalWorld.y)).mul(U.rock);
+  const rockK = smoothstep(0.17, 0.3, lean.add(grain.sub(0.5).mul(0.08))).mul(smoothstep(0.35, 0.55, normalWorld.y)).mul(U.rock);
   const rockCol = U.rockColor.mul(rockTone);
   m.colorNode = mix(mix(ground, rockCol, rockK), vec3(1), U.silhouette);
   // Relevo fino do prado e da mata: inclina a normal com o mapa de declive da água.

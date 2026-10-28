@@ -3,6 +3,7 @@ import { mrt, vec3, vec4 } from 'three/tsl';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Board, Check, PlaceResult, Placed } from '../core/board';
+import type { WaterState } from '../core/water';
 import { EggTracker, phaseOfTod, type EggSpec } from '../core/eggs';
 import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey, worldToHex } from '../core/hex';
 import { levelAt, tileProfile, worldHeights } from '../core/relief';
@@ -220,7 +221,7 @@ class Chunk {
     parent.add(this.ground, this.water);
   }
 
-  append(b: TileBuild, m: THREE.Matrix4) {
+  append(b: TileBuild, m: THREE.Matrix4): { start: number; count: number } {
     const e = m.elements;
     const gAdd = b.pos.length / 3;
     const wAdd = b.water.length / 3;
@@ -311,6 +312,21 @@ class Chunk {
     const c = this.centerSum.clone().multiplyScalar(1 / this.tiles);
     const radius = CHUNK * 1.9 + 1.5;
     for (const g of [this.ground.geometry, this.water.geometry]) g.boundingSphere = new THREE.Sphere(c, radius);
+    return { start: this.wN - wAdd, count: wAdd };
+  }
+
+  /** Reescreve a correnteza de uma peça já assentada (mesma malha de água, outro sentido): a água parada passa a correr, ou o contrário. */
+  setFlow(slot: { start: number; count: number }, b: TileBuild, m: THREE.Matrix4) {
+    if (b.wflow.length / 2 !== slot.count) return;
+    const e = m.elements;
+    for (let i = 0; i < slot.count; i++) {
+      const fx = b.wflow[i * 2], fz = b.wflow[i * 2 + 1];
+      this.wFlow[(slot.start + i) * 2] = e[0] * fx + e[8] * fz;
+      this.wFlow[(slot.start + i) * 2 + 1] = e[2] * fx + e[10] * fz;
+    }
+    const a = this.water.geometry.getAttribute('wflow') as THREE.BufferAttribute;
+    a.addUpdateRange(slot.start * 2, slot.count * 2);
+    a.needsUpdate = true;
   }
 
   triangles() {
@@ -1189,13 +1205,13 @@ export class World {
     }) };
   }
 
-  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; eggs?: BuildOpts['eggs']; levels?: BuildOpts['levels'] }) {
+  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; spring?: boolean; eggs?: BuildOpts['eggs']; levels?: BuildOpts['levels'] }) {
     return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, special: def.special, ...extra });
   }
 
   /** Peça do mapa já colocada: a inicial reserva o Centro, e a do marco o ergue. */
   private buildPlaced(p: Placed) {
-    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths: this.settleWidths(p), eggs: this.eggKits.get(p.key), levels: this.levelsFor(p.q, p.r, p.rot, p.def) });
+    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths: this.settleWidths(p), eggs: this.eggKits.get(p.key), spring: p.spring, levels: this.levelsFor(p.q, p.r, p.rot, p.def) });
   }
 
   /**
@@ -1204,9 +1220,15 @@ export class World {
    * nunca mudam; se duas correntezas opostas se encontram, a peça nova vira remanso.
    */
   private flows = new Map<number, number[]>();
-  private flowAt(q: number, r: number, edges: readonly T[], ownLevel?: number, idx = Infinity) {
+  private flowAt(q: number, r: number, edges: readonly T[], ownLevel?: number, idx = Infinity, spring = false) {
     const known = [0, 0, 0, 0, 0, 0];
     const own = ownLevel ?? this.levelOf(q, r);
+    // Águas que descem: a correnteza vem do núcleo (nascentes e curso que só desce); água fora do curso fica parada, sem correnteza.
+    if (this.pieceRelief && this.board?.rules.springs) {
+      if (!edges.includes(T.Water)) return known;
+      const st = idx === Infinity && !this.board.get(q, r) ? this.board.waterNow({ q, r, edges, level: own, spring }) : this.waterOf();
+      return st.flow.get(hkey(q, r))?.slice() ?? known;
+    }
     for (let i = 0; i < 6; i++) {
       if (edges[i] !== T.Water) continue;
       // Relevo (R2): a água só desce. Onde a vizinha é mais baixa ela sai, onde é mais alta ela entra, sem olhar a ordem
@@ -1223,9 +1245,40 @@ export class World {
     return resolveFlow(edges, known);
   }
 
+  /** Estado da água do tabuleiro (núcleo), guardado até a próxima peça. */
+  private waterMemo: { board: Board; n: number; st: WaterState } | null = null;
+  private waterOf(): WaterState {
+    const b = this.board!;
+    if (!this.waterMemo || this.waterMemo.board !== b || this.waterMemo.n !== b.list.length) this.waterMemo = { board: b, n: b.list.length, st: b.waterNow() };
+    return this.waterMemo.st;
+  }
+
+  /** Onde a água de cada peça assentada está no buffer do bloco (para trocar a correnteza sem refazer o mapa). */
+  private waterSlots = new Map<number, { chunk: Chunk; start: number; count: number }>();
+
+  /**
+   * Águas que descem: uma peça nova pode fazer correr a água de peças que já estavam assentadas (a nascente ou o mar
+   * chegou). Refaz só a correnteza delas, no buffer, e dispara a festa quando o curso chega ao mar.
+   */
+  private syncWater() {
+    const b = this.board;
+    if (!b || !this.pieceRelief || !b.rules.springs) return;
+    const st = this.waterOf();
+    for (const p of b.list) {
+      if (!p.edges.includes(T.Water)) continue;
+      const slot = this.waterSlots.get(p.key);
+      const old = this.flows.get(p.key);
+      const now = st.flow.get(p.key) ?? [0, 0, 0, 0, 0, 0];
+      if (!slot || !old || old.every((v, i) => v === now[i])) continue;
+      this.flows.set(p.key, now.slice());
+      const m = tileMatrix(p.q, p.r, p.rot, this.heightOf(p.q, p.r));
+      slot.chunk.setFlow(slot, this.build(p.def, synBase(p.synergies, p.rot), flowBase(now, p.rot), { center: false, widths: this.settleWidths(p), levels: this.levelsFor(p.q, p.r, p.rot, p.def) }), m);
+    }
+  }
+
   /** Registra a correnteza de uma peça colocada e devolve a versão na orientação de origem. */
   private settleFlow(p: Placed) {
-    const wf = this.flowAt(p.q, p.r, p.edges, undefined, p.index);
+    const wf = this.flowAt(p.q, p.r, p.edges, undefined, p.index, !!p.spring);
     this.flows.set(p.key, wf);
     return flowBase(wf, p.rot);
   }
@@ -1271,6 +1324,8 @@ export class World {
     this.life.reset(this.theme);
     this.life.phase = phaseOfTod(this.timeOfDay);
     this.flows.clear();
+    this.waterSlots.clear();
+    this.waterMemo = null;
     this.widths.clear();
     groundMap.clear();
     seaMap.clear();
@@ -1566,7 +1621,9 @@ export class World {
 
   private bake(p: Placed, b: TileBuild, flush = true) {
     const m = tileMatrix(p.q, p.r, p.rot, this.heightOf(p.q, p.r));
-    this.chunkFor(p.q, p.r).append(b, m);
+    const ch = this.chunkFor(p.q, p.r);
+    const slot = ch.append(b, m);
+    if (slot.count) this.waterSlots.set(p.key, { chunk: ch, ...slot });
     groundMap.add(b, m, this.waterColor);
     this.falls.append(b, m);
     seaMap.add(p.q, p.r);
@@ -1671,7 +1728,7 @@ export class World {
     if (this.board) this.feedEggs(this.board.list, p.index + 1, true);
     const eggs = this.eggKits.get(p.key);
     const lvs = this.levelsFor(p.q, p.r, p.rot, p.def);
-    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${eggs?.map((e) => e.kit).join('+') ?? ''}|${lvs ? `${lvs.own}${lvs.nb.join('')}${lvs.sec?.join('') ?? ''}${lvs.placed?.map(Number).join('') ?? ''}` : ''}`;
+    const sig = `${p.spring ? 's' : ''}${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${eggs?.map((e) => e.kit).join('+') ?? ''}|${lvs ? `${lvs.own}${lvs.nb.join('')}${lvs.sec?.join('') ?? ''}${lvs.placed?.map(Number).join('') ?? ''}` : ''}`;
     let live: LiveTile;
     const ly = this.heightOf(p.q, p.r);
     let y0 = ly + 1.2;
@@ -1681,7 +1738,7 @@ export class World {
       this.ghost = null;
       this.ghostKey = '';
     } else {
-      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths, eggs, levels: lvs }), sig, this.lib, this.quality !== 'low');
+      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths, eggs, spring: p.spring, levels: lvs }), sig, this.lib, this.quality !== 'low');
       this.scene.add(live.group);
       this.dropGhost();
     }
@@ -1868,18 +1925,19 @@ export class World {
   setGhost(def: TileDef, rot: number, angle: number, q: number, r: number, check: Check) {
     const syn = check.valid ? synBase(check.synergies, rot) : [];
     const lvs = this.levelsFor(q, r, rot, def);
-    const flow = flowBase(this.flowAt(q, r, rotateEdges(def.edges, rot), this.pieceRelief ? lvs?.own : undefined), rot);
+    const ew = rotateEdges(def.edges, rot);
+    const flow = flowBase(this.flowAt(q, r, ew, this.pieceRelief ? lvs?.own : undefined, Infinity, !!check.water?.spring), rot);
     const widths = flowBase(this.widthsAt(q, r, def, rot), rot);
     // O fantasma já mostra o marco da era que a peça ergueria.
     // A peça especial não ergue marco nem começa a maravilha (Board.place): o fantasma também não.
     const mark = check.valid && !def.special ? (check.eraMark ?? undefined) : undefined;
     const site = check.valid ? check.site?.kind : undefined;
     const wonder = check.valid && check.wonder && !def.special ? true : undefined;
-    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}`;
+    const sig = `${check.water?.spring ? 's' : ''}${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}`;
     const key = `${def.seed}:${this.theme.id}:${sig}:${lvs ? `${lvs.own}${lvs.nb.join('')}${lvs.sec?.join('') ?? ''}${lvs.placed?.map(Number).join('') ?? ''}` : ''}`;
     if (!this.ghost || this.ghostKey !== key) {
       const old = this.ghost;
-      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site, wonder, widths, levels: lvs }), sig, this.lib, this.quality !== 'low');
+      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site, wonder, widths, spring: check.water?.spring, levels: lvs }), sig, this.lib, this.quality !== 'low');
       this.ghostKey = key;
       this.scene.add(this.ghost.group);
       if (old && old.def === def) {
@@ -1978,6 +2036,15 @@ export class World {
       this.burst(w.x, w.z, 'sparkle', 40);
     }
     if (res.site) this.burst(x, z, 'sparkle', 46);
+    // Águas que descem: a nascente brilha ao nascer; ao chegar ao mar, o anel dourado e o bando de pássaros (a mesma festa das eras).
+    if (res.water?.spring) this.burst(x, z, 'sparkle', 20, 0.05);
+    if (res.water && res.water.seas > 0) {
+      this.burst(x, z, 'sparkle', 60);
+      if (!this.reducedMotion) {
+        this.halo(x, z, 2);
+        this.flushBirds(x, z);
+      }
+    }
     if (res.eraUp !== null) {
       this.eraUp(res.eraUp);
       if (!this.reducedMotion) {
@@ -1993,6 +2060,20 @@ export class World {
   flushBirds(x: number, z: number) {
     if (this.reducedMotion) return;
     this.life.flush(x, z);
+  }
+
+  /** Nascentes: um brilho que sobe da poça de tempos em tempos (pelo `dt` do mundo, então a foto congela e o vídeo repete). */
+  private springClock = 0;
+  private stepSprings(dt: number) {
+    if (!this.board?.rules.springs) return;
+    this.springClock += dt;
+    if (this.springClock < 0.9) return;
+    this.springClock = 0;
+    for (const p of this.board.list) {
+      if (!p.spring) continue;
+      const { x, z } = hexToWorld(p.q, p.r);
+      this.burst(x, z, 'sparkle', 2, 0.04);
+    }
   }
 
   private stepHalos(dt: number) {
@@ -2496,6 +2577,7 @@ export class World {
     }
 
     this.stepHalos(dt);
+    this.stepSprings(dt);
     this.stepCenter(dt);
     this.stepWonder(dt);
 
@@ -2549,6 +2631,7 @@ export class World {
       }
       if (d.t > fall + d.hold) {
         this.bake(d.placed, d.live.build);
+        this.syncWater();
         d.live.dispose();
         if (this.board) {
           this.life.sync(this.board);

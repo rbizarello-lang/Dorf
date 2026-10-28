@@ -219,6 +219,8 @@ let tradeMarks: RouteMark[] = [];
 /** Rota que a peça da vez renderia na casa do fantasma. */
 let routePeek: RouteHit[] = [];
 let scorePeek: number | null = null;
+/** Águas que descem: o que a água da peça do fantasma rende ("água +8", "chega ao mar", "água parada"); vazio sem água. */
+let waterPeek = '';
 /** "Onde encaixa": as melhores casas da peça atual. Valem só para a jogada e o giro em que foram pedidas. */
 let hints: { q: number; r: number; rot: number; points: number }[] | null = null;
 let hintsKey = '';
@@ -824,6 +826,8 @@ function refreshRoutePeek() {
   routePeekAt = key;
   const peek = game.preview(hover.q, hover.r);
   scorePeek = peek ? peek.points : null;
+  const cw = peek ? game.check(hover.q, hover.r)?.water : undefined;
+  waterPeek = !cw ? '' : cw.sea ? ` · chega ao mar +${cw.gain}` : cw.flows ? (cw.spring ? ` · nascente +${cw.gain}` : ` · água +${cw.gain}`) : ' · água parada';
   routePeek = peek?.routes ?? [];
 }
 
@@ -873,6 +877,11 @@ function announce(res: PlaceResult) {
     notes.push({ text: `Missão perdida: ${questLabel(q, theme)} (passou de ${q.target})`, kind: 'bad' });
   }
   if (res.newQuest) notes.push({ text: `Nova missão: ${questLabel(res.newQuest, theme)}` });
+  if (res.water?.spring) notes.push({ text: 'Nascente: a água começa a correr', kind: 'good' });
+  if (res.water && res.water.seas > 0) {
+    notes.push({ text: `A água chegou ao mar · +${game.rules.seaPoints} · +${game.rules.seaTiles * res.water.seas} peças`, kind: 'good' });
+    sfx.discover();
+  }
   if (res.site) {
     notes.push({ text: `${SITE_LABEL[res.site.kind].name}: ${siteReward(res.site.kind)}`, kind: 'good' });
     sfx.discover();
@@ -1753,7 +1762,7 @@ function step(now: number) {
   if (scorePeek !== null && hover) {
     const s = screenOf(hover.q, hover.r, 0.55);
     const route = routePeek.length ? ` · ${routePeek.map(routeLabel).join(' · ')}` : '';
-    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${route}`, color: theme.ui.accent, kind: 'score' });
+    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${waterPeek}${route}`, color: theme.ui.accent, kind: 'score' });
   }
   // Influência das construções: o ganho aparece com o fantasma numa casa contornada.
   const inf = hover && game.current && !st ? game.board.influenceAt(hover.q, hover.r, game.current.edges) : null;
@@ -1877,6 +1886,11 @@ function start(data: unknown) {
     world.rig.tilt = world.rig.goalTilt = pitchDeg * THREE.MathUtils.DEG2RAD - world.rig.basePitch(world.rig.goalDist);
   }
   if (params.has('focus')) (window as unknown as { __focus: (t: number) => boolean }).__focus(Number(params.get('focus')));
+  // ?spring=i centraliza na i-ésima nascente (modo Relevo); ?spring=mar.i, no i-ésimo lago que a água alcançou.
+  if (params.has('spring')) {
+    const [a, b] = (params.get('spring') ?? '').split('.');
+    (window as unknown as { __water: (i: number, zoom: number | undefined, mar: boolean) => unknown }).__water(Number(a === 'mar' ? b : a) || 0, params.has('zoom') ? Number(params.get('zoom')) : undefined, a === 'mar');
+  }
   // ?step=rail ou ?step=water.1 (a i-ésima borda entre níveis): centraliza na rampa ou na cachoeira.
   if (params.has('step')) {
     const [k, i] = (params.get('step') ?? '').split('.');
@@ -1924,6 +1938,20 @@ function start(data: unknown) {
   return true;
 };
 
+// Águas que descem: centraliza na i-ésima nascente (ou, com `mar`, no ponto onde o curso chegou ao mar) e devolve o estado da água.
+(window as unknown as { __water: (i?: number, zoom?: number, mar?: boolean) => unknown }).__water = (i = 0, zoom, mar = false) => {
+  const st = game.board.waterNow();
+  const springs = game.board.list.filter((p) => p.spring);
+  const sea = game.board.list.filter((p) => p.heights && p.edges.filter((e) => e === T.Water).length >= 3 && st.flow.has(p.key));
+  const t = (mar ? sea : springs)[i];
+  if (t) {
+    const { x, z } = hexToWorld(t.q, t.r);
+    world.rig.goal.set(x, 0, z);
+    world.rig.target.set(x, 0, z);
+    if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  }
+  return { springs: springs.length, flowing: st.flow.size, reached: st.reached.size, lakes: sea.length, at: t ? [t.q, t.r] : null };
+};
 // Dispara a onda do chão no foco da câmera, já com `age` segundos (capturas com ?timescale=0.01).
 (window as unknown as { __celebrate: () => void }).__celebrate = () => {
   world.halo(world.rig.target.x, world.rig.target.z, 2);

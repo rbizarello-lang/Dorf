@@ -229,7 +229,7 @@ export class Game {
       for (let rot = 0; rot < 6; rot++) {
         const c = this.board.checkDef(q, r, def, rot);
         if (!c.valid) continue;
-        const score = c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) + rand() * 0.5;
+        const score = c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) + (c.water?.gain ?? 0) * 0.3 + rand() * 0.5;
         if (!best || score > best.score) best = { q, r, rot, score };
       }
     }

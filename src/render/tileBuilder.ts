@@ -128,6 +128,8 @@ export interface BuildOpts {
    * já existe. Sem isso (pilha), vale a de `waterShape`.
    */
   widths?: readonly number[];
+  /** Nascente (modo Relevo, águas que descem): uma poça clara no meio da água, com junco em volta. */
+  spring?: boolean;
   /** Peça inicial: o meio fica livre para o Centro da vila (objeto à parte, no World). */
   center?: boolean;
   /** Marco da era erguido nesta peça (índice da era: uma flâmula por era). */
@@ -614,7 +616,7 @@ function waterField(shape: WaterShape, paths: Path[], widths: readonly number[],
       }
     });
     const b = best as ReturnType<typeof nearestParam> | null;
-    if (!b) return [0, 0];
+    if (!b || idx.every((i) => flow[i] === 0)) return [0, 0]; // água parada: sem correnteza
     let dir = 1, speed = 1;
     if (paths.length === 1 && n === 2) {
       const sa = flow[idx[0]], sb = flow[idx[1]];
@@ -1252,7 +1254,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
             const bot = edgesAbs[j + 1];
             const jit = 0.9 + rs() * 0.2;
             if (ta - bot < 1e-4 && tb - bot < 1e-4) continue;
-            const ct = rr.clone().multiplyScalar(depth(edgesAbs[j]) * jit), cb = rr.clone().multiplyScalar(depth(bot) * jit * (j % 2 ? 0.94 : 1));
+            // O pé do paredão se perde na areia e na espuma do entorno (a casa vazia entre platôs não vira um poço escuro).
+            const foot = (y: number) => (terr ? 0.7 * smooth(wallTop - 0.55, floor, y) : 0);
+            const ct = rr.clone().multiplyScalar(depth(edgesAbs[j]) * jit).lerp(bank, foot(edgesAbs[j])), cb = rr.clone().multiplyScalar(depth(bot) * jit * (j % 2 ? 0.94 : 1)).lerp(bank, foot(bot));
             g.quad([x0, ta, z0], [x1, tb, z1], [x1, Math.min(bot, tb), z1], [x0, Math.min(bot, ta), z0], ct, ct, cb, cb, nrm);
           }
         } else {
@@ -1295,6 +1299,16 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   };
   if (opts.center) reserved.push([0, 0, 0.3]);
 
+  // --- Nascente: poça brilhante no meio da água (acima dela um fio) e junco em volta, dentro da margem.
+  if (opts.spring && field) {
+    const pool = shade(tc(theme.water), 1.6).lerp(WHITE, 0.45);
+    disc(g, 0, 0, 0.13, WATER_Y + 0.006, pool, 14);
+    disc(g, 0, 0, 0.075, WATER_Y + 0.008, WHITE.clone().multiplyScalar(1.25), 12);
+    for (let k = 0; k < 7; k++) {
+      const a = (k / 7) * Math.PI * 2 + 0.4, d = 0.16 + (k % 2) * 0.04;
+      D('reed', Math.cos(a) * d, 0, Math.sin(a) * d, rng() * 6, randRange(rng, 0.8, 1.2), WHITE);
+    }
+  }
   // --- Rios e lagos: plantas na água e na margem (a superfície já saiu com o leito).
   if (field) {
     const lake = shape.lake && water.idx.length >= 2;
