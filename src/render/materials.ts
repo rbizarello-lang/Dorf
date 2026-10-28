@@ -608,6 +608,10 @@ export function makeGroundMaterial() {
   const wn = texture(noiseTex, p.div(1.7).add(vec2(0.13, 0.41))).g.sub(0.5).mul(0.45);
   const hard = smoothstep(float(0.2), float(0.8), sp.add(wn));
   const sw = hard.mul(sp.x.add(sp.y).add(sp.z).add(sp.w).div(hard.x.add(hard.y).add(hard.z).add(hard.w).max(0.001)));
+  const t2 = texture(waterTex, p.mul(2.3).add(vec2(0.17, 0.43)));
+  const t3 = texture(waterTex, p.mul(6.4).add(vec2(0.61, 0.29)));
+  const nearF = smoothstep(24, 7, length(cameraPosition.sub(positionWorld)));
+  const wGrass = sp.x.add(sp.y.mul(0.9));
   const detail = grass.mul(sw.x).add(forest.mul(sw.y)).add(field.mul(sw.z)).add(village.mul(sw.w)).add(plain.mul(rest));
   // Topo × lateral (normal plana de cada triângulo).
   const top = smoothstep(0.55, 0.9, normalWorld.y);
@@ -633,11 +637,25 @@ export function makeGroundMaterial() {
   const fertile = nearRiver.mul(U.flood).mul(sp.x.add(sp.z).mul(1.4).min(1)).mul(top).mul(0.92);
   const base = mix(base0, U.floodColor, fertile);
   // `fieldSnow` (Theme.fieldSnow) tira neve só das parcelas de plantação (o gelo do lago congelado); 1 = como sempre.
-  const ground = snowOn(base.mul(mix(sideF, detail, top)).mul(gusted), mix(float(0.85), float(0.85).mul(U.fieldSnow), sp.z.min(1)));
+  // Sombreamento de fundo: as depressões do micro-relevo (altura do mapa) escurecem e os cumes clareiam um pouco.
+  const hgt = t2.b.mul(0.6).add(t3.b.mul(0.4));
+  const cavity = mix(float(1), hgt.sub(0.5).mul(0.7).add(0.98).clamp(0.84, 1.06), nearF.mul(0.35).add(0.65).mul(wGrass.mul(0.9).add(0.3).min(1)));
+  // Inclinação (para os morros do relevo): o prado e a mata ficam terrosos nas encostas e pedregosos nas mais íngremes.
+  const ny = normalWorld.y;
+  const dirtK = smoothstep(0.97, 0.82, ny).mul(top).mul(sp.x.add(sp.y).min(1));
+  const rockK = smoothstep(0.78, 0.6, ny).mul(top).mul(sp.x.add(sp.y).min(1));
+  const slopeTone = mix(mix(vec3(1), vec3(1.18, 0.92, 0.68), dirtK.mul(0.8)), vec3(0.86, 0.88, 0.95), rockK.mul(0.7));
+  const ground = snowOn(base.mul(mix(sideF, detail.mul(cavity).mul(slopeTone), top)).mul(gusted), mix(float(0.85), float(0.85).mul(U.fieldSnow), sp.z.min(1)));
   m.colorNode = mix(ground, vec3(1), U.silhouette);
-  // Relevo fino do prado e da mata: inclina a normal com o mapa de declive da água.
-  const slope = texture(waterTex, p.mul(0.45)).rg.sub(0.5).mul(sp.x.add(sp.y).mul(0.5).add(0.12));
-  const nW = vec3(slope.x.negate(), 1, slope.y.negate()).normalize();
+  // Micro-relevo: três escalas do mapa de declive (a mesma textura da água) inclinam a normal, então a luz rasante lê tufos de
+  // capim, folhiço, torrões e pedregulhos; as escalas finas somem com a distância (cintilariam). Nos campos, sulcos na direção do pincel.
+  const wField = sp.z, wVill = sp.w;
+  const s1 = texture(waterTex, p.mul(0.45)).rg.sub(0.5).mul(sp.x.add(sp.y).mul(0.5).add(0.12));
+  const s2 = t2.rg.sub(0.5).mul(wGrass.mul(2.3).add(wVill.mul(0.8)).add(wField.mul(0.6)));
+  const s3 = t3.rg.sub(0.5).mul(wGrass.mul(1.3).add(wVill.mul(1.7)).add(0.2)).mul(nearF);
+  const furrow = vec2(ca, sa).mul(cos(p.x.mul(ca).add(p.y.mul(sa)).mul(52)).mul(0.22).mul(wField).mul(nearF));
+  const tilt = s1.add(s2).add(s3).add(furrow);
+  const nW = vec3(normalWorld.x.sub(tilt.x), normalWorld.y, normalWorld.z.sub(tilt.y)).normalize();
   m.normalNode = mix(normalView, cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize(), top);
   m.emissiveNode = ERA_GOLD.mul(eraBand(positionWorld, U.time));
   m.receivedShadowNode = shadowWithClouds;
