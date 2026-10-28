@@ -1923,6 +1923,28 @@ function start(data: unknown) {
   world.rig.goal.set(x, 0, z);
 };
 
+// Águas que descem: põe o fantasma na jogada em que a água da peça rende mais (devolve o ganho, 0 se a peça da vez não tem rio).
+(window as unknown as { __ghostWater: () => number }).__ghostWater = () => {
+  const def = game.current;
+  if (!def) return 0;
+  let best: { q: number; r: number; rot: number; gain: number } | null = null;
+  for (const k of game.board.frontier) {
+    const [q, r] = unkey(k);
+    for (let rot = 0; rot < 6; rot++) {
+      const c = game.board.checkDef(q, r, def, rot);
+      if (c.valid && c.water && (!best || c.water.gain > best.gain)) best = { q, r, rot, gain: c.water.gain };
+    }
+  }
+  if (!best) return 0;
+  hover = { q: best.q, r: best.r };
+  while (game.rot !== best.rot) rotate(1);
+  updateGhost();
+  const { x, z } = hexToWorld(best.q, best.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  return best.gain;
+};
+
 // Centraliza a câmera na peça com mais bordas de um terreno (?focus=4 para rios, nas capturas).
 (window as unknown as { __focus: (t: number, zoom?: number) => boolean }).__focus = (t, zoom) => {
   let best: { q: number; r: number; n: number } | null = null;
