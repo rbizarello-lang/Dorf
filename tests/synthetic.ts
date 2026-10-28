@@ -392,5 +392,44 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
   ok(rc.water === undefined && classic.waterNow().flow.size === 0, 'fora do Relevo não há nascente nem pontos de água');
 }
 
+// ---- 13) Nascentes escondidas: a casa só se revela com uma peça de água ao lado; o rio que pousa nela vira a nascente.
+{
+  console.log('Cenário 13: nascentes escondidas');
+  const relevo = MODES.find((m) => m.id === 'relevo')!;
+  const R: Rules = { ...DEFAULT_RULES, ...relevo.rules, startTiles: 1 };
+  const G = T.Grass, W = T.Water;
+  const def = (edges: T[], level: number): TileDef => {
+    for (let seed = 1; seed < 20000; seed++) if (tileProfile(edges, seed).h[0] === level && !isSpring(seed, edges, level)) return { edges, seed, quest: null };
+    throw new Error('sem semente');
+  };
+  const start = () => {
+    const b = new Board(R);
+    b.placeRaw(0, 0, land(G), 0);
+    b.computeGroups();
+    b.springSites = [{ q: 2, r: 0 }, { q: -3, r: 0 }];
+    return b;
+  };
+  const b = start();
+  ok(b.revealedSprings().length === 0, 'nenhuma nascente escondida aparece sozinha');
+  b.place(1, 0, def([W, G, G, G, G, G], 1), 0);
+  ok(JSON.stringify(b.revealedSprings()) === JSON.stringify([{ q: 2, r: 0 }]), 'a peça de água ao lado revela a casa (e só ela)');
+  const pre = b.checkDef(2, 0, def([W, G, G, W, G, G], 1), 0);
+  ok(pre.water?.hidden === true && pre.water.spring === true && pre.water.gain === 2 * R.flowPoints + R.hiddenSpringPoints, `a prévia mostra a nascente escondida: +${2 * R.flowPoints + R.hiddenSpringPoints} (${pre.water?.gain})`);
+  const r = b.place(2, 0, def([W, G, G, W, G, G], 1), 0);
+  ok(r.placed.spring === true && r.placed.hiddenSpring === true && r.water?.hidden === true && r.water.points === 2 * R.flowPoints + R.hiddenSpringPoints, `o rio sobre a casa vira nascente e rende +${R.hiddenSpringPoints}: ${r.water?.points}`);
+  ok(b.revealedSprings().length === 0, 'a casa ocupada some da lista das reveladas');
+  // Rio no nível 0 não vira nascente (a água nasce no alto); terra sobre a casa a perde sem pontos; a casa longe da água não se revela.
+  const c = start();
+  c.place(1, 0, def([W, G, G, G, G, G], 1), 0);
+  const low = c.checkDef(2, 0, def([W, G, G, W, G, G], 0), 0);
+  ok(low.water?.hidden === false && low.water.spring === false, 'rio no nível 0 sobre a casa não é nascente');
+  const d = start();
+  const rl = d.place(1, 0, land(G), 0);
+  ok(rl.water === undefined && d.revealedSprings().length === 0, 'terra ao lado não revela nada');
+  // Preservada pelo clone (a prévia da jogada) e a mesma para quem refaz as jogadas.
+  const cl = b.clone();
+  ok(JSON.stringify(cl.springSites) === JSON.stringify(b.springSites) && cl.get(2, 0)?.hiddenSpring === true, 'o clone guarda as nascentes escondidas e a que foi achada');
+}
+
 console.log(bad ? `\n${bad} FALHA(S)` : '\nTodos os cenários sintéticos passaram');
 process.exit(bad ? 1 : 0);

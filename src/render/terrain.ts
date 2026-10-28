@@ -68,7 +68,7 @@ const CENTER_W = 2.2;
 /** Largura (da borda para dentro) em que a correção da emenda some: o talude. */
 const TALUS = 0.85;
 /** O ondulado do mundo: amplitude (níveis) e as três oitavas (peso, comprimento de onda em unidades do mundo). */
-const SWELL_AMP = 0.5;
+const SWELL_AMP = 0.95;
 const SWELL: ReadonlyArray<readonly [number, number]> = [[0.7, 3.6], [0.25, 1.6], [0.05, 0.8]];
 
 const smooth = (a: number, b: number, x: number) => {
@@ -96,8 +96,9 @@ const MIDS = [0, 1, 2, 3, 4, 5].map((i) => edgeMid(i));
 /** Direção unitária do meio de cada borda (a normal para fora). */
 const NORMS = MIDS.map(([x, z]) => [x / INR, z / INR] as const);
 
-/** A peça é plana: nada a levantar (a malha fica a de sempre). */
+/** A peça é plana: nada a levantar (a malha fica a de sempre). Com o ondulado do mundo ligado nenhuma é: a divisa tem de casar com a vizinha. */
 export function isFlat(s: TerrainSpec): boolean {
+  if (s.world) return false;
   const v = s.h[0];
   return s.c === v && s.h.every((x) => x === v) && s.he.every((x) => x === v) && s.co.every((x) => x === v);
 }
@@ -120,7 +121,9 @@ export function nearestOnEdge(i: number, x: number, z: number): { t: number; rho
 export function swellAt(seed: number, X: number, Z: number): number {
   let v = 0;
   for (let k = 0; k < SWELL.length; k++) v += SWELL[k][0] * vnoise((seed ^ Math.imul(k + 1, 0x9e3779b1)) | 0, X / SWELL[k][1] + 3.1 * k, Z / SWELL[k][1] - 1.7 * k);
-  return v * SWELL_AMP;
+  // Os vales são mais rasos que os morros são altos: o chão de nível 0 nunca afunda perto da água do mar nem dos rios.
+  v *= SWELL_AMP;
+  return v >= 0 ? v : v * 0.4;
 }
 
 export function makeTerrain(s: TerrainSpec): Terrain {
