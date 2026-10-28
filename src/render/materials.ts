@@ -343,6 +343,11 @@ interface DecoOpts {
    * (o miolo e a barriga escurecem), variação de cor por instância e vento hierárquico.
    */
   volume?: boolean;
+  /**
+   * Brilho de seda das plantações (Kajiya-Kay): cada folha é um fio inclinado a favor do vento, e o brilho corre com as ondas de vento
+   * e muda com o ângulo câmera-sol-vento. O valor é a intensidade.
+   */
+  silk?: number;
   /** Rocha (serras): estratos horizontais, pé mais escuro e encostas íngremes mais frias. */
   rock?: boolean;
   /** Normais da geometria (copas arredondadas em lib.ts), em vez da normal plana de cada face. */
@@ -404,6 +409,7 @@ function decoMaterial(o: DecoOpts) {
   const iColor = attribute('iColor', 'vec3');
   let base: N3 = vertexColor().rgb.mul(mix(vec3(1), iColor, tint));
   // positionLocal já vem transformado pela instância (r186: instância antes do positionNode).
+  let sheenV = null as N;
   const vol = o.volume ? attribute('vol', 'vec2') : null;
   if (o.sway === 'tree' && vol) {
     const inst = hash(instanceIndex.add(31));
@@ -414,6 +420,7 @@ function decoMaterial(o: DecoOpts) {
   } else if (o.sway === 'crop') {
     const hgt = max(positionGeometry.y, 0);
     const sheen = varying(float(0), 'vSheen');
+    sheenV = sheen;
     // Cada planta tem a sua vez de afundar (some sem pipocar); 0,2 cabe na espessura da peça.
     const sink = o.fade ? float(1).sub(smoothstep(0, 0.25, U.fine.mul(1.25).sub(hash(instanceIndex)))).mul(0.2) : null;
     m.positionNode = displaced((p, t, now) => {
@@ -519,6 +526,18 @@ function decoMaterial(o: DecoOpts) {
     const leaf = base.mul(vec3(1.18, 1.22, 0.55));
     emissive = emissive.add(U.sun.mul(leaf).mul(back.mul(thin).mul(o.translucent)).mul(tint).mul(float(1).sub(U.night)).mul(float(1).sub(U.snow.mul(0.6))));
   }
+  if (o.silk && sheenV) {
+    const v = toCam.div(camDist);
+    // Fio da folha: quase vertical, inclinado a favor do vento onde a onda passa. O brilho é o seno do ângulo entre o fio e o meio-vetor.
+    const lean = sheenV.mul(1.5).add(0.3);
+    const lw: N = U.wind.mul(lean);
+    const tan: N = vec3(lw.x, float(1), lw.y).normalize();
+    const hv = U.sunDir.add(v).normalize();
+    const th = dot(tan, hv);
+    const kk = float(1).sub(th.mul(th)).max(0).pow(3);
+    const wave = sheenV.mul(0.75).add(0.25);
+    emissive = emissive.add(U.sun.mul(base).mul(kk.mul(wave).mul(o.silk)).mul(smoothstep(0, 0.012, positionGeometry.y)).mul(float(1).sub(U.night)).mul(float(1).sub(U.snow.mul(0.7))));
+  }
   if (o.rimSun) {
     const v = toCam.div(camDist);
     // Faces de lado para a câmera e viradas para o sol; o telhado visto de cima fica de fora.
@@ -541,8 +560,8 @@ export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
     reliefSoft: decoMaterial({ smooth: true, paint: 'wall', rimSun: 0.3 }),
     foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', translucent: 2.2, volume: true }),
     evergreen: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', evergreen: true, translucent: 1.3, volume: true }),
-    crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide }),
-    cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true }),
+    crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, silk: 4.5 }),
+    cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true, silk: 4.5 }),
     // Lago congelado (rachaduras, buracos e pesqueiro): quase sem neve por cima, para o gelo e a água escura lerem.
     ice: decoMaterial({ roughness: 0.55, side: THREE.DoubleSide, snow: 0.12 }),
     crystal: decoMaterial({ sway: 'tree', roughness: 0.25, metalness: 0.1, emissive: '#3a2a66', emissiveIntensity: 0.6 }),
