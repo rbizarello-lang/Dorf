@@ -1051,7 +1051,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const secs = opts.levels?.sec;
   const tspec = opts.levels?.terrain;
   // `env`: bordas de terra cuja vizinha já estava assentada: a saia dela entra nesta peça, e o chão daqui não passa abaixo dela.
-  const spec: TerrainSpec | null = tspec ? { ...tspec, vil: edges.map((e) => (e === T.Village ? 1 : 0)), seed, own: opts.levels?.own ?? 0, env: edges.map((e, i) => !!opts.levels?.placed?.[i] && !isStrict(e)) } : null;
+  const spec: TerrainSpec | null = tspec ? { ...tspec, vil: edges.map((e) => (e === T.Village ? 1 : 0)), seed, own: opts.levels?.own ?? 0, env: edges.map((e, i) => !!opts.levels?.placed?.[i] && e !== T.Water) } : null;
   const terr = spec && !isFlat(spec) ? makeTerrain(spec) : null;
   const hasSec = !!terr;
   const lv = opts.levels && (opts.levels.own > 0 || hasSec) ? opts.levels : null;
@@ -1173,7 +1173,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
    * a espessura da ilha. A malha é uma faixa paralela à normal da borda mais um leque de 30° em cada canto, que fica dentro da
    * casa vizinha (o limite dela com a casa do lado é o raio do canto).
    */
-  const skirtFor = (i: number, V: (a: number, b: number) => { p: V3; c: THREE.Color; s: Splat }) => {
+  const skirtFor = (i: number, V: (a: number, b: number) => { p: V3; c: THREE.Color; s: Splat }, mouth: readonly boolean[]) => {
     const sp = spec!, own0 = sp.own!;
     const [mx, mz] = edgeMid(i);
     const nrm: V3 = [mx / INR, 0, mz / INR];
@@ -1215,7 +1215,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     cols.push(...wedge((i + 1) % 6, bN, own0 + edgeProfile(sp, i, 1), true));
     const same = (a: V3, b: V3) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) < 1e-7;
     const UPH: V3 = [0, 1, 0];
+    // Numa borda de rio, a boca da água (e a margem inclinada) fica com a parede de sempre: a saia só cobre a terra dos dois lados.
+    const skipSeg = (j: number) => (j < 2 ? mouth[0] : j >= 2 + N ? mouth[N] : mouth[j - 2] || mouth[j - 1]);
     for (let j = 0; j + 1 < cols.length; j++) {
+      if (skipSeg(j)) continue;
       const a = cols[j], b = cols[j + 1];
       for (let m = 0; m < M; m++) {
         const p0 = a[m], p1 = b[m], p2 = b[m + 1], p3 = a[m + 1];
@@ -1285,9 +1288,16 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const floor = -TILE_T - (lv?.own ?? 0) * LEVEL_STEP;
     const rockC = tc(theme.relief?.rock ?? theme.rock);
     // Borda de terra virada para o vazio com altura: em vez de um paredão, uma saia (encosta arredondada que desce do lado de fora).
-    const skirted = !!spec && !hidden && !isStrict(edges[i]) && [0, 0.5, 1].some((t) => spec.own! + edgeProfile(spec, i, t) > 0.05);
-    if (skirted) skirtFor(i, V);
-    for (let k = 0; k < N && !hidden && !skirted; k++) {
+    const skirted = !!spec && !hidden && !lv?.placed?.[i] && [0, 0.5, 1].some((t) => spec.own! + edgeProfile(spec, i, t) > 0.05);
+    // Rio: as colunas da boca (perto da água) seguem com a parede, e a saia só cobre as margens de terra.
+    const mouth = Array.from({ length: N + 1 }, (_, k) => {
+      if (!skirted || edges[i] !== T.Water || !field) return false;
+      const [x, , z] = V(N - k, k).p;
+      return field.e(x, z) < 0.09;
+    });
+    if (skirted) skirtFor(i, V, mouth);
+    for (let k = 0; k < N && !hidden; k++) {
+      if (skirted && !(mouth[k] || mouth[k + 1])) continue;
       const v0 = V(N - k, k), v1 = V(N - k - 1, k + 1);
       const [x0, y0, z0] = v0.p, [x1, y1, z1] = v1.p;
       const l0 = shade(v0.c, 0.72), l1 = shade(v1.c, 0.72);
