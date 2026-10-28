@@ -319,6 +319,8 @@ interface DecoOpts {
    * só conta). O valor é a intensidade; só aparece quando a câmera olha para o lado do sol.
    */
   translucent?: number;
+  /** Rocha (serras): estratos horizontais, pé mais escuro e encostas íngremes mais frias. */
+  rock?: boolean;
   /** Normais da geometria (copas arredondadas em lib.ts), em vez da normal plana de cada face. */
   smooth?: boolean;
   /** Pincelada nas partes tingidas: toques nas copas, traços verticais nas paredes. */
@@ -409,6 +411,19 @@ function decoMaterial(o: DecoOpts) {
       base = base.mul(b.r.sub(0.5).mul(0.16).mul(wall).add(1));
     }
   }
+  if (o.rock) {
+    // Estratos: faixas horizontais deformadas por ruído (a luz rasante lê cada degrau), mais escuras no pé da serra
+    // (oclusão do chão) e nas encostas íngremes. A neve (vértices claros) quase não leva as faixas.
+    const sideP = positionWorld.x.add(positionWorld.z);
+    const band = texture(noiseTex, vec2(sideP.mul(0.8), positionWorld.y.mul(7.5))).g;
+    const crack = smoothstep(0.7, 0.9, texture(noiseTex, vec2(sideP.mul(2.6), positionWorld.y.mul(3.2))).b);
+    const foot = smoothstep(0, 0.45, positionGeometry.y).mul(0.3).add(0.7);
+    const steep = smoothstep(0.75, 0.3, normalWorld.y);
+    const stone = band.mul(0.62).add(0.7).mul(foot).mul(float(1).sub(crack.mul(0.35))).mul(float(1).sub(steep.mul(0.1)));
+    const cool = mix(vec3(1.03, 1.01, 0.96), vec3(0.95, 0.99, 1.06), steep);
+    const bright = smoothstep(0.7, 0.9, luminance(base));
+    base = mix(base.mul(stone).mul(cool), base.mul(stone.mul(0.4).add(0.6)), bright);
+  }
   const toCam = cameraPosition.sub(positionWorld);
   const camDist = length(toCam);
   if (o.shingles) {
@@ -454,7 +469,7 @@ export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
   return {
     deco: decoMaterial({ shingles: true, paint: 'wall', rimSun: 0.3 }),
     // Serra (faces planas) e morro (normais suaves): sem as fileiras de telha do `deco`, que listrariam a rocha.
-    relief: decoMaterial({ paint: 'wall', rimSun: 0.3 }),
+    relief: decoMaterial({ paint: 'wall', rimSun: 0.3, rock: true }),
     reliefSoft: decoMaterial({ smooth: true, paint: 'wall', rimSun: 0.3 }),
     foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', translucent: 2.2 }),
     evergreen: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', evergreen: true, translucent: 1.3 }),
