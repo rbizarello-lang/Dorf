@@ -557,6 +557,15 @@ export function makeGroundMaterial() {
   const detail = grass.mul(sw.x).add(forest.mul(sw.y)).add(field.mul(sw.z)).add(village.mul(sw.w)).add(plain.mul(rest));
   // Topo × lateral (normal plana de cada triângulo).
   const top = smoothstep(0.55, 0.9, normalWorld.y);
+  // Rajada no chão: manchas largas de luz que correm no rumo do vento (como as ondas que dobram o trigo), em prado,
+  // mata e plantação. A média fica em 1 e `U.gust` a escala; no pó do mapa (vila) e na lateral não entra.
+  const drift = U.wind.mul(U.time);
+  const gA = texture(noiseTex, p.mul(0.055).sub(drift.mul(0.11))).g;
+  const gB = texture(noiseTex, p.mul(0.19).add(vec2(0.37, 0.12)).sub(drift.mul(0.21))).r;
+  const gustField = gA.mul(0.65).add(gB.mul(0.35)).sub(0.5);
+  const gustAmt = sw.x.add(sw.y.mul(0.7)).add(sw.z).min(1).mul(top).mul(U.gust.min(2));
+  const gustTone = mix(vec3(0.96, 0.98, 1.04), vec3(1.06, 1.04, 0.93), gustField.mul(2.2).add(0.5).clamp(0, 1));
+  const gusted = mix(vec3(1), gustTone, gustAmt.mul(0.9)).mul(gustField.mul(gustAmt).mul(0.9).add(1));
   const sideP = positionWorld.x.add(positionWorld.z);
   const strata = texture(noiseTex, vec2(sideP.mul(0.9), positionWorld.y.mul(7))).g;
   const stones = smoothstep(0.66, 0.8, texture(noiseTex, vec2(sideP.mul(3.1), positionWorld.y.mul(9))).b);
@@ -570,7 +579,7 @@ export function makeGroundMaterial() {
   const fertile = nearRiver.mul(U.flood).mul(sp.x.add(sp.z).mul(1.4).min(1)).mul(top).mul(0.92);
   const base = mix(base0, U.floodColor, fertile);
   // `fieldSnow` (Theme.fieldSnow) tira neve só das parcelas de plantação (o gelo do lago congelado); 1 = como sempre.
-  const ground = snowOn(base.mul(mix(sideF, detail, top)), mix(float(0.85), float(0.85).mul(U.fieldSnow), sp.z.min(1)));
+  const ground = snowOn(base.mul(mix(sideF, detail, top)).mul(gusted), mix(float(0.85), float(0.85).mul(U.fieldSnow), sp.z.min(1)));
   m.colorNode = mix(ground, vec3(1), U.silhouette);
   // Relevo fino do prado e da mata: inclina a normal com o mapa de declive da água.
   const slope = texture(waterTex, p.mul(0.45)).rg.sub(0.5).mul(sp.x.add(sp.y).mul(0.5).add(0.12));
