@@ -558,8 +558,8 @@ export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
     // Serra (faces planas) e morro (normais suaves): sem as fileiras de telha do `deco`, que listrariam a rocha.
     relief: decoMaterial({ paint: 'wall', rimSun: 0.3, rock: true }),
     reliefSoft: decoMaterial({ smooth: true, paint: 'wall', rimSun: 0.3 }),
-    foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', translucent: 2.2, volume: true }),
-    evergreen: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', evergreen: true, translucent: 1.3, volume: true }),
+    foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', translucent: 3.4, volume: true }),
+    evergreen: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', evergreen: true, translucent: 2, volume: true }),
     crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, silk: 4.5 }),
     cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true, silk: 4.5 }),
     // Lago congelado (rachaduras, buracos e pesqueiro): quase sem neve por cima, para o gelo e a água escura lerem.
@@ -671,7 +671,7 @@ export function makeGroundMaterial() {
   const gustField = gA.mul(0.65).add(gB.mul(0.35)).sub(0.5);
   const gustAmt = sw.x.add(sw.y.mul(0.7)).add(sw.z).min(1).mul(top).mul(U.gust.min(2));
   const gustTone = mix(vec3(0.96, 0.98, 1.04), vec3(1.06, 1.04, 0.93), gustField.mul(2.2).add(0.5).clamp(0, 1));
-  const gusted = mix(vec3(1), gustTone, gustAmt.mul(0.9)).mul(gustField.mul(gustAmt).mul(0.9).add(1));
+  const gusted = mix(vec3(1), gustTone, gustAmt.mul(1.0)).mul(gustField.mul(gustAmt).mul(1.5).add(1));
   const sideP = positionWorld.x.add(positionWorld.z);
   const strata = texture(noiseTex, vec2(sideP.mul(0.9), positionWorld.y.mul(7))).g;
   const stones = smoothstep(0.66, 0.8, texture(noiseTex, vec2(sideP.mul(3.1), positionWorld.y.mul(9))).b);
