@@ -121,7 +121,7 @@ function questMove(game: Game, def: TileDef, rand: () => number) {
       const edges = rotateEdges(def.edges, rot);
       const c = b.checkDef(q, r, def, rot);
       if (!c.valid) continue;
-      let score = greedyScore(c.matches, c.neighbors, rand);
+      let score = greedyScore(c.matches, c.neighbors, rand) + (c.water?.gain ?? 0) * 0.3;
       for (let i = 0; i < 6; i++) {
         const t = want.get(k * 8 + i);
         if (t !== undefined && edges[i] === t) score += 3;

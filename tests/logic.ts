@@ -77,6 +77,44 @@ function oPlacedHeights(b: Board, n: Placed): number[] {
   return worldHeights(prof, n.rot);
 }
 
+
+/**
+ * Águas que descem (oráculo próprio, sem importar src/core/water.ts): nascente = peça de rio com 1 ou 2 bordas de água, nível ≥ 1 e o
+ * hash da semente abaixo de 0,3; o curso desce de água para água vizinha no mesmo nível ou abaixo; o mar é lago (3+ bordas) ou nível 0.
+ * Devolve quantas peças têm água corrente e quantas nascentes chegaram ao mar.
+ */
+function oWater(b: Board) {
+  type E = { t: Placed; level: number; k: string };
+  const all: E[] = b.list.filter((t) => t.edges.includes(T.Water)).map((t) => ({ t, level: oPlacedHeights(b, t)[0], k: `${t.q},${t.r}` }));
+  const at = new Map(all.map((e) => [e.k, e]));
+  const nw = (e: E) => e.t.edges.filter((x) => x === T.Water).length;
+  const spring = (e: E) => {
+    if (e.level < 1 || e.t.index === 0 || nw(e) < 1 || nw(e) > 2) return false;
+    let h = Math.imul((e.t.def.seed ^ 0x5b21d) | 0, 2654435761);
+    h = Math.imul(h ^ (h >>> 15), 2246822519);
+    return ((h ^ (h >>> 13)) >>> 0) / 4294967296 < 0.3;
+  };
+  const flowing = new Set<string>();
+  let reached = 0;
+  for (const s of all.filter(spring)) {
+    const got = new Set<string>([s.k]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const a of [...got].map((k) => at.get(k)!)) {
+        for (let i = 0; i < 6; i++) {
+          if (a.t.edges[i] !== T.Water) continue;
+          const n = at.get(`${a.t.q + DIRS[i][0]},${a.t.r + DIRS[i][1]}`);
+          if (n && n.t.edges[(i + 3) % 6] === T.Water && n.level <= a.level && !got.has(n.k)) (got.add(n.k), (grew = true));
+        }
+      }
+    }
+    got.forEach((k) => flowing.add(k));
+    if ([...got].some((k) => k !== s.k && (at.get(k)!.level === 0 || nw(at.get(k)!) >= 3))) reached++;
+  }
+  return { flowing: flowing.size, reached };
+}
+
 /** Validade por força bruta, independente de Board.check. */
 function oracleValid(b: Board, q: number, r: number, edges: readonly T[], heights?: readonly number[]) {
   if (b.tiles.has(hkey(q, r))) return false;
@@ -439,6 +477,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     const siteKind = siteHere?.kind ?? null;
     const foundBefore = b.sites.filter((st) => st.found).length;
 
+    const wBefore = rules.springs ? oWater(b) : null;
     game.rot = m.rot;
     const res = game.place(m.q, m.r);
     if (!res) {
@@ -457,6 +496,18 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       assert((res.steps ?? 0) === oSteps && (res.falls ?? 0) === oFalls, `seed ${seed}: degraus ${res.steps}/${res.falls} != oráculo ${oSteps}/${oFalls}`);
       inc('relevo_degraus', oSteps);
       inc('relevo_cachoeiras', oFalls);
+    }
+    let waterTiles = 0;
+    if (wBefore) {
+      const wAfter = oWater(b);
+      const dF = wAfter.flowing - wBefore.flowing, dS = wAfter.reached - wBefore.reached;
+      assert(dF >= 0 && dS >= 0, `seed ${seed}: a água corrente encolheu (${dF}/${dS})`);
+      pts += dF * rules.flowPoints + dS * rules.seaPoints;
+      waterTiles = dS * rules.seaTiles;
+      assert((res.water?.flowing ?? 0) === dF && (res.water?.seas ?? 0) === dS, `seed ${seed}: água ${res.water?.flowing}/${res.water?.seas} != oráculo ${dF}/${dS}`);
+      inc('agua_correntes', dF);
+      inc('agua_mares', dS);
+      if (res.water?.spring) inc('agua_nascentes');
     }
     // Estação (cópia de src/core/seasons.ts): a cada 20 jogadas, +3 numa interação.
     const seasonLock = rules.seasonLock;
@@ -507,7 +558,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     assert(newlyClosed.length === res.closed.length, `seed ${seed}: closed diverge (${newlyClosed.length} vs ${res.closed.length})`);
     for (const t of b.list) assert(t.closed === closedAfter.has(t.index), `seed ${seed}: flag closed inconsistente na peça ${t.index}`);
     pts += newlyClosed.length * rules.closedBonus;
-    let gained = newlyClosed.length * (rules.closedTiles + (oBless.has('builders') ? ORACLE_BLESS.closed : 0));
+    let gained = waterTiles + newlyClosed.length * (rules.closedTiles + (oBless.has('builders') ? ORACLE_BLESS.closed : 0));
     ts.closed += newlyClosed.length;
     if (perfect) ts.perfects++;
 

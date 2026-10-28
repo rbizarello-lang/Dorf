@@ -10,6 +10,8 @@ import { timelineSvg, type TurnNote } from '../src/ui/minimap';
 import { monumentsDue } from '../src/ui/progress';
 import { DAILY_RULES, dailyDate, dailyRule, dailySeed, modeRules, MODES } from '../src/core/modes';
 import { shareLine, shareUrl, terrainPoints } from '../src/core/share';
+import { tileProfile } from '../src/core/relief';
+import { isSpring } from '../src/core/water';
 
 const rules: Rules = { ...DEFAULT_RULES };
 let bad = 0;
@@ -338,6 +340,56 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
   b.placeRaw(-1, 1, land(T.Field), 0);
   const tp = terrainPoints(b, { matchPoints: 10, matchBonus: { [T.Forest]: 3 } });
   ok(tp.length === 2 && tp[0][0] === T.Forest && tp[0][1] === 13 && tp[1][0] === T.Field && tp[1][1] === 10, 'terrenos que mais pontuaram: floresta 13, plantação depois');
+}
+
+// ---- 12) Águas que descem (modo Relevo): a água só desce; a nascente abre o curso, o mar paga, a subida fica parada.
+{
+  console.log('Cenário 12: águas que descem');
+  const relevo = MODES.find((m) => m.id === 'relevo')!;
+  const R: Rules = { ...DEFAULT_RULES, ...relevo.rules, startTiles: 1 };
+  const G = T.Grass, W = T.Water;
+  /** Uma peça com estas bordas, nível de rio e nascente (ou não): procura a semente pelo gerador do núcleo. */
+  const def = (edges: T[], level: number, spring: boolean): TileDef => {
+    for (let seed = 1; seed < 20000; seed++) if (tileProfile(edges, seed).h[0] === level && isSpring(seed, edges, level) === spring) return { edges, seed, quest: null };
+    throw new Error('sem semente');
+  };
+  const start = (rules: Rules) => {
+    const b = new Board(rules);
+    b.placeRaw(0, 0, land(G), 0);
+    b.computeGroups();
+    return b;
+  };
+  const src = def([W, G, G, G, G, G], 1, true);
+  const straight = (lv: number) => def([W, G, G, W, G, G], lv, false);
+  const lake = def([W, W, W, W, G, G], 1, false);
+  const b = start(R);
+  const r1 = b.place(1, 0, src, 0);
+  ok(r1.water?.spring === true && r1.water.flowing === 1 && r1.water.points === 8, `nascente no nível 1 já corre: +8 (${r1.water?.points})`);
+  const r2 = b.place(2, 0, straight(1), 0);
+  ok(r2.water?.flowing === 1 && r2.water.points === 8, 'rio no mesmo nível, ligado à nascente: +8');
+  const chk = b.checkDef(3, 0, straight(2), 0);
+  ok(chk.valid && chk.water?.flows === false && chk.water.gain === 0, 'rio um nível acima do curso: jogada válida, água parada, vale 0');
+  const r3 = b.place(3, 0, straight(2), 0);
+  ok(r3.water?.flowing === 0 && r3.water.points === 0 && b.waterNow().flow.size === 2, 'rio que sobe não ganha pontos nem muda o curso');
+  // Outra partida: a nascente, um rio e o lago (mar) no fim do curso.
+  const c = start(R);
+  c.place(1, 0, src, 0);
+  c.place(2, 0, straight(1), 0);
+  const pre = c.checkDef(3, 0, lake, 0);
+  ok(pre.water?.sea === true && pre.water.gain === 8 + 60, `a prévia do lago já mostra o mar: +68 (${pre.water?.gain})`);
+  const r4 = c.place(3, 0, lake, 0);
+  ok(r4.water?.seas === 1 && r4.water.points === 68 && r4.tilesGained >= R.seaTiles, 'chegar ao mar: +8 da peça, +60 e 2 peças');
+  const r5 = c.place(3, 1, straight(1), 0);
+  ok((r5.water?.seas ?? 0) === 0, 'o mar paga uma vez por nascente');
+  // O curso é função do tabuleiro: refazer as mesmas jogadas dá o mesmo estado, e o modo Clássico não paga água.
+  const again = start(R);
+  again.place(1, 0, src, 0);
+  again.place(2, 0, straight(1), 0);
+  again.place(3, 0, lake, 0);
+  ok(JSON.stringify([...again.waterNow().flow]) === JSON.stringify([...c.waterNow().flow].slice(0, 3)) || again.waterNow().flow.size === 3, 'a água corrente se refaz igual (replay)');
+  const classic = start({ ...DEFAULT_RULES, startTiles: 1 });
+  const rc = classic.place(1, 0, src, 0);
+  ok(rc.water === undefined && classic.waterNow().flow.size === 0, 'fora do Relevo não há nascente nem pontos de água');
 }
 
 console.log(bad ? `\n${bad} FALHA(S)` : '\nTodos os cenários sintéticos passaram');

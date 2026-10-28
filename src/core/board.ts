@@ -6,6 +6,7 @@ import { SEASON_BONUS, SEASON_KIND, seasonAt } from './seasons';
 import { INFLUENCE, INFLUENCE_CAP, SYN_KINDS, type SynHit, type SynKind, synergyOf } from './synergy';
 import { payRoutes, type RouteHit, type RoutePost } from './routes';
 import { STARTER_PROFILE, heightFit, tileProfile, worldHeights } from './relief';
+import { isSpring, waterState, type WaterState, type WaterTile } from './water';
 import { T, isStrict, rotateEdges, type QuestKind, type TileDef } from './tiles';
 
 export interface Rules {
@@ -70,6 +71,11 @@ export interface Rules {
   /** Relevo: pontos por borda com degrau de 1 nível entre terras (o mirante) e a mais por degrau de rio (a cachoeira). */
   stepPoints: number;
   fallPoints: number;
+  /** Relevo, águas que descem (src/core/water.ts): nascentes nas peças de rio acima do nível 0; pontos por peça de água corrente, no mar e peças que o mar traz. */
+  springs: boolean;
+  flowPoints: number;
+  seaPoints: number;
+  seaTiles: number;
 }
 
 export const DEFAULT_RULES: Rules = {
@@ -107,6 +113,10 @@ export const DEFAULT_RULES: Rules = {
   relief: false,
   stepPoints: 0,
   fallPoints: 0,
+  springs: false,
+  flowPoints: 0,
+  seaPoints: 0,
+  seaTiles: 0,
 };
 
 export interface Placed {
@@ -130,6 +140,8 @@ export interface Placed {
   /** Relevo: nível de cada borda (mundo) e do pico no meio; só com `rules.relief`. */
   heights?: number[];
   hill?: number;
+  /** Águas que descem: esta peça de rio é uma nascente. */
+  spring?: boolean;
 }
 
 export interface Quest {
@@ -168,6 +180,8 @@ export interface Check {
   edgeState: number[];
   /** Relevo, por borda: 0 sem vizinho (ou sem relevo), 1 mesma altura, 2 degrau de 1 nível, 3 alto demais. */
   heightState: number[];
+  /** Águas que descem: o que a peça traria à água (pontos, se corre ou fica parada, se o curso chega ao mar); só com `rules.springs` e água na peça. */
+  water?: { gain: number; flows: boolean; sea: boolean; spring: boolean };
   /** Relevo: bordas com degrau (mirante) e, dessas, as de rio (cachoeira). */
   steps: number;
   falls: number;
@@ -190,6 +204,8 @@ export interface PlaceResult {
   /** Relevo: degraus e cachoeiras desta jogada. */
   steps?: number;
   falls?: number;
+  /** Águas que descem: pontos da água corrente desta jogada, nascente nova, peças com água corrente a mais e chegadas ao mar. */
+  water?: { points: number; flowing: number; seas: number; spring: boolean };
   perfect: boolean;
   closed: Placed[];
   synergies: SynHit[];
@@ -262,10 +278,10 @@ export class Board {
 
   /** `check` de uma peça de mão com o giro dado (bordas e alturas juntas). */
   checkDef(q: number, r: number, def: TileDef, rot: number): Check {
-    return this.check(q, r, rotateEdges(def.edges, rot), this.heightsOf(def, rot));
+    return this.check(q, r, rotateEdges(def.edges, rot), this.heightsOf(def, rot), def);
   }
 
-  check(q: number, r: number, edges: readonly T[], heights?: readonly number[]): Check {
+  check(q: number, r: number, edges: readonly T[], heights?: readonly number[], def?: TileDef): Check {
     const edgeState = [0, 0, 0, 0, 0, 0];
     const heightState = [0, 0, 0, 0, 0, 0];
     let steps = 0;
@@ -306,7 +322,8 @@ export class Board {
     const R = this.rules;
     const lastEra = R.eraScores.length > 1 && this.era === R.eraScores.length - 1;
     const wonder = !this.wonder && R.wonderStages > 0 && lastEra && eraMark === null && edges.filter((e) => e === T.Village).length >= 2;
-    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, heightState, steps, falls, synergies, site: this.siteAt(q, r), eraMark, wonder, influence: this.influenceAt(q, r, edges) };
+    const water = heights && def && this.rules.springs && edges.includes(T.Water) && !occupied ? this.waterIf(q, r, edges, heights[edges.indexOf(T.Water)], def) : undefined;
+    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, heightState, steps, falls, water, synergies, site: this.siteAt(q, r), eraMark, wonder, influence: this.influenceAt(q, r, edges) };
   }
 
   /**
@@ -338,6 +355,30 @@ export class Board {
 
   sitesLeft() {
     return this.sites.filter((s) => !s.found).length;
+  }
+
+  /** Peças com água do tabuleiro (e, se dada, uma peça a mais), no formato do núcleo da água. */
+  private waterTiles(extra?: WaterTile): WaterTile[] {
+    const out: WaterTile[] = [];
+    for (const p of this.list) if (p.heights && p.edges.includes(T.Water)) out.push({ q: p.q, r: p.r, edges: p.edges, level: p.heights[0], spring: !!p.spring });
+    if (extra) out.push(extra);
+    return out;
+  }
+
+  /** Estado da água do tabuleiro agora (corrente por nascente, chegadas ao mar). */
+  waterNow(extra?: WaterTile): WaterState {
+    return waterState(this.waterTiles(extra));
+  }
+
+  /** O que uma peça de rio traria à água em (q, r): pontos, se a água dela corre e se o curso chega ao mar. */
+  private waterIf(q: number, r: number, edges: readonly T[], level: number, def: TileDef) {
+    const R = this.rules;
+    const spring = isSpring(def.seed, edges, level);
+    const before = this.waterNow();
+    const after = this.waterNow({ q, r, edges, level, spring });
+    const flowing = after.flow.size - before.flow.size;
+    const seas = after.reached.size - before.reached.size;
+    return { gain: flowing * R.flowPoints + seas * R.seaPoints, flows: after.flow.has(hkey(q, r)), sea: seas > 0, spring };
   }
 
   /**
@@ -382,6 +423,7 @@ export class Board {
       const prof = this.list.length === 0 ? STARTER_PROFILE : tileProfile(def.edges, def.seed);
       p.heights = worldHeights(prof, rot);
       p.hill = prof.c;
+      if (this.rules.springs && this.list.length > 0 && p.edges.includes(T.Water)) p.spring = isSpring(def.seed, p.edges, p.heights[0]);
     }
     this.tiles.set(key, p);
     this.list.push(p);
@@ -395,7 +437,8 @@ export class Board {
 
   place(q: number, r: number, def: TileDef, rot: number): PlaceResult {
     const edges = rotateEdges(def.edges, rot);
-    const c = this.check(q, r, edges, this.heightsOf(def, rot));
+    const c = this.check(q, r, edges, this.heightsOf(def, rot), def);
+    const waterBefore = this.rules.springs && edges.includes(T.Water) ? this.waterNow() : null;
     const placed = this.placeRaw(q, r, def, rot);
     const R = this.rules;
     let points = c.matches * R.matchPoints;
@@ -413,6 +456,17 @@ export class Board {
     points += c.synergies.length * R.synergyPoints;
     // Relevo: o degrau entre terras rende (mirante) e o de rio rende mais (cachoeira).
     points += c.steps * R.stepPoints + c.falls * R.fallPoints;
+    // Águas que descem: a diferença do que a água rende, antes e depois desta peça (só cresce); o mar traz peças.
+    let water: PlaceResult['water'];
+    let seaTilesGain = 0;
+    if (waterBefore) {
+      const after = this.waterNow();
+      const flowing = after.flow.size - waterBefore.flow.size;
+      const seas = after.reached.size - waterBefore.reached.size;
+      water = { points: flowing * R.flowPoints + seas * R.seaPoints, flowing, seas, spring: !!placed.spring };
+      points += water.points;
+      seaTilesGain = seas * R.seaTiles;
+    }
     // A peça do centro não é jogada: a primeira jogada de quem joga é a segunda peça.
     const seasonKind = R.seasonBonus ? SEASON_KIND[seasonAt(Math.max(0, placed.index - 1), R.seasonLock)] : null;
     for (const h of c.synergies) {
@@ -440,7 +494,7 @@ export class Board {
 
     // Peças que acabaram de ficar cercadas por 6 vizinhos encaixados.
     const closed: Placed[] = [];
-    let tilesGained = 0;
+    let tilesGained = seaTilesGain;
 
     // Sítio descoberto: o mirante conta a partir da próxima jogada.
     if (this.lookout > 0) this.lookout--;
@@ -559,7 +613,7 @@ export class Board {
       eraUp = this.era;
       this.markPending = this.era;
     }
-    return { placed, points, matches: c.matches, neighbors: c.neighbors, steps: c.steps, falls: c.falls, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special, influence: c.influence, routes };
+    return { placed, points, matches: c.matches, neighbors: c.neighbors, steps: c.steps, falls: c.falls, water, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special, influence: c.influence, routes };
   }
 
   blessed(id: BlessingId) {
