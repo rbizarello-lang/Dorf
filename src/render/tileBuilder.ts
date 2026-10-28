@@ -3,7 +3,7 @@ import { corner, edgeMid, INR } from '../core/hex';
 import type { DayPhase, EggKit } from '../core/eggs';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
 import { FALL_D, HILL, hillProfile, PEAK, PEAK_CONES, PEAK_REACH } from './relief';
-import { edgeProfile, isFlat, makeTerrain, skirtDrop, skirtWidth, type TerrainSpec } from './terrain';
+import { isFlat, makeTerrain, skirtDrop, skirtWidth, type TerrainSpec } from './terrain';
 import type { SynKind } from '../core/synergy';
 import type { SiteKind } from '../core/sites';
 import type { SpecialKind } from '../core/specials';
@@ -20,6 +20,8 @@ export const TILE_T = 0.28;
 export const LEVEL_STEP = 0.3;
 /** Inclinação (altura por distância) acima da qual a decoração não assenta: ~17°, o resto é encosta de rocha. */
 const STEEP_MAX = 0.3;
+/** Altura mínima da borda (em níveis do mundo) para ela ganhar saia: abaixo disso fica a lateral baixa de sempre. */
+const SKIRT_MIN = 0.15;
 /** Quanto a saia afunda (em níveis) abaixo da curva que a peça vizinha segue, para não ficar no mesmo plano que o chão dela. */
 const SKIRT_UNDER = 0.1;
 /** Comprimento da rampa de estrada e trilho na peça alta, contado da borda para dentro. */
@@ -1209,10 +1211,15 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       });
       return rev ? list.reverse() : list;
     };
+    // A altura da borda, em níveis do mundo, é a do próprio vértice (perfil da emenda mais o ondulado); perto da água o leito a baixa.
+    const hbOf = (v: { p: V3 }) => own0 + v.p[1] / LEVEL_STEP;
     const b0 = V(N, 0), bN = V(0, N);
-    cols.push(...wedge(i, b0, own0 + edgeProfile(sp, i, 0), false));
-    for (let k = 0; k <= N; k++) cols.push(column(V(N - k, k), nrm[0], nrm[2], own0 + edgeProfile(sp, i, k / N)));
-    cols.push(...wedge((i + 1) % 6, bN, own0 + edgeProfile(sp, i, 1), true));
+    cols.push(...wedge(i, b0, hbOf(b0), false));
+    for (let k = 0; k <= N; k++) {
+      const v = V(N - k, k);
+      cols.push(column(v, nrm[0], nrm[2], hbOf(v)));
+    }
+    cols.push(...wedge((i + 1) % 6, bN, hbOf(bN), true));
     const same = (a: V3, b: V3) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) < 1e-7;
     const UPH: V3 = [0, 1, 0];
     // Numa borda de rio, a boca da água (e a margem inclinada) fica com a parede de sempre: a saia só cobre a terra dos dois lados.
@@ -1288,7 +1295,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const floor = -TILE_T - (lv?.own ?? 0) * LEVEL_STEP;
     const rockC = tc(theme.relief?.rock ?? theme.rock);
     // Borda de terra virada para o vazio com altura: em vez de um paredão, uma saia (encosta arredondada que desce do lado de fora).
-    const skirted = !!spec && !hidden && !lv?.placed?.[i] && [0, 0.5, 1].some((t) => spec.own! + edgeProfile(spec, i, t) > 0.05);
+    const skirted = !!spec && !hidden && !lv?.placed?.[i] && Array.from({ length: N + 1 }, (_, k) => V(N - k, k).p[1] / LEVEL_STEP + spec.own!).some((hb) => hb > SKIRT_MIN);
     // Rio: as colunas da boca (perto da água) seguem com a parede, e a saia só cobre as margens de terra.
     const mouth = Array.from({ length: N + 1 }, (_, k) => {
       if (!skirted || edges[i] !== T.Water || !field) return false;

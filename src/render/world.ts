@@ -1729,7 +1729,7 @@ export class World {
     });
     for (const sp of springs) {
       const { x, z } = hexToWorld(sp.q, sp.r);
-      geos.push(stampGeometry('spring').rotateY(Math.sin(sp.q * 12.9898 + sp.r * 78.233) * 0.25).translate(x, this.heightOf(sp.q, sp.r), z));
+      geos.push(stampGeometry('spring').scale(1.35, 1, 1.35).rotateY(Math.sin(sp.q * 12.9898 + sp.r * 78.233) * 0.25).translate(x, this.heightOf(sp.q, sp.r), z));
     }
     for (const p of board.posts) {
       const { x, z } = hexToWorld(p.q, p.r);
