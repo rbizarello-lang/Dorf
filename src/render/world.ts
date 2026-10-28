@@ -30,6 +30,7 @@ import { LiveTile } from './liveTile';
 import { PreviewView } from './preview';
 import { FallLayer } from './falls';
 import { FALL_D } from './relief';
+import { skirtWidth } from './terrain';
 import { LEVEL_STEP, TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type BuildOpts, type TileBuild } from './tileBuilder';
 import { NIGHT_LIGHT } from './nightLight';
 
@@ -107,6 +108,17 @@ const HALO_ULTRA = 2;
 const WARM_ULTRA = new THREE.Color(0.45, 0.3, 0.15);
 /** Força das poças dos lampiões com a noite fechada. */
 const LAMPS = 5;
+
+/** Assinatura dos níveis de uma peça: o que muda a malha dela (alturas, emendas, onde ela está no mundo). */
+function levelSig(lvs: BuildOpts['levels']): string {
+  if (!lvs) return '';
+  const t = lvs.terrain;
+  const w = t?.world;
+  return `${lvs.own}${lvs.nb.join('')}${lvs.sec?.join('') ?? ''}${lvs.placed?.map(Number).join('') ?? ''}${t ? `|${t.h.join(',')};${t.c};${t.he.join(',')};${t.co.join(',')}` : ''}${w ? `@${w.x.toFixed(2)},${w.z.toFixed(2)},${w.rot}` : ''}`;
+}
+
+/** O morro no meio da peça sobe mais que o nível lógico dele (só a aparência: o morro fica mais marcado). */
+const MORRO_BONUS = 0.7;
 
 function tileMatrix(q: number, r: number, rot: number, y = 0, out = new THREE.Matrix4()) {
   const { x, z } = hexToWorld(q, r);
@@ -1184,7 +1196,7 @@ export class World {
       } else return undefined;
       const own = Math.min(...hw);
       // Alvo do meio: o pico do morro, ou a média dos setores (o meio de uma encosta não é o topo dela).
-      const ct = c > Math.max(...hw) ? c : hw.reduce((p, v) => p + v, 0) / 6;
+      const ct = c > Math.max(...hw) ? c + MORRO_BONUS : hw.reduce((p, v) => p + v, 0) / 6;
       const sm = this.seamOf(q, r, hw, ew, idx);
       const nb: number[] = [], placed: boolean[] = [], sec: number[] = [];
       const loc = (a: readonly number[]) => [0, 1, 2, 3, 4, 5].map((s) => a[(s + rot) % 6] - own);
@@ -1196,7 +1208,8 @@ export class World {
         nb.push(known ? n!.heights![opposite(w)] : hw[w]);
         placed.push(known);
       }
-      return { own, nb, sec, placed, terrain: { h: loc(hw), c: ct - own, he: loc(sm.he), co: loc(sm.co) } };
+      const { x: wx, z: wz } = hexToWorld(q, r);
+      return { own, nb, sec, placed, terrain: { h: loc(hw), c: ct - own, he: loc(sm.he), co: loc(sm.co), world: { x: wx, z: wz, rot, seed: this.reliefSeed } } };
     }
     const own = this.levelOf(q, r);
     return { own, nb: [0, 1, 2, 3, 4, 5].map((s) => {
@@ -1626,7 +1639,8 @@ export class World {
     if (slot.count) this.waterSlots.set(p.key, { chunk: ch, ...slot });
     groundMap.add(b, m, this.waterColor);
     this.falls.append(b, m);
-    seaMap.add(p.q, p.r);
+    // Modo Relevo: a saia das bordas altas avança sobre a casa vazia, e a areia e a espuma do mar começam no pé dela.
+    seaMap.add(p.q, p.r, this.pieceRelief && p.heights ? 0.4 * skirtWidth(Math.max(...p.heights)) : 0);
     if (this.theme.floodplain && b.water.length) riverMap.add(b.water, m, this.theme.floodplain.reach);
     for (const d of b.decos) {
       if (d.transient) continue;
@@ -1703,7 +1717,9 @@ export class World {
 
   private updateStamps(board: Board) {
     const left = board.sites.filter((s) => !s.found);
-    const sig = left.map((s) => `${s.q},${s.r},${s.kind}`).join('|') + '#' + board.posts.map((p) => `${p.q},${p.r}`).join('|');
+    // Nascentes escondidas que uma peça de água acabou de revelar (a marca some quando uma peça pousa em cima).
+    const springs = board.revealedSprings();
+    const sig = left.map((s) => `${s.q},${s.r},${s.kind}`).join('|') + '#' + board.posts.map((p) => `${p.q},${p.r}`).join('|') + '#' + springs.map((s) => `${s.q},${s.r}`).join('|');
     if (sig === this.stampSig) return;
     this.stampSig = sig;
     const geos = left.map((s) => {
@@ -1711,6 +1727,10 @@ export class World {
       // Cada carimbo um pouco torto, como batido à mão (sem sorteio: vem da posição).
       return stampGeometry(s.kind).rotateY(Math.sin(s.q * 12.9898 + s.r * 78.233) * 0.25).translate(x, this.heightOf(s.q, s.r), z);
     });
+    for (const sp of springs) {
+      const { x, z } = hexToWorld(sp.q, sp.r);
+      geos.push(stampGeometry('spring').rotateY(Math.sin(sp.q * 12.9898 + sp.r * 78.233) * 0.25).translate(x, this.heightOf(sp.q, sp.r), z));
+    }
     for (const p of board.posts) {
       const { x, z } = hexToWorld(p.q, p.r);
       geos.push(postStampGeometry().rotateY(0.2).translate(x, this.heightOf(p.q, p.r), z));
@@ -1728,7 +1748,7 @@ export class World {
     if (this.board) this.feedEggs(this.board.list, p.index + 1, true);
     const eggs = this.eggKits.get(p.key);
     const lvs = this.levelsFor(p.q, p.r, p.rot, p.def);
-    const sig = `${p.spring ? 's' : ''}${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${eggs?.map((e) => e.kit).join('+') ?? ''}|${lvs ? `${lvs.own}${lvs.nb.join('')}${lvs.sec?.join('') ?? ''}${lvs.placed?.map(Number).join('') ?? ''}` : ''}`;
+    const sig = `${p.spring ? 's' : ''}${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${eggs?.map((e) => e.kit).join('+') ?? ''}|${levelSig(lvs)}`;
     let live: LiveTile;
     const ly = this.heightOf(p.q, p.r);
     let y0 = ly + 1.2;
@@ -1934,7 +1954,7 @@ export class World {
     const site = check.valid ? check.site?.kind : undefined;
     const wonder = check.valid && check.wonder && !def.special ? true : undefined;
     const sig = `${check.water?.spring ? 's' : ''}${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}`;
-    const key = `${def.seed}:${this.theme.id}:${sig}:${lvs ? `${lvs.own}${lvs.nb.join('')}${lvs.sec?.join('') ?? ''}${lvs.placed?.map(Number).join('') ?? ''}` : ''}`;
+    const key = `${def.seed}:${this.theme.id}:${sig}:${levelSig(lvs)}`;
     if (!this.ghost || this.ghostKey !== key) {
       const old = this.ghost;
       this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site, wonder, widths, spring: check.water?.spring, levels: lvs }), sig, this.lib, this.quality !== 'low');

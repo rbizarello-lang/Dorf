@@ -33,8 +33,11 @@ export class SeaMap {
     this.dirty = true;
   }
 
-  /** Registra a peça da casa (q, r): a distância ao hexágono dela, até DMAX. */
-  add(q: number, r: number) {
+  /**
+   * Registra a peça da casa (q, r): a distância ao hexágono dela, até DMAX. `margin` alarga o hexágono (a saia de uma peça alta
+   * desce para fora dele: a areia e a espuma começam no pé dela, não na borda da peça).
+   */
+  add(q: number, r: number, margin = 0) {
     const { x: cx, z: cz } = hexToWorld(q, r);
     const reach = 1 + SEA_DMAX;
     const u0 = Math.max(0, Math.floor((cx - reach + GROUND_EXTENT) / TEXEL)), u1 = Math.min(SEA_SIZE - 1, Math.ceil((cx + reach + GROUND_EXTENT) / TEXEL));
@@ -45,7 +48,7 @@ export class SeaMap {
         const ax = Math.abs((u + 0.5) * TEXEL - GROUND_EXTENT - cx);
         // Distância ao hexágono flat-top: a "norma hexagonal" menos o raio interno
         // (um pouco curta nos cantos, onde o contorno vira arredondado).
-        const hd = Math.max(az, ax * 0.8660254 + az * 0.5) - INR;
+        const hd = Math.max(az, ax * 0.8660254 + az * 0.5) - INR - margin;
         const d = hd <= 0 ? 0 : Math.round(Math.min(1, hd / SEA_DMAX) * 255);
         const i = v * SEA_SIZE + u;
         if (d < this.data[i]) this.data[i] = d;

@@ -3,7 +3,7 @@ import { corner, edgeMid, INR } from '../core/hex';
 import type { DayPhase, EggKit } from '../core/eggs';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
 import { FALL_D, HILL, hillProfile, PEAK, PEAK_CONES, PEAK_REACH } from './relief';
-import { isFlat, makeTerrain } from './terrain';
+import { edgeProfile, isFlat, makeTerrain, skirtDrop, skirtWidth, type TerrainSpec } from './terrain';
 import type { SynKind } from '../core/synergy';
 import type { SiteKind } from '../core/sites';
 import type { SpecialKind } from '../core/specials';
@@ -20,6 +20,8 @@ export const TILE_T = 0.28;
 export const LEVEL_STEP = 0.3;
 /** Inclinação (altura por distância) acima da qual a decoração não assenta: ~17°, o resto é encosta de rocha. */
 const STEEP_MAX = 0.3;
+/** Quanto a saia afunda (em níveis) abaixo da curva que a peça vizinha segue, para não ficar no mesmo plano que o chão dela. */
+const SKIRT_UNDER = 0.1;
 /** Comprimento da rampa de estrada e trilho na peça alta, contado da borda para dentro. */
 export const RAMP_ROAD = 0.62;
 /**
@@ -156,7 +158,7 @@ export interface BuildOpts {
      * Campo de altura contínuo da peça (`terrain.ts`), em níveis relativos a `own`: alvo de cada borda (`h`), do meio (`c`) e o perfil da
      * emenda (`he`: meio da borda; `co`: canto `k` = começo da borda `k`), que é o da vizinha onde ela já estava assentada.
      */
-    terrain?: { h: readonly number[]; c: number; he: readonly number[]; co: readonly number[] };
+    terrain?: { h: readonly number[]; c: number; he: readonly number[]; co: readonly number[]; world?: { x: number; z: number; rot: number; seed: number } };
   };
   /** Easter eggs de kit desta peça (`Theme.eggs`, efeito 'kit'): decididos pelo jogo, pela partida, nunca pelo relógio. */
   eggs?: { id: string; kit: EggKit; scale?: number; color?: string }[];
@@ -1048,17 +1050,16 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // O rio não desce em rampa: termina num lábio de pedra e cai (cachoeira, R3).
   const secs = opts.levels?.sec;
   const tspec = opts.levels?.terrain;
-  const terr = tspec ? (() => {
-    const spec = { ...tspec, vil: edges.map((e) => (e === T.Village ? 1 : 0)), seed };
-    return isFlat(spec) ? null : makeTerrain(spec);
-  })() : null;
+  // `env`: bordas de terra cuja vizinha já estava assentada: a saia dela entra nesta peça, e o chão daqui não passa abaixo dela.
+  const spec: TerrainSpec | null = tspec ? { ...tspec, vil: edges.map((e) => (e === T.Village ? 1 : 0)), seed, own: opts.levels?.own ?? 0, env: edges.map((e, i) => !!opts.levels?.placed?.[i] && !isStrict(e)) } : null;
+  const terr = spec && !isFlat(spec) ? makeTerrain(spec) : null;
   const hasSec = !!terr;
   const lv = opts.levels && (opts.levels.own > 0 || hasSec) ? opts.levels : null;
   /** Nível da borda `e` (o do setor): `own` mais o quanto o setor sobe. */
   const edgeLv = (e: number) => (lv ? lv.own + (secs?.[e] ?? 0) : 0);
   const dropOf = (e: number) => (lv && e >= 0 ? Math.max(0, edgeLv(e) - lv.nb[e]) * LEVEL_STEP : 0);
   /** Quanto o chão sobe neste ponto (mundo): o campo de altura da peça, sem mexer no leito dos rios (a água fica onde sempre esteve). */
-  const liftAt = (x: number, z: number) => (terr ? terr.at(x, z) * LEVEL_STEP * (field ? smooth(0.02, 0.2, field.e(x, z)) : 1) : 0);
+  const liftAt = (x: number, z: number) => (terr ? terr.at(x, z, field ? smooth(0.02, 0.2, field.e(x, z)) : 1) * LEVEL_STEP : 0);
   /** Inclinação do chão (altura por distância): a decoração, as casas principalmente, foge do que é íngreme. */
   const steep = (x: number, z: number) => (terr ? terr.slope(x, z) * LEVEL_STEP : 0);
   /** Comprimento do traçado e quanto cada ponta desce: a descida acompanha o arco desde a borda (`len` de rampa). */
@@ -1165,6 +1166,73 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     }
     return { c, s: sp as unknown as Splat };
   };
+  /**
+   * Saia da borda `i` (virada para o vazio, ou para uma casa que só vai ser ocupada depois): a peça não acaba num paredão. Do lado
+   * de fora, na casa vizinha, o chão desce em curva da altura da borda (`skirtDrop`, a mesma conta que a peça que chegar depois
+   * faz em `terrain.ts`, então ela fica embaixo do chão novo) até o chão comum, e termina num beiral de areia de ~0,2 de altura,
+   * a espessura da ilha. A malha é uma faixa paralela à normal da borda mais um leque de 30° em cada canto, que fica dentro da
+   * casa vizinha (o limite dela com a casa do lado é o raio do canto).
+   */
+  const skirtFor = (i: number, V: (a: number, b: number) => { p: V3; c: THREE.Color; s: Splat }) => {
+    const sp = spec!, own0 = sp.own!;
+    const [mx, mz] = edgeMid(i);
+    const nrm: V3 = [mx / INR, 0, mz / INR];
+    // O pé da encosta vira terra escura (a cor da lateral do tema), nunca areia cinzenta: é a ilha que desce para a água.
+    const soil = shade(tc(theme.side).clone().lerp(tc(theme.sideDark), 0.3), 0.9);
+    const floorY = -TILE_T - own0 * LEVEL_STEP;
+    const M = 6;
+    type P = { p: V3; c: THREE.Color; s: Splat };
+    /** Uma coluna da saia: do ponto da borda para fora, na direção (dx, dz), com a altura `hb` (níveis do mundo) na borda. */
+    const column = (base: { p: V3; c: THREE.Color; s: Splat }, dx: number, dz: number, hb: number): P[] => {
+      const w = Math.max(skirtWidth(hb), 0.02);
+      const out: P[] = [];
+      for (let m = 0; m <= M; m++) {
+        const rho = (w * m) / M, f = smooth(0.5, 1, m / M);
+        out.push({
+          // A saia fica um fio abaixo do chão que a vizinha vai ter ali (que segue a mesma curva): sem isso as duas superfícies coincidem e cintilam.
+          p: [base.p[0] + dx * rho, base.p[1] - (skirtDrop(hb, rho) + SKIRT_UNDER * smooth(0, 0.25, rho)) * LEVEL_STEP, base.p[2] + dz * rho],
+          c: base.c.clone().lerp(soil, 0.75 * f),
+          s: base.s.map((v, j) => v + (SPLAT_WALL[j] - v) * f) as unknown as Splat,
+        });
+      }
+      return out;
+    };
+    const cols: P[][] = [];
+    // Leque do canto i: do raio do canto (limite com a outra casa) até a normal da borda.
+    const wedge = (c: number, base: P, hb: number, rev: boolean) => {
+      const [cx, cz] = corner(c);
+      const l = Math.hypot(cx, cz), ux = cx / l, uz = cz / l;
+      const steps = [0, 0.5];
+      const list = steps.map((f) => {
+        const dx = ux + (nrm[0] - ux) * f, dz = uz + (nrm[2] - uz) * f, dl = Math.hypot(dx, dz);
+        return column(base, dx / dl, dz / dl, hb);
+      });
+      return rev ? list.reverse() : list;
+    };
+    const b0 = V(N, 0), bN = V(0, N);
+    cols.push(...wedge(i, b0, own0 + edgeProfile(sp, i, 0), false));
+    for (let k = 0; k <= N; k++) cols.push(column(V(N - k, k), nrm[0], nrm[2], own0 + edgeProfile(sp, i, k / N)));
+    cols.push(...wedge((i + 1) % 6, bN, own0 + edgeProfile(sp, i, 1), true));
+    const same = (a: V3, b: V3) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) < 1e-7;
+    const UPH: V3 = [0, 1, 0];
+    for (let j = 0; j + 1 < cols.length; j++) {
+      const a = cols[j], b = cols[j + 1];
+      for (let m = 0; m < M; m++) {
+        const p0 = a[m], p1 = b[m], p2 = b[m + 1], p3 = a[m + 1];
+        if (same(p0.p, p1.p)) g.tri(p0.p, p2.p, p3.p, p0.c, p2.c, p3.c, UPH, p0.s, p2.s, p3.s);
+        else if (same(p2.p, p3.p)) g.tri(p0.p, p1.p, p2.p, p0.c, p1.c, p2.c, UPH, p0.s, p1.s, p2.s);
+        else {
+          g.tri(p0.p, p1.p, p2.p, p0.c, p1.c, p2.c, UPH, p0.s, p1.s, p2.s);
+          g.tri(p0.p, p2.p, p3.p, p0.c, p2.c, p3.c, UPH, p0.s, p2.s, p3.s);
+        }
+      }
+      // Beiral: do fim da saia ao fundo comum.
+      const e0 = a[M], e1 = b[M];
+      const dk = shade(soil, 0.7);
+      g.quad(e0.p, e1.p, [e1.p[0], floorY, e1.p[2]], [e0.p[0], floorY, e0.p[2]], e0.c, e1.c, dk, dk, nrm, SPLAT_WALL);
+    }
+  };
+
   for (let i = 0; i < 6; i++) {
     const A = corner(i);
     const B = corner((i + 1) % 6);
@@ -1216,7 +1284,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const hidden = !!lv?.placed?.[i] && !isStrict(edges[i]);
     const floor = -TILE_T - (lv?.own ?? 0) * LEVEL_STEP;
     const rockC = tc(theme.relief?.rock ?? theme.rock);
-    for (let k = 0; k < N && !hidden; k++) {
+    // Borda de terra virada para o vazio com altura: em vez de um paredão, uma saia (encosta arredondada que desce do lado de fora).
+    const skirted = !!spec && !hidden && !isStrict(edges[i]) && [0, 0.5, 1].some((t) => spec.own! + edgeProfile(spec, i, t) > 0.05);
+    if (skirted) skirtFor(i, V);
+    for (let k = 0; k < N && !hidden && !skirted; k++) {
       const v0 = V(N - k, k), v1 = V(N - k - 1, k + 1);
       const [x0, y0, z0] = v0.p, [x1, y1, z1] = v1.p;
       const l0 = shade(v0.c, 0.72), l1 = shade(v1.c, 0.72);

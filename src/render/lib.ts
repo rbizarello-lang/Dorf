@@ -1678,11 +1678,19 @@ function siteGeometries(theme: Theme): Record<string, THREE.BufferGeometry> {
  * Carimbo de um sítio no mapa de pergaminho, deitado no plano xz, com ~0,6 de largura:
  * arco quebrado (ruína), X (tesouro), estrela de 8 pontas (relíquia) e torre (mirante).
  */
-export function stampGeometry(kind: SiteKind): THREE.BufferGeometry {
+export function stampGeometry(kind: SiteKind | 'spring'): THREE.BufferGeometry {
   const bar = (w: number, h: number, x: number, y: number, rot = 0) => new THREE.PlaneGeometry(w, h).rotateZ(rot).translate(x, y, 0);
   let parts: THREE.BufferGeometry[];
   if (kind === 'ruin') {
     parts = [bar(0.07, 0.3, -0.16, -0.06), bar(0.07, 0.17, 0.16, -0.125), new THREE.RingGeometry(0.125, 0.195, 8, 1, Math.PI * 0.42, Math.PI * 0.58).translate(0, 0.09, 0), bar(0.44, 0.05, 0, -0.22)];
+  } else if (kind === 'spring') {
+    // Nascente: uma gota com duas ondas em volta.
+    const drop = new THREE.Shape();
+    drop.moveTo(0, 0.2);
+    drop.quadraticCurveTo(0.12, 0.02, 0.1, -0.06);
+    drop.absarc(0, -0.06, 0.1, 0, Math.PI, true);
+    drop.quadraticCurveTo(-0.12, 0.02, 0, 0.2);
+    parts = [new THREE.ShapeGeometry(drop, 8), new THREE.RingGeometry(0.2, 0.235, 24), new THREE.RingGeometry(0.29, 0.315, 24, 1, 0.5, Math.PI * 1.5)];
   } else if (kind === 'treasure') {
     parts = [bar(0.5, 0.08, 0, 0, Math.PI / 4), bar(0.5, 0.08, 0, 0, -Math.PI / 4)];
   } else if (kind === 'relic') {

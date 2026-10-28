@@ -1,8 +1,8 @@
 // Campo de altura contínuo da peça (src/render/terrain.ts): a emenda entre duas peças vizinhas que concordam no perfil da
 // borda casa ponto a ponto (sem fresta), a peça plana continua plana e a inclinação é limitada (sem agulhas nem degraus).
-import { corner } from '../src/core/hex';
+import { corner, DIRS, edgeMid, hexToWorld, INR } from '../src/core/hex';
 import { mulberry32 } from '../src/core/rng';
-import { isFlat, makeTerrain, type TerrainSpec } from '../src/render/terrain';
+import { edgeProfile, isFlat, makeTerrain, nearestOnEdge, SKIRT_END, skirtDrop, skirtWidth, swellAt, type TerrainSpec } from '../src/render/terrain';
 
 let failed = 0;
 const check = (ok: boolean, msg: string) => {
@@ -47,6 +47,69 @@ for (let t = 0; t < 400; t++) {
 }
 check(worst < 0.01, `emenda com fresta: ${worst} níveis (0,003 do mundo é o limite: só perto dos cantos)`);
 check(steepest < 6, `inclinação demais: ${steepest} níveis por unidade`);
+
+// Saia e ondulado do mundo: a peça B vizinha (que veio depois) adota o perfil da borda de A, e o chão dela nunca passa abaixo da
+// saia de A; o ondulado é o mesmo valor dos dois lados da divisa (a emenda continua casando com ele ligado).
+{
+  const rg = mulberry32(77);
+  let worstSeam = 0, worstEnv = Infinity, hits = 0;
+  for (let t = 0; t < 300; t++) {
+    const w = Math.floor(rg() * 6), o = (w + 3) % 6;
+    const [aq, ar] = [0, 0], [bq, br] = [aq + DIRS[w][0], ar + DIRS[w][1]];
+    const wa = hexToWorld(aq, ar), wb = hexToWorld(bq, br);
+    const ownA = Math.floor(rg() * 3);
+    const hA = [ownA, 0, 0, 0, 0, 0];
+    for (let k = 1; k < 6; k++) hA[k] = Math.max(0, Math.min(2, hA[k - 1] + Math.floor(rg() * 3) - 1));
+    const A: TerrainSpec = { h: hA, c: ownA, he: hA.slice(), co: hA.map((v, k) => (hA[(k + 5) % 6] + v) / 2), vil: [0, 0, 0, 0, 0, 0], seed: t, own: 0, world: { x: wa.x, z: wa.z, rot: 0, seed: 99 } };
+    const hB = [Math.floor(rg() * 3), 0, 0, 0, 0, 0];
+    for (let k = 1; k < 6; k++) hB[k] = Math.max(0, Math.min(2, hB[k - 1] + Math.floor(rg() * 3) - 1));
+    const he = hB.slice(), co = hB.map((v, k) => (hB[(k + 5) % 6] + v) / 2);
+    he[o] = A.he[w];
+    co[(o + 1) % 6] = A.co[w];
+    co[o] = A.co[(w + 1) % 6];
+    const env = [0, 1, 2, 3, 4, 5].map((k) => k === o);
+    const B: TerrainSpec = { h: hB, c: 0, he, co, vil: [0, 0, 0, 0, 0, 0], seed: t + 5, own: 0, env, world: { x: wb.x, z: wb.z, rot: 0, seed: 99 } };
+    const ta = makeTerrain(A), tb = makeTerrain(B);
+    // Emenda com o ondulado ligado: o mesmo ponto do mundo, lido pelas duas peças.
+    const [ax, az] = corner(w), [bx, bz] = corner((w + 1) % 6);
+    for (let i = 0; i <= 12; i++) {
+      const s0 = i / 12;
+      const px = wa.x + ax + (bx - ax) * s0, pz = wa.z + az + (bz - az) * s0;
+      worstSeam = Math.max(worstSeam, Math.abs(ta.at(px - wa.x, pz - wa.z) - tb.at(px - wb.x, pz - wb.z)));
+    }
+    // Saia de A dentro de B: o chão de B fica sempre no mínimo na altura dela.
+    for (let i = 0; i < 40; i++) {
+      const lx = (rg() - 0.5) * 1.9, lz = (rg() - 0.5) * 1.7;
+      const [omx, omz] = edgeMid(o);
+      const dB = INR - (lx * omx + lz * omz) / INR;
+      if (dB < 0 || dB > 0.95) continue;
+      const px = wb.x + lx, pz = wb.z + lz;
+      const { t: tq, rho } = nearestOnEdge(w, px - wa.x, pz - wa.z);
+      const hb = edgeProfile(A, w, tq);
+      const [qx, qz] = [ax + (bx - ax) * tq, az + (bz - az) * tq];
+      const skirt = hb + swellAt(99, wa.x + qx, wa.z + qz) - skirtDrop(hb, rho);
+      worstEnv = Math.min(worstEnv, tb.at(lx, lz) - skirt);
+      hits++;
+    }
+  }
+  check(worstSeam < 0.01, `emenda com o ondulado: ${worstSeam} níveis`);
+  check(worstEnv > -1e-6, `a saia da vizinha passa acima do chão novo: ${worstEnv} níveis`);
+  check(hits > 500, `poucos pontos de saia conferidos: ${hits}`);
+  // A curva da saia: começa na borda, termina em hb + SKIRT_END na largura dela e nunca desce.
+  for (const hb of [0, 0.5, 1, 1.5, 2]) {
+    const w = skirtWidth(hb);
+    check(skirtDrop(hb, 0) === 0 && Math.abs(skirtDrop(hb, w + 0.01) - (hb + SKIRT_END)) < 1e-9, `saia ${hb}: extremos`);
+    let prev = 0, ok = true;
+    for (let i = 1; i <= 50; i++) {
+      const d = skirtDrop(hb, (i / 50) * (w + 0.1));
+      if (d < prev - 1e-12) ok = false;
+      prev = d;
+    }
+    check(ok, `saia ${hb}: não monótona`);
+    check(w <= 0.95, `saia ${hb}: larga demais (${w})`);
+  }
+  console.log(`saia: ${hits} pontos conferidos, pior emenda com o ondulado ${worstSeam.toExponential(1)}, folga mínima da saia ${worstEnv.toExponential(1)} níveis`);
+}
 const flat: TerrainSpec = { h: [1, 1, 1, 1, 1, 1], c: 1, he: [1, 1, 1, 1, 1, 1], co: [1, 1, 1, 1, 1, 1], vil: [0, 0, 0, 0, 0, 0], seed: 5 };
 check(isFlat(flat), 'peça plana não é plana');
 check(!isFlat({ ...flat, he: [2, 1, 1, 1, 1, 1] }), 'perfil de emenda diferente conta como relevo');

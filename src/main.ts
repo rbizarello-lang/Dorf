@@ -827,7 +827,7 @@ function refreshRoutePeek() {
   const peek = game.preview(hover.q, hover.r);
   scorePeek = peek ? peek.points : null;
   const cw = peek ? game.check(hover.q, hover.r)?.water : undefined;
-  waterPeek = !cw ? '' : cw.sea ? ` · chega ao mar +${cw.gain}` : cw.flows ? (cw.spring ? ` · nascente +${cw.gain}` : ` · água +${cw.gain}`) : ' · água parada';
+  waterPeek = !cw ? '' : cw.sea ? ` · chega ao mar +${cw.gain}` : cw.flows ? (cw.hidden ? ` · nascente escondida +${cw.gain}` : cw.spring ? ` · nascente +${cw.gain}` : ` · água +${cw.gain}`) : ' · água parada';
   routePeek = peek?.routes ?? [];
 }
 
@@ -877,7 +877,8 @@ function announce(res: PlaceResult) {
     notes.push({ text: `Missão perdida: ${questLabel(q, theme)} (passou de ${q.target})`, kind: 'bad' });
   }
   if (res.newQuest) notes.push({ text: `Nova missão: ${questLabel(res.newQuest, theme)}` });
-  if (res.water?.spring) notes.push({ text: 'Nascente: a água começa a correr', kind: 'good' });
+  if (res.water?.hidden) notes.push({ text: `Nascente escondida achada · +${game.rules.hiddenSpringPoints}`, kind: 'good' });
+  else if (res.water?.spring) notes.push({ text: 'Nascente: a água começa a correr', kind: 'good' });
   if (res.water && res.water.seas > 0) {
     notes.push({ text: `A água chegou ao mar · +${game.rules.seaPoints} · +${game.rules.seaTiles * res.water.seas} peças`, kind: 'good' });
     sfx.discover();
@@ -1741,6 +1742,14 @@ function step(now: number) {
   if (st) {
     const s = screenOf(st.q, st.r, 0.05);
     markers.push({ id: 100000 + st.q * 1000 + st.r, x: s.x, y: s.y + 30, visible: s.visible, text: `${SITE_LABEL[st.kind].icon} ${SITE_LABEL[st.kind].name}: ${siteReward(st.kind)}`, color: '#8a6a3a', kind: st.kind });
+  }
+  // Nascente escondida já revelada por uma peça de água: a etiqueta aparece com o fantasma em cima (ou a um passo dela).
+  if (hover && game.current && game.rules.springs) {
+    const sp = game.board.revealedSprings().find((x) => hexDistance(hover!.q, hover!.r, x.q, x.r) <= 1);
+    if (sp) {
+      const s = screenOf(sp.q, sp.r, 0.05);
+      markers.push({ id: 110000 + sp.q * 1000 + sp.r, x: s.x, y: s.y + 30, visible: s.visible, text: `💧 Nascente escondida: rio no nível 1+ aqui rende +${game.rules.hiddenSpringPoints}`, color: '#2f6f8f', kind: 'spring' });
+    }
   }
   for (const m of tradeMarks) {
     const s = screenOf(m.q, m.r, 0.2);
