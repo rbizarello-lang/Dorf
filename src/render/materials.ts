@@ -30,6 +30,7 @@ import {
   mix,
   mod,
   modelWorldMatrix,
+  normalGeometry,
   normalView,
   normalWorld,
   output,
@@ -291,6 +292,19 @@ const treeSway = (p: N3, h: N, t: N) => {
   return vec3(sin(t.mul(1.6).add(ph)).mul(0.05), float(0), cos(t.mul(1.3).add(ph.mul(1.2))).mul(0.04)).mul(h.mul(gust).mul(U.gust));
 };
 
+/**
+ * Vento hierárquico (copas com `vol`): o tronco fica parado, a copa inteira balança devagar (mais no alto) e as pontas
+ * tremem mais rápido e mais longe do eixo. A fase inclui o sorteio da instância, então duas árvores vizinhas não andam juntas.
+ */
+const crownSway = (p: N3, vol: N, t: N, inst: N) => {
+  const hk = vol.x, rr = vol.y;
+  const ph = p.x.mul(0.55).add(p.z.mul(0.45)).add(inst.mul(6.2832));
+  const gust = sin(dot(p.xz, U.wind).mul(0.8).sub(t.mul(0.9))).mul(0.4).add(0.6);
+  const slow = vec3(sin(t.mul(1.6).add(ph)).mul(0.9), float(0), cos(t.mul(1.3).add(ph.mul(1.2))).mul(0.7)).mul(hk.pow(1.4).mul(0.03));
+  const tips = vec3(sin(t.mul(5.1).add(ph.mul(2.3)).add(p.y.mul(40))), sin(t.mul(4.3).add(ph.mul(1.7))).mul(0.4), cos(t.mul(4.7).add(ph.mul(1.9)).add(p.y.mul(33)))).mul(hk.pow(2).mul(rr).mul(0.011));
+  return slow.add(tips).mul(gust.mul(0.6).add(0.55)).mul(U.gust);
+};
+
 /** Onda de vento que atravessa as plantações: dobra as plantas a favor do vento. */
 const cropBend = (p: N3, hgt: N, t: N) => {
   const wave = sin(dot(p.xz, U.wind).mul(2.4).sub(t.mul(2.2))).mul(0.5).add(0.5);
@@ -319,6 +333,11 @@ interface DecoOpts {
    * só conta). O valor é a intensidade; só aparece quando a câmera olha para o lado do sol.
    */
   translucent?: number;
+  /**
+   * Volume da copa (geometria com `vol`, lib.ts): gradiente vertical (topo claro e quente, base escura e fria), oclusão por copa
+   * (o miolo e a barriga escurecem), variação de cor por instância e vento hierárquico.
+   */
+  volume?: boolean;
   /** Rocha (serras): estratos horizontais, pé mais escuro e encostas íngremes mais frias. */
   rock?: boolean;
   /** Normais da geometria (copas arredondadas em lib.ts), em vez da normal plana de cada face. */
@@ -380,7 +399,11 @@ function decoMaterial(o: DecoOpts) {
   const iColor = attribute('iColor', 'vec3');
   let base: N3 = vertexColor().rgb.mul(mix(vec3(1), iColor, tint));
   // positionLocal já vem transformado pela instância (r186: instância antes do positionNode).
-  if (o.sway === 'tree') {
+  const vol = o.volume ? attribute('vol', 'vec2') : null;
+  if (o.sway === 'tree' && vol) {
+    const inst = hash(instanceIndex.add(31));
+    m.positionNode = displaced((p, t) => crownSway(p, vol, t, inst));
+  } else if (o.sway === 'tree') {
     const h = max(positionGeometry.y.sub(0.08), 0);
     m.positionNode = displaced((p, t) => treeSway(p, h, t));
   } else if (o.sway === 'crop') {
@@ -395,6 +418,22 @@ function decoMaterial(o: DecoOpts) {
     });
     base = base.mul(sheen.mul(0.22).add(1));
   } else m.positionNode = displaced(undefined, true);
+  if (vol) {
+    const hk = vol.x, rr = vol.y;
+    // Gradiente: topo claro e quente (sol), base escura e fria (céu). Só nas partes tingidas.
+    const lit = smoothstep(0.08, 0.85, hk);
+    const grad = mix(vec3(0.48, 0.6, 0.8), vec3(1.22, 1.13, 0.86), lit);
+    // Oclusão: a barriga da copa (normais para baixo) e o miolo (faces viradas para o eixo, perto dele) recebem pouca luz.
+    const ng = normalGeometry;
+    const radial = dot(ng.xz, positionGeometry.xz).div(max(length(ng.xz).mul(length(positionGeometry.xz)), 1e-4));
+    const inner = smoothstep(0.1, -0.7, radial).mul(float(1).sub(rr.mul(0.6)));
+    const belly = smoothstep(0.1, -0.8, ng.y);
+    const ao = float(1).sub(belly.mul(0.5)).sub(inner.mul(0.4)).sub(float(1).sub(smoothstep(0, 0.5, hk)).mul(0.3));
+    // Cada árvore tem o seu tom: valor ±13% e um desvio de matiz (mais quente ou mais frio).
+    const h1 = hash(instanceIndex.add(5)).sub(0.5), h2 = hash(instanceIndex.add(19)).sub(0.5);
+    const own = vec3(h1.mul(0.28).add(1).add(h2.mul(0.16)), h1.mul(0.28).add(1), h1.mul(0.28).add(1).sub(h2.mul(0.2)));
+    base = mix(base, base.mul(grad).mul(ao.max(0.35)).mul(own), tint);
+  }
   if (o.paint) {
     // Coordenadas do próprio kit (a pincelada gira com a instância), deslocadas por instância
     // para duas árvores iguais não terem os mesmos toques.
@@ -471,8 +510,8 @@ export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
     // Serra (faces planas) e morro (normais suaves): sem as fileiras de telha do `deco`, que listrariam a rocha.
     relief: decoMaterial({ paint: 'wall', rimSun: 0.3, rock: true }),
     reliefSoft: decoMaterial({ smooth: true, paint: 'wall', rimSun: 0.3 }),
-    foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', translucent: 2.2 }),
-    evergreen: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', evergreen: true, translucent: 1.3 }),
+    foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', translucent: 2.2, volume: true }),
+    evergreen: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', evergreen: true, translucent: 1.3, volume: true }),
     crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide }),
     cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true }),
     // Lago congelado (rachaduras, buracos e pesqueiro): quase sem neve por cima, para o gelo e a água escura lerem.
