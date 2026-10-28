@@ -9,7 +9,7 @@ import { levelAt, tileProfile, worldHeights } from '../core/relief';
 import { seasonAt } from '../core/seasons';
 import type { SiteKind } from '../core/sites';
 import type { SynHit, SynKind } from '../core/synergy';
-import { T, rotateEdges, type TileDef } from '../core/tiles';
+import { T, isStrict, rotateEdges, type TileDef } from '../core/tiles';
 import type { Theme } from '../themes/types';
 import { CameraRig, FOV } from './cameraRig';
 import { createRenderer, type Backend } from './gpu';
@@ -755,6 +755,7 @@ export class World {
       U.floodColor.value.set(theme.floodplain.color);
     }
     U.fieldSnow.value = theme.fieldSnow ?? 1;
+    U.rockColor.value.set(theme.relief?.rock ?? theme.rock);
     this.eggClear();
     this.setSurround(theme);
     this.skyTarget = skyFor(theme, this.timeOfDay);
@@ -770,6 +771,7 @@ export class World {
     U.eraWave.value.w = 0;
     this.reliefMax = this.levelsEnabled ? (this.pieceRelief ? 2 : theme.relief?.levels ?? 0) : 0;
     this.levelCache.clear();
+    this.seams.clear();
     this.rebuild(board);
   }
 
@@ -1083,6 +1085,8 @@ export class World {
 
   setPieceRelief(on: boolean) {
     this.pieceRelief = on;
+    U.rock.value = on ? 1 : 0;
+    this.seams.clear();
     this.reliefMax = this.levelsEnabled ? (on ? 2 : this.theme?.relief?.levels ?? 0) : 0;
     this.levelCache.clear();
   }
@@ -1118,6 +1122,35 @@ export class World {
     return this.heightOf(q, r);
   }
 
+  /** Perfil de emenda já resolvido de cada peça assentada (relevo contínuo): zera junto com o mapa. */
+  private seams = new Map<number, { he: number[]; co: number[] }>();
+
+  /**
+   * Perfil da emenda de uma peça em orientação de mundo: altura do meio de cada borda (`he`) e de cada canto (`co`, o canto
+   * `k` abre a borda `k`). Sem vizinha antes dela é a altura-alvo da própria peça (cantos: a média das duas bordas); com
+   * vizinha de terra já assentada, a borda e os dois cantos dela são os da vizinha, então a emenda casa ponto a ponto e a
+   * peça nova faz o talude por dentro. Água e trilho não copiam: a diferença vira cachoeira, não talude.
+   */
+  private seamOf(q: number, r: number, hw: readonly number[], ew: readonly T[], idx: number) {
+    const he = hw.slice(), co = hw.map((v, k) => (hw[(k + 5) % 6] + v) / 2);
+    for (let w = 0; w < 6; w++) {
+      if (isStrict(ew[w])) continue;
+      const n = this.board?.get(q + DIRS[w][0], r + DIRS[w][1]);
+      if (!n?.heights || n.index >= idx) continue;
+      const rn = this.seamOfPlaced(n), o = opposite(w);
+      he[w] = rn.he[o];
+      co[w] = rn.co[(o + 1) % 6];
+      co[(w + 1) % 6] = rn.co[o];
+    }
+    return { he, co };
+  }
+
+  private seamOfPlaced(p: Placed) {
+    let sm = this.seams.get(p.key);
+    if (!sm) this.seams.set(p.key, (sm = this.seamOf(p.q, p.r, p.heights!, p.edges, p.index)));
+    return sm;
+  }
+
   /**
    * Níveis da casa e das 6 vizinhas, na orientação de origem da peça (`BuildOpts.levels`); sem relevo, indefinido.
    * No modo Relevo a peça traz as alturas: os setores sobem acima do menor deles, e só as vizinhas colocadas ANTES contam
@@ -1127,14 +1160,18 @@ export class World {
     if (!this.reliefMax) return undefined;
     if (this.pieceRelief) {
       const here = this.board?.get(q, r);
-      let hw: number[], c: number, idx = Infinity;
-      if (here?.heights) (hw = here.heights), (c = here.hill ?? Math.max(...hw)), (idx = here.index);
+      let hw: number[], c: number, idx = Infinity, ew: readonly T[];
+      if (here?.heights) (hw = here.heights), (c = here.hill ?? Math.max(...hw)), (idx = here.index), (ew = here.edges);
       else if (def) {
         const prof = tileProfile(def.edges, def.seed);
-        (hw = worldHeights(prof, rot)), (c = prof.c);
+        (hw = worldHeights(prof, rot)), (c = prof.c), (ew = rotateEdges(def.edges, rot));
       } else return undefined;
       const own = Math.min(...hw);
+      // Alvo do meio: o pico do morro, ou a média dos setores (o meio de uma encosta não é o topo dela).
+      const ct = c > Math.max(...hw) ? c : hw.reduce((p, v) => p + v, 0) / 6;
+      const sm = this.seamOf(q, r, hw, ew, idx);
       const nb: number[] = [], placed: boolean[] = [], sec: number[] = [];
+      const loc = (a: readonly number[]) => [0, 1, 2, 3, 4, 5].map((s) => a[(s + rot) % 6] - own);
       for (let s = 0; s < 6; s++) {
         const w = (s + rot) % 6;
         sec.push(hw[w] - own);
@@ -1143,7 +1180,7 @@ export class World {
         nb.push(known ? n!.heights![opposite(w)] : hw[w]);
         placed.push(known);
       }
-      return { own, nb, sec, hill: c - own, placed };
+      return { own, nb, sec, placed, terrain: { h: loc(hw), c: ct - own, he: loc(sm.he), co: loc(sm.co) } };
     }
     const own = this.levelOf(q, r);
     return { own, nb: [0, 1, 2, 3, 4, 5].map((s) => {
@@ -2209,7 +2246,9 @@ export class World {
       const lo = Math.min(...prof.h);
       this.handLevel = lo;
       const sec = prof.h.map((v) => v - lo);
-      levels = { own: 0, nb: sec, sec, hill: prof.c - lo, placed: sec.map(() => false) };
+      const mean = prof.h.reduce((p, v) => p + v, 0) / 6 - lo;
+      const co = prof.h.map((v, k) => (prof.h[(k + 5) % 6] + v) / 2 - lo);
+      levels = { own: 0, nb: sec, sec, placed: sec.map(() => false), terrain: { h: sec, c: prof.c > Math.max(...prof.h) ? prof.c - lo : mean, he: sec, co } };
     }
     this.preview.set(def, () => this.build(def!, [], undefined, { levels }), angle, stack);
   }

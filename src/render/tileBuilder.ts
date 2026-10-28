@@ -3,6 +3,7 @@ import { corner, edgeMid, INR } from '../core/hex';
 import type { DayPhase, EggKit } from '../core/eggs';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
 import { FALL_D, HILL, hillProfile, PEAK, PEAK_CONES, PEAK_REACH } from './relief';
+import { isFlat, makeTerrain } from './terrain';
 import type { SynKind } from '../core/synergy';
 import type { SiteKind } from '../core/sites';
 import type { SpecialKind } from '../core/specials';
@@ -17,6 +18,8 @@ import { CROP_LAYOUT, type HouseMeta } from './lib';
 export const TILE_T = 0.28;
 /** Altura de um nível de relevo (R2): `Theme.relief.levels` e `core/relief.ts`. Vizinhos diferem 1 nível, então o degrau é 0,3. */
 export const LEVEL_STEP = 0.3;
+/** Inclinação (altura por distância) acima da qual a decoração não assenta: ~17°, o resto é encosta de rocha. */
+const STEEP_MAX = 0.3;
 /** Comprimento da rampa de estrada e trilho na peça alta, contado da borda para dentro. */
 export const RAMP_ROAD = 0.62;
 /**
@@ -143,14 +146,15 @@ export interface BuildOpts {
   levels?: {
     own: number;
     nb: readonly number[];
-    /**
-     * Relevo por peça (modo Relevo): quanto cada setor sobe acima de `own` (níveis, ≥ 0) e o pico do meio. Os degraus entre
-     * setores viram paredes de penhasco dentro da peça; a parede de fora é de penhasco em toda borda acima do nível 0.
-     */
+    /** Relevo por peça (modo Relevo): nível-alvo de cada setor acima de `own` (níveis inteiros, ≥ 0): só a água (cachoeira) e a parede lêem isto. */
     sec?: readonly number[];
-    hill?: number;
-    /** Relevo por peça: vizinhas já assentadas ANTES desta (só elas contam para queda e rampa; `nb` das outras é a borda). */
+    /** Relevo por peça: vizinhas já assentadas ANTES desta (só elas contam para queda e emenda; `nb` das outras é a borda). */
     placed?: readonly boolean[];
+    /**
+     * Campo de altura contínuo da peça (`terrain.ts`), em níveis relativos a `own`: alvo de cada borda (`h`), do meio (`c`) e o perfil da
+     * emenda (`he`: meio da borda; `co`: canto `k` = começo da borda `k`), que é o da vizinha onde ela já estava assentada.
+     */
+    terrain?: { h: readonly number[]; c: number; he: readonly number[]; co: readonly number[] };
   };
   /** Easter eggs de kit desta peça (`Theme.eggs`, efeito 'kit'): decididos pelo jogo, pela partida, nunca pelo relógio. */
   eggs?: { id: string; kit: EggKit; scale?: number; color?: string }[];
@@ -1036,43 +1040,25 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const flow = opts.flow ?? resolveFlow(edges);
   const field = hasWater ? waterField(shape, water.paths, widths, flow, seed) : null;
   /** Distância até a água ou a via mais próxima (negativa dentro): a decoração desvia. */
-  const clear = (x: number, z: number) => Math.min(road.paths.length ? distToPaths(x, z, road.paths) : Infinity, field ? field.e(x, z) - (shape.lake ? BANK_EXTRA : 0) : Infinity, cliffLine(x, z) - 0.02);
+  const clear = (x: number, z: number) => Math.min(road.paths.length ? distToPaths(x, z, road.paths) : Infinity, field ? field.e(x, z) - (shape.lake ? BANK_EXTRA : 0) : Infinity, terr && steep(x, z) > STEEP_MAX ? -0.05 : Infinity);
   // --- Relevo (R2): peça mais alta que a vizinha. Estrada e trilho descem em rampa até a borda, no nível dela
   // (`rampR`: 0 ou negativo, função só da peça, da borda e da vizinha, então a emenda casa em qualquer ordem).
   // O rio não desce em rampa: termina num lábio de pedra e cai (cachoeira, R3).
   const secs = opts.levels?.sec;
-  const hill = opts.levels?.hill ?? 0;
-  const hasSec = !!secs && (hill > 0 || secs.some((v) => v > 0));
+  const tspec = opts.levels?.terrain;
+  const terr = tspec ? (() => {
+    const spec = { ...tspec, vil: edges.map((e) => (e === T.Village ? 1 : 0)), seed };
+    return isFlat(spec) ? null : makeTerrain(spec);
+  })() : null;
+  const hasSec = !!terr;
   const lv = opts.levels && (opts.levels.own > 0 || hasSec) ? opts.levels : null;
   /** Nível da borda `e` (o do setor): `own` mais o quanto o setor sobe. */
   const edgeLv = (e: number) => (lv ? lv.own + (secs?.[e] ?? 0) : 0);
   const dropOf = (e: number) => (lv && e >= 0 ? Math.max(0, edgeLv(e) - lv.nb[e]) * LEVEL_STEP : 0);
-  /** Subida do chão no setor `i` à fração `t` (0 no meio, 1 a partir de 1/4 do caminho): do pico do meio ao nível do setor. */
-  const secLift = (i: number, t: number) => (hill + ((secs?.[i] ?? 0) - hill) * Math.min(1, t * 4)) * LEVEL_STEP;
-  /** Subida do chão num ponto (x, z) da peça: a mesma conta dos vértices do chão, para a decoração assentar nele. */
-  const liftAt = (x: number, z: number) => {
-    if (!hasSec) return 0;
-    let bi = 0, bd = -Infinity;
-    for (let i = 0; i < 6; i++) {
-      const [mx, mz] = edgeMid(i);
-      const d = x * mx + z * mz;
-      if (d > bd) (bd = d), (bi = i);
-    }
-    return secLift(bi, bd / (INR * INR));
-  };
-  /** Distância do ponto às linhas do meio aos cantos onde os setores vizinhos têm níveis diferentes (a decoração desvia). */
-  const cliffLine = (x: number, z: number) => {
-    if (!hasSec) return Infinity;
-    let m = Infinity;
-    for (let i = 0; i < 6; i++) {
-      if (secs![i] === secs![(i + 5) % 6]) continue;
-      const [cx, cz] = corner(i);
-      const L2 = cx * cx + cz * cz;
-      const u = Math.max(0, Math.min(1, (x * cx + z * cz) / L2));
-      m = Math.min(m, Math.hypot(x - cx * u, z - cz * u));
-    }
-    return m;
-  };
+  /** Quanto o chão sobe neste ponto (mundo): o campo de altura da peça, sem mexer no leito dos rios (a água fica onde sempre esteve). */
+  const liftAt = (x: number, z: number) => (terr ? terr.at(x, z) * LEVEL_STEP * (field ? smooth(0.02, 0.2, field.e(x, z)) : 1) : 0);
+  /** Inclinação do chão (altura por distância): a decoração, as casas principalmente, foge do que é íngreme. */
+  const steep = (x: number, z: number) => (terr ? terr.slope(x, z) * LEVEL_STEP : 0);
   /** Comprimento do traçado e quanto cada ponta desce: a descida acompanha o arco desde a borda (`len` de rampa). */
   const mkRamp = (paths: Path[], ends: number[][], reach: number, fade: number, len: number) => {
     const items = paths
@@ -1140,7 +1126,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
 
   // --- Topo: 6 setores subdivididos, com cores misturadas nas divisas. Peças com rio
   // usam uma malha mais fina para o leito e as margens inclinadas.
-  const N = hasWater || hasRamp ? 12 : 4;
+  const N = hasWater || hasRamp ? 12 : terr ? 8 : 4;
   const center = new THREE.Color(0, 0, 0);
   for (const c of groundCols) center.add(c);
   center.multiplyScalar(1 / 6);
@@ -1186,7 +1172,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       let v = vs.get(k);
       if (!v) {
         const x = (a / N) * A[0] + (b / N) * B[0], z = (a / N) * A[1] + (b / N) * B[1];
-        v = { p: [x, groundY(x, z) + (hasSec ? secLift(i, (a + b) / N) : 0), z], ...topColor(i, a, b, x, z) };
+        v = { p: [x, groundY(x, z) + liftAt(x, z), z], ...topColor(i, a, b, x, z) };
         vs.set(k, v);
       }
       return v;
@@ -1201,23 +1187,6 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           g.tri(p1.p, p3.p, p2.p, p1.c, p3.c, p2.c, UP, p1.s, p3.s, p2.s);
           wb?.tri(p1, p3, p2);
         }
-      }
-    }
-
-    // --- Relevo por peça: parede de penhasco entre este setor e o anterior, do pico do meio ao canto, onde os níveis diferem.
-    if (hasSec && secs![i] !== secs![(i + 5) % 6]) {
-      const hi = secs![i] > secs![(i + 5) % 6];
-      const rr = tc(theme.relief?.rock ?? theme.rock).clone().lerp(tc(theme.sideDark), 0.15);
-      const px = -A[1], pz = A[0];
-      const toward = (px * (A[0] + B[0]) + pz * (A[1] + B[1]) >= 0 ? 1 : -1) * (hi ? -1 : 1);
-      const nrmW: V3 = [px * toward, 0, pz * toward];
-      for (let k = 0; k < N; k++) {
-        const pk = V(k, 0).p, pk1 = V(k + 1, 0).p;
-        const yi = (kk: number, sec: number) => groundY(0, 0) + secLift(sec, kk / N);
-        const ia = yi(k, secs![(i + 5) % 6]), ib = yi(k + 1, secs![(i + 5) % 6]), ja = yi(k, secs![i]), jb = yi(k + 1, secs![i]);
-        if (Math.abs(ia - ja) < 1e-4 && Math.abs(ib - jb) < 1e-4) continue;
-        const top = (u: number, v: number) => (u > v ? rr.clone().multiplyScalar(0.95) : rr.clone().multiplyScalar(0.62));
-        g.quad([pk[0], ia, pk[2]], [pk1[0], ib, pk1[2]], [pk1[0], jb, pk1[2]], [pk[0], ja, pk[2]], top(ia, ja), top(ib, jb), top(jb, ib), top(ja, ia), nrmW);
       }
     }
 
@@ -1240,11 +1209,12 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     // Relevo (R2): a parede desce até o fundo comum (`floor`, o mesmo de uma peça no nível 0), qualquer que seja a
     // vizinha, então não há fresta em nenhuma ordem de colocação. Onde a vizinha é mais baixa é um penhasco (`cliff`):
     // o solo raso por cima e a rocha em camadas (cor do tema) até o chão.
-    const Lw = (secs?.[i] ?? 0) * LEVEL_STEP;
     const cliff = !!lv && (lv.placed ? edgeLv(i) > 0 : lv.nb[i] < lv.own);
+    // Relevo por peça: a vizinha já assentada (terra com terra) tem a parede dela naquela emenda, no mesmo perfil: esta fica de fora.
+    const hidden = !!lv?.placed?.[i] && !isStrict(edges[i]);
     const floor = -TILE_T - (lv?.own ?? 0) * LEVEL_STEP;
     const rockC = tc(theme.relief?.rock ?? theme.rock);
-    for (let k = 0; k < N; k++) {
+    for (let k = 0; k < N && !hidden; k++) {
       const v0 = V(N - k, k), v1 = V(N - k - 1, k + 1);
       const [x0, y0, z0] = v0.p, [x1, y1, z1] = v1.p;
       const l0 = shade(v0.c, 0.72), l1 = shade(v1.c, 0.72);
@@ -1256,7 +1226,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           const q = Math.min(r, m);
           return [y, b, m, q, Math.min(-TILE_T, q)];
         };
-        const A = cut(y0 - Lw, rockY[k]).map((v) => v + Lw), B = cut(y1 - Lw, rockY[k + 1]).map((v) => v + Lw);
+        const L0 = liftAt(x0, z0), L1 = liftAt(x1, z1);
+        const A = cut(y0 - L0, rockY[k]).map((v) => v + L0), B = cut(y1 - L1, rockY[k + 1]).map((v) => v + L1);
         const flat = (j: number) => A[j - 1] - A[j] > 1e-4 || B[j - 1] - B[j] > 1e-4;
         const layer = (j: number, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, cd: THREE.Color) => {
           if (flat(j)) g.quad([x0, A[j - 1], z0], [x1, B[j - 1], z1], [x1, B[j], z1], [x0, A[j], z0], ca, cb, cc, cd, nrm);
@@ -1266,10 +1237,16 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         if (cliff) {
           // Rocha em camadas: faixas de ~0,13 com o valor sorteado por faixa e por trecho, mais escura para baixo.
           const rr = rockC.clone().lerp(sideDark, 0.15);
-          const edgesAbs = [-0.11 + Lw];
-          while (edgesAbs[edgesAbs.length - 1] - 0.13 > floor + 0.04) edgesAbs.push(edgesAbs[edgesAbs.length - 1] - 0.13);
+          // Faixas horizontais (grade fixa de 0,13 sob o nível da peça) do topo da parede, que segue o perfil da borda, até o fundo.
+          const wallTop = Math.max(A[2], B[2]);
+          const edgesAbs = [wallTop];
+          for (let j = Math.ceil((-0.11 - wallTop) / 0.13); ; j++) {
+            const y = -0.11 - 0.13 * j;
+            if (y <= floor + 0.04) break;
+            if (y < wallTop - 0.03) edgesAbs.push(y);
+          }
           edgesAbs.push(floor);
-          const depth = (y: number) => 1 - 0.38 * Math.min(1, Math.max(0, (-0.11 + Lw - y) / (-0.11 + Lw - floor)));
+          const depth = (y: number) => 1 - 0.38 * Math.min(1, Math.max(0, (wallTop - y) / (wallTop - floor)));
           for (let j = 0; j + 1 < edgesAbs.length; j++) {
             const ta = Math.min(A[2], edgesAbs[j]), tb = Math.min(B[2], edgesAbs[j]);
             const bot = edgesAbs[j + 1];
@@ -1970,7 +1947,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   };
   const sectors = [0, 1, 2, 3, 4, 5].filter(roomy);
   // Falésia (estilo 'falesia'): arenito longe do rio, então a peça com água fica sem ela.
-  if (rel && rel.amp > 0 && sectors.length && !(rel.style === 'falesia' && hasWater) && !opts.center && !opts.special && !opts.wonder && !opts.site && opts.eraMark === undefined) {
+  if (rel && rel.amp > 0 && !terr && sectors.length && !(rel.style === 'falesia' && hasWater) && !opts.center && !opts.special && !opts.wonder && !opts.site && opts.eraMark === undefined) {
     const roll = lr(), kindRoll = lr();
     if (roll < Math.min(0.9, rel.amp * 0.6)) {
       // Falésia: só mesas (sem outeiros), para não somar um pool de decoração a mais.
@@ -2781,7 +2758,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     D('folk:sack', wx, 0, wz, yawTo(-home.x, -home.z), 1, shirt(6), 'carry');
   }
 
-  // Relevo por peça: o que foi posto depois do chão (decalques, ruas, praça) e a decoração sobem com o setor onde estão.
+  // Relevo por peça: o que foi posto depois do chão (decalques, ruas, praça) e a decoração sobem com o campo de altura, no ponto onde estão.
   if (hasSec) {
     for (let k = groundEnd; k < g.pos.length; k += 3) g.pos[k + 1] += liftAt(g.pos[k], g.pos[k + 2]);
     for (const d of decos) d.y += liftAt(d.x, d.z);

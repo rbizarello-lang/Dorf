@@ -114,6 +114,9 @@ export const U = {
   flood: uniform(0),
   floodReach: uniform(2),
   floodColor: uniform(new THREE.Color('#4a3a28')),
+  /** Modo Relevo: 1 mostra a rocha das encostas íngremes no chão (0 nos outros modos e na pilha) e a cor dela (a rocha do tema). */
+  rock: uniform(0),
+  rockColor: uniform(new THREE.Color('#8a857c')),
   /** Aurora boreal (Theme.skyFx): 0 a 1, sobe à noite (aurora.ts). */
   aurora: uniform(0),
 };
@@ -558,10 +561,17 @@ export function makeGroundMaterial() {
   const base = mix(base0, U.floodColor, fertile);
   // `fieldSnow` (Theme.fieldSnow) tira neve só das parcelas de plantação (o gelo do lago congelado); 1 = como sempre.
   const ground = snowOn(base.mul(mix(sideF, detail, top)), mix(float(0.85), float(0.85).mul(U.fieldSnow), sp.z.min(1)));
-  m.colorNode = mix(ground, vec3(1), U.silhouette);
+  // Rocha pela inclinação (modo Relevo): só onde a encosta é íngreme, em estratos discretos por altura (cada faixa com o seu valor).
+  // A lateral quase vertical fica de fora: ela já tem as camadas de terra e rocha da própria malha.
+  const lean = float(1).sub(normalWorld.y);
+  const band = floor(positionWorld.y.mul(9).add(texture(noiseTex, p.mul(0.7)).g.mul(1.6)));
+  const rockTone = hash(band.add(17)).mul(0.34).add(0.78).mul(texture(noiseTex, vec2(p.x.mul(2.3).add(p.y), positionWorld.y.mul(11))).b.mul(0.22).add(0.9));
+  const rockK = smoothstep(0.1, 0.22, lean.add(grain.sub(0.5).mul(0.07))).mul(smoothstep(0.35, 0.55, normalWorld.y)).mul(U.rock);
+  const rockCol = U.rockColor.mul(rockTone);
+  m.colorNode = mix(mix(ground, rockCol, rockK), vec3(1), U.silhouette);
   // Relevo fino do prado e da mata: inclina a normal com o mapa de declive da água.
   const slope = texture(waterTex, p.mul(0.45)).rg.sub(0.5).mul(sp.x.add(sp.y).mul(0.5).add(0.12));
-  const nW = vec3(slope.x.negate(), 1, slope.y.negate()).normalize();
+  const nW = vec3(normalWorld.x.sub(slope.x), normalWorld.y, normalWorld.z.sub(slope.y)).normalize();
   m.normalNode = mix(normalView, cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize(), top);
   m.emissiveNode = ERA_GOLD.mul(eraBand(positionWorld, U.time));
   m.receivedShadowNode = shadowWithClouds;
@@ -965,7 +975,7 @@ export function makeVoidMaterial() {
   const wB = texture(waterTex, p.div(1.1).add(vec2(t.mul(-0.009).add(0.37), t.mul(0.008).add(0.61))));
   const wave = wA.rg.add(wB.rg).sub(1).mul(0.5);
   const slope = wave.mul(0.5).add(big.rg.sub(0.5).mul(0.35)).mul(u.sea).mul(float(1).sub(far.mul(0.6)));
-  const nW = vec3(slope.x.negate(), 1, slope.y.negate()).normalize();
+  const nW = vec3(normalWorld.x.sub(slope.x), normalWorld.y, normalWorld.z.sub(slope.y)).normalize();
   m.normalNode = cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize();
   m.roughnessNode = mix(float(1), mix(float(0.16), float(0.6), far), u.sea);
 
