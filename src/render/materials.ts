@@ -314,6 +314,11 @@ interface DecoOpts {
    * com a câmera baixa, como a máscara de fresnel do Dorfromantik. O valor é a intensidade.
    */
   rimSun?: number;
+  /**
+   * Translucência das copas: contra o sol a folha deixa a luz passar e brilha em verde amarelado (subsurface falso,
+   * só conta). O valor é a intensidade; só aparece quando a câmera olha para o lado do sol.
+   */
+  translucent?: number;
   /** Normais da geometria (copas arredondadas em lib.ts), em vez da normal plana de cada face. */
   smooth?: boolean;
   /** Pincelada nas partes tingidas: toques nas copas, traços verticais nas paredes. */
@@ -423,6 +428,14 @@ function decoMaterial(o: DecoOpts) {
     const rim = float(1).sub(max(dot(normalWorld, v), 0)).pow(3);
     emissive = emissive.add(U.sun.mul(base).mul(rim.mul(0.35)).mul(float(1).sub(U.night)));
   }
+  if (o.translucent) {
+    const v = toCam.div(camDist);
+    // Olhando para o sol através da copa: lóbulo largo, mais forte no alto da copa (folha fina) e nas faces de lado.
+    const back = max(dot(v, U.sunDir.negate()).add(0.15), 0).pow(2);
+    const thin = positionGeometry.y.mul(2.2).clamp(0.35, 1).mul(float(1).sub(abs(normalWorld.y).mul(0.5)));
+    const leaf = base.mul(vec3(1.18, 1.22, 0.55));
+    emissive = emissive.add(U.sun.mul(leaf).mul(back.mul(thin).mul(o.translucent)).mul(tint).mul(float(1).sub(U.night)).mul(float(1).sub(U.snow.mul(0.6))));
+  }
   if (o.rimSun) {
     const v = toCam.div(camDist);
     // Faces de lado para a câmera e viradas para o sol; o telhado visto de cima fica de fora.
@@ -443,8 +456,8 @@ export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
     // Serra (faces planas) e morro (normais suaves): sem as fileiras de telha do `deco`, que listrariam a rocha.
     relief: decoMaterial({ paint: 'wall', rimSun: 0.3 }),
     reliefSoft: decoMaterial({ smooth: true, paint: 'wall', rimSun: 0.3 }),
-    foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy' }),
-    evergreen: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', evergreen: true }),
+    foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', translucent: 2.2 }),
+    evergreen: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', evergreen: true, translucent: 1.3 }),
     crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide }),
     cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true }),
     // Lago congelado (rachaduras, buracos e pesqueiro): quase sem neve por cima, para o gelo e a água escura lerem.
