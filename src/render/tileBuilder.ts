@@ -30,6 +30,8 @@ export const RAMP_ROAD = 0.62;
  * baixa abre a bacia de espuma no pé. As duas metades saem dos níveis (da semente), então não dependem da ordem das jogadas.
  */
 const FALL_LIP = 0.16;
+/** Largura (da borda para dentro) em que o fundo de uma boca aberta sobe até o lábio. */
+const OPEN_LIP = 0.1;
 /** Superfície da água: abaixo do chão, dentro do leito escavado. */
 export const WATER_Y = -0.02;
 /** Fundo do rio no lábio da cachoeira: 12 mm de água por cima. */
@@ -673,6 +675,18 @@ class WaterBuf {
       this.bed.push(v.c.r, v.c.g, v.c.b, WATER_Y - y);
     }
   }
+
+  /** Película d'água sobre a saia (boca aberta): os vértices ficam onde estão (acompanham a encosta) e `d` é a coluna d'água. */
+  film(a: { p: V3; c: THREE.Color; d: number; at: V2 }, b: { p: V3; c: THREE.Color; d: number; at: V2 }, c: { p: V3; c: THREE.Color; d: number; at: V2 }) {
+    if (a.d <= 0 && b.d <= 0 && c.d <= 0) return;
+    const cross = (b.p[0] - a.p[0]) * (c.p[2] - a.p[2]) - (b.p[2] - a.p[2]) * (c.p[0] - a.p[0]);
+    for (const v of cross > 0 ? [a, c, b] : [a, b, c]) {
+      const [fx, fz] = this.attr(v.at[0], v.at[1]);
+      this.pos.push(...v.p);
+      this.flow.push(fx, fz);
+      this.bed.push(v.c.r, v.c.g, v.c.b, v.d);
+    }
+  }
 }
 
 function strip(buf: Buf, pts: V2[], hw: number, y: number, color: THREE.Color, sp: Splat = NO_SPLAT) {
@@ -1090,6 +1104,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const rampY = (x: number, z: number) => (rampR ? rampR(x, z) : 0);
   // --- Cachoeira (R3): bordas de rio que dão numa casa mais baixa (esta peça tem o lábio) ou mais alta (tem a bacia).
   const fallHi: number[] = [], fallLo: number[] = [];
+  /** Bordas de água sem vizinha assentada (modo Relevo): a água escorre pela saia em vez de acabar num corte de vidro. */
+  const openWater: number[] = [];
+  if (spec) for (let i = 0; i < 6; i++) if (edges[i] === T.Water && !opts.levels?.placed?.[i]) openWater.push(i);
   if (opts.levels && hasWater) {
     for (const i of water.idx) {
       if (opts.levels.nb[i] < edgeLv(i)) fallHi.push(i);
@@ -1103,11 +1120,16 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   };
   /** O fundo do rio sobe até o lábio de pedra nos últimos `FALL_LIP` de uma borda de queda. */
   const lipBed = (x: number, z: number, y: number) => {
-    if (!fallHi.length || y >= LIP_Y) return y;
+    if ((!fallHi.length && !openWater.length) || y >= LIP_Y) return y;
     let k = 0;
     for (const i of fallHi) {
       const b = edgeDist(i, x, z);
       if (b < FALL_LIP) k = Math.max(k, 1 - smooth(0.02, FALL_LIP, b));
+    }
+    // Boca aberta (sem vizinha): o fundo sobe até pouco abaixo da água, então a água termina rasa e o corte de vidro some.
+    for (const i of openWater) {
+      const b = edgeDist(i, x, z);
+      if (b < OPEN_LIP) k = Math.max(k, 1 - smooth(0.0, OPEN_LIP, b));
     }
     return y + (LIP_Y - y) * k;
   };
@@ -1220,6 +1242,25 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       cols.push(column(v, nrm[0], nrm[2], hbOf(v)));
     }
     cols.push(...wedge((i + 1) % 6, bN, hbOf(bN), true));
+    // Boca de água: a água segue pela encosta como uma película fina (espuma), até metade da saia, e some na beira do rio.
+    if (wb && edges[i] === T.Water) {
+      const MF = Math.round(M * 0.5);
+      const d0 = (k: number) => Math.max(0, WATER_Y - V(N - k, k).p[1]);
+      for (let k = 0; k < N; k++) {
+        const ca = cols[2 + k], cb = cols[3 + k], da = d0(k), db = d0(k + 1);
+        if (da <= 0 && db <= 0) continue;
+        const vt = (col: P[], m: number, d: number, kk: number) => {
+          const th = d * (1 - m / MF);
+          const [bx, , bz] = V(N - kk, kk).p;
+          return { p: [col[m].p[0], col[m].p[1] + 0.003 + th, col[m].p[2]] as V3, c: col[m].c, d: d > 0 ? 0.0025 + th * (m < MF ? 1 : 0) : 0, at: [bx, bz] as V2 };
+        };
+        for (let m = 0; m < MF; m++) {
+          const p0 = vt(ca, m, da, k), p1 = vt(cb, m, db, k + 1), p2 = vt(cb, m + 1, db, k + 1), p3 = vt(ca, m + 1, da, k);
+          wb.film(p0, p1, p2);
+          wb.film(p0, p2, p3);
+        }
+      }
+    }
     const same = (a: V3, b: V3) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) < 1e-7;
     const UPH: V3 = [0, 1, 0];
     for (let j = 0; j + 1 < cols.length; j++) {
@@ -1293,15 +1334,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const rockC = tc(theme.relief?.rock ?? theme.rock);
     // Borda de terra virada para o vazio com altura: em vez de um paredão, uma saia (encosta arredondada que desce do lado de fora).
     const skirted = !!spec && !hidden && !lv?.placed?.[i];
-    // Rio: a saia desce também sob a boca da água (o leito segue pela encosta); só o corte de vidro da água fica na beira, como num aquário.
-    const mouth = Array.from({ length: N + 1 }, (_, k) => {
-      if (!skirted || edges[i] !== T.Water || !field) return false;
-      const [x, , z] = V(N - k, k).p;
-      return field.e(x, z) < 0.09;
-    });
     if (skirted) skirtFor(i, V);
     for (let k = 0; k < N && !hidden; k++) {
-      if (skirted && !(mouth[k] || mouth[k + 1])) continue;
+      if (skirted) continue;
       const v0 = V(N - k, k), v1 = V(N - k - 1, k + 1);
       const [x0, y0, z0] = v0.p, [x1, y1, z1] = v1.p;
       const l0 = shade(v0.c, 0.72), l1 = shade(v1.c, 0.72);
