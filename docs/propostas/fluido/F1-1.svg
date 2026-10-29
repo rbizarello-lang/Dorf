@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 470 300" width="470" height="300" font-family="sans-serif" font-size="12">
+<title>Fatias</title>
+<rect width="470" height="300" fill="#ece7d6"/>
+<polygon points="40.0,40.0 90.0,40.0 65.0,83.3" fill="#3f7a45" stroke="#fff" stroke-width="1.5"/>
+<polygon points="90.0,40.0 115.0,83.3 65.0,83.3" fill="#3f7a45" stroke="#fff" stroke-width="1.5"/>
+<polygon points="90.0,40.0 140.0,40.0 115.0,83.3" fill="#4f9fc8" stroke="#fff" stroke-width="1.5"/>
+<polygon points="140.0,40.0 165.0,83.3 115.0,83.3" fill="#4f9fc8" stroke="#fff" stroke-width="1.5"/>
+<polygon points="140.0,40.0 190.0,40.0 165.0,83.3" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="190.0,40.0 215.0,83.3 165.0,83.3" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="190.0,40.0 240.0,40.0 215.0,83.3" fill="#c9b8a0" stroke="#fff" stroke-width="1.5"/>
+<polygon points="240.0,40.0 265.0,83.3 215.0,83.3" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="65.0,83.3 115.0,83.3 90.0,126.6" fill="#3f7a45" stroke="#fff" stroke-width="1.5"/>
+<polygon points="115.0,83.3 140.0,126.6 90.0,126.6" fill="#8dbb5a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="115.0,83.3 165.0,83.3 140.0,126.6" fill="#4f9fc8" stroke="#fff" stroke-width="1.5"/>
+<polygon points="165.0,83.3 190.0,126.6 140.0,126.6" fill="#4f9fc8" stroke="#fff" stroke-width="1.5"/>
+<polygon points="165.0,83.3 215.0,83.3 190.0,126.6" fill="#4f9fc8" stroke="#fff" stroke-width="1.5"/>
+<polygon points="215.0,83.3 240.0,126.6 190.0,126.6" fill="#4f9fc8" stroke="#fff" stroke-width="1.5"/>
+<polygon points="90.0,126.6 140.0,126.6 115.0,169.9" fill="#8dbb5a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="140.0,126.6 165.0,169.9 115.0,169.9" fill="#3f7a45" stroke="#fff" stroke-width="1.5"/>
+<polygon points="140.0,126.6 190.0,126.6 165.0,169.9" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="190.0,126.6 215.0,169.9 165.0,169.9" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="190.0,126.6 240.0,126.6 215.0,169.9" fill="#4f9fc8" stroke="#fff" stroke-width="1.5"/>
+<polygon points="240.0,126.6 265.0,169.9 215.0,169.9" fill="#4f9fc8" stroke="#fff" stroke-width="1.5"/>
+<polygon points="290.0,126.6 315.0,169.9 265.0,169.9" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="115.0,169.9 165.0,169.9 140.0,213.2" fill="#3f7a45" stroke="#fff" stroke-width="1.5"/>
+<polygon points="165.0,169.9 190.0,213.2 140.0,213.2" fill="#3f7a45" stroke="#fff" stroke-width="1.5"/>
+<polygon points="165.0,169.9 215.0,169.9 190.0,213.2" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="215.0,169.9 240.0,213.2 190.0,213.2" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="215.0,169.9 265.0,169.9 240.0,213.2" fill="#4f9fc8" stroke="#fff" stroke-width="1.5"/>
+<polygon points="265.0,169.9 290.0,213.2 240.0,213.2" fill="#4f9fc8" stroke="#fff" stroke-width="1.5"/>
+<polygon points="265.0,169.9 315.0,169.9 290.0,213.2" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="315.0,169.9 340.0,213.2 290.0,213.2" fill="#c9b8a0" stroke="#fff" stroke-width="1.5"/>
+<polygon points="265.0,83.3 290.0,126.6 240.0,126.6" fill="#d9b44a" fill-opacity="0.55" stroke="#8a6d1a" stroke-width="2" stroke-dasharray="5 3"/>
+<polygon points="215.0,83.3 265.0,83.3 240.0,126.6" fill="#d9b44a" fill-opacity="0.55" stroke="#8a6d1a" stroke-width="2" stroke-dasharray="5 3"/>
+<polygon points="240.0,126.6 290.0,126.6 265.0,169.9" fill="#d9b44a" fill-opacity="0.55" stroke="#8a6d1a" stroke-width="2" stroke-dasharray="5 3"/>
+<text x="20" y="285" text-anchor="start" fill="#3b3b32" font-size="12" >rio em zigue-zague de triângulos = meandro</text>
+<text x="300" y="215" text-anchor="start" fill="#8a6d1a" font-size="12" >peça de 3 fatias</text>
+<text x="300" y="120" text-anchor="start" fill="#3b3b32" font-size="12" >+3 por lado igual</text>
+<text x="20" y="22" text-anchor="start" fill="#3b3b32" font-size="13" font-weight="bold">Fatias: tabuleiro de triângulos, peças de 1 a 4 fatias</text>
+</svg>

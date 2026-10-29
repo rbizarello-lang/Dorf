@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 300" width="600" height="300" font-family="sans-serif" font-size="12">
+<title>Penrose</title>
+<rect width="600" height="300" fill="#ece7d6"/>
+<polygon points="190.0,150.0 190.0,80.0 256.6,58.4 256.6,128.4" fill="#8dbb5a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="190.0,150.0 256.6,128.4 297.7,185.0 231.1,206.6" fill="#3f7a45" stroke="#fff" stroke-width="1.5"/>
+<polygon points="190.0,150.0 231.1,206.6 190.0,263.3 148.9,206.6" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="190.0,150.0 148.9,206.6 82.3,185.0 123.4,128.4" fill="#c9b8a0" stroke="#fff" stroke-width="1.5"/>
+<polygon points="190.0,150.0 123.4,128.4 123.4,58.4 190.0,80.0" fill="#8dbb5a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="190.0,80.0 123.4,58.4 190.0,36.7 256.6,58.4" fill="#4f9fc8" stroke="#fff" stroke-width="1.5"/>
+<polygon points="256.6,128.4 256.6,58.4 297.7,115.0 297.7,185.0" fill="#8dbb5a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="231.1,206.6 297.7,185.0 256.6,241.6 190.0,263.3" fill="#3f7a45" stroke="#fff" stroke-width="1.5"/>
+<polygon points="148.9,206.6 190.0,263.3 123.4,241.6 82.3,185.0" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="123.4,128.4 82.3,185.0 82.3,115.0 123.4,58.4" fill="#c9b8a0" stroke="#fff" stroke-width="1.5"/>
+<text x="400" y="90" text-anchor="start" fill="#3b3b32" font-size="12" >losango gordo (72°)</text>
+<text x="400" y="110" text-anchor="start" fill="#3b3b32" font-size="12" >losango fino (36°)</text>
+<text x="400" y="150" text-anchor="start" fill="#3b3b32" font-size="12" >todos os lados iguais:</text>
+<text x="400" y="168" text-anchor="start" fill="#3b3b32" font-size="12" >qualquer lado aceita</text>
+<text x="400" y="186" text-anchor="start" fill="#3b3b32" font-size="12" >qualquer losango.</text>
+<text x="400" y="214" text-anchor="start" fill="#3b3b32" font-size="12" >o ângulo livre decide</text>
+<text x="100" y="25" text-anchor="start" fill="#3b3b32" font-size="13" font-weight="bold">Losangos de Penrose: 5 gordos + 5 finos</text>
+</svg>

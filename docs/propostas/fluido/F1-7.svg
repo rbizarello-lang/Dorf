@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 350" width="640" height="350" font-family="sans-serif" font-size="12">
+<title>Octógonos e praças</title>
+<rect width="640" height="350" fill="#ece7d6"/>
+<polygon points="136.9,111.5 111.5,136.9 75.5,136.9 50.0,111.5 50.0,75.5 75.5,50.0 111.5,50.0 136.9,75.5" fill="#3f7a45" stroke="#fff" stroke-width="1.5"/>
+<polygon points="223.8,111.5 198.4,136.9 162.4,136.9 136.9,111.5 136.9,75.5 162.4,50.0 198.4,50.0 223.8,75.5" fill="#3f7a45" stroke="#fff" stroke-width="1.5"/>
+<polygon points="310.7,111.5 285.3,136.9 249.3,136.9 223.8,111.5 223.8,75.5 249.3,50.0 285.3,50.0 310.7,75.5" fill="#8dbb5a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="136.9,198.4 111.5,223.8 75.5,223.8 50.0,198.4 50.0,162.4 75.5,136.9 111.5,136.9 136.9,162.4" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="223.8,198.4 198.4,223.8 162.4,223.8 136.9,198.4 136.9,162.4 162.4,136.9 198.4,136.9 223.8,162.4" fill="#8dbb5a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="310.7,198.4 285.3,223.8 249.3,223.8 223.8,198.4 223.8,162.4 249.3,136.9 285.3,136.9 310.7,162.4" fill="#c9b8a0" stroke="#fff" stroke-width="1.5"/>
+<polygon points="136.9,285.3 111.5,310.7 75.5,310.7 50.0,285.3 50.0,249.3 75.5,223.8 111.5,223.8 136.9,249.3" fill="#8dbb5a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="223.8,285.3 198.4,310.7 162.4,310.7 136.9,285.3 136.9,249.3 162.4,223.8 198.4,223.8 223.8,249.3" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="310.7,285.3 285.3,310.7 249.3,310.7 223.8,285.3 223.8,249.3 249.3,223.8 285.3,223.8 310.7,249.3" fill="#c9b8a0" stroke="#fff" stroke-width="1.5"/>
+<polygon points="136.9,111.5 162.4,136.9 136.9,162.4 111.5,136.9" fill="#c9b8a0" stroke="#fff" stroke-width="1.5"/>
+<polygon points="136.9,198.4 162.4,223.8 136.9,249.3 111.5,223.8" fill="#d9b44a" fill-opacity="0.55" stroke="#8a6d1a" stroke-width="2" stroke-dasharray="5 3"/>
+<polygon points="223.8,111.5 249.3,136.9 223.8,162.4 198.4,136.9" fill="#c8553d" stroke="#fff" stroke-width="1.5"/>
+<polygon points="223.8,198.4 249.3,223.8 223.8,249.3 198.4,223.8" fill="#c9b8a0" stroke="#fff" stroke-width="1.5"/>
+<text x="450" y="100" text-anchor="start" fill="#3b3b32" font-size="12" >octógono: 8 bordas</text>
+<text x="450" y="120" text-anchor="start" fill="#3b3b32" font-size="11" >(4 grandes + 4 diagonais)</text>
+<text x="450" y="160" text-anchor="start" fill="#3b3b32" font-size="12" >praça: 4 bordas, 45°</text>
+<text x="450" y="180" text-anchor="start" fill="#3b3b32" font-size="11" >fecha o vazio entre 4</text>
+<text x="450" y="198" text-anchor="start" fill="#3b3b32" font-size="11" >octógonos</text>
+<text x="45" y="20" text-anchor="start" fill="#3b3b32" font-size="13" font-weight="bold">Octógonos e praças</text>
+</svg>

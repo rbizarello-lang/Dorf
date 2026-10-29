@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 470 320" width="470" height="320" font-family="sans-serif" font-size="12">
+<title>Costura de ilhas</title>
+<rect width="470" height="320" fill="#ece7d6"/>
+<polygon points="116.0,110.0 103.0,132.5 77.0,132.5 64.0,110.0 77.0,87.5 103.0,87.5" fill="#3f7a45" stroke="#fff" stroke-width="1.5"/>
+<polygon points="155.0,132.5 142.0,155.0 116.0,155.0 103.0,132.5 116.0,110.0 142.0,110.0" fill="#3f7a45" stroke="#fff" stroke-width="1.5"/>
+<polygon points="116.0,155.0 103.0,177.5 77.0,177.5 64.0,155.0 77.0,132.5 103.0,132.5" fill="#8dbb5a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="155.0,87.5 142.0,110.0 116.0,110.0 103.0,87.5 116.0,65.0 142.0,65.0" fill="#4f9fc8" stroke="#fff" stroke-width="1.5"/>
+<polygon points="77.0,132.5 64.0,155.0 38.0,155.0 25.0,132.5 38.0,110.0 64.0,110.0" fill="#8dbb5a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="356.0,70.0 343.0,92.5 317.0,92.5 304.0,70.0 317.0,47.5 343.0,47.5" fill="#4f9fc8" stroke="#fff" stroke-width="1.5"/>
+<polygon points="356.0,115.0 343.0,137.5 317.0,137.5 304.0,115.0 317.0,92.5 343.0,92.5" fill="#8dbb5a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="395.0,92.5 382.0,115.0 356.0,115.0 343.0,92.5 356.0,70.0 382.0,70.0" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="317.0,92.5 304.0,115.0 278.0,115.0 265.0,92.5 278.0,70.0 304.0,70.0" fill="#c9b8a0" stroke="#fff" stroke-width="1.5"/>
+<polygon points="356.0,230.0 343.0,252.5 317.0,252.5 304.0,230.0 317.0,207.5 343.0,207.5" fill="#c9b8a0" stroke="#fff" stroke-width="1.5"/>
+<polygon points="395.0,252.5 382.0,275.0 356.0,275.0 343.0,252.5 356.0,230.0 382.0,230.0" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="356.0,185.0 343.0,207.5 317.0,207.5 304.0,185.0 317.0,162.5 343.0,162.5" fill="#d9b44a" stroke="#fff" stroke-width="1.5"/>
+<polygon points="356.0,0.0 343.0,22.5 317.0,22.5 304.0,0.0 317.0,-22.5 343.0,-22.5" fill="#ece7d6" fill-opacity="0"/>
+<polygon points="241.0,150.0 228.0,172.5 202.0,172.5 189.0,150.0 202.0,127.5 228.0,127.5" fill="#4f9fc8" fill-opacity="0.35" stroke="#8a6d1a" stroke-width="2" stroke-dasharray="5 3"/>
+<polygon points="241.0,195.0 228.0,217.5 202.0,217.5 189.0,195.0 202.0,172.5 228.0,172.5" fill="#8dbb5a" fill-opacity="0.35" stroke="#8a6d1a" stroke-width="2" stroke-dasharray="5 3"/>
+<polygon points="280.0,172.5 267.0,195.0 241.0,195.0 228.0,172.5 241.0,150.0 267.0,150.0" fill="#d9b44a" fill-opacity="0.35" stroke="#8a6d1a" stroke-width="2" stroke-dasharray="5 3"/>
+<polygon points="202.0,172.5 189.0,195.0 163.0,195.0 150.0,172.5 163.0,150.0 189.0,150.0" fill="#c9b8a0" fill-opacity="0.35" stroke="#8a6d1a" stroke-width="2" stroke-dasharray="5 3"/>
+<path d="M300,80 C270,90 250,120 240,140" fill="none" stroke="#c8553d" stroke-width="2.5"/>
+<text x="150" y="40" text-anchor="middle" fill="#3b3b32" font-size="13" font-weight="bold">Costura de ilhas</text>
+<text x="140" y="205" text-anchor="middle" fill="#3b3b32" font-size="12" >ilha A</text>
+<text x="330" y="25" text-anchor="middle" fill="#c8553d" font-size="12" >ilha B anda e gira</text>
+<text x="330" y="300" text-anchor="middle" fill="#3b3b32" font-size="12" >ilha C (ainda solta)</text>
+<text x="250" y="255" text-anchor="middle" fill="#3b3b32" font-size="11" >3 bordas casam = +3×10 +nó</text>
+</svg>
