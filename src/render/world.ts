@@ -31,6 +31,7 @@ import { PreviewView } from './preview';
 import { FallLayer } from './falls';
 import { FALL_D } from './relief';
 import { skirtWidth } from './terrain';
+import { Warp, isWarped, warpBuild } from './fluid';
 import { LEVEL_STEP, TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type BuildOpts, type TileBuild } from './tileBuilder';
 import { NIGHT_LIGHT } from './nightLight';
 
@@ -535,6 +536,32 @@ function skyFor(theme: Theme, tod: TimeOfDay): Sky {
   };
 }
 
+/** Tracejado da casa vazia com influência: 6 lados com 3 traços cada, um pouco para dentro da borda; no fluido, um anel de 14 traços. */
+function dashGeometry(fluid: boolean): THREE.BufferGeometry {
+  const dashes: THREE.BufferGeometry[] = [];
+  if (fluid) {
+    const n = 14, R = 0.74;
+    for (let i = 0; i < n; i++) {
+      const a0 = ((i + 0.15) / n) * Math.PI * 2, a1 = ((i + 0.85) / n) * Math.PI * 2;
+      const x0 = Math.cos(a0) * R, z0 = Math.sin(a0) * R, x1 = Math.cos(a1) * R, z1 = Math.sin(a1) * R;
+      dashes.push(new THREE.PlaneGeometry(Math.hypot(x1 - x0, z1 - z0), 0.07).rotateX(-Math.PI / 2).rotateY(-Math.atan2(z1 - z0, x1 - x0)).translate((x0 + x1) / 2, 0, (z0 + z1) / 2));
+    }
+    return mergeGeometries(dashes)!;
+  }
+  for (let i = 0; i < 6; i++) {
+    const a0 = (i * Math.PI) / 3, a1 = ((i + 1) * Math.PI) / 3;
+    const p0 = new THREE.Vector2(Math.cos(a0), Math.sin(a0)).multiplyScalar(0.8), p1 = new THREE.Vector2(Math.cos(a1), Math.sin(a1)).multiplyScalar(0.8);
+    for (let d = 0; d < 3; d++) {
+      const t0 = (d + 0.2) / 3, t1 = (d + 0.8) / 3;
+      const x0 = p0.x + (p1.x - p0.x) * t0, z0 = p0.y + (p1.y - p0.y) * t0;
+      const x1 = p0.x + (p1.x - p0.x) * t1, z1 = p0.y + (p1.y - p0.y) * t1;
+      const len = Math.hypot(x1 - x0, z1 - z0);
+      dashes.push(new THREE.PlaneGeometry(len, 0.07).rotateX(-Math.PI / 2).rotateY(-Math.atan2(z1 - z0, x1 - x0)).translate((x0 + x1) / 2, 0, (z0 + z1) / 2));
+    }
+  }
+  return mergeGeometries(dashes)!;
+}
+
 export class World {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 400);
@@ -591,6 +618,35 @@ export class World {
   private infl: THREE.InstancedMesh;
   private inflMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.95, depthWrite: false, fog: false });
   private hoverRing: THREE.Mesh;
+  /** Encaixe fluido (`?fluido`): o deslocamento do desenho das peças (`fluid.ts`); nulo = hexágonos de sempre. */
+  private warp: Warp | null = null;
+  /** Liga o desenho fluido (antes da primeira peça): chão, água e decoração deslocados, casas vazias em mancha. */
+  setFluid(on: boolean) {
+    this.warp = on ? new Warp(0x2a) : null;
+    this.slots.geometry.dispose();
+    this.slots.geometry = on ? new THREE.CircleGeometry(0.8, 28).rotateX(-Math.PI / 2) : new THREE.CircleGeometry(0.9, 6).rotateX(-Math.PI / 2);
+    this.infl.geometry.dispose();
+    this.infl.geometry = dashGeometry(on);
+    this.hoverRing.geometry.dispose();
+    this.hoverRing.geometry = on ? new THREE.RingGeometry(0.72, 0.86, 28).rotateX(-Math.PI / 2) : new THREE.RingGeometry(0.84, 0.97, 6).rotateX(-Math.PI / 2);
+  }
+  get fluid() {
+    return !!this.warp;
+  }
+  /** O centro da casa (x, z) já com o deslocamento do desenho fluido. */
+  private fl(x: number, z: number): { x: number; z: number } {
+    if (!this.warp) return { x, z };
+    const d = this.warp.at(x, z);
+    return { x: x + d[0], z: z + d[1] };
+  }
+  private flq(q: number, r: number) {
+    const { x, z } = hexToWorld(q, r);
+    return this.fl(x, z);
+  }
+  /** A peça pronta, deslocada para a casa (q, r) girada `rot` (sem o fluido, a mesma). */
+  private shaped(b: TileBuild, q: number, r: number, rot: number): TileBuild {
+    return this.warp && !isWarped(b) ? warpBuild(b, tileMatrix(q, r, rot, 0).elements, this.warp) : b;
+  }
   private hoverMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.9, depthWrite: false, fog: false });
   private markers: THREE.Mesh[] = [];
   /** Anéis dourados que se abrem em volta da peça (encaixe perfeito, nova era); cada um com o próprio material para apagar sozinho. */
@@ -715,20 +771,7 @@ export class World {
     this.slots.frustumCulled = false;
     this.slots.position.y = -0.12;
     this.scene.add(this.slots);
-    // Tracejado: 6 lados com 3 traços cada, um pouco para dentro da borda da casa.
-    const dashes: THREE.BufferGeometry[] = [];
-    for (let i = 0; i < 6; i++) {
-      const a0 = (i * Math.PI) / 3, a1 = ((i + 1) * Math.PI) / 3;
-      const p0 = new THREE.Vector2(Math.cos(a0), Math.sin(a0)).multiplyScalar(0.8), p1 = new THREE.Vector2(Math.cos(a1), Math.sin(a1)).multiplyScalar(0.8);
-      for (let d = 0; d < 3; d++) {
-        const t0 = (d + 0.2) / 3, t1 = (d + 0.8) / 3;
-        const x0 = p0.x + (p1.x - p0.x) * t0, z0 = p0.y + (p1.y - p0.y) * t0;
-        const x1 = p0.x + (p1.x - p0.x) * t1, z1 = p0.y + (p1.y - p0.y) * t1;
-        const len = Math.hypot(x1 - x0, z1 - z0);
-        dashes.push(new THREE.PlaneGeometry(len, 0.07).rotateX(-Math.PI / 2).rotateY(-Math.atan2(z1 - z0, x1 - x0)).translate((x0 + x1) / 2, 0, (z0 + z1) / 2));
-      }
-    }
-    this.infl = new THREE.InstancedMesh(mergeGeometries(dashes)!, this.inflMat, 256);
+    this.infl = new THREE.InstancedMesh(dashGeometry(false), this.inflMat, 256);
     this.infl.count = 0;
     this.infl.frustumCulled = false;
     this.infl.position.y = -0.11;
@@ -1638,8 +1681,9 @@ export class World {
     return key.startsWith('crop:') || key === 'grass' || key === 'flower';
   }
 
-  private bake(p: Placed, b: TileBuild, flush = true) {
+  private bake(p: Placed, b0: TileBuild, flush = true) {
     const m = tileMatrix(p.q, p.r, p.rot, this.heightOf(p.q, p.r));
+    const b = this.shaped(b0, p.q, p.r, p.rot);
     const ch = this.chunkFor(p.q, p.r);
     const slot = ch.append(b, m);
     if (slot.count) this.waterSlots.set(p.key, { chunk: ch, ...slot });
@@ -1687,7 +1731,8 @@ export class World {
       const { x, z } = hexToWorld(q, r);
       maxR = Math.max(maxR, Math.hypot(x, z));
       if (i >= 512) continue;
-      this.slots.setMatrixAt(i++, tmpM.makeTranslation(x, this.heightOf(q, r), z));
+      const f = this.fl(x, z);
+      this.slots.setMatrixAt(i++, tmpM.makeTranslation(f.x, this.heightOf(q, r), f.z));
     }
     this.slotCount = i;
     this.slots.count = i;
@@ -1703,7 +1748,8 @@ export class World {
     for (const [q, r] of cells) {
       if (i >= 256) break;
       const { x, z } = hexToWorld(q, r);
-      this.infl.setMatrixAt(i++, tmpM.makeTranslation(x, this.heightOf(q, r), z));
+      const f = this.fl(x, z);
+      this.infl.setMatrixAt(i++, tmpM.makeTranslation(f.x, this.heightOf(q, r), f.z));
     }
     this.infl.count = i;
     this.infl.instanceMatrix.needsUpdate = true;
@@ -1731,16 +1777,16 @@ export class World {
     if (sig === this.stampSig) return;
     this.stampSig = sig;
     const geos = left.map((s) => {
-      const { x, z } = hexToWorld(s.q, s.r);
+      const { x, z } = this.flq(s.q, s.r);
       // Cada carimbo um pouco torto, como batido à mão (sem sorteio: vem da posição).
       return stampGeometry(s.kind).rotateY(Math.sin(s.q * 12.9898 + s.r * 78.233) * 0.25).translate(x, this.heightOf(s.q, s.r), z);
     });
     for (const sp of springs) {
-      const { x, z } = hexToWorld(sp.q, sp.r);
+      const { x, z } = this.flq(sp.q, sp.r);
       geos.push(stampGeometry('spring').scale(1.35, 1, 1.35).rotateY(Math.sin(sp.q * 12.9898 + sp.r * 78.233) * 0.25).translate(x, this.heightOf(sp.q, sp.r), z));
     }
     for (const p of board.posts) {
-      const { x, z } = hexToWorld(p.q, p.r);
+      const { x, z } = this.flq(p.q, p.r);
       geos.push(postStampGeometry().rotateY(0.2).translate(x, this.heightOf(p.q, p.r), z));
     }
     this.stamps.geometry.dispose();
@@ -1760,13 +1806,13 @@ export class World {
     let live: LiveTile;
     const ly = this.heightOf(p.q, p.r);
     let y0 = ly + 1.2;
-    if (this.ghost && this.ghost.def === p.def && this.ghost.sig === sig) {
+    if (this.ghost && this.ghost.def === p.def && this.ghost.sig === sig && (!this.warp || this.ghostKey.endsWith(`:${p.q},${p.r},${p.rot}`))) {
       live = this.ghost;
       y0 = live.group.position.y;
       this.ghost = null;
       this.ghostKey = '';
     } else {
-      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths, eggs, spring: p.spring, levels: lvs }), sig, this.lib, this.quality !== 'low');
+      live = new LiveTile(p.def, this.shaped(this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths, eggs, spring: p.spring, levels: lvs }), p.q, p.r, p.rot), sig, this.lib, this.quality !== 'low');
       this.scene.add(live.group);
       this.dropGhost();
     }
@@ -1962,10 +2008,10 @@ export class World {
     const site = check.valid ? check.site?.kind : undefined;
     const wonder = check.valid && check.wonder && !def.special ? true : undefined;
     const sig = `${check.water?.spring ? 's' : ''}${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}`;
-    const key = `${def.seed}:${this.theme.id}:${sig}:${levelSig(lvs)}`;
+    const key = `${def.seed}:${this.theme.id}:${sig}:${levelSig(lvs)}${this.warp ? `:${q},${r},${rot}` : ''}`;
     if (!this.ghost || this.ghostKey !== key) {
       const old = this.ghost;
-      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site, wonder, widths, spring: check.water?.spring, levels: lvs }), sig, this.lib, this.quality !== 'low');
+      this.ghost = new LiveTile(def, this.shaped(this.build(def, syn, flow, { eraMark: mark, site, wonder, widths, spring: check.water?.spring, levels: lvs }), q, r, rot), sig, this.lib, this.quality !== 'low');
       this.ghostKey = key;
       this.scene.add(this.ghost.group);
       if (old && old.def === def) {
@@ -1987,7 +2033,8 @@ export class World {
     const ly = lvs ? lvs.own * LEVEL_STEP : 0;
     this.ghostTarget.set(x, 0.32 + ly, z);
     this.hoverRing.visible = true;
-    this.hoverRing.position.set(x, -0.1 + ly, z);
+    const hf = this.fl(x, z);
+    this.hoverRing.position.set(hf.x, -0.1 + ly, hf.z);
     this.hoverMat.color.set(check.valid ? '#ffffff' : '#ff5a4f');
     for (let i = 0; i < 6; i++) {
       const m = this.markers[i];
@@ -2203,7 +2250,8 @@ export class World {
       this.pickPlane.constant = -l * LEVEL_STEP;
       const hit = this.ray.ray.intersectPlane(this.pickPlane, this.groundHit);
       if (!hit) continue;
-      const [q, r] = worldToHex(hit.x, hit.z);
+      const [wx, wz] = this.warp ? this.warp.inverse(hit.x, hit.z) : [hit.x, hit.z];
+      const [q, r] = worldToHex(wx, wz);
       if (l === 0) return [q, r];
       if (this.pieceRelief) {
         if (this.board?.get(q, r) ? this.topOf(q, r) >= l : l <= this.handLevel) return [q, r];

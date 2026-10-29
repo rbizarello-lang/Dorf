@@ -99,6 +99,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?fx=ao.gi.ssr.rays.traa.msaa.bloom.dof.tilt.ink.finish.film` | liga os efeitos de pós um a um (medir custo; `dof` é a profundidade de campo, só do Cinema; `tilt` é o desfoque de miniatura da Alta e do Ultra; `finish` é só o grão e a lente, `film` soma as amostras a mais do Cinema); `?fx=` desliga todos |
 | `?timescale=0.05` | desacelera o mundo (animações nas capturas por software) |
 | `?silhueta` | decorações pretas sobre chão branco: confere se vilas, construções e marcos leem de longe |
+| `?fluido` | encaixe fluido (protótipo, só visual, `src/render/fluid.ts`): chão, água, queda e decoração de cada peça são deslocados no plano por uma função só das coordenadas do mundo (a emenda segue fechada), as casas vazias viram manchas redondas e `pickHex` desfaz o deslocamento. A lógica segue hexagonal; sem save novo. `?fluido=0` desliga. A espuma e a areia do mar (`seaMap`) e os trajetos de barcos e trens ainda seguem o hexágono |
 | `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
 | `window.__ripple(idade)` | dispara a onda do chão no foco da câmera, já com essa idade em segundos |
 | `window.__weather(tipo, idade?)` | clima tocável: `'rain'`, `'snow'`, `'sun'` ou `null` (encerra); com `idade` em segundos, já entra com essa idade (capturas por software). `scripts/weather.mjs` roda os 5 temas e falha com erro no console (`SHOTS=holanda:rain,inverno:snow,egito:sun` grava capturas) |

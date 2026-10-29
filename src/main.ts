@@ -104,6 +104,8 @@ async function createWorld(): Promise<World> {
   }
 }
 const world = await createWorld();
+// Encaixe fluido (`?fluido`): antes de qualquer peça, para o desenho de todas já nascer deslocado.
+if (new URLSearchParams(location.search).get('fluido') !== null && new URLSearchParams(location.search).get('fluido') !== '0') world.setFluid(true);
 // `?levels=0` desliga o relevo (platôs): o tabuleiro sai plano, como antes (comparar capturas).
 world.levelsEnabled = params.get('levels') !== '0';
 {
