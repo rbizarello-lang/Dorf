@@ -1073,7 +1073,16 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const edgeLv = (e: number) => (lv ? lv.own + (secs?.[e] ?? 0) : 0);
   const dropOf = (e: number) => (lv && e >= 0 ? Math.max(0, edgeLv(e) - lv.nb[e]) * LEVEL_STEP : 0);
   /** Quanto o chão sobe neste ponto (mundo): o campo de altura da peça, sem mexer no leito dos rios (a água fica onde sempre esteve). */
-  const liftAt = (x: number, z: number) => (terr ? terr.at(x, z, field ? smooth(0.02, 0.2, field.e(x, z)) : 1) * LEVEL_STEP : 0);
+  const liftAt = (x: number, z: number) => {
+    if (!terr) return 0;
+    if (!field) return terr.at(x, z) * LEVEL_STEP;
+    const e = field.e(x, z);
+    const v = terr.at(x, z, smooth(0.02, 0.2, e));
+    // O vale do ondulado não afunda a margem abaixo da linha d'água: a água inundaria a margem e a decoração (casas, plantas) ficaria dentro dela.
+    const lift = (v < 0 ? v * smooth(0.12, 0.4, e) : v) * LEVEL_STEP;
+    // Nem longe da água o vale afunda o chão abaixo da linha d'água: viraria uma poça solta no meio do campo.
+    return e > 0.03 ? Math.max(lift, WATER_Y + 0.01 - groundY(x, z)) : lift;
+  };
   /** Inclinação do chão (altura por distância): a decoração, as casas principalmente, foge do que é íngreme. */
   const steep = (x: number, z: number) => (terr ? terr.slope(x, z) * LEVEL_STEP : 0);
   /** Comprimento do traçado e quanto cada ponta desce: a descida acompanha o arco desde a borda (`len` de rampa). */

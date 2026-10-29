@@ -2,6 +2,9 @@
 // borda casa ponto a ponto (sem fresta), a peça plana continua plana e a inclinação é limitada (sem agulhas nem degraus).
 import { corner, DIRS, edgeMid, hexToWorld, INR } from '../src/core/hex';
 import { mulberry32 } from '../src/core/rng';
+import { T } from '../src/core/tiles';
+import { buildTile, WATER_Y } from '../src/render/tileBuilder';
+import { THEMES } from '../src/themes/themes';
 import { edgeProfile, isFlat, makeTerrain, nearestOnEdge, SKIRT_MAX, skirtDrop, skirtEnd, skirtWidth, swellAt, type TerrainSpec } from '../src/render/terrain';
 
 let failed = 0;
@@ -116,6 +119,41 @@ check(steepest < 6, `inclinação demais: ${steepest} níveis por unidade`);
   }
   console.log(`saia: ${hits} pontos conferidos, pior emenda com o ondulado ${worstSeam.toExponential(1)}, folga mínima da saia ${worstEnv.toExponential(1)} níveis`);
 }
+// Água e chão: o ondulado do mundo não afunda a margem nem o campo abaixo da linha d'água (uma poça solta, ou a água por cima das
+// casas), e a decoração fica fora da água. Peças com rio e lago em todos os níveis, com o ondulado ligado.
+{
+  const holanda = THEMES.find((t) => t.id === 'holanda')!;
+  const W = T.Water, G = T.Grass, V = T.Village, F = T.Forest, P = T.Field;
+  const sets = [[W, V, V, W, G, G], [W, W, W, G, G, G], [W, V, F, W, V, P], [V, W, W, V, V, W], [W, W, W, W, W, G], [W, G, V, V, G, W]];
+  let n = 0, inWater = 0, puddle = 0;
+  for (const edges of sets) for (let seed = 1; seed <= 12; seed++) for (const own of [0, 1, 2]) {
+    const z6 = [0, 0, 0, 0, 0, 0];
+    const b = buildTile(edges, seed * 7919, holanda, { detail: 0.6, houses: [], levels: { own, nb: [own, own, own, own, own, own], sec: z6, placed: [false, false, false, false, false, false], terrain: { h: z6, c: 0, he: z6, co: z6, world: { x: seed, z: own * 3, rot: 0, seed: 5 } } } });
+    const wet = (x: number, z: number) => {
+      for (let i = 0; i < b.water.length; i += 9) {
+        const [ax, az, bx, bz, cx, cz] = [b.water[i], b.water[i + 2], b.water[i + 3], b.water[i + 5], b.water[i + 6], b.water[i + 8]];
+        const d = (bx - ax) * (cz - az) - (cx - ax) * (bz - az);
+        if (Math.abs(d) < 1e-9) continue;
+        const u = ((x - ax) * (cz - az) - (cx - ax) * (z - az)) / d, v = ((bx - ax) * (z - az) - (x - ax) * (bz - az)) / d;
+        if (u < -1e-6 || v < -1e-6 || u + v > 1 + 1e-6) continue;
+        const j = i / 3;
+        if (b.wbed[j * 4 + 3] * (1 - u - v) + b.wbed[(j + 1) * 4 + 3] * u + b.wbed[(j + 2) * 4 + 3] * v > 0.003) return true;
+      }
+      return false;
+    };
+    for (const d of b.decos) {
+      if (/^(lily|reed|moored|fish|wheel|fauna|dock|pier|boat|bridge)/.test(d.key) || d.transient) continue;
+      n++;
+      if (wet(d.x, d.z)) inWater++;
+    }
+    // Chão abaixo da linha d'água sem água por cima: poça solta (a lateral e a saia ficam de fora: y < -0,2 ou fora do tampo).
+    for (let i = 1; i < b.pos.length; i += 3) if (b.pos[i] > -0.2 && b.pos[i] < WATER_Y - 0.006 && Math.hypot(b.pos[i - 1], b.pos[i + 1]) < 0.85 && !wet(b.pos[i - 1], b.pos[i + 1])) puddle++;
+  }
+  check(inWater <= n * 0.001, `decoração dentro da água com o relevo ondulado: ${inWater} de ${n}`);
+  check(puddle === 0, `chão abaixo da linha d'água sem água por cima: ${puddle} vértices`);
+  console.log(`água: ${n} decorações conferidas, ${inWater} na água`);
+}
+
 const flat: TerrainSpec = { h: [1, 1, 1, 1, 1, 1], c: 1, he: [1, 1, 1, 1, 1, 1], co: [1, 1, 1, 1, 1, 1], vil: [0, 0, 0, 0, 0, 0], seed: 5 };
 check(isFlat(flat), 'peça plana não é plana');
 check(!isFlat({ ...flat, he: [2, 1, 1, 1, 1, 1] }), 'perfil de emenda diferente conta como relevo');
