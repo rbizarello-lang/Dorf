@@ -20,8 +20,6 @@ export const TILE_T = 0.28;
 export const LEVEL_STEP = 0.3;
 /** Inclinação (altura por distância) acima da qual a decoração não assenta: ~17°, o resto é encosta de rocha. */
 const STEEP_MAX = 0.3;
-/** Altura mínima da borda (em níveis do mundo) para ela ganhar saia: abaixo disso fica a lateral baixa de sempre. */
-const SKIRT_MIN = 0.15;
 /** Quanto a saia afunda (em níveis) abaixo da curva que a peça vizinha segue, para não ficar no mesmo plano que o chão dela. */
 const SKIRT_UNDER = 0.1;
 /** Comprimento da rampa de estrada e trilho na peça alta, contado da borda para dentro. */
@@ -1182,18 +1180,20 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     // O pé da encosta vira terra escura (a cor da lateral do tema), nunca areia cinzenta: é a ilha que desce para a água.
     const soil = shade(tc(theme.side).clone().lerp(tc(theme.sideDark), 0.3), 0.9);
     const floorY = -TILE_T - own0 * LEVEL_STEP;
-    const M = 6;
+    const M = 8;
     type P = { p: V3; c: THREE.Color; s: Splat };
     /** Uma coluna da saia: do ponto da borda para fora, na direção (dx, dz), com a altura `hb` (níveis do mundo) na borda. */
     const column = (base: { p: V3; c: THREE.Color; s: Splat }, dx: number, dz: number, hb: number): P[] => {
       const w = Math.max(skirtWidth(hb), 0.02);
+      const grass = base.c;
       const out: P[] = [];
       for (let m = 0; m <= M; m++) {
-        const rho = (w * m) / M, f = smooth(0.5, 1, m / M);
+        // A cor passa do chão da borda para a terra só no flanco e no pé (pela altura que já desceu), nunca para um cinza liso.
+        const rho = (w * m) / M, f = smooth(0.35, 1, skirtDrop(hb, rho) / Math.max(1e-6, skirtDrop(hb, w)));
         out.push({
           // A saia fica um fio abaixo do chão que a vizinha vai ter ali (que segue a mesma curva): sem isso as duas superfícies coincidem e cintilam.
           p: [base.p[0] + dx * rho, base.p[1] - (skirtDrop(hb, rho) + SKIRT_UNDER * smooth(0, 0.25, rho)) * LEVEL_STEP, base.p[2] + dz * rho],
-          c: base.c.clone().lerp(soil, 0.75 * f),
+          c: grass.clone().lerp(soil, 0.7 * f),
           s: base.s.map((v, j) => v + (SPLAT_WALL[j] - v) * f) as unknown as Splat,
         });
       }
@@ -1236,7 +1236,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       // Beiral: do fim da saia ao fundo comum.
       const e0 = a[M], e1 = b[M];
       const dk = shade(soil, 0.7);
-      g.quad(e0.p, e1.p, [e1.p[0], floorY, e1.p[2]], [e0.p[0], floorY, e0.p[2]], e0.c, e1.c, dk, dk, nrm, SPLAT_WALL);
+      if (Math.min(e0.p[1], e1.p[1]) - floorY > 0.004) g.quad(e0.p, e1.p, [e1.p[0], floorY, e1.p[2]], [e0.p[0], floorY, e0.p[2]], e0.c, e1.c, dk, dk, nrm, SPLAT_WALL);
     }
   };
 
@@ -1292,7 +1292,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const floor = -TILE_T - (lv?.own ?? 0) * LEVEL_STEP;
     const rockC = tc(theme.relief?.rock ?? theme.rock);
     // Borda de terra virada para o vazio com altura: em vez de um paredão, uma saia (encosta arredondada que desce do lado de fora).
-    const skirted = !!spec && !hidden && !lv?.placed?.[i] && Array.from({ length: N + 1 }, (_, k) => V(N - k, k).p[1] / LEVEL_STEP + spec.own!).some((hb) => hb > SKIRT_MIN);
+    const skirted = !!spec && !hidden && !lv?.placed?.[i];
     // Rio: a saia desce também sob a boca da água (o leito segue pela encosta); só o corte de vidro da água fica na beira, como num aquário.
     const mouth = Array.from({ length: N + 1 }, (_, k) => {
       if (!skirted || edges[i] !== T.Water || !field) return false;

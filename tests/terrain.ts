@@ -2,7 +2,7 @@
 // borda casa ponto a ponto (sem fresta), a peça plana continua plana e a inclinação é limitada (sem agulhas nem degraus).
 import { corner, DIRS, edgeMid, hexToWorld, INR } from '../src/core/hex';
 import { mulberry32 } from '../src/core/rng';
-import { edgeProfile, isFlat, makeTerrain, nearestOnEdge, SKIRT_END, skirtDrop, skirtWidth, swellAt, type TerrainSpec } from '../src/render/terrain';
+import { edgeProfile, isFlat, makeTerrain, nearestOnEdge, SKIRT_MAX, skirtDrop, skirtEnd, skirtWidth, swellAt, type TerrainSpec } from '../src/render/terrain';
 
 let failed = 0;
 const check = (ok: boolean, msg: string) => {
@@ -87,7 +87,8 @@ check(steepest < 6, `inclinação demais: ${steepest} níveis por unidade`);
       const { t: tq, rho } = nearestOnEdge(w, px - wa.x, pz - wa.z);
       const hb = edgeProfile(A, w, tq);
       const [qx, qz] = [ax + (bx - ax) * tq, az + (bz - az) * tq];
-      const skirt = hb + swellAt(99, wa.x + qx, wa.z + qz) - skirtDrop(hb, rho);
+      const hbs = hb + swellAt(99, wa.x + qx, wa.z + qz);
+      const skirt = hbs - skirtDrop(hbs, rho);
       worstEnv = Math.min(worstEnv, tb.at(lx, lz) - skirt);
       hits++;
     }
@@ -95,10 +96,10 @@ check(steepest < 6, `inclinação demais: ${steepest} níveis por unidade`);
   check(worstSeam < 0.01, `emenda com o ondulado: ${worstSeam} níveis`);
   check(worstEnv > -1e-6, `a saia da vizinha passa acima do chão novo: ${worstEnv} níveis`);
   check(hits > 500, `poucos pontos de saia conferidos: ${hits}`);
-  // A curva da saia: começa na borda, termina em hb + SKIRT_END na largura dela e nunca desce.
-  for (const hb of [0, 0.5, 1, 1.5, 2]) {
+  // A curva da saia: começa na borda, termina em hb + skirtEnd(hb) na largura dela e nunca desce.
+  for (const hb of [-0.1, 0, 0.5, 1, 1.5, 2, 2.9]) {
     const w = skirtWidth(hb);
-    check(skirtDrop(hb, 0) === 0 && Math.abs(skirtDrop(hb, w + 0.01) - (hb + SKIRT_END)) < 1e-9, `saia ${hb}: extremos`);
+    check(skirtDrop(hb, 0) === 0 && Math.abs(skirtDrop(hb, w + 0.01) - (hb + skirtEnd(hb))) < 1e-9, `saia ${hb}: extremos`);
     let prev = 0, ok = true;
     for (let i = 1; i <= 50; i++) {
       const d = skirtDrop(hb, (i / 50) * (w + 0.1));
@@ -106,7 +107,12 @@ check(steepest < 6, `inclinação demais: ${steepest} níveis por unidade`);
       prev = d;
     }
     check(ok, `saia ${hb}: não monótona`);
-    check(w <= 0.95, `saia ${hb}: larga demais (${w})`);
+    check(w <= SKIRT_MAX, `saia ${hb}: larga demais (${w})`);
+    // O pé não passa do fundo da peça (0,28) e a encosta nunca é íngreme demais (inclinação no mundo, até ~50°).
+    check(hb - skirtDrop(hb, w) >= -0.28 / 0.3 - 1e-9, `saia ${hb}: o pé passa do fundo da peça`);
+    let steep = 0;
+    for (let i = 0; i < 200; i++) steep = Math.max(steep, ((skirtDrop(hb, ((i + 1) / 200) * w) - skirtDrop(hb, (i / 200) * w)) * 0.3) / (w / 200));
+    check(steep < 1.2, `saia ${hb}: íngreme demais (${steep.toFixed(2)})`);
   }
   console.log(`saia: ${hits} pontos conferidos, pior emenda com o ondulado ${worstSeam.toExponential(1)}, folga mínima da saia ${worstEnv.toExponential(1)} níveis`);
 }

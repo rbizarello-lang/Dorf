@@ -43,23 +43,32 @@ export interface Terrain {
   slope(x: number, z: number): number;
 }
 
-/** Saia (borda sobre o vazio): onde ela acaba (níveis abaixo do chão comum, o 0), largura por nível de altura da borda e largura máxima. */
-export const SKIRT_END = 0.3;
-const SKIRT_K = 0.5;
-const SKIRT_MAX = 0.95;
-/** Largura da saia numa borda de altura `hb` (níveis do mundo): zero no chão comum, e o paredão da ilha continua sendo a espessura dela. */
-export const skirtWidth = (hb: number) => Math.min(SKIRT_MAX, SKIRT_K * Math.max(0, hb));
+/** Altura de um nível no mundo (a mesma de `LEVEL_STEP`, em tileBuilder) e a espessura da peça (`TILE_T`): o pé da saia desce até o fundo dela. */
+const LV = 0.3;
+const FLOOR_W = 0.28;
+/** Largura máxima da saia (fica dentro da casa vizinha) e inclinação média alvo (altura por largura, no mundo: ~35°). */
+export const SKIRT_MAX = 1.0;
+const SKIRT_SLOPE = 0.7;
+/** Quanto do perfil é a curva em S (o resto é reta): o alto da encosta arredonda e o pé se deita, sem barriga. */
+const SKIRT_S = 0.4;
 /**
- * Quanto a saia desce da altura da borda (`hb`, níveis do mundo) a `rho` de distância dela: de 0 até `hb + SKIRT_END`. A curva é
- * a de um morro (parte plana e vai ficando mais íngreme até o pé, onde a rocha aparece), não a de uma rampa.
+ * Fundo do pé da saia, em níveis abaixo do chão comum (0): a borda baixa desce até o fundo da peça (sem parede), a alta termina
+ * mais acima e deixa um beiral curto. Depende só da altura da borda, então os dois lados concordam.
+ */
+export const skirtEnd = (hb: number) => (FLOOR_W - 0.095 * Math.min(2, Math.max(0, hb))) / LV;
+/** Largura da saia numa borda de altura `hb` (níveis do mundo): a que dá a inclinação alvo até o pé, no máximo `SKIRT_MAX`. */
+export const skirtWidth = (hb: number) => Math.min(SKIRT_MAX, ((hb + skirtEnd(hb)) * LV) / SKIRT_SLOPE);
+/**
+ * Quanto a saia desce da altura da borda (`hb`, níveis do mundo) a `rho` de distância dela: de 0 até `hb + skirtEnd(hb)`, o pé
+ * sempre na mesma altura absoluta. Curva de morro: ombro arredondado, flanco quase reto e pé deitado.
  */
 export function skirtDrop(hb: number, rho: number): number {
   const w = skirtWidth(hb);
-  const total = Math.max(0, hb) + SKIRT_END;
+  const total = hb + skirtEnd(hb);
   if (rho <= 0) return 0;
-  if (w < 1e-6 || rho >= w) return total;
+  if (rho >= w) return total;
   const t = rho / w;
-  return total * t * t;
+  return total * ((1 - SKIRT_S) * t + SKIRT_S * t * t * (3 - 2 * t));
 }
 
 const SIGMA = 0.72;
@@ -167,9 +176,10 @@ export function makeTerrain(s: TerrainSpec): Terrain {
       if (!s.env?.[i]) continue;
       const { t, rho } = nearestOnEdge(i, x, z);
       if (rho > SKIRT_MAX) continue;
-      const hb = own + edgeProfile(s, i, t);
       const [ax, az] = CORNERS[i], [bx, bz] = CORNERS[(i + 1) % 6];
-      m = Math.max(m, hb + swell(ax + (bx - ax) * t, az + (bz - az) * t) - skirtDrop(hb, rho) - own);
+      // A altura da borda da vizinha já traz o ondulado: é a mesma que o `skirtFor` lê no vértice dela.
+      const hb = own + edgeProfile(s, i, t) + swell(ax + (bx - ax) * t, az + (bz - az) * t);
+      m = Math.max(m, hb - skirtDrop(hb, rho) - own);
     }
     return m;
   };
