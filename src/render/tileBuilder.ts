@@ -3,7 +3,7 @@ import { corner, edgeMid, INR } from '../core/hex';
 import type { DayPhase, EggKit } from '../core/eggs';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
 import { FALL_D, HILL, hillProfile, PEAK, PEAK_CONES, PEAK_REACH } from './relief';
-import { isFlat, makeTerrain, skirtDrop, skirtWidth, type TerrainSpec } from './terrain';
+import { isFlat, makeTerrain, skirtDrop, skirtEnd, skirtWidth, type TerrainSpec } from './terrain';
 import type { SynKind } from '../core/synergy';
 import type { SiteKind } from '../core/sites';
 import type { SpecialKind } from '../core/specials';
@@ -1203,18 +1203,29 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const soil = shade(tc(theme.side).clone().lerp(tc(theme.sideDark), 0.3), 0.9);
     const floorY = -TILE_T - own0 * LEVEL_STEP;
     const M = 8;
+    /** Linhas da saia (fração da largura): mais cerradas junto da borda, onde a boca de água faz o degrau. */
+    const FR = [0, 0.03, 0.08, 0.15, 0.3, 0.5, 0.7, 0.85, 1];
+    /** Boca de água: a encosta cai logo (`SKIRT_CHUTE` níveis em `SKIRT_CHUTE_W` da largura), como a queda que a vizinha mais baixa fará. */
+    const SKIRT_CHUTE = 1.15, SKIRT_CHUTE_W = 0.14;
     type P = { p: V3; c: THREE.Color; s: Splat };
     /** Uma coluna da saia: do ponto da borda para fora, na direção (dx, dz), com a altura `hb` (níveis do mundo) na borda. */
     const column = (base: { p: V3; c: THREE.Color; s: Splat }, dx: number, dz: number, hb: number): P[] => {
       const w = Math.max(skirtWidth(hb), 0.02);
       const grass = base.c;
       const out: P[] = [];
+      // Coluna sob a água (o fundo já subiu ao lábio): `ck` = 1 faz o degrau da boca; na margem some.
+      const ck = edges[i] === T.Water ? Math.max(0, Math.min(1, (WATER_Y - base.p[1]) / 0.01)) : 0;
+      const total = hb + skirtEnd(hb);
+      const dropAt = (rho: number) => {
+        const n = skirtDrop(hb, rho);
+        return ck > 0 ? n + (Math.max(n, Math.min(total, SKIRT_CHUTE * smooth(0, SKIRT_CHUTE_W * w, rho))) - n) * ck : n;
+      };
       for (let m = 0; m <= M; m++) {
         // A cor passa do chão da borda para a terra só no flanco e no pé (pela altura que já desceu), nunca para um cinza liso.
-        const rho = (w * m) / M, f = smooth(0.35, 1, skirtDrop(hb, rho) / Math.max(1e-6, skirtDrop(hb, w)));
+        const rho = w * FR[m], f = smooth(0.35, 1, dropAt(rho) / Math.max(1e-6, total));
         out.push({
           // A saia fica um fio abaixo do chão que a vizinha vai ter ali (que segue a mesma curva): sem isso as duas superfícies coincidem e cintilam.
-          p: [base.p[0] + dx * rho, base.p[1] - (skirtDrop(hb, rho) + SKIRT_UNDER * smooth(0, 0.25, rho)) * LEVEL_STEP, base.p[2] + dz * rho],
+          p: [base.p[0] + dx * rho, base.p[1] - (dropAt(rho) + SKIRT_UNDER * smooth(0, 0.25, rho)) * LEVEL_STEP, base.p[2] + dz * rho],
           c: grass.clone().lerp(soil, 0.7 * f),
           s: base.s.map((v, j) => v + (SPLAT_WALL[j] - v) * f) as unknown as Splat,
         });
