@@ -44,6 +44,12 @@ const CHUNK = 8;
  * e a câmera (e a sombra) deixam de desenhar o bloco fora de vista.
  */
 const REGION = 32;
+/**
+ * O super-bloco central se estende `REGION_MARGIN` além das bordas: o mapa que passa um pouco de 32 de largura (o Relevo estica para
+ * um lado) não abre um lote novo de cada kit só para as peças da ponta, o que somava dezenas de chamadas de desenho.
+ */
+const REGION_MARGIN = 6;
+const regionOf = (v: number) => (v >= -REGION / 2 - REGION_MARGIN && v < REGION / 2 + REGION_MARGIN ? 0 : Math.floor((v + REGION / 2) / REGION));
 /** A chave do lote é `kit@cq,cr`. O kit pode ter `:` (`wall:0`), nunca `@`. */
 function poolKey(id: string) {
   const at = id.lastIndexOf('@');
@@ -1600,8 +1606,8 @@ export class World {
   }
 
   private pool(key: string, q: number, r: number) {
-    const cq = Math.floor((q + REGION / 2) / REGION);
-    const cr = Math.floor((r + REGION / 2) / REGION);
+    const cq = regionOf(q);
+    const cr = regionOf(r);
     const id = `${key}@${cq},${cr}`;
     let p = this.pools.get(id);
     if (!p) {
