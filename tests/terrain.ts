@@ -1,9 +1,9 @@
 // Campo de altura contínuo da peça (src/render/terrain.ts): a emenda entre duas peças vizinhas que concordam no perfil da
 // borda casa ponto a ponto (sem fresta), a peça plana continua plana e a inclinação é limitada (sem agulhas nem degraus).
-import { corner, DIRS, edgeMid, hexToWorld, INR } from '../src/core/hex';
+import { corner, DIRS, edgeMid, hexToWorld, INR, opposite } from '../src/core/hex';
 import { mulberry32 } from '../src/core/rng';
 import { T } from '../src/core/tiles';
-import { buildTile, WATER_Y } from '../src/render/tileBuilder';
+import { buildTile, LEVEL_STEP, WATER_Y } from '../src/render/tileBuilder';
 import { THEMES } from '../src/themes/themes';
 import { edgeProfile, isFlat, makeTerrain, nearestOnEdge, SKIRT_MAX, skirtDrop, skirtEnd, skirtWidth, swellAt, type TerrainSpec } from '../src/render/terrain';
 
@@ -152,6 +152,109 @@ check(steepest < 6, `inclinação demais: ${steepest} níveis por unidade`);
   check(inWater <= n * 0.001, `decoração dentro da água com o relevo ondulado: ${inWater} de ${n}`);
   check(puddle === 0, `chão abaixo da linha d'água sem água por cima: ${puddle} vértices`);
   console.log(`água: ${n} decorações conferidas, ${inWater} na água`);
+}
+
+// Fresta entre saias: peças vizinhas (de 3 a 5 das 7 casas em volta do Centro, em ordem sorteada, com rio e trilho) e a casa vazia ao lado
+// delas: toda a faixa de 0,2 em volta de cada peça tem chão (visto de cima), em qualquer ordem de colocação.
+{
+  const rgap = mulberry32(99);
+  const theme = THEMES.find((t) => t.id === 'holanda')!;
+  const G = T.Grass;
+interface P { q: number; r: number; hw: number[]; edges: T[]; he: number[]; co: number[]; own: number }
+const placed = new Map<string, P>();
+const key = (q: number, r: number) => q + ',' + r;
+function seam(q: number, r: number, hw: number[], ew: T[]) {
+  const he = hw.slice(), co = hw.map((v, k) => (hw[(k + 5) % 6] + v) / 2);
+  for (let w = 0; w < 6; w++) {
+    if (ew[w] === T.Water || ew[w] === T.Rail) continue;
+    const n = placed.get(key(q + DIRS[w][0], r + DIRS[w][1]));
+    if (!n) continue;
+    const o = opposite(w);
+    he[w] = n.he[o];
+    co[w] = n.co[(o + 1) % 6];
+    co[(w + 1) % 6] = n.co[o];
+  }
+  return { he, co };
+}
+function put(q: number, r: number, hw: number[], edges: T[], seed: number) {
+  const own = Math.min(...hw);
+  const { he, co } = seam(q, r, hw, edges);
+  const ct = hw.reduce((p, v) => p + v, 0) / 6;
+  const pl = [0, 1, 2, 3, 4, 5].map((w) => !!placed.get(key(q + DIRS[w][0], r + DIRS[w][1])));
+  const loc = (a: number[]) => a.map((v) => v - own);
+  const { x, z } = hexToWorld(q, r);
+  const b = buildTile(edges, seed, theme, { detail: 0.3, houses: [], levels: { own, nb: hw.map((v, w) => (pl[w] ? placed.get(key(q + DIRS[w][0], r + DIRS[w][1]))!.hw[opposite(w)] : v)), sec: loc(hw), placed: pl, terrain: { h: loc(hw), c: ct - own, he: loc(he), co: loc(co), world: { x, z, rot: 0, seed: 1234 } } } });
+  placed.set(key(q, r), { q, r, hw, edges, he, co, own });
+  return { b, x, z, oy: own * LEVEL_STEP };
+}
+const rh = () => {
+  const h = [Math.floor(rgap() * 3), 0, 0, 0, 0, 0];
+  for (let k = 1; k < 6; k++) h[k] = Math.max(0, Math.min(2, h[k - 1] + Math.floor(rgap() * 3) - 1));
+  return h;
+};
+const RES = 0.03;
+const TYPES = [T.Grass, T.Grass, T.Forest, T.Village, T.Field, T.Water, T.Rail];
+const pairType = (q1: number, r1: number, q2: number, r2: number, salt: number) => {
+  const [a, b] = q1 < q2 || (q1 === q2 && r1 < r2) ? [[q1, r1], [q2, r2]] : [[q2, r2], [q1, r1]];
+  let h = Math.imul(a[0] * 31 + a[1] * 17 + b[0] * 131 + b[1] * 71 + 1000, 2654435761) ^ salt;
+  h = Math.imul(h ^ (h >>> 15), 2246822519);
+  return TYPES[((h ^ (h >>> 13)) >>> 0) % TYPES.length];
+};
+let holes = 0, tests = 0, worst = 0;
+const N = 40;
+const cells: [number, number][] = [[0, 0], [1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
+const inHexAt = (px: number, pz: number, q: number, r: number) => {
+  const c = hexToWorld(q, r), x = Math.abs(px - c.x), z = Math.abs(pz - c.z);
+  return Math.max(z, x * 0.8660254 + z * 0.5) - 0.8660254;
+};
+for (let t = 0; t < N; t++) {
+  placed.clear();
+  const k = 3 + Math.floor(rgap() * 3);
+  const pool = cells.slice();
+  const pick: [number, number][] = [];
+  while (pick.length < k) pick.push(pool.splice(Math.floor(rgap() * pool.length), 1)[0]);
+  const out: { b: ReturnType<typeof put>['b']; x: number; z: number; oy: number }[] = [];
+  for (const [q, r] of pick) {
+    const hw = rh();
+    const edges = DIRS.map(([dq, dr]) => pairType(q, r, q + dq, r + dr, t)) as T[];
+    // peça de água/trilho: plana no nível dela
+    const strict = edges.some((e) => e === T.Water || e === T.Rail);
+    const hh = strict ? hw.map(() => 1) : hw;
+    out.push(put(q, r, hh, edges, 100 + t * 13 + q * 7 + r));
+  }
+  const S = 7, n = Math.round(S / RES), c0 = hexToWorld(0, 0);
+  const hm = new Float32Array(n * n).fill(-9);
+  for (const o of out) {
+    const p = o.b.pos;
+    for (let i = 0; i < p.length; i += 9) {
+      const X = [p[i] + o.x, p[i + 3] + o.x, p[i + 6] + o.x], Z = [p[i + 2] + o.z, p[i + 5] + o.z, p[i + 8] + o.z], Y = [p[i + 1] + o.oy, p[i + 4] + o.oy, p[i + 7] + o.oy];
+      const gx0 = Math.max(0, Math.floor((Math.min(...X) - c0.x + S / 2) / RES)), gx1 = Math.min(n - 1, Math.ceil((Math.max(...X) - c0.x + S / 2) / RES));
+      const gz0 = Math.max(0, Math.floor((Math.min(...Z) - c0.z + S / 2) / RES)), gz1 = Math.min(n - 1, Math.ceil((Math.max(...Z) - c0.z + S / 2) / RES));
+      const d = (X[1] - X[0]) * (Z[2] - Z[0]) - (X[2] - X[0]) * (Z[1] - Z[0]);
+      if (Math.abs(d) < 1e-12) continue;
+      for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
+        const px = c0.x - S / 2 + (gx + 0.5) * RES, pz = c0.z - S / 2 + (gz + 0.5) * RES;
+        const u = ((px - X[0]) * (Z[2] - Z[0]) - (X[2] - X[0]) * (pz - Z[0])) / d, v = ((X[1] - X[0]) * (pz - Z[0]) - (px - X[0]) * (Z[1] - Z[0])) / d;
+        if (u < -0.02 || v < -0.02 || u + v > 1.02) continue;
+        hm[gx * n + gz] = Math.max(hm[gx * n + gz], Y[0] + (Y[1] - Y[0]) * u + (Y[2] - Y[0]) * v);
+      }
+    }
+  }
+  let bad = 0;
+  for (let gx = 0; gx < n; gx++) for (let gz = 0; gz < n; gz++) {
+    const px = c0.x - S / 2 + (gx + 0.5) * RES, pz = c0.z - S / 2 + (gz + 0.5) * RES;
+    // célula do ponto: a que o contém; vazia e perto de uma peça (menos de 0.2 do hexágono dela)
+    let inTile = false, dmin = 9;
+    for (const [q, r] of pick) { const d = inHexAt(px, pz, q, r); if (d <= 0) inTile = true; dmin = Math.min(dmin, d); }
+    if (inTile) continue;
+    tests++;
+    if (dmin < 0.2 && hm[gx * n + gz] < -8) bad++;
+  }
+  holes += bad;
+  worst = Math.max(worst, bad);
+}
+check(holes === 0, `fresta entre saias e vizinhas: ${holes} pontos sem chão (pior caso ${worst})`);
+  console.log(`emenda: ${tests} pontos de casa vazia conferidos, ${holes} sem chão`);
 }
 
 const flat: TerrainSpec = { h: [1, 1, 1, 1, 1, 1], c: 1, he: [1, 1, 1, 1, 1, 1], co: [1, 1, 1, 1, 1, 1], vil: [0, 0, 0, 0, 0, 0], seed: 5 };
