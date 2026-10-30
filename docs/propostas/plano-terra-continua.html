@@ -1,0 +1,166 @@
+<title>Plano Terra Contínua</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Alegreya:ital,wght@0,500;0,700;1,500&family=Alegreya+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* Layout: caderno de campo em uma coluna; fases como trilha vertical com portões de decisão do Roger */
+:root{
+  --bg:#f1f3ee; --fg:#1d2a24; --muted:#56665d; --card:#fbfcf8; --line:#cdd7cc;
+  --accent:#1f6f8b; --accent-bg:#dcecf2; --gold:#d9a52f; --gold-bg:#fbf0cf; --gold-fg:#4a3604;
+  --ok:#2d7a4a; --warn:#a8432c; --code:#e6ebe2;
+  --f-display:'Alegreya',Georgia,serif; --f-body:'Alegreya Sans','Segoe UI',system-ui,sans-serif;
+  color-scheme:light
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#121815; --fg:#e4ebe5; --muted:#9bada2; --card:#1b2420; --line:#31423a;
+  --accent:#7cc3e0; --accent-bg:#1c3641; --gold:#e6c25a; --gold-bg:#3a3014; --gold-fg:#f3dc92;
+  --ok:#6fcf93; --warn:#f08a70; --code:#26322c; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121815; --fg:#e4ebe5; --muted:#9bada2; --card:#1b2420; --line:#31423a;
+  --accent:#7cc3e0; --accent-bg:#1c3641; --gold:#e6c25a; --gold-bg:#3a3014; --gold-fg:#f3dc92;
+  --ok:#6fcf93; --warn:#f08a70; --code:#26322c; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:400 17px/1.55 var(--f-body)}
+.wrap{max-width:820px;margin:0 auto;padding-block:28px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1,h2,h3{font-family:var(--f-display);line-height:1.15;margin:0;font-weight:700;text-wrap:balance}
+h1{font-size:clamp(34px,8vw,50px)}
+h1 small{display:block;font:italic 500 clamp(17px,4vw,21px)/1.3 var(--f-display);color:var(--muted);margin-top:8px}
+h2{font-size:clamp(25px,5.5vw,32px);margin:48px 0 10px;padding-top:12px;border-top:2px solid var(--fg)}
+h3{font-size:21px;margin:0 0 6px}
+p,li{max-width:65ch}
+p{margin:0 0 .8em}
+code{font:500 .86em ui-monospace,Menlo,Consolas,monospace;background:var(--code);padding:1px 4px;border-radius:4px}
+.lede{font-size:19px;margin-top:14px}
+.pick{margin:22px 0 0;padding:18px 20px;border-radius:14px;background:var(--gold-bg);color:var(--gold-fg);border:1.5px solid var(--gold)}
+.pick h3{font-size:24px;color:inherit}
+.pick p{color:inherit}
+.cols{display:grid;gap:14px;margin-top:12px}
+@media (min-width:720px){.cols.two{grid-template-columns:1fr 1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:0}
+.card h3{font-size:19px}
+.card ul{margin:4px 0 0;padding-left:19px}
+.lbl{font:700 12px var(--f-body);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 4px}
+.track{list-style:none;margin:16px 0 0;padding:0;display:grid;gap:0}
+.track>li{position:relative;padding:0 0 22px 34px;max-width:none}
+.track>li::before{content:'';position:absolute;left:10px;top:6px;bottom:0;width:2px;background:var(--line)}
+.track>li:last-child::before{display:none}
+.track>li::after{content:'';position:absolute;left:4px;top:4px;width:14px;height:14px;border-radius:50%;background:var(--bg);border:2.5px solid var(--accent)}
+.track>li.gate::after{border-radius:3px;transform:rotate(45deg);border-color:var(--gold);background:var(--gold)}
+.track h3{font-size:20px}
+.track .when{font:600 13px var(--f-body);color:var(--accent);letter-spacing:.04em;text-transform:uppercase}
+.track li.gate .when{color:var(--warn)}
+.track ul{margin:4px 0 0;padding-left:18px}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--card);margin:12px 0}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:15.5px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:700 12px var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:var(--bg)}
+tr:last-child td{border-bottom:0}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+ol.q{padding-left:22px}
+ol.q li{margin-bottom:6px}
+.out{color:var(--muted)}
+.foot{margin-top:36px;font-size:14px;color:var(--muted)}
+</style>
+
+<div class="wrap">
+<header>
+<h1>Terra contínua<small>plano de pesquisa e o caminho que escolhi para o encaixe</small></h1>
+<p class="lede">Você me deu liberdade para escolher. Escolhi um caminho principal, montei um jeito de medir as ideias antes de gastar semanas com elas e deixei um teste barato correndo para a alternativa mais radical. Você olha depois e diz se seguimos.</p>
+</header>
+
+<h2>O que já sabemos</h2>
+<div class="cols two">
+  <div class="card"><p class="lbl">Funcionou</p><ul>
+    <li>A água: leito, correnteza, cachoeiras.</li>
+    <li>O relevo em ondulação, sem cortes: "esse é o caminho".</li>
+    <li>"Águas que descem": a água precisa chegar ao mar.</li>
+    <li>A 2ª rodada visual (chão, copas, casas, trigo).</li>
+  </ul></div>
+  <div class="card"><p class="lbl">Não funcionou</p><ul>
+    <li>Camada abstrata por cima do mapa (a Colcha).</li>
+    <li>Cortes bruscos, paredões, "bolo cortado".</li>
+    <li>A peça que ainda se lê como hexágono.</li>
+    <li>Sua impressão nova: a peça ficou "gorda", como uma almofada.</li>
+  </ul></div>
+</div>
+
+<h2>O que "fluido" quer dizer</h2>
+<p>Para não discutir no escuro, transformei o pedido em três critérios que dá para medir:</p>
+<div class="cols">
+  <div class="card"><h3>1. Não se lê hexágono</h3><p>De longe e de perto, o contorno das manchas de terreno e da ilha não forma ângulos de 60°. Vamos medir isso nas capturas com um "hexômetro": o histograma das direções das bordas da imagem. Hexágono dá seis picos; paisagem dá uma curva lisa.</p></div>
+  <div class="card"><h3>2. A decisão é moldar paisagem, não casar cores</h3><p>Quem joga pensa "a mata continua por aqui, a água desce por ali", e não "esta borda verde com aquela borda verde". Medimos pela riqueza de decisão: quantas jogadas boas e diferentes existem a cada vez, e o quanto pensar à frente rende mais que o jogador guloso.</p></div>
+  <div class="card"><h3>3. O mundo responde</h3><p>Depois que a peça assenta, a paisagem se acomoda: a mata avança, a terra seca ou umedece, a água encontra caminho. Sem que nada se perca para quem joga.</p></div>
+</div>
+
+<h2>O caminho escolhido</h2>
+<div class="pick">
+  <h3>Terra contínua</h3>
+  <p><b>A ideia em uma frase:</b> o mundo deixa de ser um mosaico de peças e passa a ser um campo contínuo de terreno, altura e água; o hexágono vira só o lugar onde você pousa a mão.</p>
+  <p>Cada peça é um "carimbo" com mistura de terrenos, relevo e água. Ao pousar, ela se funde ao campo que já existe: as manchas de mata, prado e lavoura atravessam as emendas com contorno orgânico, a altura continua sem degrau e a água desce pelo relevo até o mar. A pontuação lê o campo, não as bordas: quanto a paisagem continua (quase igual vale quase tanto quanto igual), o tamanho e a forma das manchas, a água que chega ao mar e a umidade certa para cada terreno.</p>
+</div>
+
+<h3 style="margin-top:22px">Por que este, e não os outros</h3>
+<ul>
+  <li><b>Nasce do que você aprovou.</b> O relevo em ondulação e as águas que descem já são campos contínuos. Este caminho estende a mesma lógica ao terreno e à pontuação.</li>
+  <li><b>Junta as melhores ideias das três frentes:</b> o hexágono escondido (já prototipado), a Aquarela (encaixe gradual), a Argila (a mancha que avança) e o Orvalho (a umidade da água). Separadas, cada uma era pequena; juntas formam uma regra só: o que vale é a paisagem contínua.</li>
+  <li><b>É fluido nos três critérios</b>, sem jogar fora o que funciona: a grade fica por baixo só como lugar de pouso, então replay, desfazer, IA, missões e os cinco temas continuam valendo.</li>
+  <li><b>Corrige a peça "gorda":</b> a cúpula de cada peça some, porque o relevo passa a ser do mundo, não da peça; os topos ficam mais planos e as encostas mais longas.</li>
+  <li><b>Risco controlado.</b> Entra como modo à parte. Nada muda no Clássico até você decidir.</li>
+</ul>
+
+<h3 style="margin-top:18px">E a ideia mais radical?</h3>
+<p>Os <b>Recortes</b> (peças de contorno livre que giram e grudam na costa) foram a ideia a que as três frentes chegaram sozinhas. Custa um mês ou mais, e o risco é a pilha travar. Em vez de apostar no escuro, deixei um <b>teste barato</b> correndo: uma simulação sem gráficos que joga centenas de partidas de Recortes e mede se trava, quantas opções o jogador tem e como fica o mapa (com desenhos dos mapas finais). Se o teste for bom, ele vira o segundo projeto.</p>
+
+<h2>O plano, em fases</h2>
+<ol class="track">
+  <li><p class="when">Fase 1 · agora, em paralelo</p><h3>Bancada de testes, Terra contínua visual e teste dos Recortes</h3><ul>
+    <li><b>Bancada de testes de encaixe:</b> um simulador que joga qualquer regra nova com três estilos de jogador (guloso, planejador, distraído) e mede travamento, riqueza de decisão, duração e equilíbrio. Primeiros alvos: Clássico, Relevo com água, Aquarela, Orvalho, Argila e Fluxo.</li>
+    <li><b>Terra contínua, o desenho:</b> o modo Relevo corrigido, com o visual novo da main e o hexágono escondido; as manchas de terreno atravessam as emendas com contorno orgânico; a cúpula "gorda" sai. Ainda com a regra de hoje.</li>
+    <li><b>Recortes, o teste de travamento:</b> simulação sem gráficos e desenhos dos mapas resultantes.</li>
+  </ul></li>
+  <li class="gate"><p class="when">Portão 1 · você olha</p><h3>O desenho convence? O "hexômetro" concorda?</h3><ul>
+    <li>Você joga a prévia visual e lê o relatório da bancada e dos Recortes.</li>
+    <li>Se o desenho não convencer, paramos aqui e mudamos de rumo, sem ter gasto a regra.</li>
+  </ul></li>
+  <li><p class="when">Fase 2</p><h3>A regra da Terra contínua</h3><ul>
+    <li>A pontuação passa a ler o campo: continuidade gradual, manchas por área e forma, água até o mar, umidade.</li>
+    <li>Primeiro na bancada, com números, até travar menos que o Clássico e premiar quem planeja; depois no jogo, com oráculo independente nos testes.</li>
+  </ul></li>
+  <li><p class="when">Fase 3</p><h3>Protótipo jogável completo</h3><ul>
+    <li>Fantasma que mostra a paisagem que vai nascer, não números soltos.</li>
+    <li>O mundo responde depois da jogada (mancha que avança devagar, terra que umedece).</li>
+    <li>Hexômetro e bancada de novo, mais o seu roteiro de jogo abaixo.</li>
+  </ul></li>
+  <li class="gate"><p class="when">Portão 2 · você decide</p><h3>Vira modo principal? Os Recortes entram como próximo projeto?</h3></li>
+</ol>
+
+<h2>Como vamos testar</h2>
+<div class="tw"><table>
+<thead><tr><th>Teste</th><th>O que mede</th><th>Meta</th></tr></thead>
+<tbody>
+<tr><td>Travamento</td><td>partidas em que nenhuma jogada serve</td><td class="n">≤ Clássico</td></tr>
+<tr><td>Riqueza de decisão</td><td>jogadas a até 10% da melhor; distância entre a melhor e a mediana</td><td class="n">≥ Clássico</td></tr>
+<tr><td>Profundidade</td><td>quanto o planejador ganha do guloso</td><td class="n">≥ Clássico</td></tr>
+<tr><td>Equilíbrio</td><td>média, p10 e p90 contra o Clássico</td><td class="n">±10%</td></tr>
+<tr><td>Hexômetro</td><td>picos de 60° no histograma de direções das bordas</td><td class="n">sem picos</td></tr>
+<tr><td>Desempenho</td><td>draw calls e triângulos com 300 peças</td><td class="n">≤ +10%</td></tr>
+</tbody></table></div>
+
+<h3>Roteiro para quando você jogar</h3>
+<ol class="q">
+  <li>Em algum momento você pensou "aqui a mata continua", em vez de "aqui casa a borda"?</li>
+  <li>De longe, você ainda vê hexágonos? E de perto?</li>
+  <li>Você entendeu, antes de pousar, o que a peça ia fazer com a paisagem?</li>
+  <li>Alguma jogada pareceu injusta ou confusa?</li>
+  <li>A peça ainda parece "gorda"?</li>
+</ol>
+
+<h2 class="out">O que fica de fora, por ora</h2>
+<ul class="out">
+  <li>Grades novas (Townscaper, Voronoi, Penrose, octógonos): reescrevem tudo e, na leitura das frentes, quase não mudam a sensação de jogo.</li>
+  <li>Pintura livre e Coro como encaixe: repetem o problema da Colcha.</li>
+  <li>Costura de ilhas: boa e barata, mas é outra pergunta (a forma do mapa, não o encaixe). Volta depois do Portão 2.</li>
+</ul>
+
+<p class="foot">Propostas que embasam este plano: as 20 primeiras e as 18 de encaixe fluido, guardadas no git em <code>docs/propostas/</code> (branch <code>dorf/propostas</code>). Nada disso toca a main até você aprovar.</p>
+</div>
