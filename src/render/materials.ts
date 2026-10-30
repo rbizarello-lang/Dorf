@@ -712,6 +712,37 @@ export function makeGroundMaterial() {
   return m;
 }
 
+/**
+ * Chão enxuto da Média e da Baixa: as mesmas cores por terreno e a costura de cor entre peças, em 8 leituras de textura
+ * (o completo faz ~28). Sem a várzea, as manchas grandes, o pincel girando pelo mapa, as rajadas de vento,
+ * o sombreamento de cavidades e o micro-relevo da normal. Os pesos dos terrenos misturam direto, sem o ruído que
+ * endurece a fronteira em lóbulos. A mesma geometria e os mesmos uniformes: só o World troca o material (setQuality).
+ */
+export function makeLiteGroundMaterial() {
+  const m = new LitMaterial({ roughness: 0.95, metalness: 0, flatShading: true });
+  m.positionNode = displaced();
+  const p = positionWorld.xz;
+  const sp = attribute('splat', 'vec4');
+  const blot = texture(noiseTex, p.div(2.6)).g;
+  const grass = mix(vec3(0.9, 0.97, 1.04), vec3(1.07, 1.03, 0.86), blot).mul(blot.mul(0.14).add(0.93));
+  const forest = mix(vec3(0.74, 0.8, 0.74), vec3(0.98, 0.96, 0.9), blot);
+  const stroke = texture(brushTex, p.mul(vec2(0.35, 1.4)));
+  const field = vec3(stroke.r.mul(0.36).add(0.82)).mul(mix(vec3(1.07, 0.93, 0.96), vec3(1.06, 1.04, 0.84), stroke.b));
+  const village = vec3(blot.mul(0.2).add(0.88));
+  const rest = float(1).sub(sp.x.add(sp.y).add(sp.z).add(sp.w)).max(0);
+  const detail = grass.mul(sp.x).add(forest.mul(sp.y)).add(field.mul(sp.z)).add(village.mul(sp.w)).add(vec3(0.95).mul(rest));
+  const top = smoothstep(0.55, 0.9, normalWorld.y);
+  const contact = texture(groundMap.shadeTexture, positionWorld.xz.div(GROUND_EXTENT * 2).add(0.5)).r.mul(U.seam).mul(top);
+  // A costura de cor entre peças fica (4 leituras): sem ela a divisa de cada hexágono aparece como uma linha clara no prado.
+  const seam = seamAt();
+  const base = mix(vertexColor().rgb, seam.rgb, seam.a.mul(top));
+  const ground = snowOn(base.mul(mix(vec3(0.86), detail, top)).mul(mix(vec3(1), vec3(0.5, 0.52, 0.58), contact.mul(0.85))), mix(float(0.85), float(0.85).mul(U.fieldSnow), sp.z.min(1)));
+  m.colorNode = mix(ground, vec3(1), U.silhouette);
+  m.emissiveNode = ERA_GOLD.mul(eraBand(positionWorld, U.time));
+  m.receivedShadowNode = shadowWithClouds;
+  return m;
+}
+
 // ---------------------------------------------------------------- água
 
 /** Índice de refração da água e a refletância de frente de um dielétrico com ele. */

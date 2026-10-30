@@ -7,7 +7,7 @@ import { awningRoofParts, catGeometry, crocodileGeometry, ibisGeometry, mesaGeom
 import { ancientBlossomGeometry, heronGeometry, koiPondGeometry, luckyCatGeometry, niwakiGeometry } from './kits/oriental';
 import { anteaterGeometry, coffeeBloomGeometry, colonialRoof, engenhoGeometry, jaguarGeometry, macawGeometry, manedWolfGeometry, muleGeometry, oxcartGeometry, porteiraGeometry, profetasGeometry, rheaGeometry, termiteMoundGeometry, zebuGeometry, type KitTools } from './kits/brasil';
 import { makeFoamMaterial } from './fx';
-import { FALL, U, makeDecoMaterials, makeFallMaterial, makeGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
+import { FALL, U, makeDecoMaterials, makeFallMaterial, makeGroundMaterial, makeLiteGroundMaterial, makeWaterMaterial, type MatKey } from './materials';
 import type { EggKit } from '../core/eggs';
 import { brickGateParts, bulbParts, cheeseParts, dikeBoyParts, drawbridgeParts, duckParts, dutchGableParts, poplarParts, tjalkParts, windmillParts } from './kits/holanda';
 import * as inv from './kits/inverno';
@@ -2405,7 +2405,13 @@ function lanternGeometry(): THREE.BufferGeometry {
 }
 
 export class Lib {
-  readonly ground = makeGroundMaterial();
+  private readonly groundFull = makeGroundMaterial();
+  private groundLite: THREE.Material | null = null;
+  /** Chão enxuto (Média e Baixa): o World liga em `setQuality` e troca o material dos blocos. */
+  lite = false;
+  get ground(): THREE.Material {
+    return this.lite ? (this.groundLite ??= makeLiteGroundMaterial()) : this.groundFull;
+  }
   readonly water = makeWaterMaterial();
   /** Cachoeira (R3): lâmina d'água (opaca) e espuma da bacia (transparente). */
   readonly fall = makeFallMaterial();

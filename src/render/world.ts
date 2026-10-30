@@ -947,6 +947,12 @@ export class World {
       this.recompile();
     }
     this.sun.castShadow = shadows;
+    // Chão enxuto na Média e na Baixa (materials.ts): o completo faz ~28 leituras de textura por pixel.
+    const lite = q === 'medium' || q === 'low';
+    if (this.lib.lite !== lite) {
+      this.lib.lite = lite;
+      for (const c of this.chunks.values()) c.ground.material = this.lib.ground;
+    }
     const map = SHADOW_MAP[q];
     if (this.sun.shadow.mapSize.x !== map) {
       this.sun.shadow.mapSize.set(map, map);
