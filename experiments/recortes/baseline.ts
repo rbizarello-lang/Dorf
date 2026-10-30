@@ -39,14 +39,14 @@ const pct = (a: number[], p: number) => {
   return s.length ? s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))] : 0;
 };
 
-interface Rec { score: number; placed: number; noPose: number; maxConsec: number; poses: number[]; rich: number[]; gap: number[]; top3gap: number[]; ms: number[]; check: Record<string, any> }
+interface Rec { score: number; placed: number; noPose: number; maxConsec: number; poses: number[]; rich: number[]; richPlaces: number[]; gap: number[]; top3gap: number[]; ms: number[]; check: Record<string, any> }
 const recs: Rec[] = [];
 
 for (let g = 0; g < games; g++) {
   const seed = 1000 + g;
   const game = new Game(seed, rules);
   const rng = mulberry32((seed * 7919 + 13) >>> 0);
-  const rec: Rec = { score: 0, placed: 1, noPose: 0, maxConsec: 0, poses: [], rich: [], gap: [], top3gap: [], ms: [], check: {} };
+  const rec: Rec = { score: 0, placed: 1, noPose: 0, maxConsec: 0, poses: [], rich: [], richPlaces: [], gap: [], top3gap: [], ms: [], check: {} };
   let consec = 0;
   const snap = (tag: string) => {
     const polys = [...game.board.tiles.values()].map((p) => hexPoly(p.q, p.r));
@@ -84,6 +84,7 @@ for (let g = 0; g < games; g++) {
     rec.poses.push(moves.length);
     rec.ms.push(ms);
     rec.rich.push(moves.filter((m) => m.pts >= best * 0.9).length);
+    rec.richPlaces.push(new Set(moves.filter((m) => m.pts >= best * 0.9).map((m) => m.q + ',' + m.r)).size);
     const med = moves[Math.floor(moves.length / 2)].pts;
     rec.gap.push(best > 0 ? (best - med) / best : 0);
     rec.top3gap.push(best > 0 ? (best - moves[Math.min(2, moves.length - 1)].pts) / best : 0);
@@ -118,6 +119,7 @@ const row: any = {
   posesMin: Math.min(...recs.flatMap((r) => r.poses)),
   rich10: mean(recs.flatMap((r) => r.rich)),
   richMed: pct(recs.flatMap((r) => r.rich), 50),
+  richPlaces: mean(recs.flatMap((r) => r.richPlaces)),
   gap: mean(recs.flatMap((r) => r.gap)),
   top3gap: mean(recs.flatMap((r) => r.top3gap)),
   msMed: mean(recs.flatMap((r) => r.ms)),

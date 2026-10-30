@@ -20,10 +20,10 @@ const n1 = (v) => (v == null || Number.isNaN(v) ? '-' : v.toFixed(1));
 const n0 = (v) => (v == null || Number.isNaN(v) ? '-' : v.toFixed(0));
 const n2 = (v) => (v == null || Number.isNaN(v) ? '-' : v.toFixed(2));
 
-console.log('| execução | jogos | sem pose % | partidas c/ trava % | trava forte % | poses/jogada | ≤10% da melhor | gap melhor-mediana | ms/jogada (méd, p95) | nota p10-p90 | descartes | remendos |');
+console.log('| execução | jogos | sem pose % | partidas c/ trava % | trava forte % | poses/jogada | ≤10% da melhor (poses / lugares) | gap melhor-mediana | ms/jogada (méd, p95) | nota p10-p90 | descartes | remendos |');
 console.log('|---|---|---|---|---|---|---|---|---|---|---|---|');
 for (const r of rows)
-  console.log(`| ${r.label} | ${r.games} | ${n1(r.semPosePct)} | ${n0(r.partidasComTravaPct)} | ${n0(r.travaFortePct)} | ${n1(r.posesMed)} | ${n1(r.rich10)} | ${n2(r.gap)} | ${n0(r.msMed)}, ${n0(r.msP95)} | ${n0(r.scoreP10)}-${n0(r.scoreP90)} | ${n1(r.discards)} | ${n1(r.patches)} |`);
+  console.log(`| ${r.label} | ${r.games} | ${n1(r.semPosePct)} | ${n0(r.partidasComTravaPct)} | ${n0(r.travaFortePct)} | ${n1(r.posesMed)} | ${n1(r.rich10)} / ${n1(r.richPlaces)} | ${n2(r.gap)} | ${n0(r.msMed)}, ${n0(r.msP95)} | ${n0(r.scoreP10)}-${n0(r.scoreP90)} | ${n1(r.discards)} | ${n1(r.patches)} |`);
 console.log('');
 console.log('| execução | rugosidade (perímetro / círculo) 20→fim | lagoas por partida (fim) | fendas % da terra (fim) | lagoas % da terra (fim) | rio continua % | sobreposições / não-inteiros / rio errado |');
 console.log('|---|---|---|---|---|---|---|');

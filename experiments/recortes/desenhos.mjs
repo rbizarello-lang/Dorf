@@ -24,6 +24,17 @@ for (const fam of ['i30', 'i15', 'ii']) {
   writeFileSync(`${out}/mapa-${fam}-limpo.svg`, mapSvg(finals[fam][0].world, { width: 1400, outline: false, uid: `${fam}L` }));
 }
 
+// ---- variantes de rigor: o que o encaixe mais justo faz com o mapa ----
+const variants = [
+  ['i30', 'rigor1', 'costa quantizada 30°, contato mín. 1 lado (2 arestas), com descarte', { minContact: 1.0, forgive: 'discard' }],
+  ['ii', 'rigor1-ima', 'contorno livre, contato mín. 1 lado, ímã tolerante e remendo', { minContact: 1.0, forgive: 'patch', world: { tolMul: 2 } }],
+  ['ii', 'rigor15-ima', 'contorno livre, contato mín. 1,5 lado, ímã tolerante e remendo', { minContact: 1.5, forgive: 'patch', world: { tolMul: 2 } }],
+];
+for (const [fam, tag, title, extra] of variants) {
+  const rec = playGame({ fam, seed: 1000, player: 'greedy', pieces: 40, keep: true, ...extra });
+  writeFileSync(`${out}/mapa-${fam}-${tag}.svg`, mapSvg(rec.world, { width: 1400, outline: true, uid: `${fam}${tag}`, title: `${title} · ${rec.world.pieces.length} peças postas, ${rec.discards} descartes` }));
+}
+
 // ---- galeria de peças ----
 for (const fam of ['i30', 'i15', 'ii']) {
   const ps = [];

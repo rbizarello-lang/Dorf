@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const out = process.argv[2];
 const filter = process.argv[3] ?? '';
+const skip = new Set((process.argv[4] ?? '').split(',').filter(Boolean)); // execuções que outro processo já está rodando
 mkdirSync(out, { recursive: true });
 
 const jobs = [];
@@ -21,34 +22,33 @@ for (const fam of ['ii', 'i30', 'i15'])
 
 // B: rigor do encaixe (contato mínimo) e regras de perdão, jogador guloso.
 for (const fam of ['ii', 'i30']) {
-  const g = fam === 'ii' ? 120 : 300;
+  const g = fam === 'ii' ? 60 : 200;
   const k = fam === 'ii' ? 3 : 1;
-  for (const c of fam === 'ii' ? ['0.75', '1.0', '1.5'] : ['1.0', '1.5']) {
+  for (const c of ['1.0', '1.5']) {
     const base = ['--fam', fam, '--player', 'greedy', '--minContact', c];
     add(`B-${fam}-c${c}-descarte`, g, [...base, '--forgive', 'discard'], k);
-    if (c === '0.75') continue;
     add(`B-${fam}-c${c}-remendo`, g, [...base, '--forgive', 'patch'], k);
     add(`B-${fam}-c${c}-remendo-ima`, g, [...base, '--forgive', 'patch', '--magnet', '1'], k);
     add(`B-${fam}-c${c}-remendo-ima-fendas`, g, [...base, '--forgive', 'patch', '--magnet', '1', '--patchSlits', '4'], k * 1.3);
   }
 }
 for (const [n, extra] of [['descarte', ['--forgive', 'discard']], ['remendo-ima', ['--forgive', 'patch', '--magnet', '1']]])
-  add(`B-i15-c1.0-${n}`, 300, ['--fam', 'i15', '--player', 'greedy', '--minContact', '1.0', ...extra], 1);
+  add(`B-i15-c1.0-${n}`, 200, ['--fam', 'i15', '--player', 'greedy', '--minContact', '1.0', ...extra], 1);
 
 // C: pontuação que premia o encaixe justo (qualquer costa que encosta + golfo mais valioso).
 for (const fam of ['ii', 'i30'])
-  for (const pl of ['greedy', 'top3']) add(`C-${fam}-${pl}-encaixe`, fam === 'ii' ? 120 : 300, ['--fam', fam, '--player', pl, '--forgive', 'discard', '--world', FIT], fam === 'ii' ? 3 : 1);
+  for (const pl of ['greedy', 'top3']) add(`C-${fam}-${pl}-encaixe`, fam === 'ii' ? 60 : 200, ['--fam', fam, '--player', pl, '--forgive', 'discard', '--world', FIT], fam === 'ii' ? 3 : 1);
 
 // D: todas as poses válidas (sem o corte em P), para contar a riqueza sem o teto.
-for (const fam of ['ii', 'i30', 'i15']) add(`D-${fam}-todas`, fam === 'ii' ? 40 : 60, ['--fam', fam, '--player', 'greedy', '--forgive', 'discard', '--exhaustive', '1'], fam === 'ii' ? 9 : 3);
+for (const fam of ['ii', 'i30', 'i15']) add(`D-${fam}-todas`, fam === 'ii' ? 20 : 50, ['--fam', fam, '--player', 'greedy', '--forgive', 'discard', '--exhaustive', '1'], fam === 'ii' ? 9 : 3);
 
 // E: tamanho da lista de poses.
 for (const P of ['24', '64']) {
-  for (const pl of ['greedy', 'top3']) add(`E-i30-${pl}-P${P}`, 150, ['--fam', 'i30', '--player', pl, '--forgive', 'discard', '--P', P], 1);
-  add(`E-ii-greedy-P${P}`, 80, ['--fam', 'ii', '--player', 'greedy', '--forgive', 'discard', '--P', P], 3);
+  for (const pl of ['greedy', 'top3']) add(`E-i30-${pl}-P${P}`, 100, ['--fam', 'i30', '--player', pl, '--forgive', 'discard', '--P', P], 1);
+  add(`E-ii-greedy-P${P}`, 40, ['--fam', 'ii', '--player', 'greedy', '--forgive', 'discard', '--P', P], 3);
 }
 
-const todo = jobs.filter((j) => j.name.includes(filter)).sort((a, b) => b.cost - a.cost);
+const todo = jobs.filter((j) => j.name.includes(filter) && !skip.has(j.name)).sort((a, b) => b.cost - a.cost);
 let running = 0, idx = 0, done = 0;
 const t0 = Date.now();
 function next() {

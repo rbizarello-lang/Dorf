@@ -9,7 +9,7 @@ import { writeFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { S, deepInside, hyp, mulberry32 } from './geom.mjs';
 import { rasterStats } from './metrics.mjs';
-import { WATER, makePiece } from './pieces.mjs';
+import { WATER, makePiece, shapeAt } from './pieces.mjs';
 import { World } from './world.mjs';
 
 const polysOf = (world) => world.pieces.map((p) => ({ vx: p.vx, vy: p.vy }));
@@ -75,6 +75,7 @@ export function playGame(cfg) {
     ms: [],
     poses: [],
     rich: [],
+    richPlaces: [],
     gap: [],
     top3gap: [],
     cand: [],
@@ -147,7 +148,16 @@ export function playGame(cfg) {
     rec.ovl.push(res.stats.overlapTests);
     const best = poses[0].score;
     const thr = best * 0.9;
-    rec.rich.push(poses.filter((p) => p.score >= thr).length);
+    const good = poses.filter((p) => p.score >= thr);
+    rec.rich.push(good.length);
+    // lugares distintos entre as boas: agrupa as poses cujo centro está a menos de 0,8 lado uma da outra
+    const centers = [];
+    for (const p of good) {
+      const sh = shapeAt(piece, p.r);
+      const cx = sh.cx + p.tx, cy = sh.cy + p.ty;
+      if (!centers.some((c) => (c[0] - cx) ** 2 + (c[1] - cy) ** 2 < (0.8 * S) ** 2)) centers.push([cx, cy]);
+    }
+    rec.richPlaces.push(centers.length);
     const med = poses[Math.floor(poses.length / 2)].score;
     rec.gap.push(best > 0 ? (best - med) / best : 0);
     rec.top3gap.push(best > 0 ? (best - (poses[Math.min(2, poses.length - 1)].score)) / best : 0);
@@ -193,6 +203,7 @@ export function summarize(recs, label) {
     posesMin: Math.min(...all((r) => r.poses)),
     rich10: mean(all((r) => r.rich)),
     richMed: pct(all((r) => r.rich), 50),
+    richPlaces: mean(all((r) => r.richPlaces ?? [])),
     gap: mean(all((r) => r.gap)),
     top3gap: mean(all((r) => r.top3gap)),
     msMed: mean(all((r) => r.ms)),
