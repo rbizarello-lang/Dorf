@@ -632,6 +632,7 @@ export class World {
     this.warp = on ? new Warp(0x2a) : null;
     // Terra contínua: o chão lê o campo de terreno do mundo, que só existe com o desenho deslocado.
     U.land.value = on ? 1 : 0;
+    this.lib.land = on;
     this.slots.geometry.dispose();
     // Mancha: um disco largo que esmaece (os vizinhos se fundem); sem o fluido, o hexágono de sempre.
     this.slots.geometry = on ? new THREE.CircleGeometry(1.12, 40).rotateX(-Math.PI / 2) : new THREE.CircleGeometry(0.9, 6).rotateX(-Math.PI / 2);

@@ -2413,7 +2413,13 @@ function lanternGeometry(): THREE.BufferGeometry {
 }
 
 export class Lib {
-  readonly ground = makeGroundMaterial();
+  private readonly groundFlat = makeGroundMaterial();
+  private groundField: ReturnType<typeof makeGroundMaterial> | null = null;
+  /** Terra contínua: o chão lê o campo de terreno do mundo (material à parte, compilado só quando o fluido liga; os outros modos ficam com o chão de sempre). */
+  land = false;
+  get ground() {
+    return this.land ? (this.groundField ??= makeGroundMaterial(true)) : this.groundFlat;
+  }
   readonly water = makeWaterMaterial();
   /** Cachoeira (R3): lâmina d'água (opaca) e espuma da bacia (transparente). */
   readonly fall = makeFallMaterial();

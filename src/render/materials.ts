@@ -658,37 +658,43 @@ const seamAt = Fn(() => {
   return vec4(col, k);
 });
 
-export function makeGroundMaterial() {
+export function makeGroundMaterial(land = false) {
   const m = new LitMaterial({ roughness: 0.95, metalness: 0, flatShading: true });
   m.positionNode = displaced();
   const p = positionWorld.xz;
   const sp0 = attribute('splat', 'vec4');
-  // --- Campo contínuo do terreno (U.land): o mapa do chão lido borrado e deslocado, no lugar dos pesos por vértice.
-  const landUV = (q: N2) => q.div(GROUND_EXTENT * 2).add(0.5);
-  const lWarp = vec2(texture(noiseTex, p.div(LAND_WARP_SCALE).add(vec2(0.21, 0.64))).a, texture(noiseTex, p.div(LAND_WARP_SCALE).add(vec2(0.77, 0.18))).a).sub(0.5).mul(LAND_WARP);
-  const lRaw = texture(groundMap.landTexture, landUV(p.add(lWarp))).level(float(LAND_LOD));
-  const lSum = lRaw.x.add(lRaw.y).add(lRaw.z).add(lRaw.w);
-  const lCn = texture(noiseTex, p.div(LAND_NOISE_SCALE).add(vec2(0.5, 0.3)));
-  const lNoisy = lRaw.div(max(lSum, 0.02)).add(vec4(lCn.r, lCn.a, lCn.g, lCn.b).sub(0.5).mul(vec4(...LAND_NOISE_AMP)));
-  const lTop = max(max(lNoisy.x, lNoisy.y), max(lNoisy.z, lNoisy.w));
-  const lWin = smoothstep(lTop.sub(LAND_SOFT), lTop, lNoisy);
-  const lField = lWin.div(lWin.x.add(lWin.y).add(lWin.z).add(lWin.w).max(0.001));
-  // Só onde há peça assentada sob o ponto (a peça que cai e a pilha não estão no mapa) e na face de cima.
-  const lHave = step(0.5, texture(groundMap.coverTexture, landUV(p)).level(float(0)).r);
-  const lK = U.land.mul(lHave).mul(smoothstep(0.55, 0.9, normalWorld.y));
-  const sum0 = sp0.x.add(sp0.y).add(sp0.z).add(sp0.w);
-  // Normal suave do relevo (U.land): diferença central do mapa de alturas, no lugar da normal plana de cada triângulo (as encostas
-  // deixam de ter quinas retas nas divisas dos setores). Só no topo (a lateral íngreme fica com a normal do triângulo).
-  const hAt = (q: N2) => texture(groundMap.reliefTexture, landUV(q)).level(float(0)).r;
-  const hdx = hAt(p.add(vec2(RELIEF_E, 0))).sub(hAt(p.sub(vec2(RELIEF_E, 0))));
-  const hdz = hAt(p.add(vec2(0, RELIEF_E))).sub(hAt(p.sub(vec2(0, RELIEF_E))));
-  const nSmooth = vec3(hdx.negate(), RELIEF_E * 2, hdz.negate()).normalize();
-  const nG = mix(normalWorld, nSmooth, U.land.mul(lHave).mul(smoothstep(0.35, 0.7, normalWorld.y)).mul(smoothstep(0.0, 0.12, sum0))).normalize();
-  /** Cor média do terreno de um peso [prado, mata, plantação, vila] (normalizado: só a proporção conta). */
-  const landMix = (s: N) => U.landCol[0].mul(s.x).add(U.landCol[1].mul(s.y)).add(U.landCol[2].mul(s.z)).add(U.landCol[3].mul(s.w)).div(max(s.x.add(s.y).add(s.z).add(s.w), 0.001));
-  // A parte do chão que é terreno (e não areia de beira de rio, estrada...) fica a do vértice; o campo só reparte os terrenos.
-  const sp = mix(sp0, lField.mul(min(sum0, 1)), lK);
-  const landShift = landMix(lField).sub(landMix(sp0)).mul(smoothstep(0.35, 0.9, sum0)).mul(lK);
+  let sp: N = sp0;
+  let nG: N = normalWorld;
+  let landShift: N = null;
+  // --- Campo contínuo do terreno (`land`, um material à parte para o fluido: os outros modos compilam o chão de sempre).
+  if (land) {
+    // --- Campo contínuo do terreno (U.land): o mapa do chão lido borrado e deslocado, no lugar dos pesos por vértice.
+    const landUV = (q: N2) => q.div(GROUND_EXTENT * 2).add(0.5);
+    const lWarp = vec2(texture(noiseTex, p.div(LAND_WARP_SCALE).add(vec2(0.21, 0.64))).a, texture(noiseTex, p.div(LAND_WARP_SCALE).add(vec2(0.77, 0.18))).a).sub(0.5).mul(LAND_WARP);
+    const lRaw = texture(groundMap.landTexture, landUV(p.add(lWarp))).level(float(LAND_LOD));
+    const lSum = lRaw.x.add(lRaw.y).add(lRaw.z).add(lRaw.w);
+    const lCn = texture(noiseTex, p.div(LAND_NOISE_SCALE).add(vec2(0.5, 0.3)));
+    const lNoisy = lRaw.div(max(lSum, 0.02)).add(vec4(lCn.r, lCn.a, lCn.g, lCn.b).sub(0.5).mul(vec4(...LAND_NOISE_AMP)));
+    const lTop = max(max(lNoisy.x, lNoisy.y), max(lNoisy.z, lNoisy.w));
+    const lWin = smoothstep(lTop.sub(LAND_SOFT), lTop, lNoisy);
+    const lField = lWin.div(lWin.x.add(lWin.y).add(lWin.z).add(lWin.w).max(0.001));
+    // Só onde há peça assentada sob o ponto (a peça que cai e a pilha não estão no mapa) e na face de cima.
+    const lHave = step(0.5, texture(groundMap.coverTexture, landUV(p)).level(float(0)).r);
+    const lK = U.land.mul(lHave).mul(smoothstep(0.55, 0.9, normalWorld.y));
+    const sum0 = sp0.x.add(sp0.y).add(sp0.z).add(sp0.w);
+    // Normal suave do relevo (U.land): diferença central do mapa de alturas, no lugar da normal plana de cada triângulo (as encostas
+    // deixam de ter quinas retas nas divisas dos setores). Só no topo (a lateral íngreme fica com a normal do triângulo).
+    const hAt = (q: N2) => texture(groundMap.reliefTexture, landUV(q)).level(float(0)).r;
+    const hdx = hAt(p.add(vec2(RELIEF_E, 0))).sub(hAt(p.sub(vec2(RELIEF_E, 0))));
+    const hdz = hAt(p.add(vec2(0, RELIEF_E))).sub(hAt(p.sub(vec2(0, RELIEF_E))));
+    const nSmooth = vec3(hdx.negate(), RELIEF_E * 2, hdz.negate()).normalize();
+    nG = mix(normalWorld, nSmooth, U.land.mul(lHave).mul(smoothstep(0.35, 0.7, normalWorld.y)).mul(smoothstep(0.0, 0.12, sum0))).normalize();
+    /** Cor média do terreno de um peso [prado, mata, plantação, vila] (normalizado: só a proporção conta). */
+    const landMix = (s: N) => U.landCol[0].mul(s.x).add(U.landCol[1].mul(s.y)).add(U.landCol[2].mul(s.z)).add(U.landCol[3].mul(s.w)).div(max(s.x.add(s.y).add(s.z).add(s.w), 0.001));
+    // A parte do chão que é terreno (e não areia de beira de rio, estrada...) fica a do vértice; o campo só reparte os terrenos.
+    sp = mix(sp0, lField.mul(min(sum0, 1)), lK);
+    landShift = landMix(lField).sub(landMix(sp0)).mul(smoothstep(0.35, 0.9, sum0)).mul(lK);
+  }
   const blot = texture(noiseTex, p.div(2.6)).g;
   const blot2 = texture(noiseTex, p.div(1.1).add(vec2(0.31, 0.77))).r;
   const fine = texture(noiseTex, p.mul(0.85)).b;
@@ -716,7 +722,7 @@ export function makeGroundMaterial() {
   // Endurece os pesos com ruído para a fronteira entre terrenos virar lóbulos: o pincel da
   // plantação e a terra da vila invadem o vizinho aos pedaços, e a soma é preservada.
   const wn = texture(noiseTex, p.div(1.7).add(vec2(0.13, 0.41))).g.sub(0.5).mul(0.45);
-  const hard = smoothstep(float(0.2), float(0.8), sp.add(wn));
+  const hard: N = smoothstep(float(0.2), float(0.8), sp.add(wn));
   const sw = hard.mul(sp.x.add(sp.y).add(sp.z).add(sp.w).div(hard.x.add(hard.y).add(hard.z).add(hard.w).max(0.001)));
   const t2 = texture(waterTex, p.mul(2.3).add(vec2(0.17, 0.43)));
   const t3 = texture(waterTex, p.mul(6.4).add(vec2(0.61, 0.29)));
@@ -741,7 +747,7 @@ export function makeGroundMaterial() {
   // Costura de cor com a peça vizinha, só no topo (a lateral fica com a cor do vértice).
   const seam = seamAt();
   // Na terra contínua a divisa entre peças é do campo (acima), e a costura do hexágono (que supõe a grade sem deslocamento) fica de fora.
-  const base0 = mix(max(vertexColor().rgb.add(landShift), 0), seam.rgb, seam.a.mul(top).mul(float(1).sub(U.land)));
+  const base0 = land ? mix(max(vertexColor().rgb.add(landShift), 0), seam.rgb, seam.a.mul(top).mul(float(1).sub(U.land))) : mix(vertexColor().rgb, seam.rgb, seam.a.mul(top));
   // Várzea: o prado e a plantação perto da água puxam para a cor fértil do tema (mapa de distância ao rio).
   const riverD = texture(riverMap.texture, positionWorld.xz.div(GROUND_EXTENT * 2).add(0.5)).r.mul(RIVER_DMAX);
   const nearRiver = float(1).sub(smoothstep(U.floodReach.mul(0.3), U.floodReach, riverD));
