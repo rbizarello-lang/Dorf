@@ -7,6 +7,7 @@
 import { isSpring } from '../../../src/core/water';
 import { STARTER_PROFILE, heightFit, tileProfile } from '../../../src/core/relief';
 import { T, isStrict, type TileDef } from '../../../src/core/tiles';
+import { knobs } from '../knobs';
 import { BASE_CFG, STARTER_EDGES, LiteWorld, makeLTile, type LTile, type LiteCfg, type Placed, type RTile } from '../lite';
 import type { Rule } from '../types';
 import { WaterTracker } from '../water';
@@ -114,7 +115,9 @@ export const relevoLite: Rule = {
 };
 
 /** Fluxo: só o caminho (rio, trilho, altura, água até o mar) pontua; a borda de terreno comum não. */
-export const FLUXO_CFG: ReliefCfg = { ...RELIEF_CFG, landPay: 0, perfect: false, closed: false };
+/** Botão `fluxo.landPay`: pontos da borda de terreno comum que encaixa (0 na proposta: só o caminho paga). */
+const FK = knobs('fluxo', { landPay: 0 });
+export const FLUXO_CFG: ReliefCfg = { ...RELIEF_CFG, landPay: FK.landPay, perfect: false, closed: false };
 
 export const fluxo: Rule = {
   id: 'fluxo',
