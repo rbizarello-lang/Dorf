@@ -1630,9 +1630,10 @@ async function runBench() {
     rows.push({ quality: qualityLabel[level], res: `${d.w}x${d.h}`, ratio: d.ratio, fps, p95Ms: round1(p95), cpuMs: round1(cpuMs), gpuMs, gpuP95Ms, calls: s.calls, triangles: s.triangles, slack });
   }
   rig.goalYaw = yaw0;
-  const refresh = REFRESH_RATES.reduce((a, b) => (Math.abs(b - bestFps) < Math.abs(a - bestFps) ? b : a));
+  // Sem pelo menos ~24 qps em algum nível não há como adivinhar a taxa do monitor (placa lenta demais, ou software).
+  const hz = bestFps >= 24 ? REFRESH_RATES.reduce((a, b) => (Math.abs(b - bestFps) < Math.abs(a - bestFps) ? b : a)) : 0;
   const fits = rows.filter((r) => r.slack === 'folga' || r.slack === 'no limite' || r.slack.startsWith('cabe')).map((r) => r.quality);
-  out.summary = `Monitor: o FPS parou em ~${refresh} Hz. Cabem em 16,7 ms (60 qps): ${fits.length ? fits.join(', ') : 'nenhum nível'}. Folga = GPU e CPU até 10 ms.`;
+  out.summary = `${hz ? `Monitor: o melhor FPS parou em ~${hz} Hz.` : 'Monitor: poucos quadros para estimar a taxa.'} Cabem em 16,7 ms (60 qps): ${fits.length ? fits.join(', ') : 'nenhum nível'}. Folga = GPU e CPU até 10 ms.`;
   out.done = true;
   render('Pronto. A câmera girou devagar sobre o mesmo tabuleiro em cada nível.');
 }
