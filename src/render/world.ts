@@ -622,6 +622,7 @@ export class World {
   private warp: Warp | null = null;
   /** Liga o desenho fluido (antes da primeira peça): chão, água e decoração deslocados, casas vazias em mancha. */
   setFluid(on: boolean) {
+    if (on === !!this.warp) return;
     this.warp = on ? new Warp(0x2a) : null;
     this.slots.geometry.dispose();
     this.slots.geometry = on ? new THREE.CircleGeometry(0.8, 28).rotateX(-Math.PI / 2) : new THREE.CircleGeometry(0.9, 6).rotateX(-Math.PI / 2);
@@ -1160,8 +1161,12 @@ export class World {
   /** Relevo por peça: nível-base da peça da vez (a casa vazia sob o ponteiro é aceita nesse plano). */
   private handLevel = 0;
 
+  /** Quando o encaixe fluido liga: `auto` = só no modo Relevo (`?fluido=0` e `?fluido` forçam). */
+  fluidPref: 'auto' | 'on' | 'off' = 'auto';
+
   setPieceRelief(on: boolean) {
     this.pieceRelief = on;
+    this.setFluid(this.fluidPref === 'on' || (this.fluidPref === 'auto' && on));
     U.rock.value = on ? 1 : 0;
     this.seams.clear();
     this.reliefMax = this.levelsEnabled ? (on ? 2 : this.theme?.relief?.levels ?? 0) : 0;

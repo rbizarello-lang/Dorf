@@ -33,6 +33,9 @@ const cases = [
   { name: 'bench', q: 'bench&quality=low', backend: 'webgpu', bench: true },
   { name: 'webgpu', q: 'theme=holanda&seed=3&auto=12&quality=low', backend: 'webgpu' },
   { name: 'webgl', q: 'theme=egito&seed=3&auto=12&quality=low&webgl', backend: 'webgl2' },
+  // O modo Relevo liga o encaixe fluido (chão, água e costa deslocados) por padrão: confere os dois backends.
+  { name: 'relevo', q: 'mode=relevo&theme=holanda&seed=3&auto=12&quality=low', backend: 'webgpu' },
+  { name: 'relevo-webgl', q: 'mode=relevo&theme=oriental&seed=3&auto=12&quality=low&webgl', backend: 'webgl2' },
 ];
 
 const browser = await launch(['--ignore-gpu-blocklist']);

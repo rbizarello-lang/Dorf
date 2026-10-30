@@ -104,8 +104,12 @@ async function createWorld(): Promise<World> {
   }
 }
 const world = await createWorld();
-// Encaixe fluido (`?fluido`): antes de qualquer peça, para o desenho de todas já nascer deslocado.
-if (new URLSearchParams(location.search).get('fluido') !== null && new URLSearchParams(location.search).get('fluido') !== '0') world.setFluid(true);
+// Encaixe fluido: ligado por padrão no modo Relevo (`World.setPieceRelief`); `?fluido=0` desliga e `?fluido` liga em qualquer modo.
+// Vem antes de qualquer peça, para o desenho de todas já nascer deslocado.
+{
+  const fl = params.get('fluido');
+  world.fluidPref = fl === null ? 'auto' : fl === '0' ? 'off' : 'on';
+}
 // `?levels=0` desliga o relevo (platôs): o tabuleiro sai plano, como antes (comparar capturas).
 world.levelsEnabled = params.get('levels') !== '0';
 {
@@ -294,7 +298,8 @@ const forcedSpecials: SpecialKind[] | null = params.has('specials') ? (params.ge
 const rulesFor = (t: Theme, seed: number, m: Mode = mode): Rules => ({ ...DEFAULT_RULES, ...(m.daily ? {} : t.rules), ...modeRules(m, seed) });
 /** Nome do modo no HUD; no desafio do dia, com a regra do dia. */
 const modeLabel = () => (mode.daily ? `${mode.name} · ${dailyRule(game.seed).name}` : mode.name);
-let mode: Mode = modeById(params.get('mode') ?? store.get('mode'));
+// A prévia publicada (`VITE_PREVIEW=relevo npm run build`) não recebe parâmetros de URL: abre no Relevo enquanto a pessoa não escolheu outro modo.
+let mode: Mode = modeById(params.get('mode') ?? store.get('mode') ?? (import.meta.env.VITE_PREVIEW === 'relevo' ? 'relevo' : null));
 let undone = 0;
 const ERA_NAMES = ['Aldeia', 'Vila', 'Burgo', 'Cidade'];
 const eraName = (i: number) => (theme.eras ?? ERA_NAMES)[i] ?? ERA_NAMES[ERA_NAMES.length - 1];
