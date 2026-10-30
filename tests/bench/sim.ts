@@ -31,6 +31,8 @@ export interface GameRec {
   /** Tempo gasto escolhendo (ms) e quantas escolhas. */
   ms: number;
   dec: Decisions;
+  /** Pontos que vieram do termo próprio da ideia, por nome (só nos mundos leves). */
+  parts?: Record<string, number>;
 }
 
 export const emptyDecisions = (): Decisions => ({ turns: 0, forced: 0, empty: 0, informative: 0, options: 0, good: 0, goodCells: 0, gap: 0, stake: 0 });
@@ -87,5 +89,5 @@ export function playGame(rule: Rule, player: Player, seed: number): GameRec {
     ms += performance.now() - t0;
     w.play(m);
   }
-  return { seed, score: w.score, placed: w.placed, discards: w.discards, ms, dec };
+  return { seed, score: w.score, placed: w.placed, discards: w.discards, ms, dec, parts: w.parts?.() };
 }

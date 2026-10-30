@@ -80,6 +80,7 @@ export class ReliefWorld extends LiteWorld {
     const level = p.v.aux.h[iw];
     const g = this.water.gain({ q: p.q, r: p.r, edges, level, spring: p.idx > 0 && isSpring(p.seed, edges, level) });
     this.exTiles += g.tiles;
+    this.note('água corrente e mar', g.pts);
     return g.pts;
   }
 

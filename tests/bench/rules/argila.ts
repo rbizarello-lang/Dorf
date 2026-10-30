@@ -10,11 +10,14 @@
 import { DIRS } from '../../../src/core/hex';
 import { isStrict } from '../../../src/core/tiles';
 import { buildGroups, find, mass } from '../groups';
+import { knobs } from '../knobs';
 import { LiteWorld, opp, type Placed } from '../lite';
 import type { Rule } from '../types';
 
-export const ADVANCE = 0.5;
-export const POINTS_PER_TILE = 10;
+/** Botões `argila.advance` (cunhas que a maior mancha avança por borda) e `argila.perTile` (pontos por peça de área ganha). */
+const K = knobs('argila', { advance: 0.5, perTile: 10 });
+export const ADVANCE = K.advance;
+export const POINTS_PER_TILE = K.perTile;
 
 /** Área ganha (em pontos, já arredondada) pelas manchas do mundo `w`. */
 export function clayPoints(w: LiteWorld): number {
@@ -48,6 +51,7 @@ export class ArgilaWorld extends LiteWorld {
   protected extra(_p: Placed, commit: boolean): number {
     const now = clayPoints(this);
     const gain = Math.max(0, now - this.best);
+    this.note('área (Argila)', gain);
     if (commit && now > this.best) this.best = now;
     return gain;
   }

@@ -38,6 +38,8 @@ export class OrvalhoWorld extends LiteWorld {
       const gain = f - this.paid[o.idx];
       if (gain > 0) {
         total += gain;
+        // O mundo respondendo: o orvalho que a peça nova levou a peças que já estavam lá.
+        this.note(o === p ? 'umidade da própria peça' : 'umidade levada às peças vizinhas', gain);
         if (commit) this.paid[o.idx] = f;
       }
     }

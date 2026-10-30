@@ -34,6 +34,8 @@ export interface World {
   discard(): void;
   /** As jogadas da peça seguinte (que o jogo mostra) depois de `m`. Não mexe neste mundo. Vazio se não houver peça seguinte ou ela travar. */
   after(m: Move): Move[];
+  /** Só nos mundos leves: pontos da partida que vieram do termo próprio da ideia (umidade, área, água...), por nome. */
+  parts?(): Record<string, number>;
   /** Só nos mundos do núcleo: a jogada da IA do jogo (`Game.bestMove`), para conferir com o `tests/balance.ts`. */
   native?(rand: () => number): Move | null;
 }

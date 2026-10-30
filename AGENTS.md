@@ -41,10 +41,12 @@ npm run check        # typecheck + testes + build: rode antes de todo commit
 npm run typecheck    # tsc --noEmit
 npm test             # 600 partidas simuladas com oráculos independentes, cenários sintéticos, legibilidade das cores (tests/legibility.ts), vídeo/câmera/nível por placa (tests/video.ts) e os gatilhos dos easter eggs (tests/eggs.ts)
 npm run balance      # painel de equilíbrio (tests/balance.ts): média, p10/p50/p90 e origem dos pontos, por modo e por tema. Não entra no check. `npm run balance -- 40` muda o tamanho da amostra (padrão 80). Meta dos Exploradores: o jogador "caça sítios" acha os 10 em pelo menos 50% das partidas (linha "todos os sítios"); o guloso puro não mira sítios e fica bem abaixo, de propósito
+npm run bench -- <regras> [partidas]   # bancada de testes de encaixe (tests/bench), Fase 1 do plano Terra contínua. Não entra no check. Joga uma regra com 3 jogadores (guloso, planejador de 2 peças, distraído) e mede média/p10/p50/p90, peças, travamento, riqueza de decisão, profundidade e tempo por jogada; grava RESULTADO.md e resultado.json (`BENCH_OUT` ou `--saida=`). `<regras>` = `todas` ou ids (classico, base, relevo, relevo-base, aquarela, orvalho, argila, fluxo, terra). `-- --verifica` confere o motor leve contra o core jogada a jogada e a coerência de cada regra; `-- --paridade` confere a IA do jogo contra o laço do balance
 npm run build        # dist/index.html (arquivo único)
 npm run smoke        # depois do build: abre o jogo em WebGPU e WebGL2 e falha com erro no console
 node scripts/pwa.mjs http://127.0.0.1:4173/   # depois do build e com o dist servido: service worker, offline, manifesto, exportar/importar
 node scripts/artifact.mjs   # depois do build: dist/artifact/retalhos.html (formato de página publicável)
+node scripts/hexometro.mjs <png...>   # nota de hexagonalidade das capturas (histograma de orientação das bordas, harmônicos de 60°): cai quando o contorno deixa de ser hexágono. Node puro, sem navegador; compare capturas da mesma vista
 ```
 
 A CI (`.github/workflows/ci.yml`) roda typecheck, testes e build em todo pull request e em todo push na `main`, e depois `npm run smoke` (`scripts/smoke.mjs`): abre o build no Chromium em WebGPU e em WebGL2, deixa a IA pôr 12 peças e falha com qualquer erro no console. Rode o mesmo localmente depois do build quando mexer em `src/render/` ou no `main.ts`. No Claude Code na web, o hook `.claude/hooks/session-start.sh` roda `npm install` no início da sessão.
@@ -206,6 +208,7 @@ tests/storage.ts    ida e volta do backup com armazenamento falso e recusas sem 
 tests/eggs.ts       gatilhos dos easter eggs: horas, datas (inclusive virando o ano), sorte por semente, grupos conferidos por BFS numa partida de verdade e replay idêntico
 tests/themes.ts     os 5 temas, `?theme=` antigo, migração dos recordes dos temas fundidos e o progresso dos removidos
 tests/video.ts      MP4 conferido por um leitor de caixas próprio, resolução dinâmica, nível por placa, câmera e filme
+tests/bench/       bancada de encaixe (não entra no check): `run.ts` (linha de comando, fios em paralelo, relatório), `lite.ts` (motor leve com os ganchos de cada regra: gerador de peça, validade, pontos), `coreWorld.ts` (o `Game` do core como mundo da bancada), `rules/` (um plugin por ideia: Clássico e Relevo pelo core; Aquarela, Orvalho, Argila, Fluxo e Terra contínua no motor leve), `players.ts`, `sim.ts`, `stats.ts`, `verifica.ts`
 scripts/         capturas, teste de carga, conversão para página publicável; pwa-plugin.mjs (plugin do Vite: manifesto, ícones PNG desenhados em código e sw.js no dist); pwa.mjs (confere SW, offline, manifesto e backup)
 ```
 

@@ -106,6 +106,10 @@ export abstract class LiteWorld implements World {
   protected nbs: (Placed | undefined)[] = [undefined, undefined, undefined, undefined, undefined, undefined];
   /** Peças de volta da jogada em avaliação (o mar, o cerco): o `extra` soma aqui. */
   protected exTiles = 0;
+  /** Pontos do termo próprio da regra, por nome, nas jogadas já feitas (para a tabela de origem dos pontos). */
+  protected got: Record<string, number> = {};
+  /** Os do `extra` da jogada em avaliação (só entram em `got` ao jogar de verdade). */
+  protected gotNow: Record<string, number> = {};
 
   // ---- ganchos das regras ----
   /** A rotina de `perfeito` e de `cerco`: a similaridade mínima de cada borda. */
@@ -166,6 +170,15 @@ export abstract class LiteWorld implements World {
   /** Pontos que dependem do mundo todo (umidade, área, água). `p` já está posta; só grave estado se `commit`. */
   protected extra(_p: Placed, _commit: boolean): number {
     return 0;
+  }
+
+  /** O `extra` anota aqui de onde vieram os pontos dele (`nome`); a partida soma o que foi jogado de verdade. */
+  protected note(name: string, pts: number): void {
+    if (pts) this.gotNow[name] = (this.gotNow[name] ?? 0) + pts;
+  }
+
+  parts(): Record<string, number> {
+    return this.got;
   }
 
   /** Depois de uma jogada de verdade: atualiza o estado próprio da regra. */
@@ -273,6 +286,7 @@ export abstract class LiteWorld implements World {
     if (this.usePerfect && n >= 2 && perfect) pts += cfg.perfectBonus;
     pts += syn * cfg.synergyPoints;
     this.exTiles = 0;
+    this.gotNow = {};
     let newClosed: number[] | null = null;
     if (this.useClosed) {
       let c = 0;
@@ -314,6 +328,7 @@ export abstract class LiteWorld implements World {
     if (!t) throw new Error('partida acabada');
     const pts = this.evaluate(t, m.q, m.r, m.rot, true);
     if (pts < 0) throw new Error(`jogada inválida ${m.q},${m.r},${m.rot}`);
+    for (const k of Object.keys(this.gotNow)) this.got[k] = (this.got[k] ?? 0) + this.gotNow[k];
     this.score += pts;
     this.placed++;
     this.stack += this.exTiles - 1;
@@ -362,6 +377,7 @@ export abstract class LiteWorld implements World {
     w.cur = this.cur;
     w.nxt = this.nxt;
     w.tiles = this.tiles;
+    w.got = { ...this.got };
   }
 
   /** Peças do mundo (a do centro é o índice 0). */

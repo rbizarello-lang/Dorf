@@ -37,6 +37,8 @@ export interface Summary {
     /** Pontos da melhor jogada nas decisões que contam (o que está em jogo em cada escolha). */
     stake: number;
   };
+  /** Pontos por partida (média) que vieram do termo próprio da ideia, por nome; vazio nas regras do núcleo. */
+  parts: Record<string, number>;
   /** Placar de cada partida por semente (1..N), para o pareamento entre jogadores. */
   scores: number[];
 }
@@ -60,6 +62,8 @@ export function summarize(rule: string, player: string, recs: GameRec[]): Summar
     stake += d.stake;
     ms += r.ms;
   }
+  const parts: Record<string, number> = {};
+  for (const r of recs) for (const [k, v] of Object.entries(r.parts ?? {})) parts[k] = (parts[k] ?? 0) + v / recs.length;
   return {
     rule,
     player,
@@ -78,11 +82,12 @@ export function summarize(rule: string, player: string, recs: GameRec[]): Summar
       gap: info ? gap / info : 0,
       stake: info ? stake / info : 0,
     },
+    parts,
     scores: recs.slice().sort((a, b) => a.seed - b.seed).map((r) => r.score),
   };
 }
 
-/** Diferença pareada por semente (b − a): média, erro padrão e o ganho relativo (soma de b sobre soma de a, menos 1). */
+/** Diferença pareada por semente (b − a): média, erro padrão, o ganho relativo (soma de b sobre soma de a, menos 1) e a fração de sementes em que b ganha de a. */
 export function paired(a: number[], b: number[]) {
   const n = Math.min(a.length, b.length);
   const d = Array.from({ length: n }, (_, i) => b[i] - a[i]);
@@ -90,5 +95,5 @@ export function paired(a: number[], b: number[]) {
   const se = Math.sqrt(d.reduce((s, x) => s + (x - m) ** 2, 0) / Math.max(1, n - 1)) / Math.sqrt(Math.max(1, n));
   const sa = a.slice(0, n).reduce((x, y) => x + y, 0);
   const sb = b.slice(0, n).reduce((x, y) => x + y, 0);
-  return { mean: m, se, rel: sa ? sb / sa - 1 : 0 };
+  return { mean: m, se, rel: sa ? sb / sa - 1 : 0, wins: n ? d.filter((x) => x > 0).length / n : 0 };
 }

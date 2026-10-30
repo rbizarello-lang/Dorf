@@ -5,6 +5,7 @@
 //   --jogadores=guloso,planejador,distraido   quais jogam (padrão: os três)
 //   --fios=N          fios em paralelo (padrão: núcleos − 1)
 //   --saida=<pasta>   onde gravar RESULTADO.md e resultado.json (padrão: .cache/bench, ou a variável BENCH_OUT)
+//   --relatorio       só refaz o RESULTADO.md a partir do resultado.json da pasta (e do leitura.md, se houver), sem jogar de novo
 //   --verifica[=N]    (N partidas, padrão 40) confere o motor leve contra o núcleo e a coerência de cada regra (não joga o painel)
 //   --paridade[=N]    confere a IA do jogo no Clássico contra o laço do tests/balance.ts (N partidas, padrão 30)
 // Não entra no `npm run check`. A mesma linha de comando dá a mesma tabela (sementes fixas; o distraído usa gerador de semente fixa).
@@ -84,9 +85,9 @@ interface RuleRow {
   baseline: string;
   by: Record<string, Summary>;
   /** Planejador menos guloso, pareado por semente. */
-  depth: { mean: number; se: number; rel: number } | null;
+  depth: { mean: number; se: number; rel: number; wins: number } | null;
   /** Distraído menos guloso. */
-  slip: { mean: number; se: number; rel: number } | null;
+  slip: { mean: number; se: number; rel: number; wins: number } | null;
 }
 
 function table(head: string[], rows: string[][]): string {
@@ -139,6 +140,18 @@ function report(rows: RuleRow[], games: number, wall: number, threads: number, l
     '',
   );
 
+  const origin = rows.filter((r) => G(r) && Object.keys(G(r).parts).length);
+  if (origin.length) {
+    L.push('### De onde vêm os pontos do termo novo (jogador guloso, média por partida)', '');
+    L.push(
+      table(
+        ['Regra', 'Termo', 'Pontos/partida', '% da média'],
+        origin.flatMap((r) => Object.entries(G(r).parts).map(([k, v]) => [r.name, k, num(v, 0), `${num((100 * v) / G(r).score.mean, 1)}%`])),
+      ),
+      '',
+    );
+  }
+
   L.push('## 2. Riqueza de decisão e profundidade', '');
   L.push(
     '- **Boas**: nas decisões em que a melhor jogada vale mais que 0, quantas jogadas valem pelo menos 90% da melhor (entre parênteses, em quantas casas diferentes). Muitas = muitas saídas boas e diferentes.',
@@ -150,10 +163,10 @@ function report(rows: RuleRow[], games: number, wall: number, threads: number, l
   );
   L.push(
     table(
-      ['Regra', 'Opções/jogada', 'Boas (casas)', 'Folga', 'Em jogo', 'Vazias', 'Forçadas', 'Profundidade (planej. − guloso)', 'Distraído − guloso'],
+      ['Regra', 'Opções/jogada', 'Boas (casas)', 'Folga', 'Em jogo', 'Vazias', 'Forçadas', 'Profundidade (planej. − guloso; % das sementes em que ganha)', 'Distraído − guloso'],
       rows.filter((r) => G(r)).map((r) => {
         const g = G(r).rich;
-        return [r.name, num(g.options, 0), `${num(g.good, 1)} (${num(g.goodCells, 1)})`, `${num(100 * g.gap, 0)}%`, `${num(g.stake, 0)} pts`, `${num(g.emptyPct, 1)}%`, `${num(g.forcedPct, 1)}%`, r.depth ? `${r.depth.mean >= 0 ? '+' : ''}${num(r.depth.mean, 0)} ± ${num(r.depth.se, 0)} (${pct(r.depth.rel, 1)})` : '-', r.slip ? pct(r.slip.rel, 1) : '-'];
+        return [r.name, num(g.options, 0), `${num(g.good, 1)} (${num(g.goodCells, 1)})`, `${num(100 * g.gap, 0)}%`, `${num(g.stake, 0)} pts`, `${num(g.emptyPct, 1)}%`, `${num(g.forcedPct, 1)}%`, r.depth ? `${r.depth.mean >= 0 ? '+' : ''}${num(r.depth.mean, 0)} ± ${num(r.depth.se, 0)} (${pct(r.depth.rel, 1)}; ganha em ${num(100 * r.depth.wins, 0)}%)` : '-', r.slip ? pct(r.slip.rel, 1) : '-'];
       }),
     ),
     '',
@@ -219,6 +232,15 @@ async function main() {
   if (has('verifica')) process.exit(verifyAll(Number(flag('verifica')) || 40) ? 0 : 1);
   if (has('paridade')) process.exit(parity(Number(flag('paridade')) || 30) ? 0 : 1);
 
+  const outDir = flag('saida') ?? process.env.BENCH_OUT ?? '.cache/bench';
+  if (has('relatorio')) {
+    const j = JSON.parse(readFileSync(join(outDir, 'resultado.json'), 'utf8')) as { games: number; seconds: number; threads?: number; rules: RuleRow[] };
+    const leituraFile = join(outDir, 'leitura.md');
+    writeFileSync(join(outDir, 'RESULTADO.md'), report(j.rules, j.games, j.seconds, j.threads ?? 1, existsSync(leituraFile) ? readFileSync(leituraFile, 'utf8') : ''));
+    process.stderr.write(`Refeito ${outDir}/RESULTADO.md\n`);
+    return;
+  }
+
   const wanted = !pos[0] || pos[0] === 'todas' ? ALL.map((r) => r.id) : pos[0].split(',');
   for (const id of wanted) if (!BY_ID.has(id)) throw new Error(`regra desconhecida: ${id} (as que existem: ${[...BY_ID.keys()].join(', ')})`);
   const games = pos[1] ? Number(pos[1]) : 100;
@@ -236,7 +258,6 @@ async function main() {
   for (const p of ['planejador', 'guloso', 'distraido'].filter((x) => players.includes(x))) for (let from = 1; from <= games; from += chunk) for (const r of rules) jobs.push({ rule: r, player: p, from, to: Math.min(games, from + chunk - 1) });
   const threads = Number(flag('fios')) || Math.max(1, cpus().length - 1);
 
-  const outDir = flag('saida') ?? process.env.BENCH_OUT ?? '.cache/bench';
   process.stderr.write(`Bancada: ${rules.length} regras × ${players.length} jogadores × ${games} partidas = ${jobs.length} pedaços em ${Math.min(threads, jobs.length)} fios\n`);
   const t0 = Date.now();
   const done = await runAll(jobs, threads);
@@ -259,7 +280,7 @@ async function main() {
   const leitura = existsSync(leituraFile) ? readFileSync(leituraFile, 'utf8') : '';
   const md = report(rows, games, wall, threads, leitura);
   writeFileSync(join(outDir, 'RESULTADO.md'), md);
-  writeFileSync(join(outDir, 'resultado.json'), JSON.stringify({ games, seeds: [1, games], players, seconds: wall, rules: rows }, null, 2));
+  writeFileSync(join(outDir, 'resultado.json'), JSON.stringify({ games, seeds: [1, games], players, seconds: wall, threads, rules: rows }, null, 2));
   console.log(md);
   process.stderr.write(`Gravado em ${outDir}/RESULTADO.md e resultado.json (${num(wall / 60, 1)} min)\n`);
 }

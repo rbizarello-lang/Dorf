@@ -25,14 +25,15 @@ import { mulberry32 } from '../../../src/core/rng';
 import { T, isStrict, type TileDef } from '../../../src/core/tiles';
 import { isSpring } from '../../../src/core/water';
 import { buildGroups, exposed, find, mass, terrainOf } from '../groups';
+import { knobs } from '../knobs';
 import { BASE_CFG, LiteWorld, STARTER_EDGES, makeLTile, type LTile, type Placed, type RTile } from '../lite';
 import { compAux, pure, tileComp } from '../mix';
 import { affected, fitOf, moistureAt } from '../moisture';
 import type { Rule } from '../types';
 import { WaterTracker } from '../water';
 
-/** Os botões da Terra contínua (tudo o que a calibração mexe). */
-export const TERRA = {
+/** Os botões da Terra contínua (tudo o que a calibração mexe; `BENCH_KNOBS` troca sem editar, ver knobs.ts). */
+export const TERRA = knobs('terra', {
   waterChance: 0.24,
   lambdaMin: 0.08,
   lambdaMax: 0.3,
@@ -45,7 +46,7 @@ export const TERRA = {
   flowPoints: 8,
   seaPoints: 60,
   seaTiles: 2,
-};
+});
 const SALT = 0x7e77a;
 const MAX = 512;
 
@@ -129,13 +130,16 @@ export class TerraWorld extends LiteWorld {
     let pts = 0;
     // 3. manchas
     const v = this.patches();
-    pts += Math.max(0, v - this.patchBest);
+    const patch = Math.max(0, v - this.patchBest);
+    pts += patch;
+    this.note('manchas', patch);
     if (commit && v > this.patchBest) this.patchBest = v;
     // 5. umidade
     for (const o of affected(this, p)) {
       const f = fitOf(tileComp(o.v), moistureAt(this, o.q, o.r));
       if (f > this.paid[o.idx]) {
         pts += f - this.paid[o.idx];
+        this.note(o === p ? 'umidade da própria peça' : 'umidade levada às peças vizinhas', f - this.paid[o.idx]);
         if (commit) this.paid[o.idx] = f;
       }
     }
@@ -145,6 +149,7 @@ export class TerraWorld extends LiteWorld {
       const g = this.water.gain({ q: p.q, r: p.r, edges: p.v.edges, level, spring: p.idx > 0 && isSpring(p.seed, p.v.edges, level) });
       this.exTiles += g.tiles;
       pts += g.pts;
+      this.note('água corrente e mar', g.pts);
     }
     return pts;
   }

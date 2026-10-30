@@ -7,6 +7,7 @@
 //
 // Só cresce: cada peça guarda o que já pagou (`paid`) e uma peça de água ou de mata nova paga a diferença às peças que ela fez entrar na faixa.
 import { T } from '../../src/core/tiles';
+import { knobs } from './knobs';
 import type { LiteWorld, Placed } from './lite';
 
 export const MOIST = [1.0, 0.7, 0.45, 0.25];
@@ -20,8 +21,10 @@ export const RANGE: readonly (readonly [number, number])[] = [
   [0.5, 0.8], // plantação
   [0.1, 0.4], // vila
 ];
-export const FIT_IN = 8;
-export const FIT_MID = 11;
+/** Pontos de uma peça na faixa e no meio da faixa (botões `orvalho.fitIn` e `orvalho.fitMid`). */
+const FIT = knobs('orvalho', { fitIn: 8, fitMid: 11 });
+export const FIT_IN = FIT.fitIn;
+export const FIT_MID = FIT.fitMid;
 const REACH = 3;
 
 export const hasWater = (edges: readonly T[]) => edges.includes(T.Water);

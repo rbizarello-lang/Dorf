@@ -11,11 +11,14 @@
 import { mulberry32 } from '../../../src/core/rng';
 import { LAND, T, isStrict, type TileDef } from '../../../src/core/tiles';
 import { LiteWorld, STARTER_EDGES, makeLTile, type LTile, type RTile } from '../lite';
+import { knobs } from '../knobs';
 import { compAux, l1, pure } from '../mix';
 import type { Rule } from '../types';
 
-export const P_TRANSITION = 0.55;
-export const P_LOOSE = 0.08;
+/** Botões `aquarela.*`: chance de misturar numa transição e solta, semelhança mínima que paga e a que vale perfeito/cerco. */
+const K = knobs('aquarela', { transition: 0.55, loose: 0.08, payFloor: 0.5, perfectS: 0.75 });
+export const P_TRANSITION = K.transition;
+export const P_LOOSE = K.loose;
 export const SALT = 0xa9a9a9;
 
 /** A composição de cada borda de uma peça de bordas `edges`, gerada só de `seed`. */
@@ -50,7 +53,7 @@ export function mixComp(edges: readonly T[], seed: number): number[][] {
 export class AquarelaWorld extends LiteWorld {
   constructor(seed: number) {
     super(seed);
-    this.perfectS = 0.75;
+    this.perfectS = K.perfectS;
   }
 
   protected decorate(def: TileDef): LTile {
@@ -67,11 +70,11 @@ export class AquarelaWorld extends LiteWorld {
   }
 
   protected pay(_a: RTile, _i: number, _b: RTile, _j: number, s: number): number {
-    return s >= 0.5 ? Math.round(this.cfg.matchPoints * s) : 0;
+    return s >= K.payFloor ? Math.round(this.cfg.matchPoints * s) : 0;
   }
 
   protected synOpen(s: number): boolean {
-    return s < 0.5;
+    return s < K.payFloor;
   }
 
   protected spawn(): LiteWorld {
