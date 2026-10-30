@@ -188,7 +188,7 @@ export function mapSvg(world, o = {}) {
   let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${f1(b.minx - m)} ${f1(b.miny - m)} ${f1(w)} ${f1(h)}">`;
   s += `<rect x="${f1(b.minx - m)}" y="${f1(b.miny - m)}" width="${f1(w)}" height="${f1(h)}" fill="${COL.sea}"/>`;
   s += mapGroup(world, o.uid ?? 'm', o);
-  if (o.title) s += `<text x="${f1(b.minx - m + 260)}" y="${f1(b.miny - m + 700)}" font-family="sans-serif" font-size="560" fill="#0d2b3a" opacity=".85">${o.title}</text>`;
+  if (o.title) s += `<text x="${f1(b.minx - m + 260)}" y="${f1(b.miny - m + 700)}" font-family="sans-serif" font-size="400" fill="#0d2b3a" opacity=".85">${o.title}</text>`;
   return s + '</svg>';
 }
 
