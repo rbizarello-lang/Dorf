@@ -1902,6 +1902,7 @@ function start(data: unknown) {
     world.rig.tilt = world.rig.goalTilt = pitchDeg * THREE.MathUtils.DEG2RAD - world.rig.basePitch(world.rig.goalDist);
   }
   if (params.has('focus')) (window as unknown as { __focus: (t: number) => boolean }).__focus(Number(params.get('focus')));
+  if (params.has('coast')) (window as unknown as { __coast: (i: number) => boolean }).__coast(Number(params.get('coast')) || 0);
   // ?spring=i centraliza na i-ésima nascente (modo Relevo); ?spring=mar.i, no i-ésimo lago que a água alcançou.
   if (params.has('spring')) {
     const [a, b] = (params.get('spring') ?? '').split('.');
@@ -1970,6 +1971,18 @@ function start(data: unknown) {
   }
   if (!best) return false;
   const { x, z } = hexToWorld(best.q, best.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
+
+// Centraliza a câmera na i-ésima peça mais longe do centro do mapa (a costa, para conferir a areia e a espuma do mar nas capturas).
+(window as unknown as { __coast: (i?: number, zoom?: number) => boolean }).__coast = (i = 0, zoom) => {
+  const far = game.board.list.map((p) => ({ p, d: Math.hypot(hexToWorld(p.q, p.r).x, hexToWorld(p.q, p.r).z) })).sort((a, b) => b.d - a.d);
+  const t = far[Math.min(i, far.length - 1)]?.p;
+  if (!t) return false;
+  const { x, z } = hexToWorld(t.q, t.r);
   world.rig.goal.set(x, 0, z);
   world.rig.target.set(x, 0, z);
   if (zoom) world.rig.dist = world.rig.goalDist = zoom;

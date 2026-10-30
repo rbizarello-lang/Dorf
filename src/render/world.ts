@@ -16,7 +16,7 @@ import { CameraRig, FOV } from './cameraRig';
 import { createRenderer, type Backend } from './gpu';
 import { Lib, WONDER_PODIUM, instGeometry, postStampGeometry, setInstColor, stampGeometry } from './lib';
 import { Life } from './life';
-import { CLOUD_TOP, U, makeVoidMaterial, softShadowFilter } from './materials';
+import { CLOUD_TOP, U, makeVoidMaterial, slotAlpha, slotBlob, softShadowFilter } from './materials';
 import { A, fogNode } from './atmosphere';
 import { CL, makeCloudMesh } from './clouds';
 import { seaMap } from './seaMap';
@@ -124,8 +124,13 @@ function levelSig(lvs: BuildOpts['levels']): string {
   return `${lvs.own}${lvs.nb.join('')}${lvs.sec?.join('') ?? ''}${lvs.placed?.map(Number).join('') ?? ''}${t ? `|${t.h.join(',')};${t.c};${t.he.join(',')};${t.co.join(',')}` : ''}${w ? `@${w.x.toFixed(2)},${w.z.toFixed(2)},${w.rot}` : ''}`;
 }
 
-/** O morro no meio da peça sobe mais que o nível lógico dele (só a aparência: o morro fica mais marcado). */
-const MORRO_BONUS = 0.7;
+/** O morro no meio da peça sobe mais que o nível lógico dele (só a aparência; baixo, para o morro não virar uma cúpula por peça). */
+const MORRO_BONUS = 0.3;
+/**
+ * O relevo é do mundo: onde a vizinha já assentada tem a borda mais baixa (ou mais alta), o alvo do setor puxa esta fração do caminho
+ * até ela. Sem isso, cada peça cercada de vizinhas mais baixas vira uma almofada (platô no meio e encosta para todos os lados).
+ */
+const WORLD_PULL = 0.42;
 
 function tileMatrix(q: number, r: number, rot: number, y = 0, out = new THREE.Matrix4()) {
   const { x, z } = hexToWorld(q, r);
@@ -540,10 +545,11 @@ function skyFor(theme: Theme, tod: TimeOfDay): Sky {
 function dashGeometry(fluid: boolean): THREE.BufferGeometry {
   const dashes: THREE.BufferGeometry[] = [];
   if (fluid) {
-    const n = 14, R = 0.74;
+    // Contorno de mancha (raio que ondula com o ângulo, o mesmo em toda casa), não um polígono.
+    const n = 16, R = (a: number) => 0.76 * (1 + 0.09 * Math.sin(2 * a + 0.7) + 0.06 * Math.sin(3 * a + 2.1) + 0.04 * Math.sin(5 * a + 0.3));
     for (let i = 0; i < n; i++) {
       const a0 = ((i + 0.15) / n) * Math.PI * 2, a1 = ((i + 0.85) / n) * Math.PI * 2;
-      const x0 = Math.cos(a0) * R, z0 = Math.sin(a0) * R, x1 = Math.cos(a1) * R, z1 = Math.sin(a1) * R;
+      const x0 = Math.cos(a0) * R(a0), z0 = Math.sin(a0) * R(a0), x1 = Math.cos(a1) * R(a1), z1 = Math.sin(a1) * R(a1);
       dashes.push(new THREE.PlaneGeometry(Math.hypot(x1 - x0, z1 - z0), 0.07).rotateX(-Math.PI / 2).rotateY(-Math.atan2(z1 - z0, x1 - x0)).translate((x0 + x1) / 2, 0, (z0 + z1) / 2));
     }
     return mergeGeometries(dashes)!;
@@ -624,8 +630,13 @@ export class World {
   setFluid(on: boolean) {
     if (on === !!this.warp) return;
     this.warp = on ? new Warp(0x2a) : null;
+    // Terra contínua: o chão lê o campo de terreno do mundo, que só existe com o desenho deslocado.
+    U.land.value = on ? 1 : 0;
     this.slots.geometry.dispose();
-    this.slots.geometry = on ? new THREE.CircleGeometry(0.8, 28).rotateX(-Math.PI / 2) : new THREE.CircleGeometry(0.9, 6).rotateX(-Math.PI / 2);
+    // Mancha: um disco largo que esmaece (os vizinhos se fundem); sem o fluido, o hexágono de sempre.
+    this.slots.geometry = on ? new THREE.CircleGeometry(1.12, 40).rotateX(-Math.PI / 2) : new THREE.CircleGeometry(0.9, 6).rotateX(-Math.PI / 2);
+    this.slotMat.opacityNode = on ? slotBlob() : null;
+    this.slotMat.needsUpdate = true;
     this.infl.geometry.dispose();
     this.infl.geometry = dashGeometry(on);
     this.hoverRing.geometry.dispose();
@@ -834,6 +845,7 @@ export class World {
     }
     U.fieldSnow.value = theme.fieldSnow ?? 1;
     U.rockColor.value.set(theme.relief?.rock ?? theme.rock);
+    for (let k = 0; k < 4; k++) U.landCol[k].value.set(theme.ground[k]);
     this.eggClear();
     this.setSurround(theme);
     this.skyTarget = skyFor(theme, this.timeOfDay);
@@ -976,6 +988,7 @@ export class World {
     if (this.theme) this.stampMat.color.set(this.theme.ui.ink).lerp(s.fill, 0.5);
     // Sobre o mar e a areia as casas livres são só uma sombra leve: o fundo já é cenário, não papel.
     this.slotMat.opacity = (0.55 - s.night * 0.3) * (this.voidU.sea.value ? 0.4 : this.voidU.sand.value ? 0.65 : 1);
+    slotAlpha.value = this.slotMat.opacity * 1.5;
     this.inflMat.color.set('#e0981c');
     this.sun.color.copy(s.sun);
     this.sun.intensity = s.sunI;
@@ -1250,8 +1263,14 @@ export class World {
       } else return undefined;
       const own = Math.min(...hw);
       // Alvo do meio: o pico do morro, ou a média dos setores (o meio de uma encosta não é o topo dela).
-      const ct = c > Math.max(...hw) ? c + MORRO_BONUS : hw.reduce((p, v) => p + v, 0) / 6;
+      let ct = c > Math.max(...hw) ? c + MORRO_BONUS : hw.reduce((p, v) => p + v, 0) / 6;
       const sm = this.seamOf(q, r, hw, ew, idx);
+      // O relevo é do mundo: o alvo de cada setor (e do meio) já puxa para a borda da vizinha assentada, que é de terra (a água não copia).
+      const tg = hw.map((v, w) => {
+        const n = this.board?.get(q + DIRS[w][0], r + DIRS[w][1]);
+        return n?.heights && n.index < idx && !isStrict(ew[w]) ? v + (sm.he[w] - v) * WORLD_PULL : v;
+      });
+      ct += tg.reduce((p, v) => p + v, 0) / 6 - hw.reduce((p, v) => p + v, 0) / 6;
       const nb: number[] = [], placed: boolean[] = [], sec: number[] = [];
       const loc = (a: readonly number[]) => [0, 1, 2, 3, 4, 5].map((s) => a[(s + rot) % 6] - own);
       for (let s = 0; s < 6; s++) {
@@ -1263,7 +1282,7 @@ export class World {
         placed.push(known);
       }
       const { x: wx, z: wz } = hexToWorld(q, r);
-      return { own, nb, sec, placed, terrain: { h: loc(hw), c: ct - own, he: loc(sm.he), co: loc(sm.co), world: { x: wx, z: wz, rot, seed: this.reliefSeed } } };
+      return { own, nb, sec, placed, terrain: { h: loc(tg), c: ct - own, he: loc(sm.he), co: loc(sm.co), world: { x: wx, z: wz, rot, seed: this.reliefSeed } } };
     }
     const own = this.levelOf(q, r);
     return { own, nb: [0, 1, 2, 3, 4, 5].map((s) => {
@@ -1273,7 +1292,7 @@ export class World {
   }
 
   private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; spring?: boolean; eggs?: BuildOpts['eggs']; levels?: BuildOpts['levels'] }) {
-    return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, special: def.special, ...extra });
+    return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, special: def.special, continuous: !!this.warp, ...extra });
   }
 
   /** Peça do mapa já colocada: a inicial reserva o Centro, e a do marco o ergue. */
@@ -1695,7 +1714,7 @@ export class World {
     groundMap.add(b, m, this.waterColor);
     this.falls.append(b, m);
     // Modo Relevo: a saia das bordas altas avança sobre a casa vazia, e a areia e a espuma do mar começam no pé dela.
-    seaMap.add(p.q, p.r, this.pieceRelief && p.heights ? 0.4 * skirtWidth(Math.max(...p.heights)) : 0);
+    seaMap.add(p.q, p.r, this.pieceRelief && p.heights ? 0.4 * skirtWidth(Math.max(...p.heights)) : 0, this.warp ? (x, z) => this.warp!.inverse(x, z) : undefined);
     if (this.theme.floodplain && b.water.length) riverMap.add(b.water, m, this.theme.floodplain.reach);
     for (const d of b.decos) {
       if (d.transient) continue;

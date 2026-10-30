@@ -72,13 +72,16 @@ export function skirtDrop(hb: number, rho: number): number {
 }
 
 const SIGMA = 0.72;
-/** Peso do pico do meio no kernel: segura o morro, que o vizinho de borda dilui. */
-const CENTER_W = 2.2;
+/** Peso do pico do meio no kernel: segura o morro, que o vizinho de borda dilui (baixo: a cúpula por peça não incha o morro). */
+const CENTER_W = 1.5;
 /** Largura (da borda para dentro) em que a correção da emenda some: o talude. */
 const TALUS = 0.85;
-/** O ondulado do mundo: amplitude (níveis) e as três oitavas (peso, comprimento de onda em unidades do mundo). */
-const SWELL_AMP = 0.95;
-const SWELL: ReadonlyArray<readonly [number, number]> = [[0.7, 3.6], [0.25, 1.6], [0.05, 0.8]];
+/**
+ * O ondulado do mundo: amplitude (níveis) e as três oitavas (peso, comprimento de onda em unidades do mundo). Colinas de 4 a 5
+ * peças de largura (a peça tem 1,7), não uma saliência por peça: o relevo é do mundo e atravessa as emendas.
+ */
+const SWELL_AMP = 0.8;
+const SWELL: ReadonlyArray<readonly [number, number]> = [[0.65, 9], [0.27, 4], [0.08, 1.7]];
 
 const smooth = (a: number, b: number, x: number) => {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
@@ -130,8 +133,9 @@ export function nearestOnEdge(i: number, x: number, z: number): { t: number; rho
 export function swellAt(seed: number, X: number, Z: number): number {
   let v = 0;
   for (let k = 0; k < SWELL.length; k++) v += SWELL[k][0] * vnoise((seed ^ Math.imul(k + 1, 0x9e3779b1)) | 0, X / SWELL[k][1] + 3.1 * k, Z / SWELL[k][1] - 1.7 * k);
+  // Topo chato: a crista satura (tanh) e vira um platô largo em vez de uma cúpula; as encostas ficam longas e suaves.
+  v = Math.tanh(v * 2.4) / 0.95 * SWELL_AMP;
   // Os vales são mais rasos que os morros são altos: o chão de nível 0 nunca afunda perto da água do mar nem dos rios.
-  v *= SWELL_AMP;
   return v >= 0 ? v : v * 0.4;
 }
 

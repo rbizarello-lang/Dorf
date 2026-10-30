@@ -94,6 +94,8 @@ export interface TileBuild {
   col: Float32Array;
   /** Por vértice do chão: pesos de detalhe [prado, floresta, plantação, vila] (0 nas laterais). */
   splat: Float32Array;
+  /** Quantos números de `pos` são o chão em si (topo, saia e laterais); o que vem depois são decalques (estradas, parcelas) sobre ele. */
+  groundEnd: number;
   water: Float32Array;
   /** Por vértice da água: correnteza (x, z, em unidades/s relativas). */
   wflow: Float32Array;
@@ -162,6 +164,11 @@ export interface BuildOpts {
      */
     terrain?: { h: readonly number[]; c: number; he: readonly number[]; co: readonly number[]; world?: { x: number; z: number; rot: number; seed: number } };
   };
+  /**
+   * Terra contínua (encaixe fluido): o terreno é um campo do mundo, lido pelo material do chão no mapa. A peça deixa de sortear o
+   * tom do prado por conta própria (o degrau de tom entre vizinhas lia como hexágono) e a decoração das bordas invade um pouco o vizinho.
+   */
+  continuous?: boolean;
   /** Easter eggs de kit desta peça (`Theme.eggs`, efeito 'kit'): decididos pelo jogo, pela partida, nunca pelo relógio. */
   eggs?: { id: string; kit: EggKit; scale?: number; color?: string }[];
 }
@@ -1029,7 +1036,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // Cada peça desloca valor e matiz do prado pela semente (gerador à parte, para não mexer no resto da
   // peça): o prado grande ganha degraus de tom entre as peças, como no original.
   const tone = mulberry32((seed ^ 0x5bd1e995) >>> 0);
-  const dL = (tone() - 0.5) * 0.12, dH = ((tone() - 0.5) * 16) / 360;
+  const dL = opts.continuous ? 0 : (tone() - 0.5) * 0.12, dH = opts.continuous ? 0 : ((tone() - 0.5) * 16) / 360;
   const groundCols = edges.map((t) => {
     const c = tc(theme.ground[t]);
     if (t !== T.Grass) return c;
@@ -2241,7 +2248,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         let d = Infinity;
         if (edges[(i + 5) % 6] !== T.Forest) d = Math.min(d, Math.abs(x * caz - z * cax) / Math.hypot(cax, caz));
         if (edges[(i + 1) % 6] !== T.Forest) d = Math.min(d, Math.abs(x * cbz - z * cbx) / Math.hypot(cbx, cbz));
-        return d < 0.16;
+        // Terra contínua: a franja tem largura que muda ao longo da divisa (ruído da semente e da posição), não uma faixa de 0,16 reta.
+        return d < (opts.continuous ? 0.05 + 0.22 * bNoise(seed ^ 0x9e11, x, z) : 0.16);
       };
       // Mata em fileiras (`Theme.forestRows`): 2 ou 3 fileiras retas e paralelas à borda, cada uma de uma espécie só
       // (alameda de álamos, cortinado de pôlder). O gerador da peça não gasta nada (tudo sai do `frng`).
@@ -2280,6 +2288,24 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       for (let k = Math.round(4 * detail); k > 0; k--) {
         const p = samplePoint(rng, i, 0.1, 0.05);
         if (p && clear(p[0], p[1]) > 0.03 && free(p[0], p[1], 0.03)) D('grass', p[0], 0, p[1], rng() * 6, randRange(rng, 0.9, 1.4), shade(tc(pick(rng, theme.grass)), 0.8));
+      }
+      // Terra contínua: a mata se espalha em franja irregular pelo prado vizinho (algumas copas pequenas e arbustos passam da divisa do
+      // setor), por um gerador à parte: nada do resto da peça muda.
+      if (opts.continuous && !theme.forestRows) {
+        const tr = mulberry32(((seed ^ 0x3a1d9) + i * 977) >>> 0);
+        for (const [j, ci] of [[(i + 1) % 6, (i + 1) % 6], [(i + 5) % 6, i]] as const) {
+          if (edges[j] !== T.Grass) continue;
+          const [cx, cz] = corner(ci), cl = Math.hypot(cx, cz);
+          for (let k = 0, tries = 0; k < 3 && tries < 14; tries++) {
+            const p = samplePoint(tr, j, 0.14, 0.08);
+            if (!p || Math.abs(p[0] * cz - p[1] * cx) / cl > 0.08 + 0.24 * bNoise(seed ^ 0x77a1, p[0], p[1]) || !free(p[0], p[1], 0.07) || clear(p[0], p[1]) < 0.05) continue;
+            k++;
+            if (tr() < 0.35) {
+              D('bush', p[0], 0, p[1], tr() * 6, randRange(tr, 0.9, 1.4), vary(tr, tc(pick(tr, theme.bush))));
+              taken.push(p);
+            } else addTree(p[0], p[1], tr, 0.66);
+          }
+        }
       }
     } else if (terr === T.Village) {
       // Quarteirão: a rua vai do meio da borda ao centro e os lotes ficam dos dois lados dela,
@@ -2563,7 +2589,18 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   if (trees.length) {
     const floor = tc(theme.ground[T.Forest]).clone().lerp(tc(theme.trunk), 0.35).multiplyScalar(0.62);
     // Discos maiores que a copa de baixo: com a mata mais cheia eles se unem num chão escuro contínuo.
-    for (const [x, z, s] of trees) disc(g, x, z, 0.075 * s, 0.0025, floor, 5, [0, 1, 0, 0]);
+    for (const [x, z, s] of trees) {
+      if (!opts.continuous) {
+        disc(g, x, z, 0.075 * s, 0.0025, floor, 5, [0, 1, 0, 0]);
+        continue;
+      }
+      // Terra contínua: o disco é redondo e esmaece até a cor do chão ao redor (uma árvore na franja não leva uma placa escura de 5 lados).
+      const rim = floor.clone().lerp(groundCols[sectorAt(x, z)], 0.85), r = 0.085 * s;
+      for (let k = 0; k < 10; k++) {
+        const a0 = (k / 10) * Math.PI * 2, a1 = ((k + 1) / 10) * Math.PI * 2;
+        g.tri([x, 0.0025, z], [x + Math.cos(a0) * r, 0.0025, z + Math.sin(a0) * r], [x + Math.cos(a1) * r, 0.0025, z + Math.sin(a1) * r], floor, rim, rim, UP, [0, 1, 0, 0]);
+      }
+    }
   }
 
   // Centro: segue o terreno dominante, quando não há rio, estrada ou marco.
@@ -2925,6 +2962,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     pos: new Float32Array(g.pos),
     col: new Float32Array(g.col),
     splat: new Float32Array(g.spl),
+    groundEnd,
     water: new Float32Array([...(wb?.pos ?? []), ...(pad?.pos ?? [])]),
     wflow: new Float32Array([...(wb?.flow ?? []), ...(pad?.flow ?? [])]),
     wbed: new Float32Array([...(wb?.bed ?? []), ...(pad?.bed ?? [])]),

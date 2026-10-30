@@ -9,6 +9,10 @@ import type { TileBuild } from './tileBuilder';
 // (a costura de cor entre peças, em makeGroundMaterial).
 // A altura do chão (R8, `HEIGHT_RANGE` = 255) fica numa terceira textura: em platô de nível 1 ou 2 os materiais medem o
 // ponto a partir do chão da casa (poças de lampião e luz rebatida), não do y absoluto.
+// A altura do chão (`relief`, meio ponto flutuante) de cada texel vai numa quarta textura: o material do chão tira dela a normal
+// SUAVE (diferença central), no lugar da normal plana de cada triângulo, e as encostas deixam de ter as quinas retas em 60 graus.
+// O campo de terreno (`land`, RGBA8) guarda os pesos [prado, mata, plantação, vila] de cada texel, que o material do chão lê
+// borrado e deslocado por ruído do mundo: é o que faz as manchas de terreno atravessarem as emendas (modo Relevo).
 // Uma textura só, alinhada ao mundo, cobre o tabuleiro inteiro. Como os blocos estáticos, só
 // cresce: cada peça que assenta pinta a sua parte, rasterizada na CPU a partir da geometria.
 
@@ -21,6 +25,8 @@ export const HEIGHT_RANGE = 1;
 /** Raio da poça de luz de um lampião (desvio da gaussiana, em unidades do mundo). */
 const LANTERN_SIGMA = 0.17;
 
+/** Altura de um texel sem peça (o fundo da ilha, -TILE_T). */
+const RELIEF_VOID = THREE.DataUtils.toHalfFloat(-0.28);
 const to8 = (v: number) => (v <= 0 ? 0 : v >= 1 ? 255 : Math.round(v * 255));
 
 export class GroundMap {
@@ -34,6 +40,12 @@ export class GroundMap {
   /** Sombra de contato em volta das casas (0 a 255): o chão escurece junto da parede (material do chão). */
   readonly shade = new Uint8Array(GROUND_SIZE * GROUND_SIZE);
   readonly shadeTexture: THREE.DataTexture;
+  /** Campo de terreno: pesos por vértice (`TileBuild.splat`) rasterizados no mundo; 0 onde nenhuma peça tem terreno (rio, estrada, vazio). */
+  readonly land = new Uint8Array(GROUND_SIZE * GROUND_SIZE * 4);
+  readonly landTexture: THREE.DataTexture;
+  /** Altura do chão no mundo (half float; `RELIEF_VOID` onde não há peça: o fundo da ilha, para a borda da costa não ganhar um degrau). */
+  readonly relief = new Uint16Array(GROUND_SIZE * GROUND_SIZE).fill(RELIEF_VOID);
+  readonly reliefTexture: THREE.DataTexture;
   private dirty = false;
 
   constructor() {
@@ -68,6 +80,22 @@ export class GroundMap {
     sh.colorSpace = THREE.NoColorSpace;
     sh.needsUpdate = true;
     this.shadeTexture = sh;
+    // Mipmaps: o material lê um nível borrado (a mancha de terreno não tem a quina do hexágono).
+    const ld = new THREE.DataTexture(this.land, GROUND_SIZE, GROUND_SIZE, THREE.RGBAFormat, THREE.UnsignedByteType);
+    ld.wrapS = ld.wrapT = THREE.ClampToEdgeWrapping;
+    ld.magFilter = THREE.LinearFilter;
+    ld.minFilter = THREE.LinearMipmapLinearFilter;
+    ld.generateMipmaps = true;
+    ld.colorSpace = THREE.NoColorSpace;
+    ld.needsUpdate = true;
+    this.landTexture = ld;
+    const rl = new THREE.DataTexture(this.relief, GROUND_SIZE, GROUND_SIZE, THREE.RedFormat, THREE.HalfFloatType);
+    rl.wrapS = rl.wrapT = THREE.ClampToEdgeWrapping;
+    rl.magFilter = rl.minFilter = THREE.LinearFilter;
+    rl.generateMipmaps = false;
+    rl.colorSpace = THREE.NoColorSpace;
+    rl.needsUpdate = true;
+    this.reliefTexture = rl;
   }
 
   clear() {
@@ -75,12 +103,14 @@ export class GroundMap {
     this.cover.fill(0);
     this.height.fill(0);
     this.shade.fill(0);
+    this.land.fill(0);
+    this.relief.fill(RELIEF_VOID);
     this.dirty = true;
   }
 
   /** Pinta o chão e a água de uma peça já posta no mundo pela matriz `m`. */
   add(b: TileBuild, m: THREE.Matrix4, water: THREE.Color) {
-    this.raster(b.pos, m, (i, out) => out.setRGB(b.col[i * 3], b.col[i * 3 + 1], b.col[i * 3 + 2]));
+    this.raster(b.pos, m, (i, out) => out.setRGB(b.col[i * 3], b.col[i * 3 + 1], b.col[i * 3 + 2]), b.splat, b.groundEnd);
     // A água vista de cima: a cor do tema, mais escura que o leito (ela absorve).
     const w = water.clone().multiplyScalar(0.55);
     this.raster(b.water, m, (_, out) => out.copy(w));
@@ -128,17 +158,19 @@ export class GroundMap {
     this.coverTexture.needsUpdate = true;
     this.heightTexture.needsUpdate = true;
     this.shadeTexture.needsUpdate = true;
+    this.landTexture.needsUpdate = true;
+    this.reliefTexture.needsUpdate = true;
   }
 
   /**
    * Rasteriza os triângulos virados para cima (o topo da peça; as laterais ficam de fora):
    * cada texel cujo centro cai num triângulo recebe a cor interpolada dos vértices.
    */
-  private raster(pos: Float32Array, m: THREE.Matrix4, colorAt: (vertex: number, out: THREE.Color) => void) {
+  private raster(pos: Float32Array, m: THREE.Matrix4, colorAt: (vertex: number, out: THREE.Color) => void, splat?: Float32Array, groundEnd = 0) {
     const e = m.elements;
     const level = to8(e[13] / HEIGHT_RANGE);
     const c0 = new THREE.Color(), c1 = new THREE.Color(), c2 = new THREE.Color();
-    const u = [0, 0, 0], v = [0, 0, 0];
+    const u = [0, 0, 0], v = [0, 0, 0], wy = [0, 0, 0];
     for (let t = 0; t < pos.length; t += 9) {
       // Normal da face no espaço da peça: a matriz só gira em torno de y, então o y vale no mundo.
       const ax = pos[t + 3] - pos[t], ay = pos[t + 4] - pos[t + 1], az = pos[t + 5] - pos[t + 2];
@@ -153,9 +185,13 @@ export class GroundMap {
       const area = (u[1] - u[0]) * (v[2] - v[0]) - (u[2] - u[0]) * (v[1] - v[0]);
       if (Math.abs(area) < 1e-9) continue;
       const vi = t / 3;
+      const hasLand = !!splat && splat[vi * 4] + splat[vi * 4 + 1] + splat[vi * 4 + 2] + splat[vi * 4 + 3] + splat[vi * 4 + 4] + splat[vi * 4 + 5] + splat[vi * 4 + 6] + splat[vi * 4 + 7] + splat[vi * 4 + 8] + splat[vi * 4 + 9] + splat[vi * 4 + 10] + splat[vi * 4 + 11] > 0.05;
       colorAt(vi, c0);
       colorAt(vi + 1, c1);
       colorAt(vi + 2, c2);
+      // Altura de cada vértice no mundo (só o chão: os decalques acima de `groundEnd` — parcelas, ruas — não entram no relevo).
+      const hasRelief = t < groundEnd;
+      if (hasRelief) for (let k = 0; k < 3; k++) wy[k] = e[1] * pos[t + k * 3] + e[5] * pos[t + k * 3 + 1] + e[9] * pos[t + k * 3 + 2] + e[13];
       const umin = Math.max(0, Math.ceil(Math.min(u[0], u[1], u[2]) - 1e-6));
       const umax = Math.min(GROUND_SIZE - 1, Math.floor(Math.max(u[0], u[1], u[2]) + 1e-6));
       const vmin = Math.max(0, Math.ceil(Math.min(v[0], v[1], v[2]) - 1e-6));
@@ -173,6 +209,12 @@ export class GroundMap {
           this.data[i + 2] = to8(c0.b * w0 + c1.b * w1 + c2.b * w2);
           this.cover[py * GROUND_SIZE + px] = 255;
           this.height[py * GROUND_SIZE + px] = level;
+          if (hasRelief) this.relief[py * GROUND_SIZE + px] = THREE.DataUtils.toHalfFloat(wy[0] * w0 + wy[1] * w1 + wy[2] * w2);
+          // Triângulo sem terreno (estrada, trilho: pesos 0) deixa o campo como estava: o terreno por baixo continua valendo.
+          if (hasLand) {
+            const si = vi * 4;
+            for (let c = 0; c < 4; c++) this.land[i + c] = to8(splat![si + c] * w0 + splat![si + 4 + c] * w1 + splat![si + 8 + c] * w2);
+          }
         }
       }
     }
