@@ -88,7 +88,7 @@ const WEATHER: Record<Quality, number> = { cinema: 1, ultra: 1, high: 1, medium:
 // uma tela 4K renderiza 8 milhões de pixels em qualquer nível, e descer de Ultra para Alta
 // não alivia a GPU (o custo do GTAO, do TRAA e do desfoque cresce com a área).
 // O Cinema desenha 1,5× acima da densidade da tela em cada eixo (supersamplagem): até 4K × 2,25.
-const DPR_MAX: Record<Quality, number> = { cinema: 3, ultra: 2, high: 2, medium: 1.5, low: 1 };
+const DPR_MAX: Record<Quality, number> = { cinema: 3, ultra: 1.5, high: 1.25, medium: 1.25, low: 1 };
 const PIXELS: Record<Quality, number> = { cinema: 3840 * 2160 * 2.25, ultra: 3840 * 2160, high: 2560 * 1440, medium: 1920 * 1080, low: 1920 * 1080 };
 const SUPERSAMPLE: Record<Quality, number> = { cinema: 1.5, ultra: 1, high: 1, medium: 1, low: 1 };
 /** Lado máximo de textura garantido pelo WebGPU: o desenho nunca passa disso. */
