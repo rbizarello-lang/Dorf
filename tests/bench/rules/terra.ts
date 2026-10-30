@@ -1,25 +1,39 @@
-// TERRA CONTÍNUA, rascunho v0 (plano "Terra contínua", Fase 1). O mundo é um campo contínuo de terreno e a pontuação lê o campo, não as bordas.
-// Primeira versão para CALIBRAR na bancada: cada número abaixo é um botão (`TERRA` no fim do arquivo) e nenhum foi ajustado ainda.
+// TERRA CONTÍNUA, regra v1 (plano "Terra contínua", Fase 2). O mundo é um campo contínuo de terreno e a pontuação lê o campo, não as bordas.
+// Em uma frase: as emendas pagam pela continuidade da paisagem (casar muito bem paga bem mais que casar mais ou menos), cada mancha de
+// terra paga ao ser FECHADA (cercada, sem borda aberta) pelo tamanho e pela forma, e a água que chega faz render a terra que a esperava.
+// Cada número abaixo é um botão (`TERRA`); os padrões são os da calibração vencedora (ver TERRA-REGRA.md). Para reproduzir o rascunho da Fase 1:
+//   BENCH_KNOBS='{"terra":{"matchPoints":10,"perfectBonus":20,"contExp":1,"patchK":4,"patchExp":1.3,"closeK":0,"closeTiles":0,"fitSelf":1}}'
 //
 // 1. CAMPO. Cada peça é um carimbo: o terreno de cada borda é suavizado com o das duas bordas vizinhas da MESMA peça,
 //        c_i = δ(t_i) + Σ_{vizinhas de terra} λ_i·(δ(t_viz) − δ(t_i)),    λ_i ∈ [0,08; 0,30] sorteado pela semente da peça,
 //    um vetor de 4 terrenos (prado, mata, plantação, vila) que soma 1. Rio e trilho ficam puros e estritos (são caminhos). Ao longo de
 //    uma borda o campo é linear por trechos: no meio vale c_i; nos cantos, a média com a borda vizinha. É isso que "atravessa a emenda".
-// 2. CONTINUIDADE (gradual nas emendas). Em cada borda encostada, 3 amostras ao longo dela (u = ¼, ½, ¾; a outra peça é lida de trás
-//    para frente, u → 1−u):  s = 1 − ½·média_u ‖F_a(u) − F_b(1−u)‖₁,   0 a 1. Paga  round(10·max(0, (s − 0,5)/0,5)):  s = 0,5 vale 0, s = 1 vale 10.
-//    Perfeito e cerco exigem s ≥ 0,8 em todas as bordas. A interação entre terrenos só entra onde a borda não paga.
+// 2. CONTINUIDADE (gradual e CONVEXA nas emendas). Em cada borda encostada, 3 amostras ao longo dela (u = ¼, ½, ¾; a outra peça é lida de
+//    trás para frente, u → 1−u):  s = 1 − ½·média_u ‖F_a(u) − F_b(1−u)‖₁,   0 a 1. Com x = max(0, (s − 0,5)/0,5), a borda paga  round(14·x³):
+//    s = 0,5 vale 0, s = 0,9 vale 7, s = 1 vale 14. Perfeito (+28) e cerco da peça (+30 e uma peça de volta) exigem s ≥ 0,8 em todas as bordas.
+//    A interação entre terrenos só entra onde a borda não paga.
 // 3. MANCHAS (área e forma). As manchas são as de `groups.ts` pelo terreno principal de cada borda, e a massa é medida em cunhas (1/6 de
-//    peça). Valor da mancha de área a (em peças) e perímetro P (bordas viradas para o vazio ou outro terreno):
-//        V = K · a^1,3 · (0,55 + 0,45·compacidade),   compacidade = min(1, 6·√a / P)   (1 num hexágono cheio; ~0,5 numa fila)
-//    A jogada paga o aumento do valor total de manchas sobre a maior marca já alcançada (só cresce). K = 4.
+//    peça). Para a mancha de área a (em peças) e perímetro P (bordas viradas para o vazio ou outro terreno):
+//        forma = 0,55 + 0,45·compacidade,   compacidade = min(1, 6·√a / P)   (1 num hexágono cheio; ~0,67 numa fila de 4)
+//        crescimento:  V = 1,5 · a^1,8 · forma, paga o aumento do valor total de manchas sobre a maior marca já alcançada (só cresce);
+//        FECHAMENTO:   F = 20 · a^1,5 · forma, paga uma vez, quando a mancha (de pelo menos 1 peça de área) fica SEM borda aberta para o
+//                      vazio e não cresce mais; devolve 1 peça à pilha. A mancha fechada nunca muda (nada encosta nela), então o prêmio
+//                      não precisa de estado: é função do tabuleiro, como a água.
 // 4. ÁGUA ATÉ O MAR. A altura é do MUNDO, não da peça: o nível da casa é o do relevo de platôs da semente (`levelAt`, 0 a 2). A conta
 //    de água é a do núcleo (`waterState`): nascente = peça de rio acima do nível 0 (30% de chance pela semente da peça), a água só desce
 //    e chega ao mar num lago (3 bordas de água ou mais) ou no nível 0. 8 pontos por peça com água corrente e 60 (mais 2 peças) por curso
 //    que chega ao mar. Não há degrau nem altura no encaixe: a peça não traz cúpula nem altura própria.
-// 5. UMIDADE. A de `moisture.ts` (Orvalho), lida sobre a mistura da peça (a média das bordas de terra), não sobre o terreno principal.
+// 5. UMIDADE QUE CHEGA. A de `moisture.ts` (Orvalho), lida sobre a mistura da peça (a média das bordas de terra). Só rende a umidade que
+//    a água (ou a mata) leva às peças que JÁ estavam lá: a peça nova não recebe a própria (`fitSelf` = 0), porque um pagamento por peça
+//    é um piso que achata a escolha (folga de 66% contra 74%). Peça na faixa: +8; no meio da faixa: +11. Só cresce.
+// 6. ARGILA (desligada: `clayPerTile` = 0). A mancha maior avança `clayAdvance` cunhas por divisa sobre a vizinha e paga a área ganha.
 //
-// Fica de fora desta versão: as missões, as eras e os sítios do jogo (a bancada compara a regra de encaixe, não a progressão), a
-// deformação visual das divisas (render) e o "mundo que responde" (a mancha que avança devagar depois da jogada).
+// O que a bancada chama de "mundo responde": os pontos pagos por estruturas que JÁ estavam no tabuleiro quando a peça pousou, ou seja, o
+// fechamento de mancha, a umidade levada às peças vizinhas, a água que chega (peças de antes que passam a correr e o mar) e a Argila.
+// O crescimento das manchas fica de fora dessa conta estrita (a coluna "resp+cresc" da varredura o soma).
+//
+// Fica de fora desta versão: as missões, as eras e os sítios do jogo (a bancada compara a regra de encaixe, não a progressão) e a
+// deformação visual das divisas (render).
 import { levelAt } from '../../../src/core/relief';
 import { mulberry32 } from '../../../src/core/rng';
 import { T, isStrict, type TileDef } from '../../../src/core/tiles';
@@ -33,28 +47,28 @@ import { affected, fitOf, moistureAt } from '../moisture';
 import type { Rule } from '../types';
 import { WaterTracker } from '../water';
 
-/** Os botões da Terra contínua (tudo o que a calibração mexe; `BENCH_KNOBS` troca sem editar, ver knobs.ts). */
+/** Os botões da Terra contínua (tudo o que a calibração mexe; `BENCH_KNOBS` troca sem editar, ver knobs.ts). Padrões = a regra vencedora. */
 export const TERRA = knobs('terra', {
   waterChance: 0.24,
   lambdaMin: 0.08,
   lambdaMax: 0.3,
   /** Pontos de uma emenda perfeita, o bônus de peça perfeita e o de cerco da peça (os números do Clássico: 10, 20 e 30). */
-  matchPoints: 10,
-  perfectBonus: 20,
+  matchPoints: 14,
+  perfectBonus: 28,
   cercoBonus: 30,
   /** Continuidade mínima que paga e a que vale perfeito/cerco. */
   payFloor: 0.5,
   perfectS: 0.8,
   /** Curva do pagamento da emenda: 1 = linear; 2 ou 3 = convexa (casar muito bem paga bem mais que casar mais ou menos). */
-  contExp: 1,
-  patchK: 4,
-  patchExp: 1.3,
+  contExp: 3,
+  patchK: 1.5,
+  patchExp: 1.8,
   patchShapeBase: 0.55,
   /** Prêmio de fechamento: K · área^exp · forma, uma vez, quando a mancha (de pelo menos `closeMin` peças) fica sem borda aberta; `closeTiles` peças de volta por mancha fechada. */
-  closeK: 0,
-  closeExp: 1.3,
+  closeK: 20,
+  closeExp: 1.5,
   closeMin: 1,
-  closeTiles: 0,
+  closeTiles: 1,
   /** Argila: a mancha maior avança `clayAdvance` cunhas por borda sobre a vizinha e cada peça de área ganha paga `clayPerTile`. */
   clayAdvance: 0.5,
   clayPerTile: 0,
@@ -62,7 +76,7 @@ export const TERRA = knobs('terra', {
   fitIn: 8,
   fitMid: 11,
   /** Quanto da umidade a própria peça recebe ao pousar (0 = só rende a umidade que chega depois às peças que já estavam lá; 1 = como o Orvalho). */
-  fitSelf: 1,
+  fitSelf: 0,
   flowPoints: 8,
   seaPoints: 60,
   seaTiles: 2,
@@ -294,8 +308,8 @@ export class TerraWorld extends LiteWorld {
 
 export const terra: Rule = {
   id: 'terra',
-  name: 'Terra contínua (rascunho)',
-  blurb: 'Campo contínuo de terreno: continuidade gradual nas emendas, manchas por área e forma, água até o mar e umidade. Primeira versão, para calibrar.',
+  name: 'Terra contínua',
+  blurb: 'Emendas por continuidade (convexa), manchas que pagam ao se fechar (tamanho e forma, com peça de volta), água que chega e umidade que a água leva às terras que a esperavam.',
   baseline: 'relevo-base',
   create: (seed) => new TerraWorld(seed).start(),
 };
