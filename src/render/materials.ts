@@ -30,6 +30,7 @@ import {
   mix,
   mod,
   modelWorldMatrix,
+  normalGeometry,
   normalView,
   normalWorld,
   output,
@@ -294,6 +295,19 @@ const treeSway = (p: N3, h: N, t: N) => {
   return vec3(sin(t.mul(1.6).add(ph)).mul(0.05), float(0), cos(t.mul(1.3).add(ph.mul(1.2))).mul(0.04)).mul(h.mul(gust).mul(U.gust));
 };
 
+/**
+ * Vento hierárquico (copas com `vol`): o tronco fica parado, a copa inteira balança devagar (mais no alto) e as pontas
+ * tremem mais rápido e mais longe do eixo. A fase inclui o sorteio da instância, então duas árvores vizinhas não andam juntas.
+ */
+const crownSway = (p: N3, vol: N, t: N, inst: N) => {
+  const hk = vol.x, rr = vol.y;
+  const ph = p.x.mul(0.55).add(p.z.mul(0.45)).add(inst.mul(6.2832));
+  const gust = sin(dot(p.xz, U.wind).mul(0.8).sub(t.mul(0.9))).mul(0.4).add(0.6);
+  const slow = vec3(sin(t.mul(1.6).add(ph)).mul(0.9), float(0), cos(t.mul(1.3).add(ph.mul(1.2))).mul(0.7)).mul(hk.pow(1.4).mul(0.03));
+  const tips = vec3(sin(t.mul(5.1).add(ph.mul(2.3)).add(p.y.mul(40))), sin(t.mul(4.3).add(ph.mul(1.7))).mul(0.4), cos(t.mul(4.7).add(ph.mul(1.9)).add(p.y.mul(33)))).mul(hk.pow(2).mul(rr).mul(0.011));
+  return slow.add(tips).mul(gust.mul(0.6).add(0.55)).mul(U.gust);
+};
+
 /** Onda de vento que atravessa as plantações: dobra as plantas a favor do vento. */
 const cropBend = (p: N3, hgt: N, t: N) => {
   const wave = sin(dot(p.xz, U.wind).mul(2.4).sub(t.mul(2.2))).mul(0.5).add(0.5);
@@ -308,6 +322,11 @@ interface DecoOpts {
   sway?: 'tree' | 'crop';
   /** Metade fina das plantas (chaves com "~"): cada instância afunda no chão quando `U.fine` cai. */
   fade?: boolean;
+  /**
+   * Casas assentadas no chão (kits tingidos): oclusão de contato nos primeiros centímetros da parede, desgaste e umidade no pé,
+   * leve gradiente de altura e, com `shingles`, variação de cor telha a telha.
+   */
+  grounded?: boolean;
   /** Fiadas de telha nas superfícies inclinadas tingidas (telhados), só de perto. */
   shingles?: boolean;
   /** Contorno luminoso nas bordas das copas, na cor do sol. */
@@ -317,6 +336,23 @@ interface DecoOpts {
    * com a câmera baixa, como a máscara de fresnel do Dorfromantik. O valor é a intensidade.
    */
   rimSun?: number;
+  /**
+   * Translucência das copas: contra o sol a folha deixa a luz passar e brilha em verde amarelado (subsurface falso,
+   * só conta). O valor é a intensidade; só aparece quando a câmera olha para o lado do sol.
+   */
+  translucent?: number;
+  /**
+   * Volume da copa (geometria com `vol`, lib.ts): gradiente vertical (topo claro e quente, base escura e fria), oclusão por copa
+   * (o miolo e a barriga escurecem), variação de cor por instância e vento hierárquico.
+   */
+  volume?: boolean;
+  /**
+   * Brilho de seda das plantações (Kajiya-Kay): cada folha é um fio inclinado a favor do vento, e o brilho corre com as ondas de vento
+   * e muda com o ângulo câmera-sol-vento. O valor é a intensidade.
+   */
+  silk?: number;
+  /** Rocha (serras): estratos horizontais, pé mais escuro e encostas íngremes mais frias. */
+  rock?: boolean;
   /** Normais da geometria (copas arredondadas em lib.ts), em vez da normal plana de cada face. */
   smooth?: boolean;
   /** Pincelada nas partes tingidas: toques nas copas, traços verticais nas paredes. */
@@ -376,12 +412,18 @@ function decoMaterial(o: DecoOpts) {
   const iColor = attribute('iColor', 'vec3');
   let base: N3 = vertexColor().rgb.mul(mix(vec3(1), iColor, tint));
   // positionLocal já vem transformado pela instância (r186: instância antes do positionNode).
-  if (o.sway === 'tree') {
+  let sheenV = null as N;
+  const vol = o.volume ? attribute('vol', 'vec2') : null;
+  if (o.sway === 'tree' && vol) {
+    const inst = hash(instanceIndex.add(31));
+    m.positionNode = displaced((p, t) => crownSway(p, vol, t, inst));
+  } else if (o.sway === 'tree') {
     const h = max(positionGeometry.y.sub(0.08), 0);
     m.positionNode = displaced((p, t) => treeSway(p, h, t));
   } else if (o.sway === 'crop') {
     const hgt = max(positionGeometry.y, 0);
     const sheen = varying(float(0), 'vSheen');
+    sheenV = sheen;
     // Cada planta tem a sua vez de afundar (some sem pipocar); 0,2 cabe na espessura da peça.
     const sink = o.fade ? float(1).sub(smoothstep(0, 0.25, U.fine.mul(1.25).sub(hash(instanceIndex)))).mul(0.2) : null;
     m.positionNode = displaced((p, t, now) => {
@@ -391,6 +433,22 @@ function decoMaterial(o: DecoOpts) {
     });
     base = base.mul(sheen.mul(0.22).add(1));
   } else m.positionNode = displaced(undefined, true);
+  if (vol) {
+    const hk = vol.x, rr = vol.y;
+    // Gradiente: topo claro e quente (sol), base escura e fria (céu). Só nas partes tingidas.
+    const lit = smoothstep(0.08, 0.85, hk);
+    const grad = mix(vec3(0.48, 0.6, 0.8), vec3(1.22, 1.13, 0.86), lit);
+    // Oclusão: a barriga da copa (normais para baixo) e o miolo (faces viradas para o eixo, perto dele) recebem pouca luz.
+    const ng = normalGeometry;
+    const radial = dot(ng.xz, positionGeometry.xz).div(max(length(ng.xz).mul(length(positionGeometry.xz)), 1e-4));
+    const inner = smoothstep(0.1, -0.7, radial).mul(float(1).sub(rr.mul(0.6)));
+    const belly = smoothstep(0.1, -0.8, ng.y);
+    const ao = float(1).sub(belly.mul(0.5)).sub(inner.mul(0.4)).sub(float(1).sub(smoothstep(0, 0.5, hk)).mul(0.3));
+    // Cada árvore tem o seu tom: valor ±13% e um desvio de matiz (mais quente ou mais frio).
+    const h1 = hash(instanceIndex.add(5)).sub(0.5), h2 = hash(instanceIndex.add(19)).sub(0.5);
+    const own = vec3(h1.mul(0.28).add(1).add(h2.mul(0.16)), h1.mul(0.28).add(1), h1.mul(0.28).add(1).sub(h2.mul(0.2)));
+    base = mix(base, base.mul(grad).mul(ao.max(0.35)).mul(own), tint);
+  }
   if (o.paint) {
     // Coordenadas do próprio kit (a pincelada gira com a instância), deslocadas por instância
     // para duas árvores iguais não terem os mesmos toques.
@@ -407,12 +465,49 @@ function decoMaterial(o: DecoOpts) {
       base = base.mul(b.r.sub(0.5).mul(0.16).mul(wall).add(1));
     }
   }
+  if (o.rock) {
+    // Estratos: faixas horizontais deformadas por ruído (a luz rasante lê cada degrau), mais escuras no pé da serra
+    // (oclusão do chão) e nas encostas íngremes. A neve (vértices claros) quase não leva as faixas.
+    const sideP = positionWorld.x.add(positionWorld.z);
+    const band = texture(noiseTex, vec2(sideP.mul(0.8), positionWorld.y.mul(7.5))).g;
+    const crack = smoothstep(0.7, 0.9, texture(noiseTex, vec2(sideP.mul(2.6), positionWorld.y.mul(3.2))).b);
+    const foot = smoothstep(0, 0.45, positionGeometry.y).mul(0.3).add(0.7);
+    const steep = smoothstep(0.75, 0.3, normalWorld.y);
+    const stone = band.mul(0.62).add(0.7).mul(foot).mul(float(1).sub(crack.mul(0.35))).mul(float(1).sub(steep.mul(0.1)));
+    const cool = mix(vec3(1.03, 1.01, 0.96), vec3(0.95, 0.99, 1.06), steep);
+    const bright = smoothstep(0.7, 0.9, luminance(base));
+    base = mix(base.mul(stone).mul(cool), base.mul(stone.mul(0.4).add(0.6)), bright);
+  }
   const toCam = cameraPosition.sub(positionWorld);
   const camDist = length(toCam);
   if (o.shingles) {
     const roof = smoothstep(0.3, 0.45, normalWorld.y).mul(smoothstep(0.97, 0.9, normalWorld.y)).mul(tint);
     const rows = smoothstep(0.25, 0.6, abs(fract(positionWorld.y.mul(72)).sub(0.5)).mul(2));
-    base = base.mul(mix(float(1), rows.mul(0.17).add(0.85), roof.mul(smoothstep(15, 6, camDist))));
+    const near = roof.mul(smoothstep(15, 6, camDist));
+    base = base.mul(mix(float(1), rows.mul(0.17).add(0.85), near));
+    if (o.grounded) {
+      // Cada telha tem o seu tom (valor ±9%, algumas bem mais escuras) e um desvio quente ou frio; fileiras alternadas.
+      const row = floor(positionWorld.y.mul(72));
+      const col = floor(positionGeometry.x.add(positionGeometry.z).mul(46).add(row.mul(0.5)));
+      const hs = hash(col.add(row.mul(37)).add(instanceIndex.mul(3)));
+      const old = step(0.92, hs);
+      const tile = hs.sub(0.5).mul(0.32).sub(old.mul(0.14));
+      base = base.mul(mix(vec3(1), vec3(tile.add(1), tile.mul(0.8).add(1), tile.mul(0.55).add(1)), near));
+    }
+  }
+  if (o.grounded) {
+    // Parede assentada: só nas faces de lado dos kits tingidos (o telhado visto de cima e as peças chatas ficam de fora).
+    const y = positionGeometry.y;
+    const sideK = tint.mul(smoothstep(0.6, 0.25, abs(normalWorld.y)));
+    const n = texture(noiseTex, vec2(positionGeometry.x.add(positionGeometry.z).mul(5.5), y.mul(2.5)).add(hash(instanceIndex).mul(3))).g;
+    // Oclusão de contato: os primeiros ~3 cm escurecem, sem recortar a janela (que é mais alta).
+    const contactAo = mix(float(0.38), float(1), smoothstep(0, 0.05, y));
+    // Umidade e desgaste: o pé escurece e esverdeia, com borda irregular (ruído), subindo mais onde o ruído é alto.
+    const damp = float(1).sub(smoothstep(0.02, 0.1, y.add(n.sub(0.5).mul(0.07))));
+    const stain = mix(vec3(1), vec3(0.58, 0.67, 0.52), damp.mul(0.72));
+    // Gradiente leve de altura: a parede clareia para cima (a luz do céu chega mais ao beiral).
+    const rise = mix(float(0.9), float(1.05), smoothstep(0.02, 0.22, y));
+    base = mix(base, base.mul(contactAo).mul(stain).mul(rise), sideK);
   }
   // Telhados e paredes: neve contida, para o branco do inverno não apagar a casa.
   const seasoned = o.paint === 'canopy' ? seasonFoliage(base, o.evergreen) : snowOn(base, 0.55 * (o.snow ?? 1));
@@ -425,6 +520,26 @@ function decoMaterial(o: DecoOpts) {
     const v = toCam.div(camDist);
     const rim = float(1).sub(max(dot(normalWorld, v), 0)).pow(3);
     emissive = emissive.add(U.sun.mul(base).mul(rim.mul(0.35)).mul(float(1).sub(U.night)));
+  }
+  if (o.translucent) {
+    const v = toCam.div(camDist);
+    // Olhando para o sol através da copa: lóbulo largo, mais forte no alto da copa (folha fina) e nas faces de lado.
+    const back = max(dot(v, U.sunDir.negate()).add(0.15), 0).pow(2);
+    const thin = positionGeometry.y.mul(2.2).clamp(0.35, 1).mul(float(1).sub(abs(normalWorld.y).mul(0.5)));
+    const leaf = base.mul(vec3(1.18, 1.22, 0.55));
+    emissive = emissive.add(U.sun.mul(leaf).mul(back.mul(thin).mul(o.translucent)).mul(tint).mul(float(1).sub(U.night)).mul(float(1).sub(U.snow.mul(0.6))));
+  }
+  if (o.silk && sheenV) {
+    const v = toCam.div(camDist);
+    // Fio da folha: quase vertical, inclinado a favor do vento onde a onda passa. O brilho é o seno do ângulo entre o fio e o meio-vetor.
+    const lean = sheenV.mul(1.5).add(0.3);
+    const lw: N = U.wind.mul(lean);
+    const tan: N = vec3(lw.x, float(1), lw.y).normalize();
+    const hv = U.sunDir.add(v).normalize();
+    const th = dot(tan, hv);
+    const kk = float(1).sub(th.mul(th)).max(0).pow(3);
+    const wave = sheenV.mul(0.75).add(0.25);
+    emissive = emissive.add(U.sun.mul(base).mul(kk.mul(wave).mul(o.silk)).mul(smoothstep(0, 0.012, positionGeometry.y)).mul(float(1).sub(U.night)).mul(float(1).sub(U.snow.mul(0.7))));
   }
   if (o.rimSun) {
     const v = toCam.div(camDist);
@@ -442,14 +557,14 @@ export type MatKey = 'deco' | 'relief' | 'reliefSoft' | 'foliage' | 'evergreen' 
 
 export function makeDecoMaterials(): Record<MatKey, THREE.Material> {
   return {
-    deco: decoMaterial({ shingles: true, paint: 'wall', rimSun: 0.3 }),
+    deco: decoMaterial({ shingles: true, grounded: true, paint: 'wall', rimSun: 0.3 }),
     // Serra (faces planas) e morro (normais suaves): sem as fileiras de telha do `deco`, que listrariam a rocha.
-    relief: decoMaterial({ paint: 'wall', rimSun: 0.3 }),
+    relief: decoMaterial({ paint: 'wall', rimSun: 0.3, rock: true }),
     reliefSoft: decoMaterial({ smooth: true, paint: 'wall', rimSun: 0.3 }),
-    foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy' }),
-    evergreen: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', evergreen: true }),
-    crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide }),
-    cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true }),
+    foliage: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', translucent: 3.4, volume: true }),
+    evergreen: decoMaterial({ sway: 'tree', roughness: 0.9, rim: true, smooth: true, paint: 'canopy', evergreen: true, translucent: 2, volume: true }),
+    crop: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, silk: 4.5 }),
+    cropFine: decoMaterial({ sway: 'crop', roughness: 0.9, side: THREE.DoubleSide, fade: true, silk: 4.5 }),
     // Lago congelado (rachaduras, buracos e pesqueiro): quase sem neve por cima, para o gelo e a água escura lerem.
     ice: decoMaterial({ roughness: 0.55, side: THREE.DoubleSide, snow: 0.12 }),
     crystal: decoMaterial({ sway: 'tree', roughness: 0.25, metalness: 0.1, emissive: '#3a2a66', emissiveIntensity: 0.6 }),
@@ -544,9 +659,22 @@ export function makeGroundMaterial() {
   const wn = texture(noiseTex, p.div(1.7).add(vec2(0.13, 0.41))).g.sub(0.5).mul(0.45);
   const hard = smoothstep(float(0.2), float(0.8), sp.add(wn));
   const sw = hard.mul(sp.x.add(sp.y).add(sp.z).add(sp.w).div(hard.x.add(hard.y).add(hard.z).add(hard.w).max(0.001)));
+  const t2 = texture(waterTex, p.mul(2.3).add(vec2(0.17, 0.43)));
+  const t3 = texture(waterTex, p.mul(6.4).add(vec2(0.61, 0.29)));
+  const nearF = smoothstep(24, 7, length(cameraPosition.sub(positionWorld)));
+  const wGrass = sp.x.add(sp.y.mul(0.9));
   const detail = grass.mul(sw.x).add(forest.mul(sw.y)).add(field.mul(sw.z)).add(village.mul(sw.w)).add(plain.mul(rest));
   // Topo × lateral (normal plana de cada triângulo).
   const top = smoothstep(0.55, 0.9, normalWorld.y);
+  // Rajada no chão: manchas largas de luz que correm no rumo do vento (como as ondas que dobram o trigo), em prado,
+  // mata e plantação. A média fica em 1 e `U.gust` a escala; no pó do mapa (vila) e na lateral não entra.
+  const drift = U.wind.mul(U.time);
+  const gA = texture(noiseTex, p.mul(0.055).sub(drift.mul(0.11))).g;
+  const gB = texture(noiseTex, p.mul(0.19).add(vec2(0.37, 0.12)).sub(drift.mul(0.21))).r;
+  const gustField = gA.mul(0.65).add(gB.mul(0.35)).sub(0.5);
+  const gustAmt = sw.x.add(sw.y.mul(0.7)).add(sw.z).min(1).mul(top).mul(U.gust.min(2));
+  const gustTone = mix(vec3(0.96, 0.98, 1.04), vec3(1.06, 1.04, 0.93), gustField.mul(2.2).add(0.5).clamp(0, 1));
+  const gusted = mix(vec3(1), gustTone, gustAmt.mul(1.0)).mul(gustField.mul(gustAmt).mul(1.5).add(1));
   const sideP = positionWorld.x.add(positionWorld.z);
   const strata = texture(noiseTex, vec2(sideP.mul(0.9), positionWorld.y.mul(7))).g;
   const stones = smoothstep(0.66, 0.8, texture(noiseTex, vec2(sideP.mul(3.1), positionWorld.y.mul(9))).b);
@@ -560,7 +688,17 @@ export function makeGroundMaterial() {
   const fertile = nearRiver.mul(U.flood).mul(sp.x.add(sp.z).mul(1.4).min(1)).mul(top).mul(0.92);
   const base = mix(base0, U.floodColor, fertile);
   // `fieldSnow` (Theme.fieldSnow) tira neve só das parcelas de plantação (o gelo do lago congelado); 1 = como sempre.
-  const ground = snowOn(base.mul(mix(sideF, detail, top)), mix(float(0.85), float(0.85).mul(U.fieldSnow), sp.z.min(1)));
+  // Sombreamento de fundo: as depressões do micro-relevo (altura do mapa) escurecem e os cumes clareiam um pouco.
+  const hgt = t2.b.mul(0.6).add(t3.b.mul(0.4));
+  const cavity = mix(float(1), hgt.sub(0.5).mul(0.7).add(0.98).clamp(0.84, 1.06), nearF.mul(0.35).add(0.65).mul(wGrass.mul(0.9).add(0.3).min(1)));
+  // Inclinação (para os morros do relevo): o prado e a mata ficam terrosos nas encostas e pedregosos nas mais íngremes.
+  const ny = normalWorld.y;
+  const dirtK = smoothstep(0.97, 0.82, ny).mul(top).mul(sp.x.add(sp.y).min(1));
+  const slopeRock = smoothstep(0.78, 0.6, ny).mul(top).mul(sp.x.add(sp.y).min(1));
+  const slopeTone = mix(mix(vec3(1), vec3(1.18, 0.92, 0.68), dirtK.mul(0.8)), vec3(0.86, 0.88, 0.95), slopeRock.mul(0.7));
+  // Sombra de contato das casas (mapa do chão): escurece o chão colado à parede; 0 na pilha, que não tem mapa.
+  const contact = texture(groundMap.shadeTexture, positionWorld.xz.div(GROUND_EXTENT * 2).add(0.5)).r.mul(U.seam).mul(top);
+  const ground = snowOn(base.mul(mix(sideF, detail.mul(cavity).mul(slopeTone), top)).mul(gusted).mul(mix(vec3(1), vec3(0.5, 0.52, 0.58), contact.mul(0.85))), mix(float(0.85), float(0.85).mul(U.fieldSnow), sp.z.min(1)));
   // Rocha pela inclinação (modo Relevo): só onde a encosta é íngreme, em estratos discretos por altura (cada faixa com o seu valor).
   // A lateral quase vertical fica de fora: ela já tem as camadas de terra e rocha da própria malha.
   const lean = float(1).sub(normalWorld.y);
@@ -570,9 +708,15 @@ export function makeGroundMaterial() {
   // A rocha leva um tanto da cor do vértice (o pé da encosta é terra escura): nada de cinza chapado ao lado do verde.
   const rockCol = mix(U.rockColor, vertexColor().rgb.mul(1.15), 0.4).mul(rockTone);
   m.colorNode = mix(mix(ground, rockCol, rockK), vec3(1), U.silhouette);
-  // Relevo fino do prado e da mata: inclina a normal com o mapa de declive da água.
-  const slope = texture(waterTex, p.mul(0.45)).rg.sub(0.5).mul(sp.x.add(sp.y).mul(0.5).add(0.12));
-  const nW = vec3(normalWorld.x.sub(slope.x), normalWorld.y, normalWorld.z.sub(slope.y)).normalize();
+  // Micro-relevo: três escalas do mapa de declive (a mesma textura da água) inclinam a normal, então a luz rasante lê tufos de
+  // capim, folhiço, torrões e pedregulhos; as escalas finas somem com a distância (cintilariam). Nos campos, sulcos na direção do pincel.
+  const wField = sp.z, wVill = sp.w;
+  const s1 = texture(waterTex, p.mul(0.45)).rg.sub(0.5).mul(sp.x.add(sp.y).mul(0.5).add(0.12));
+  const s2 = t2.rg.sub(0.5).mul(wGrass.mul(2.3).add(wVill.mul(0.8)).add(wField.mul(0.6)));
+  const s3 = t3.rg.sub(0.5).mul(wGrass.mul(1.3).add(wVill.mul(1.7)).add(0.2)).mul(nearF);
+  const furrow = vec2(ca, sa).mul(cos(p.x.mul(ca).add(p.y.mul(sa)).mul(52)).mul(0.22).mul(wField).mul(nearF));
+  const tilt = s1.add(s2).add(s3).add(furrow);
+  const nW = vec3(normalWorld.x.sub(tilt.x), normalWorld.y, normalWorld.z.sub(tilt.y)).normalize();
   m.normalNode = mix(normalView, cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize(), top);
   m.emissiveNode = ERA_GOLD.mul(eraBand(positionWorld, U.time));
   m.receivedShadowNode = shadowWithClouds;

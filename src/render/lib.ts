@@ -735,6 +735,31 @@ function softCanopy(g: THREE.BufferGeometry, soft = 0.75): THREE.BufferGeometry 
   return g;
 }
 
+/**
+ * Volume da copa para o material: `vol` = (altura normalizada dentro da copa, 0 na base e 1 no topo; distância ao eixo da copa,
+ * 0 no eixo e 1 na borda). Só os vértices tingidos (a copa) levam valor; o tronco fica em (0, 0) e não balança. A silhueta não muda.
+ */
+function crownVol(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  const tint = g.attributes.tint as THREE.BufferAttribute;
+  const box = new THREE.Box3();
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) if (tint.getX(i) > 0.5) box.expandByPoint(v.fromBufferAttribute(pos, i));
+  const vol = new Float32Array(pos.count * 2);
+  if (!box.isEmpty()) {
+    const c = box.getCenter(new THREE.Vector3());
+    const h = Math.max(box.max.y - box.min.y, 1e-3);
+    const rx = Math.max((box.max.x - box.min.x) / 2, (box.max.z - box.min.z) / 2, 1e-3);
+    for (let i = 0; i < pos.count; i++) {
+      if (tint.getX(i) <= 0.5) continue;
+      vol[i * 2] = THREE.MathUtils.clamp((pos.getY(i) - box.min.y) / h, 0, 1);
+      vol[i * 2 + 1] = Math.min(Math.hypot(pos.getX(i) - c.x, pos.getZ(i) - c.z) / rx, 1);
+    }
+  }
+  g.setAttribute('vol', new THREE.BufferAttribute(vol, 2));
+  return g;
+}
+
 // ---------------------------------------------------------------- plantações
 
 export interface CropLayout {
@@ -2440,7 +2465,7 @@ export class Lib {
         treeBuild = true;
         try {
           const g = treeGeometry(f.geo, theme.trunk);
-          return FACETED.has(f.geo) ? g : softCanopy(g, SOFT[f.geo]);
+          return crownVol(FACETED.has(f.geo) ? g : softCanopy(g, SOFT[f.geo]));
         } finally {
           farTree = false;
           treeBuild = false;
@@ -2481,10 +2506,10 @@ export class Lib {
     if (theme.mill === 'granary') set('mill', sp.granary);
     set('grass', kit(tuft(4, 0.042, 0.0045, 0.012, 0.75, 0.004, 23).map((geo) => ({ geo, color: '#fff', tint: 1, grad: [0.6, 1.12, 0, 0.045] as [number, number, number, number] }))));
     set('reed', kit(tuft(5, 0.07, 0.004, 0.012, 0.8, 0.01, 29).map((geo) => ({ geo, color: '#4f7a3a', grad: [0.6, 1.1, 0, 0.07] as [number, number, number, number] }))));
-    set('bush', softCanopy(kit([{ geo: jitter(ico(0.05, 0), 0.01, 5).translate(0, 0.03, 0), color: '#fff', tint: 1, grad: [0.8, 1.1, 0, 0.07] }])));
+    set('bush', crownVol(softCanopy(kit([{ geo: jitter(ico(0.05, 0), 0.01, 5).translate(0, 0.03, 0), color: '#fff', tint: 1, grad: [0.8, 1.1, 0, 0.07] }]))));
     set('rock', kit([{ geo: new THREE.DodecahedronGeometry(0.04, 0).scale(1, 0.6, 1).translate(0, 0.012, 0), color: '#fff', tint: 1 }]));
     // Versões leves para o zoom aberto (octaedros), no mesmo molde das árvores.
-    this.farGeos.set('bush', softCanopy(kit([{ geo: jitter(new THREE.OctahedronGeometry(0.05, 0), 0.01, 5).translate(0, 0.03, 0), color: '#fff', tint: 1, grad: [0.8, 1.1, 0, 0.07] }])));
+    this.farGeos.set('bush', crownVol(softCanopy(kit([{ geo: jitter(new THREE.OctahedronGeometry(0.05, 0), 0.01, 5).translate(0, 0.03, 0), color: '#fff', tint: 1, grad: [0.8, 1.1, 0, 0.07] }]))));
     this.farGeos.set('rock', kit([{ geo: new THREE.OctahedronGeometry(0.042, 0).scale(1, 0.55, 1).translate(0, 0.012, 0), color: '#fff', tint: 1 }]));
     // Relevo decorativo (Theme.relief): serra e morro, com a versão leve no mesmo molde das árvores.
     if (theme.relief && theme.relief.amp > 0) {
