@@ -159,7 +159,8 @@ Eram 14 temas. O Jardim Sakura, o Jade Song e o Edo Tranquilo viraram o Terraço
 | `?webgl` | força o WebGL2 em vez do WebGPU |
 | `?mode=zen` | modo inicial: `classico`, `zen`, `diario`, `exploradores` ou `rotas` |
 | `?debug` | mostra FPS, draw calls, triângulos e instâncias |
-| `?bench` | mede o desempenho do seu aparelho em Baixa, Média, Alta e Ultra (cerca de 1 minuto e meio) e mostra uma tabela que dá para copiar |
+| `?bench` | mede o desempenho do seu aparelho em Baixa, Média, Alta e Ultra (cerca de 1 minuto e meio) e mostra uma tabela que dá para copiar: resolução interna, FPS, p95, tempo de CPU e, onde o navegador oferece, o de GPU por quadro e a folga contra os 16,7 ms de 60 qps |
+| `?gpu` | liga o medidor de GPU (consulta de tempo do WebGPU ou do WebGL2) sem rodar o `?bench`; `window.__gpu()` devolve o tempo por quadro e por passe |
 | `?auto=40` | a IA coloca 40 peças de uma vez (tabuleiro de exemplo) |
 | `?demo` | a IA joga sozinha, com animação |
 | `?stress=1000` | teste de carga com 1.000 peças |

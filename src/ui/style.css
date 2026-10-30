@@ -2012,6 +2012,17 @@ html.poster .sheet {
   margin: 0 0 8px;
 }
 
+.bench ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.bench p.sum {
+  font-weight: 700;
+}
+
 .bench table {
   border-collapse: collapse;
   margin-bottom: 8px;

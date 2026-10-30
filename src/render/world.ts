@@ -75,6 +75,7 @@ const SHADOW_MAP: Record<Quality, number> = { cinema: 4096, ultra: 4096, high: 2
  */
 const CASCADES: Record<Quality, number[]> = { cinema: [0.18, 0.34, 0.56, 1], ultra: [0.3, 0.5, 1], high: [], medium: [], low: [] };
 const tmpM = new THREE.Matrix4();
+const tmpV2 = new THREE.Vector2();
 const tmpM2 = new THREE.Matrix4();
 const tmpQ = new THREE.Matrix4();
 /** Seções de andaime em volta da maravilha (3 por lado). */
@@ -612,8 +613,8 @@ export class World {
   fx?: string[];
 
   /** Cria o renderizador (WebGPU ou WebGL2) e o mundo. */
-  static async create(canvas: HTMLCanvasElement, forceWebGL = false) {
-    const { renderer, backend } = await createRenderer(canvas, forceWebGL);
+  static async create(canvas: HTMLCanvasElement, forceWebGL = false, trackTimestamp = false) {
+    const { renderer, backend } = await createRenderer(canvas, forceWebGL, trackTimestamp);
     const lib = new Lib();
     const preview = await PreviewView.create(backend === 'webgl2', lib);
     return new World(canvas, renderer, backend, lib, preview);
@@ -646,6 +647,7 @@ export class World {
 
     this.sun.castShadow = true;
     countShadowPasses(this.renderer);
+    this.initGpuTimer();
     this.sun.shadow.autoUpdate = false;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.0006;
@@ -2144,6 +2146,90 @@ export class World {
     return Math.abs(this.voidU.radius.value - this.voidGoal) > 1e-2 ? 'vazio' : '';
   }
 
+  // ---------------------------------------------------------------- tempo de GPU
+
+  /** Ligado só com `?bench`/`?gpu` (o renderizador nasce com trackTimestamp); sem suporte da placa, fica desligado. */
+  gpuOn = false;
+  private gpuBusy = false;
+  private gpuLastFrame = -1;
+  /** Média móvel do tempo de GPU por quadro (ms), para o `?debug`; 0 sem medidor. */
+  gpuAvg = 0;
+  /** Soma dos passes de cada quadro resolvido, em ms. */
+  private gpuFrames: number[] = [];
+  /** Por tipo de passe (contexto de desenho): rótulo e a duração em cada quadro resolvido. */
+  private gpuPasses = new Map<number, { label: string; ms: number[] }>();
+  private gpuLabels = new Map<number, string>();
+
+  private initGpuTimer() {
+    const b = this.renderer.backend as unknown as { trackTimestamp?: boolean };
+    if (!b.trackTimestamp) return;
+    this.gpuOn = true;
+    // Rótulo de cada passe (contexto de desenho): o que se desenha e em que alvo. O uid do passe é `r:<chamada>:<contexto>:f<quadro>`.
+    const insp = this.renderer.inspector as unknown as { beginRender: (uid: string, scene: THREE.Object3D, camera: THREE.Camera, rt: unknown) => void };
+    const orig = insp.beginRender.bind(insp);
+    insp.beginRender = (uid, scene, camera, rt) => {
+      orig(uid, scene, camera, rt);
+      const id = Number(uid.split(':')[2]);
+      if (this.gpuLabels.has(id)) return;
+      const t = rt as { width: number; height: number; textures?: unknown[]; samples?: number } | null;
+      const mesh = scene as THREE.Mesh;
+      const what = scene === this.scene ? ((camera as THREE.OrthographicCamera).isOrthographicCamera ? 'sombra' : 'cena') : scene === this.cloudScene ? 'nuvens' : mesh.isMesh ? ((mesh.material as THREE.Material).name || (mesh.material as THREE.Material).type) : scene.type;
+      this.gpuLabels.set(id, `${what} ${t ? `${t.width}x${t.height}` : 'tela'}${t && t.textures && t.textures.length > 1 ? ` mrt${t.textures.length}` : ''}${t?.samples ? ` x${t.samples}` : ''}`);
+    };
+  }
+
+  /** Pede ao renderizador o tempo dos passes dos quadros enviados (um pedido por vez); cada pedido cobre vários quadros. */
+  private pollGpu() {
+    if (this.gpuBusy) return;
+    this.gpuBusy = true;
+    const pool = (this.renderer.backend as unknown as { timestampQueryPool?: Record<string, { timestamps: Map<string, number> } | undefined> }).timestampQueryPool?.render;
+    this.renderer.resolveTimestampsAsync('render').then(
+      () => {
+        // Os uids são `r:<chamada>:<contexto>:f<quadro>`: agrupa por quadro e, dentro dele, soma por contexto.
+        const frames = new Map<number, Map<number, number>>();
+        for (const [uid, d] of pool?.timestamps ?? []) {
+          const [, , id, f] = uid.split(':');
+          const fr = Number(f.slice(1));
+          let per = frames.get(fr);
+          if (!per) frames.set(fr, (per = new Map()));
+          per.set(Number(id), (per.get(Number(id)) ?? 0) + d);
+        }
+        for (const [fr, per] of frames) {
+          if (fr <= this.gpuLastFrame) continue;
+          this.gpuLastFrame = fr;
+          let total = 0;
+          for (const [id, d] of per) {
+            total += d;
+            let p = this.gpuPasses.get(id);
+            if (!p) this.gpuPasses.set(id, (p = { label: this.gpuLabels.get(id) ?? String(id), ms: [] }));
+            p.ms.push(d);
+          }
+          this.gpuFrames.push(total);
+          this.gpuAvg = this.gpuAvg ? this.gpuAvg + (total - this.gpuAvg) * 0.1 : total;
+        }
+        if (this.gpuFrames.length > 4000) {
+          this.gpuFrames.splice(0, 2000);
+          for (const p of this.gpuPasses.values()) p.ms.splice(0, 2000);
+        }
+      },
+      () => {},
+    ).finally(() => (this.gpuBusy = false));
+  }
+
+  /** Tempo de GPU dos quadros resolvidos desde `gpuTake()` (ms por quadro, soma dos passes) e por passe; zera o acúmulo. */
+  gpuTake(): { frames: number[]; passes: { label: string; ms: number[] }[] } {
+    const out = { frames: this.gpuFrames, passes: [...this.gpuPasses.values()] };
+    this.gpuFrames = [];
+    this.gpuPasses = new Map();
+    return out;
+  }
+
+  /** Tamanho do quadro desenhado (pixels), a densidade de pixels usada e o tamanho do canvas na tela. */
+  drawInfo() {
+    const d = this.renderer.getDrawingBufferSize(tmpV2);
+    return { w: d.x, h: d.y, ratio: this.renderer.getPixelRatio(), cssW: this.size.x, cssH: this.size.y, dpr: window.devicePixelRatio || 1, res: this.resScale };
+  }
+
   stats() {
     const info = this.renderer.info;
     let tris = 0;
@@ -2496,6 +2582,7 @@ export class World {
 
     if (this.post) this.post.pipeline.render();
     else this.renderer.render(this.scene, this.camera);
+    if (this.gpuOn) this.pollGpu();
 
     this.preview.render(realDt);
   }

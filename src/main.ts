@@ -94,7 +94,7 @@ const sfx = new Sfx();
 async function createWorld(): Promise<World> {
   try {
     // ?webgl força o backend WebGL2 (para comparar com o WebGPU).
-    return await World.create(canvas, params.has('webgl'));
+    return await World.create(canvas, params.has('webgl'), params.has('bench') || params.has('gpu'));
   } catch (err) {
     document.body.insertAdjacentHTML(
       'beforeend',
@@ -1515,39 +1515,82 @@ let perfNote = '';
 let statsClock = 0;
 let frames = 0;
 let cpuAcc = 0;
+/** Soma do JS por passo desde o início (o `?bench` tira a média por nível). */
+const benchCpu = { ms: 0, n: 0 };
 let last = performance.now();
 let ambienceAt = 0;
 
-interface BenchRow { gpu: string; quality: string; fps: number; p95Ms: number; calls: number; triangles: number }
+interface BenchRow {
+  quality: string;
+  /** Resolução interna desenhada (pixels) e a densidade usada. */
+  res: string;
+  ratio: number;
+  fps: number;
+  p95Ms: number;
+  /** Tempo de JS por quadro (lógica do jogo e envio dos comandos à GPU), em ms. */
+  cpuMs: number;
+  /** Tempo de GPU por quadro (timestamp query): mediana e p95, ou null quando o navegador não oferece. */
+  gpuMs: number | null;
+  gpuP95Ms: number | null;
+  calls: number;
+  triangles: number;
+  /** Quanto sobra do orçamento de 16,7 ms (60 qps). */
+  slack: string;
+}
+
+const pct = (sorted: number[], p: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] ?? 0;
+const round1 = (v: number) => Math.round(v * 10) / 10;
+/** Taxas de atualização comuns de monitor: a do `?bench` é a mais próxima do melhor FPS visto. */
+const REFRESH_RATES = [30, 48, 50, 60, 72, 75, 90, 100, 120, 144, 165, 180, 240];
 
 /**
  * `?bench`: passa por Baixa, Média, Alta e Ultra no mesmo tabuleiro (semente 7, 60 peças), com a
  * câmera girando devagar, e mostra a tabela num painel com botão de copiar. O resultado também
  * fica em `window.__bench` (`rows` e `done`). O nível é fixo (sem o Auto), para medir o nível puro.
+ *
+ * O FPS num monitor com v-sync para no refresh (60, 144…) e não diz quanto sobra; por isso a tabela
+ * traz também o tempo de CPU e, onde o navegador oferece (timestamp query), o de GPU por quadro.
+ * Folga: GPU e CPU dentro de 10 ms; no limite até 16,7 ms; pesado acima disso.
  */
 async function runBench() {
   const rows: BenchRow[] = [];
-  const out = { done: false, seconds: BENCH_SECONDS, rows };
+  const out: { done: boolean; seconds: number; rows: BenchRow[]; info: string[]; summary: string } = { done: false, seconds: BENCH_SECONDS, rows, info: [], summary: '' };
   (window as unknown as { __bench: unknown }).__bench = out;
   const panel = document.createElement('div');
   panel.className = 'bench';
   document.body.appendChild(panel);
+  const info = () => {
+    const d = world.drawInfo();
+    return [
+      `Placa: ${gpuLabel || '?'} (${world.backend === 'webgpu' ? 'WebGPU' : 'WebGL2'}${gpu.vendor ? `, ${gpu.vendor}${gpu.architecture ? ' ' + gpu.architecture : ''}` : ''})`,
+      `Navegador: ${navigator.userAgent.replace(/^Mozilla\/5\.0 /, '')}`,
+      `Tela: ${screen.width}x${screen.height}, janela ${d.cssW}x${d.cssH}, densidade do navegador ${d.dpr}`,
+      `Medidor de GPU: ${world.gpuOn ? 'sim (timestamp query)' : 'não (o navegador não oferece; só FPS e CPU)'}`,
+      `Auto começaria em: ${qualityLabel[autoStart]}`,
+    ];
+  };
+  const head = ['Nível', 'Resolução interna', 'FPS (mediana)', 'p95 (ms)', 'CPU (ms)', 'GPU (ms)', 'GPU p95 (ms)', 'Draw calls', 'Triângulos (mil)', 'Folga'];
+  const cells = (r: BenchRow) => [r.quality, `${r.res} (x${round1(r.ratio)})`, String(r.fps), String(r.p95Ms), String(r.cpuMs), r.gpuMs === null ? 'n/d' : String(r.gpuMs), r.gpuP95Ms === null ? 'n/d' : String(r.gpuP95Ms), String(r.calls), String(Math.round(r.triangles / 1000)), r.slack];
   const render = (status: string) => {
-    const head = ['Placa', 'Nível', 'FPS (mediana)', 'p95 (ms)', 'Draw calls', 'Triângulos (mil)'];
-    const body = rows.map((r) => [r.gpu || '?', r.quality, String(r.fps), String(r.p95Ms), String(r.calls), String(Math.round(r.triangles / 1000))]);
-    panel.innerHTML = `<h3>Medição (?bench)</h3><p></p><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map((r) => `<tr>${r.map(() => '<td></td>').join('')}</tr>`).join('')}</tbody></table><button type="button" disabled>Copiar</button>`;
+    out.info = info();
+    const body = rows.map(cells);
+    panel.innerHTML = `<h3>Medição (?bench)</h3><p></p><ul></ul><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map((r) => `<tr>${r.map(() => '<td></td>').join('')}</tr>`).join('')}</tbody></table><p class="sum"></p><button type="button" disabled>Copiar</button>`;
     panel.querySelector('p')!.textContent = status;
+    panel.querySelector('p.sum')!.textContent = out.summary;
+    const ul = panel.querySelector('ul')!;
+    for (const l of out.info) ul.appendChild(Object.assign(document.createElement('li'), { textContent: l }));
     panel.querySelectorAll('tbody tr').forEach((tr, i) => tr.querySelectorAll('td').forEach((td, j) => (td.textContent = body[i][j])));
     const btn = panel.querySelector('button')!;
     btn.disabled = !rows.length;
     btn.onclick = () => {
-      const md = [`| ${head.join(' | ')} |`, `|${head.map(() => '---').join('|')}|`, ...body.map((r) => `| ${r.join(' | ')} |`)].join('\n');
+      const md = [...out.info.map((l) => `- ${l}`), '', `| ${head.join(' | ')} |`, `|${head.map(() => '---').join('|')}|`, ...body.map((r) => `| ${r.join(' | ')} |`), '', out.summary].join('\n');
       void navigator.clipboard?.writeText(md).then(() => hud.toast('Tabela copiada.', 'good'), () => hud.toast('Não foi possível copiar.', 'bad'));
     };
   };
   render('Preparando…');
   const rig = world.rig;
   const yaw0 = rig.goalYaw;
+  let bestFps = 0;
   for (const level of BENCH_LEVELS) {
     applyQuality(level);
     render(`Medindo ${qualityLabel[level]}… (${BENCH_SECONDS} s)`);
@@ -1555,6 +1598,8 @@ async function runBench() {
     await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
     await new Promise((r) => setTimeout(r, 1500));
     const samples: number[] = [];
+    world.gpuTake();
+    const cpu0 = { ms: benchCpu.ms, n: benchCpu.n };
     const t0 = performance.now();
     let prev = t0;
     await new Promise<void>((resolve) => {
@@ -1570,11 +1615,24 @@ async function runBench() {
     samples.shift();
     samples.sort((a, b) => a - b);
     const mid = samples[Math.floor(samples.length / 2)] ?? 0;
-    const p95 = samples[Math.min(samples.length - 1, Math.floor(samples.length * 0.95))] ?? 0;
+    const p95 = pct(samples, 0.95);
+    const gpuT = world.gpuTake().frames.sort((a, b) => a - b);
+    const cpuMs = benchCpu.n > cpu0.n ? (benchCpu.ms - cpu0.ms) / (benchCpu.n - cpu0.n) : 0;
+    const d = world.drawInfo();
     const s = world.stats();
-    rows.push({ gpu: gpuLabel, quality: qualityLabel[level], fps: mid > 0 ? Math.round(10000 / mid) / 10 : 0, p95Ms: Math.round(p95 * 10) / 10, calls: s.calls, triangles: s.triangles });
+    const gpuMs = gpuT.length >= 5 ? round1(pct(gpuT, 0.5)) : null;
+    const gpuP95Ms = gpuT.length >= 5 ? round1(pct(gpuT, 0.95)) : null;
+    const fps = mid > 0 ? round1(1000 / mid) : 0;
+    bestFps = Math.max(bestFps, fps);
+    // Folga: sem o medidor de GPU, só dá para dizer que o quadro cabe quando o FPS encosta no refresh.
+    const busy = Math.max(cpuMs, gpuP95Ms ?? 0);
+    const slack = gpuP95Ms === null ? (fps < 55 ? 'pesado' : 'cabe (sem medidor de GPU)') : busy <= 10 ? 'folga' : busy <= 1000 / 60 ? 'no limite' : 'pesado';
+    rows.push({ quality: qualityLabel[level], res: `${d.w}x${d.h}`, ratio: d.ratio, fps, p95Ms: round1(p95), cpuMs: round1(cpuMs), gpuMs, gpuP95Ms, calls: s.calls, triangles: s.triangles, slack });
   }
   rig.goalYaw = yaw0;
+  const refresh = REFRESH_RATES.reduce((a, b) => (Math.abs(b - bestFps) < Math.abs(a - bestFps) ? b : a));
+  const fits = rows.filter((r) => r.slack === 'folga' || r.slack === 'no limite' || r.slack.startsWith('cabe')).map((r) => r.quality);
+  out.summary = `Monitor: o FPS parou em ~${refresh} Hz. Cabem em 16,7 ms (60 qps): ${fits.length ? fits.join(', ') : 'nenhum nível'}. Folga = GPU e CPU até 10 ms.`;
   out.done = true;
   render('Pronto. A câmera girou devagar sobre o mesmo tabuleiro em cada nível.');
 }
@@ -1757,7 +1815,10 @@ function step(now: number) {
     markers.push({ id: 200000, x: s.x, y, visible: s.visible, text: `✦ +${inf.points} · ${inf.kinds.map((k) => theme.synergy[k.kind]).join(', ')}`, color: theme.ui.accent, kind: 'influence' });
   }
   hud.updateMarkers(markers);
-  cpuAcc += performance.now() - c0;
+  const cpuStep = performance.now() - c0;
+  cpuAcc += cpuStep;
+  benchCpu.ms += cpuStep;
+  benchCpu.n++;
   frames++;
   statsClock += realDt;
   if (statsClock >= 0.5) {
@@ -1772,6 +1833,7 @@ function step(now: number) {
       hud.stats.textContent = [
         `FPS ${statsText.fps.toFixed(0)}  (${statsText.ms.toFixed(1)} ms)`,
         `CPU/quadro ${statsText.cpu.toFixed(2)} ms`,
+        ...(world.gpuOn ? [`GPU/quadro ${world.gpuAvg.toFixed(1)} ms`] : []),
         `draw calls ${s.calls}`,
         `triângulos ${(s.triangles / 1000).toFixed(0)} mil`,
         `peças ${game.board.list.length} · blocos ${s.chunks}`,
@@ -1782,7 +1844,7 @@ function step(now: number) {
         ...(perfNote ? [perfNote] : []),
       ].join('\n');
     }
-    (window as unknown as { __stats: unknown }).__stats = { ...statsText, ...world.stats(), tiles: game.board.list.length, quality: world.quality, res: dynres.scale, pace: paceFps, steps: stepCount, settling: world.settlingWhy(), gpu: gpuLabel };
+    (window as unknown as { __stats: unknown }).__stats = { ...statsText, ...world.stats(), tiles: game.board.list.length, quality: world.quality, res: dynres.scale, pace: paceFps, steps: stepCount, settling: world.settlingWhy(), gpu: gpuLabel, gpuMs: world.gpuAvg };
     if (capture.take) capture.updateCameraBtn();
   }
   stepCount++;
@@ -1826,6 +1888,8 @@ function start(data: unknown) {
   // Legibilidade: decorações pretas sobre chão branco (vilas, construções e marcos precisam ler de longe).
   if (params.has('silhueta')) U.silhouette.value = 1;
   (window as unknown as { __pools: () => unknown }).__pools = () => world.poolReport();
+  // Tempo de GPU por quadro e por passe (`?gpu` ou `?bench`): `__gpu()` devolve o acumulado desde a última chamada.
+  (window as unknown as { __gpu: () => unknown }).__gpu = () => ({ on: world.gpuOn, ...world.gpuTake(), draw: world.drawInfo() });
   // Medição para o PC de quem joga: `window.__perf(5)` ou `?perf`. A mediana ignora um quadro lento.
   (window as unknown as { __perf: (seconds?: number) => Promise<Record<string, unknown>> }).__perf = (seconds = 5) =>
     new Promise((resolve) => {
