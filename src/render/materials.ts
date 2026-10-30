@@ -619,7 +619,7 @@ const LAND_WARP_SCALE = 6;
 const LAND_NOISE_SCALE = 7;
 const LAND_NOISE_AMP: readonly [number, number, number, number] = [0.34, 0.34, 0.3, 0.14];
 /** Passo da diferença central do mapa de alturas (um pouco mais de um texel): quanto mais largo, mais lisa a encosta. */
-const RELIEF_E = 0.13;
+const RELIEF_E = 0.19;
 
 /**
  * Peso da costura de cor (1 na borda do hexágono, 0 a SEAM_WIDTH para dentro) e a cor média do
@@ -678,12 +678,12 @@ export function makeGroundMaterial() {
   const lK = U.land.mul(lHave).mul(smoothstep(0.55, 0.9, normalWorld.y));
   const sum0 = sp0.x.add(sp0.y).add(sp0.z).add(sp0.w);
   // Normal suave do relevo (U.land): diferença central do mapa de alturas, no lugar da normal plana de cada triângulo (as encostas
-  // deixam de ter quinas retas nas divisas dos setores). Só no topo, longe das margens dos rios (a margem é estreita demais para o mapa).
+  // deixam de ter quinas retas nas divisas dos setores). Só no topo (a lateral íngreme fica com a normal do triângulo).
   const hAt = (q: N2) => texture(groundMap.reliefTexture, landUV(q)).level(float(0)).r;
   const hdx = hAt(p.add(vec2(RELIEF_E, 0))).sub(hAt(p.sub(vec2(RELIEF_E, 0))));
   const hdz = hAt(p.add(vec2(0, RELIEF_E))).sub(hAt(p.sub(vec2(0, RELIEF_E))));
   const nSmooth = vec3(hdx.negate(), RELIEF_E * 2, hdz.negate()).normalize();
-  const nG = mix(normalWorld, nSmooth, U.land.mul(lHave).mul(smoothstep(0.35, 0.7, normalWorld.y)).mul(smoothstep(0.5, 0.9, sum0))).normalize();
+  const nG = mix(normalWorld, nSmooth, U.land.mul(lHave).mul(smoothstep(0.35, 0.7, normalWorld.y)).mul(smoothstep(0.0, 0.12, sum0))).normalize();
   /** Cor média do terreno de um peso [prado, mata, plantação, vila] (normalizado: só a proporção conta). */
   const landMix = (s: N) => U.landCol[0].mul(s.x).add(U.landCol[1].mul(s.y)).add(U.landCol[2].mul(s.z)).add(U.landCol[3].mul(s.w)).div(max(s.x.add(s.y).add(s.z).add(s.w), 0.001));
   // A parte do chão que é terreno (e não areia de beira de rio, estrada...) fica a do vértice; o campo só reparte os terrenos.

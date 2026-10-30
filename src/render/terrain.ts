@@ -49,8 +49,12 @@ const FLOOR_W = 0.28;
 /** Largura máxima da saia (fica dentro da casa vizinha) e inclinação média alvo (altura por largura, no mundo: ~35°). */
 export const SKIRT_MAX = 1.0;
 const SKIRT_SLOPE = 0.7;
-/** Quanto do perfil é a curva em S (o resto é reta): o alto da encosta arredonda e o pé se deita, sem barriga. */
-const SKIRT_S = 0.4;
+/**
+ * Perfil da saia: mistura de uma curva em S (ombro arredondado, pé deitado) com uma curva de talude (começa mais firme e se deita
+ * devagar até o chão). Menos S e mais talude: o topo fica chato com uma quina macia e o pé corre longo e suave, sem a barriga de almofada.
+ */
+const SKIRT_S = 0.3;
+const SKIRT_TALUS = 1.4;
 /**
  * Fundo do pé da saia, em níveis abaixo do chão comum (0): a borda baixa desce até o fundo da peça (sem parede), a alta termina
  * mais acima e deixa um beiral curto. Depende só da altura da borda, então os dois lados concordam.
@@ -68,7 +72,7 @@ export function skirtDrop(hb: number, rho: number): number {
   if (rho <= 0) return 0;
   if (rho >= w) return total;
   const t = rho / w;
-  return total * ((1 - SKIRT_S) * t + SKIRT_S * t * t * (3 - 2 * t));
+  return total * ((1 - SKIRT_S) * (1 - (1 - t) ** SKIRT_TALUS) + SKIRT_S * t * t * (3 - 2 * t));
 }
 
 const SIGMA = 0.72;

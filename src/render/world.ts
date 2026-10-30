@@ -988,7 +988,7 @@ export class World {
     if (this.theme) this.stampMat.color.set(this.theme.ui.ink).lerp(s.fill, 0.5);
     // Sobre o mar e a areia as casas livres são só uma sombra leve: o fundo já é cenário, não papel.
     this.slotMat.opacity = (0.55 - s.night * 0.3) * (this.voidU.sea.value ? 0.4 : this.voidU.sand.value ? 0.65 : 1);
-    slotAlpha.value = this.slotMat.opacity * 1.5;
+    slotAlpha.value = this.slotMat.opacity * 1.8;
     this.inflMat.color.set('#e0981c');
     this.sun.color.copy(s.sun);
     this.sun.intensity = s.sunI;
