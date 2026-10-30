@@ -368,8 +368,13 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
     disposables.push(aoNode);
     // Filtro de ruído que respeita profundidade e normal: a oclusão sai limpa já no
     // primeiro quadro, sem depender da média temporal.
-    const clean = denoise(aoNode.getTextureNode(), depth, normalOf, camera);
-    clean.radius.value = 6;
+    const den = denoise(aoNode.getTextureNode(), depth, normalOf, camera);
+    den.radius.value = 6;
+    disposables.push(den);
+    // O filtro (16 voltas por pixel, cada uma com 3 leituras e a posição de vista) roda em meia resolução, como o GTAO que ele
+    // limpa: o raio é medido em texels do mapa de oclusão, então a mancha é a mesma, em um quarto dos pixels. A leitura em
+    // resolução cheia é bilinear.
+    const clean = rtt(den, null, null, { resolutionScale: 0.5 });
     disposables.push(clean);
     const occ = mix(float(1), (clean as unknown as { r: ReturnType<typeof float> }).r, P.aoStrength);
     // Sem a cor difusa no passe, o rebatimento usa a matiz do pixel com a claridade de um chão.
@@ -417,11 +422,14 @@ export function buildPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, ca
   if (clouds) {
     // Nuvens (clouds.ts) num passe à parte, por cima da luz indireta, da oclusão e dos reflexos:
     // no passe da cena, elas herdariam a oclusão e o rebatimento do chão que fica embaixo delas.
-    const over = pass(clouds, camera, { depthBuffer: false });
+    // Sem MSAA (`samples: 0`): o padrão do passe é o do renderizador (4×), e a nuvem é um plano macio sem bordas de geometria;
+    // o alvo com 4 amostras custava limpar e resolver 4× os pixels da tela a cada quadro, mesmo sem nuvem à vista.
+    const over = pass(clouds, camera, { depthBuffer: false, samples: 0 });
     // Limpa com alfa 0 (o renderizador limparia com 1): onde não há nuvem, a cena passa inteira.
     over.setMRT(mrt({ output }).setClearColor('output', 0x000000, 0));
-    // Sem TRAA, meia resolução: a nuvem é macia, e o passe custa um quarto.
-    if (cfg.aa !== 'traa') over.setResolutionScale(0.5);
+    // Meia resolução: a nuvem é macia, e o passe custa um quarto (com o zoom aberto ele marcha 22 passos por pixel). O Ultra e o
+    // Cinema, com TRAA, ficam em resolução cheia: o TRAA acumula os quadros e a borda da nuvem sai mais firme.
+    if (cfg.aa !== 'traa' || q === 'high') over.setResolutionScale(0.5);
     disposables.push(over);
     // A mistura do material já deixa a cor multiplicada pelo alfa.
     const c = over.getTextureNode('output');
