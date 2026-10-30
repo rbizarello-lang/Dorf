@@ -1,10 +1,13 @@
 // A conta da água dos mundos leves: usa o `waterState` do núcleo (função pura sobre a lista de peças com água), então a regra de
 // "a água só desce até o mar" é a do jogo. O ganho de uma peça é a diferença entre o estado depois e antes (só cresce).
+import { hkey } from '../../src/core/hex';
 import { waterState, type WaterState, type WaterTile } from '../../src/core/water';
 
 export interface WaterGain {
   pts: number;
   tiles: number;
+  /** Do total, os pontos de água corrente da própria peça nova (o resto vem de peças que já estavam lá e passaram a correr, e do mar). */
+  own: number;
 }
 
 export class WaterTracker {
@@ -27,7 +30,8 @@ export class WaterTracker {
     const after = waterState([...this.tiles, w]);
     const flowing = after.flow.size - before.flow.size;
     const seas = after.reached.size - before.reached.size;
-    return { pts: flowing * this.flowPoints + seas * this.seaPoints, tiles: seas * this.seaTiles };
+    const own = after.flow.has(hkey(w.q, w.r)) ? this.flowPoints : 0;
+    return { pts: flowing * this.flowPoints + seas * this.seaPoints, tiles: seas * this.seaTiles, own };
   }
 
   add(w: WaterTile) {

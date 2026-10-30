@@ -24,9 +24,10 @@ import { levelAt } from '../../../src/core/relief';
 import { mulberry32 } from '../../../src/core/rng';
 import { T, isStrict, type TileDef } from '../../../src/core/tiles';
 import { isSpring } from '../../../src/core/water';
-import { buildGroups, exposed, find, mass, terrainOf } from '../groups';
+import { DIRS } from '../../../src/core/hex';
+import { buildGroups, exposed, find, mass, terrainOf, voids } from '../groups';
 import { knobs } from '../knobs';
-import { BASE_CFG, LiteWorld, STARTER_EDGES, makeLTile, type LTile, type Placed, type RTile } from '../lite';
+import { BASE_CFG, LiteWorld, STARTER_EDGES, makeLTile, opp, type LTile, type Placed, type RTile } from '../lite';
 import { compAux, pure, tileComp } from '../mix';
 import { affected, fitOf, moistureAt } from '../moisture';
 import type { Rule } from '../types';
@@ -37,12 +38,31 @@ export const TERRA = knobs('terra', {
   waterChance: 0.24,
   lambdaMin: 0.08,
   lambdaMax: 0.3,
+  /** Pontos de uma emenda perfeita, o bônus de peça perfeita e o de cerco da peça (os números do Clássico: 10, 20 e 30). */
+  matchPoints: 10,
+  perfectBonus: 20,
+  cercoBonus: 30,
   /** Continuidade mínima que paga e a que vale perfeito/cerco. */
   payFloor: 0.5,
   perfectS: 0.8,
+  /** Curva do pagamento da emenda: 1 = linear; 2 ou 3 = convexa (casar muito bem paga bem mais que casar mais ou menos). */
+  contExp: 1,
   patchK: 4,
   patchExp: 1.3,
   patchShapeBase: 0.55,
+  /** Prêmio de fechamento: K · área^exp · forma, uma vez, quando a mancha (de pelo menos `closeMin` peças) fica sem borda aberta; `closeTiles` peças de volta por mancha fechada. */
+  closeK: 0,
+  closeExp: 1.3,
+  closeMin: 1,
+  closeTiles: 0,
+  /** Argila: a mancha maior avança `clayAdvance` cunhas por borda sobre a vizinha e cada peça de área ganha paga `clayPerTile`. */
+  clayAdvance: 0.5,
+  clayPerTile: 0,
+  /** Orvalho: pontos de uma peça na faixa de umidade e no meio da faixa. */
+  fitIn: 8,
+  fitMid: 11,
+  /** Quanto da umidade a própria peça recebe ao pousar (0 = só rende a umidade que chega depois às peças que já estavam lá; 1 = como o Orvalho). */
+  fitSelf: 1,
   flowPoints: 8,
   seaPoints: 60,
   seaTiles: 2,
@@ -69,12 +89,16 @@ export function smearComp(edges: readonly T[], seed: number): number[][] {
 export class TerraWorld extends LiteWorld {
   private paid = new Float32Array(MAX);
   private patchBest = 0;
+  private closedBest = 0;
+  private closedNBest = 0;
+  private clayBest = 0;
   private water = new WaterTracker(TERRA.flowPoints, TERRA.seaPoints, TERRA.seaTiles);
 
   constructor(seed: number) {
-    super(seed, { ...BASE_CFG, waterChance: TERRA.waterChance });
+    super(seed, { ...BASE_CFG, waterChance: TERRA.waterChance, matchPoints: TERRA.matchPoints, perfectBonus: TERRA.perfectBonus, closedBonus: TERRA.cercoBonus });
     this.perfectS = TERRA.perfectS;
     this.hasExtra = true;
+    this.trackBase = true;
   }
 
   protected decorate(def: TileDef): LTile {
@@ -102,24 +126,46 @@ export class TerraWorld extends LiteWorld {
   }
 
   protected pay(_a: RTile, _i: number, _b: RTile, _j: number, s: number): number {
-    return Math.round((this.cfg.matchPoints * Math.max(0, s - TERRA.payFloor)) / (1 - TERRA.payFloor));
+    const x = Math.max(0, (s - TERRA.payFloor) / (1 - TERRA.payFloor));
+    return Math.round(this.cfg.matchPoints * x ** TERRA.contExp);
   }
 
   protected synOpen(s: number): boolean {
     return s < TERRA.payFloor + 0.05;
   }
 
-  /** Valor total das manchas de terra (peças) do mundo agora, arredondado. */
-  private patches(): number {
+  /** O campo lido sobre as manchas do mundo agora (a peça tentativa já posta): valor das manchas, valor e número das fechadas, e a área ganha pela Argila. */
+  private field(): { patch: number; closed: number; closedN: number; clay: number } {
     const n = buildGroups(this);
-    let v = 0;
+    let v = 0, c = 0, cn = 0;
     for (let i = 0; i < n; i++) {
       if (mass[i] === 0 || find(i) !== i || isStrict(terrainOf(this, i))) continue;
       const a = mass[i] / 6;
       const compact = Math.min(1, (6 * Math.sqrt(a)) / Math.max(1, exposed[i]));
-      v += TERRA.patchK * a ** TERRA.patchExp * (TERRA.patchShapeBase + (1 - TERRA.patchShapeBase) * compact);
+      const shape = TERRA.patchShapeBase + (1 - TERRA.patchShapeBase) * compact;
+      v += TERRA.patchK * a ** TERRA.patchExp * shape;
+      if (voids[i] === 0 && a >= TERRA.closeMin) {
+        c += TERRA.closeK * a ** TERRA.closeExp * shape;
+        cn++;
+      }
     }
-    return Math.round(v);
+    let adv = 0;
+    if (TERRA.clayPerTile > 0) {
+      // Argila: em cada divisa entre manchas de terreno diferente, a de maior massa avança sobre a menor.
+      for (const t of this.tilesList) {
+        const e = t.v.edges;
+        for (let k = 0; k < 6; k++) {
+          if (isStrict(e[k])) continue;
+          const nb = this.at(t.q + DIRS[k][0], t.r + DIRS[k][1]);
+          if (!nb) continue;
+          const other = nb.v.edges[opp(k)];
+          if (other === e[k] || isStrict(other)) continue;
+          const a = mass[find(t.idx * 6 + k)], b = mass[find(nb.idx * 6 + opp(k))];
+          if (a > b) adv += (TERRA.clayAdvance * (a - b)) / (a + b);
+        }
+      }
+    }
+    return { patch: Math.round(v), closed: Math.round(c), closedN: cn, clay: Math.round((adv * TERRA.clayPerTile) / 6) };
   }
 
   private level(p: Placed): number {
@@ -128,19 +174,31 @@ export class TerraWorld extends LiteWorld {
 
   protected extra(p: Placed, commit: boolean): number {
     let pts = 0;
-    // 3. manchas
-    const v = this.patches();
-    const patch = Math.max(0, v - this.patchBest);
-    pts += patch;
-    this.note('manchas', patch);
-    if (commit && v > this.patchBest) this.patchBest = v;
+    // 3. manchas: crescimento, fechamento e a área que a Argila dá a quem avança
+    const f = this.field();
+    const patch = Math.max(0, f.patch - this.patchBest);
+    const close = Math.max(0, f.closed - this.closedBest);
+    const clay = Math.max(0, f.clay - this.clayBest);
+    pts += patch + close + clay;
+    this.note('manchas (crescimento)', patch);
+    this.note('fechamento de mancha', close);
+    this.note('avanço da mancha (Argila)', clay);
+    this.exTiles += Math.max(0, f.closedN - this.closedNBest) * TERRA.closeTiles;
+    if (commit) {
+      if (f.patch > this.patchBest) this.patchBest = f.patch;
+      if (f.closed > this.closedBest) this.closedBest = f.closed;
+      if (f.closedN > this.closedNBest) this.closedNBest = f.closedN;
+      if (f.clay > this.clayBest) this.clayBest = f.clay;
+    }
     // 5. umidade
     for (const o of affected(this, p)) {
-      const f = fitOf(tileComp(o.v), moistureAt(this, o.q, o.r));
-      if (f > this.paid[o.idx]) {
-        pts += f - this.paid[o.idx];
-        this.note(o === p ? 'umidade da própria peça' : 'umidade levada às peças vizinhas', f - this.paid[o.idx]);
-        if (commit) this.paid[o.idx] = f;
+      const fit = fitOf(tileComp(o.v), moistureAt(this, o.q, o.r), TERRA.fitIn, TERRA.fitMid);
+      if (fit > this.paid[o.idx]) {
+        // A peça nova recebe `fitSelf` do que cabe a ela; o que ela não recebe fica registrado como pago (só o que a água traz depois rende).
+        const gain = o === p ? Math.round((fit - this.paid[o.idx]) * TERRA.fitSelf) : fit - this.paid[o.idx];
+        pts += gain;
+        this.note(o === p ? 'umidade da própria peça' : 'umidade levada às peças vizinhas', gain);
+        if (commit) this.paid[o.idx] = fit;
       }
     }
     // 4. água até o mar
@@ -149,7 +207,8 @@ export class TerraWorld extends LiteWorld {
       const g = this.water.gain({ q: p.q, r: p.r, edges: p.v.edges, level, spring: p.idx > 0 && isSpring(p.seed, p.v.edges, level) });
       this.exTiles += g.tiles;
       pts += g.pts;
-      this.note('água corrente e mar', g.pts);
+      this.note('água corrente (própria peça)', g.own);
+      this.note('água que chega (peças de antes e mar)', g.pts - g.own);
     }
     return pts;
   }
@@ -157,8 +216,12 @@ export class TerraWorld extends LiteWorld {
   protected onCommit(p: Placed): void {
     if (p.idx === 0) {
       // A peça do centro nasce com o que já tem: não é jogada, não paga.
-      this.paid[0] = fitOf(tileComp(p.v), moistureAt(this, p.q, p.r));
-      this.patchBest = this.patches();
+      this.paid[0] = fitOf(tileComp(p.v), moistureAt(this, p.q, p.r), TERRA.fitIn, TERRA.fitMid);
+      const f = this.field();
+      this.patchBest = f.patch;
+      this.closedBest = f.closed;
+      this.closedNBest = f.closedN;
+      this.clayBest = f.clay;
     }
     if (p.v.edges.includes(T.Water)) {
       const level = this.level(p);
@@ -175,6 +238,9 @@ export class TerraWorld extends LiteWorld {
     const t = w as TerraWorld;
     t.paid = this.paid.slice();
     t.patchBest = this.patchBest;
+    t.closedBest = this.closedBest;
+    t.closedNBest = this.closedNBest;
+    t.clayBest = this.clayBest;
     this.water.copyInto(t.water);
   }
 }

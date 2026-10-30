@@ -51,14 +51,14 @@ export function moistureAt(w: LiteWorld, q: number, r: number): number {
   return Math.min(1, m);
 }
 
-/** Pontos (inteiros) de uma peça de composição `comp` (4 terrenos, soma 1 ou 0) com umidade `m`. */
-export function fitOf(comp: readonly number[], m: number): number {
+/** Pontos (inteiros) de uma peça de composição `comp` (4 terrenos, soma 1 ou 0) com umidade `m`; `pin` e `pmid` trocam os 8 e 11 (a Terra contínua calibra os dela). */
+export function fitOf(comp: readonly number[], m: number, pin = FIT_IN, pmid = FIT_MID): number {
   let s = 0;
   for (let k = 0; k < comp.length; k++) {
     const [lo, hi] = RANGE[k];
     if (!comp[k] || m < lo || m > hi) continue;
     const mid = (lo + hi) / 2;
-    s += comp[k] * (Math.abs(m - mid) <= (hi - lo) / 4 ? FIT_MID : FIT_IN);
+    s += comp[k] * (Math.abs(m - mid) <= (hi - lo) / 4 ? pmid : pin);
   }
   return Math.round(s);
 }

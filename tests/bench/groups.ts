@@ -14,6 +14,8 @@ const parent = new Int32Array(SIZE);
 export const mass = new Int32Array(SIZE);
 /** Bordas da mancha viradas para o vazio ou para outro terreno (só na raiz): o "perímetro". */
 export const exposed = new Int32Array(SIZE);
+/** Bordas da mancha viradas só para o vazio (casa ainda sem peça; só na raiz): zero = a mancha está fechada e não cresce mais. */
+export const voids = new Int32Array(SIZE);
 
 export function find(x: number): number {
   while (parent[x] !== x) {
@@ -36,6 +38,7 @@ export function buildGroups(w: LiteWorld): number {
     parent[i] = i;
     mass[i] = 0;
     exposed[i] = 0;
+    voids[i] = 0;
   }
   for (const t of list) {
     const e = t.v.edges;
@@ -56,6 +59,7 @@ export function buildGroups(w: LiteWorld): number {
     for (let s = 0; s < 6; s++) {
       const nb = w.at(t.q + DIRS[s][0], t.r + DIRS[s][1]);
       if (!nb || nb.v.edges[opp(s)] !== e[s]) exposed[find(t.idx * 6 + s)]++;
+      if (!nb) voids[find(t.idx * 6 + s)]++;
     }
   }
   return n;

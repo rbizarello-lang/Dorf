@@ -118,6 +118,8 @@ export abstract class LiteWorld implements World {
   protected useClosed = true;
   /** A regra tem `extra` (precisa da peça já posta para medir). */
   protected hasExtra = false;
+  /** Anota também a origem dos pontos de base (encaixe das bordas, perfeito, cerco, interações) em `parts()`. */
+  protected trackBase = false;
 
   constructor(readonly seed: number, protected cfg: LiteCfg = BASE_CFG) {
     this.stack = cfg.startTiles;
@@ -268,7 +270,7 @@ export abstract class LiteWorld implements World {
     const v = t.views[rot];
     const nbs = this.nbs;
     const cfg = this.cfg;
-    let n = 0, pts = 0, syn = 0;
+    let n = 0, pts = 0, syn = 0, edgeSum = 0;
     let perfect = true;
     for (let i = 0; i < 6; i++) {
       const o = this.at(q + DIRS[i][0], r + DIRS[i][1]);
@@ -278,7 +280,9 @@ export abstract class LiteWorld implements World {
       const j = opp(i);
       if (!this.compat(v, i, o.v, j)) return -1;
       const s = this.sim(v, i, o.v, j);
-      pts += this.pay(v, i, o.v, j, s) + this.edgePts(v, i, o.v, j);
+      const pay = this.pay(v, i, o.v, j, s) + this.edgePts(v, i, o.v, j);
+      pts += pay;
+      edgeSum += pay;
       if (s < this.perfectS) perfect = false;
       if (this.synOpen(s) && synergyOf(v.edges[i], o.v.edges[j])) syn++;
     }
@@ -287,6 +291,8 @@ export abstract class LiteWorld implements World {
     pts += syn * cfg.synergyPoints;
     this.exTiles = 0;
     this.gotNow = {};
+    const perfectPts = this.usePerfect && n >= 2 && perfect ? cfg.perfectBonus : 0;
+    let closedPts = 0;
     let newClosed: number[] | null = null;
     if (this.useClosed) {
       let c = 0;
@@ -299,8 +305,15 @@ export abstract class LiteWorld implements World {
         }
       }
       pts += c * cfg.closedBonus;
+      closedPts = c * cfg.closedBonus;
       this.exTiles += c * cfg.closedTiles;
       if (commit && n === 6 && perfect) (newClosed ??= []).push(this.list.length);
+    }
+    if (this.trackBase) {
+      this.note('encaixe das bordas', edgeSum);
+      this.note('perfeito', perfectPts);
+      this.note('cerco da peça', closedPts);
+      this.note('interações', syn * cfg.synergyPoints);
     }
     if (this.hasExtra || commit) {
       const p = this.push(t, rot, q, r);

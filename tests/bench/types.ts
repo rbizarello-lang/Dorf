@@ -53,7 +53,7 @@ export interface Rule {
 
 /** Um jogador: escolhe uma das jogadas (a lista nunca vem vazia). Pode olhar adiante com `w.after`. */
 export interface Player {
-  id: 'guloso' | 'planejador' | 'distraido';
+  id: 'guloso' | 'planejador' | 'planejador3' | 'distraido';
   name: string;
   choose(w: World, moves: Move[], rng: () => number): Move;
 }

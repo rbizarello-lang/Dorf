@@ -72,7 +72,7 @@ export function addDecision(d: Decisions, moves: Move[]) {
 /** Joga uma partida inteira de semente `seed` com `player` sob `rule`. Determinístico: o desempate de quem joga usa gerador próprio. */
 export function playGame(rule: Rule, player: Player, seed: number): GameRec {
   const w = rule.create(seed);
-  const salt = player.id === 'guloso' ? 0x6a1 : player.id === 'planejador' ? 0x6a2 : 0xd157;
+  const salt = player.id === 'guloso' ? 0x6a1 : player.id === 'planejador' ? 0x6a2 : player.id === 'planejador3' ? 0x6a3 : 0xd157;
   const rng = mulberry32((seed ^ Math.imul(salt, 0x9e3779b1)) >>> 0);
   const dec = emptyDecisions();
   let ms = 0;
