@@ -14,21 +14,35 @@ import { World } from './world.mjs';
 
 const polysOf = (world) => world.pieces.map((p) => ({ vx: p.vx, vy: p.vy }));
 
-/** Confere que nenhuma peça entra em outra além da tolerância (oráculo independente do gerador de poses). */
+/**
+ * Oráculo independente do gerador de poses: confere (1) vértices inteiros, (2) nenhuma peça entra em
+ * outra além da tolerância, (3) rio só encosta em rio: arestas antiparalelas que se sobrepõem em mais
+ * de 40 unidades precisam ser as duas de rio ou as duas de terra.
+ */
 export function validate(world) {
   const tol2 = (world.tol * 1.5) ** 2;
-  let bad = 0;
+  const out = { overlaps: 0, nonInt: 0, riverBad: 0 };
   const ps = world.pieces;
+  for (const p of ps) for (let i = 0; i < p.vx.length; i++) if (!Number.isInteger(p.vx[i]) || !Number.isInteger(p.vy[i])) out.nonInt++;
   for (let a = 0; a < ps.length; a++)
     for (let b = a + 1; b < ps.length; b++) {
       const A = ps[a], B = ps[b];
-      if (A.maxx < B.minx || B.maxx < A.minx || A.maxy < B.miny || B.maxy < A.miny) continue;
+      if (A.maxx < B.minx - 200 || B.maxx < A.minx - 200 || A.maxy < B.miny - 200 || B.maxy < A.miny - 200) continue;
       let hit = false;
       for (let i = 0; i < A.sx.length && !hit; i++) if (deepInside(A.sx[i], A.sy[i], B.vx, B.vy, tol2)) hit = true;
       for (let i = 0; i < B.sx.length && !hit; i++) if (deepInside(B.sx[i], B.sy[i], A.vx, A.vy, tol2)) hit = true;
-      if (hit) bad++;
+      if (hit) out.overlaps++;
+      for (const e of A.edges)
+        for (const f of B.edges) {
+          if (e.ux * f.ux + e.uy * f.uy > -world.angCos) continue;
+          const dc = e.ux * (f.ay - e.ay) - e.uy * (f.ax - e.ax), dd = e.ux * (f.by - e.ay) - e.uy * (f.bx - e.ax);
+          if (Math.abs(dc) > world.dTol + 1 || Math.abs(dd) > world.dTol + 1) continue;
+          const tc = e.ux * (f.ax - e.ax) + e.uy * (f.ay - e.ay), td = e.ux * (f.bx - e.ax) + e.uy * (f.by - e.ay);
+          const ov = Math.min(e.len, Math.max(tc, td)) - Math.max(0, Math.min(tc, td));
+          if (ov > 60 && (e.label === WATER) !== (f.label === WATER)) out.riverBad++;
+        }
     }
-  return bad;
+  return out;
 }
 
 const pct = (a, p) => {
@@ -46,7 +60,7 @@ export function playGame(cfg) {
   const rng = mulberry32((seed * 7919 + 13) >>> 0);
   const forgive = cfg.forgive ?? 'none';
   const useDiscard = forgive !== 'none';
-  const usePatch = forgive === 'patch' || forgive === 'all';
+  const usePatch = forgive === 'patch';
   const pieces = cfg.pieces ?? 40;
   const rec = {
     seed,
@@ -150,12 +164,15 @@ export function playGame(cfg) {
       if ((pose.parts.river ?? 0) > 0) rec.riverJoined++;
     }
     if (cfg.keep) {
-      rec.steps.push({ k, piece, poses: poses.slice(0, 12).map((p) => ({ r: p.r, tx: p.tx, ty: p.ty, score: p.score })), chosen: idx, pcId: pc.id, snap: cfg.snap ? world.pieces.map((q) => q.edges.map((e) => e.exp.slice())) : null });
+      rec.steps.push({ k, piece, n: poses.length, score: pose.score, parts: pose.parts, poses: poses.slice(0, 12).map((p) => ({ r: p.r, tx: p.tx, ty: p.ty, score: p.score })), chosen: idx, pcId: pc.id, snap: cfg.snap ? world.pieces.map((q) => q.edges.map((e) => e.exp.slice())) : null });
     }
     if (cps.has(world.pieces.length)) snapshot('n' + world.pieces.length);
   }
   snapshot('fim');
-  rec.overlaps = validate(world);
+  const v = validate(world);
+  rec.overlaps = v.overlaps;
+  rec.nonInt = v.nonInt;
+  rec.riverBad = v.riverBad;
   rec.perimEnd = world.perim;
   if (cfg.keep) rec.world = world;
   return rec;
@@ -188,6 +205,8 @@ export function summarize(recs, label) {
     discards: mean(recs.map((r) => r.discards)),
     patches: mean(recs.map((r) => r.patches)),
     overlaps: recs.reduce((s, r) => s + r.overlaps, 0),
+    nonInt: recs.reduce((s, r) => s + r.nonInt, 0),
+    riverBad: recs.reduce((s, r) => s + r.riverBad, 0),
     riverJoinPct: (100 * recs.reduce((s, r) => s + r.riverJoined, 0)) / Math.max(1, recs.reduce((s, r) => s + r.riverPieces, 0)),
     parts: Object.fromEntries(Object.keys(recs[0].parts).map((key) => [key, mean(recs.map((r) => r.parts[key]))])),
     check: {},
@@ -222,7 +241,7 @@ if (process.argv[1] && process.argv[1].endsWith('sim.mjs')) {
     tolMul: +(args.tolMul ?? 1),
     exhaustive: args.exhaustive === '1',
     patchSlits: +(args.patchSlits ?? 0),
-    world: args.world ? JSON.parse(args.world) : undefined,
+    world: { ...(args.magnet === '1' ? (args.fam === 'ii' ? { tolMul: 2 } : { tol: 100, dTol: 100 }) : {}), ...(args.world ? JSON.parse(args.world) : {}) },
   };
   const recs = [];
   const t0 = performance.now();

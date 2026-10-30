@@ -1,9 +1,10 @@
 // Linha de base: o Clássico (hexágonos de hoje) medido com as MESMAS métricas dos Recortes.
 // Usa src/core só para ler (não altera o jogo). Empacota com o rolldown, como os testes:
 //   npx rolldown experiments/recortes/baseline.ts --file .cache/recortes-base.mjs --format esm --platform node --logLevel silent
-//   node .cache/recortes-base.mjs --games 300 --player greedy --tiles 58
+//   node .cache/recortes-base.mjs --games 300 --player greedy --tiles 58 [--dump mapas.json]
 // Regras: as do modo Partida rápida (sem missões, pilha fixa) com `--tiles` peças, para a pilha
 // bater com a dos Recortes em área (40 retalhos de ~1,5 hexágono ≈ 58 hexágonos).
+import { writeFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { DEFAULT_RULES, type Rules } from '../../src/core/board';
 import { Game } from '../../src/core/game';
@@ -18,6 +19,7 @@ const args = Object.fromEntries(process.argv.slice(2).reduce((a: any[], v, i, ar
 const games = +(args.games ?? 300);
 const player = args.player ?? 'greedy';
 const tiles = +(args.tiles ?? 58);
+const dump: { seed: number; tiles: { q: number; r: number; edges: number[] }[] }[] = [];
 
 const rules: Rules = { ...DEFAULT_RULES, startTiles: tiles, fixedStack: true, questChance: 0, sites: 0, wonderStages: 0, blessings: false };
 
@@ -102,6 +104,7 @@ for (let g = 0; g < games; g++) {
     if (n === 10 || n === 20 || n === 30 || n === 45) snap('n' + n);
   }
   snap('fim');
+  if (args.dump && g < 3) dump.push({ seed, tiles: [...game.board.tiles.values()].map((p) => ({ q: p.q, r: p.r, edges: [...p.edges] })) });
   recs.push(rec);
 }
 
@@ -137,4 +140,5 @@ for (const tag of ['n10', 'n20', 'n30', 'n45', 'fim']) {
     landHex: mean(cs.map((c) => c.landHex)),
   };
 }
+if (args.dump) writeFileSync(args.dump, JSON.stringify(dump));
 console.log(JSON.stringify(row));
