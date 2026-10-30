@@ -168,6 +168,53 @@ export class TerraWorld extends LiteWorld {
     return { patch: Math.round(v), closed: Math.round(c), closedN: cn, clay: Math.round((adv * TERRA.clayPerTile) / 6) };
   }
 
+  /**
+   * Conferência do `field()`: o mesmo cálculo das manchas por uma busca em largura sobre (peça, setor), sem o `groups.ts` (união-busca,
+   * perímetro e bordas abertas). Devolve as duas leituras para o `verifica.ts` comparar a cada jogada.
+   */
+  audit(): { fast: { patch: number; closed: number; closedN: number }; slow: { patch: number; closed: number; closedN: number } } {
+    const f = this.field();
+    const seen = new Set<number>();
+    let v = 0, c = 0, cn = 0;
+    for (const t of this.tilesList) {
+      for (let s0 = 0; s0 < 6; s0++) {
+        if (isStrict(t.v.edges[s0]) || seen.has(t.idx * 6 + s0)) continue;
+        let cunhas = 0, perim = 0, open = 0;
+        const stack: [Placed, number][] = [[t, s0]];
+        seen.add(t.idx * 6 + s0);
+        while (stack.length) {
+          const [u, s] = stack.pop()!;
+          const terr = u.v.edges[s];
+          cunhas++;
+          for (const k of [(s + 5) % 6, (s + 1) % 6]) {
+            if (u.v.edges[k] === terr && !seen.has(u.idx * 6 + k)) {
+              seen.add(u.idx * 6 + k);
+              stack.push([u, k]);
+            }
+          }
+          const nb = this.at(u.q + DIRS[s][0], u.r + DIRS[s][1]);
+          if (!nb) {
+            perim++;
+            open++;
+          } else if (nb.v.edges[opp(s)] === terr) {
+            if (!seen.has(nb.idx * 6 + opp(s))) {
+              seen.add(nb.idx * 6 + opp(s));
+              stack.push([nb, opp(s)]);
+            }
+          } else perim++;
+        }
+        const a = cunhas / 6;
+        const shape = TERRA.patchShapeBase + (1 - TERRA.patchShapeBase) * Math.min(1, (6 * Math.sqrt(a)) / Math.max(1, perim));
+        v += TERRA.patchK * a ** TERRA.patchExp * shape;
+        if (open === 0 && a >= TERRA.closeMin) {
+          c += TERRA.closeK * a ** TERRA.closeExp * shape;
+          cn++;
+        }
+      }
+    }
+    return { fast: { patch: f.patch, closed: f.closed, closedN: f.closedN }, slow: { patch: Math.round(v), closed: Math.round(c), closedN: cn } };
+  }
+
   private level(p: Placed): number {
     return levelAt(this.seed, p.q, p.r, 2);
   }

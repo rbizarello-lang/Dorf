@@ -11,6 +11,7 @@ import { ranked } from './players';
 import { ALL, BY_ID } from './rules/index';
 import { gameRules } from './rules/core';
 import { mixComp } from './rules/aquarela';
+import { TerraWorld } from './rules/terra';
 import { LAND, T, generateTile, isStrict } from '../../src/core/tiles';
 import type { Move, Rule, World } from './types';
 
@@ -144,10 +145,39 @@ function aquarelaShare() {
   say(`info aquarela: ${((100 * mixed) / land).toFixed(1)}% das bordas de terra saem misturadas (400 peças)`);
 }
 
+/** Terra contínua: as manchas, o fechamento e o perímetro da união-busca batem com uma busca em largura independente a cada peça posta. */
+function checkTerra(n: number): boolean {
+  let bad = 0, checks = 0, closedSeen = 0;
+  for (let seed = 1; seed <= n; seed++) {
+    const w = new TerraWorld(seed).start();
+    const rng = mulberry32(seed ^ 0x51);
+    let guard = 0;
+    while (!w.over() && guard++ < 2000) {
+      const ms = w.moves();
+      if (!ms.length) {
+        w.discard();
+        continue;
+      }
+      // Joga ao acaso entre as 5 melhores, para as manchas ficarem variadas (e não só as do guloso).
+      const top = ranked(ms, rng).slice(0, 5);
+      w.play(top[Math.floor(rng() * top.length)]);
+      const a = w.audit();
+      checks++;
+      closedSeen = Math.max(closedSeen, a.slow.closedN);
+      if (a.fast.patch !== a.slow.patch || a.fast.closed !== a.slow.closed || a.fast.closedN !== a.slow.closedN) {
+        if (bad++ < 3) say(`  FALHOU terra: semente ${seed}, peça ${w.placed}: união-busca ${JSON.stringify(a.fast)} × busca em largura ${JSON.stringify(a.slow)}`);
+      }
+    }
+  }
+  say(`${bad ? 'FALHOU' : 'ok'}  terra (manchas e fechamento): união-busca × busca em largura, ${n} partidas, ${checks} conferências, até ${closedSeen} manchas fechadas por partida`);
+  return bad === 0;
+}
+
 export function verifyAll(n = 40): boolean {
   say(`# Verificação da bancada (${n} partidas por conferência)`);
   let ok = checkTwins(n);
   for (const r of [...ALL, BY_ID.get('base-lite')!, BY_ID.get('relevo-lite')!]) ok = checkRule(r, Math.min(n, r.id === 'classico' || r.id === 'relevo' ? 12 : n)) && ok;
+  ok = checkTerra(n) && ok;
   cheapGap(BY_ID.get('classico')!, 12);
   cheapGap(BY_ID.get('relevo')!, 12);
   aquarelaShare();
