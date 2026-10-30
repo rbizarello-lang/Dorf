@@ -1,7 +1,7 @@
 // Testes do vídeo, da resolução dinâmica e do nível pela placa de vídeo (lógica pura, em Node).
 // O MP4 é conferido por um leitor de caixas escrito aqui, independente do gravador.
 import { DynRes, RES_STEPS } from '../src/render/dynres';
-import { dtCap, shouldRender, targetFps, type PacingState } from '../src/render/framePacing';
+import { RefreshMeter, capFor, dtCap, isEconomy, shouldRender, targetFps, type PacingState } from '../src/render/framePacing';
 import { autoStartTier, gpuName, tierForGpu } from '../src/render/gpuTier';
 import { fitDist, planFilm } from '../src/video/film';
 import { mp4Header, type Mp4Sample } from '../src/video/mp4';
@@ -131,7 +131,7 @@ console.log('MP4: VP9 sem reordenação');
 
 console.log('Resolução dinâmica');
 {
-  const d = new DynRes(1 / 38, 1 / 50);
+  const d = new DynRes();
   let now = 0;
   const run = (dt: number, frames: number) => {
     const evs: string[] = [];
@@ -142,21 +142,66 @@ console.log('Resolução dinâmica');
     }
     return evs;
   };
-  // A primeira janela é ignorada (carência), depois desce um degrau por janela, também com carência.
+  // A primeira janela é ignorada (carência); quadros de 40 ms (25 qps) descem um degrau por janela.
   let evs = run(0.04, 40 * 12);
   ok(evs.slice(0, RES_STEPS.length - 1).every((e) => e === 'down') && d.step === RES_STEPS.length - 1, `quadros de 40 ms: desce até ${RES_STEPS[d.step]} (${evs.join(' ')})`);
   ok(evs.includes('floor'), 'no menor degrau e ainda lento: pede para descer o nível');
   d.reset();
   ok(d.step === 0 && d.scale === 1, 'reset volta à resolução cheia');
-  // Meio-termo (22 ms): fica onde está.
-  evs = run(0.022, 40 * 6);
-  ok(evs.length === 0 && d.step === 0, 'quadros de 22 ms em resolução cheia: nada muda');
-  // Desce dois degraus, depois folga: sobe um por vez.
+  // 60 qps firmes (16,7 ms) em resolução cheia: nada muda; nem 17 ms, dentro da folga.
+  evs = run(1 / 60, 40 * 6);
+  ok(evs.length === 0 && d.step === 0, 'quadros de 16,7 ms em resolução cheia: nada muda');
+  evs = run(0.017, 40 * 6);
+  ok(evs.length === 0 && d.step === 0, 'quadros de 17 ms: nada muda');
+  // A meta é 60 qps: 20 ms (50 qps) já é lento, mas só depois de duas janelas seguidas.
+  d.reset();
+  evs = run(0.02, 40);
+  ok(evs.length === 0 && d.step === 0, 'a primeira janela é carência: nada muda');
+  evs = run(0.02, 40);
+  ok(evs.length === 0 && d.step === 0, 'a primeira janela lenta espera a segunda');
+  evs = run(0.02, 40);
+  ok(evs.join() === 'down' && d.step === 1, `a segunda janela lenta desce um degrau (${evs.join(' ')})`);
+  // 33 ms (30 qps) é lento demais para esperar: a primeira janela já desce.
+  d.reset();
+  run(0.033, 40);
+  evs = run(0.033, 40);
+  ok(evs.join() === 'down', 'quadros de 33 ms descem na primeira janela depois da carência');
+  // Uma GPU de 20 ms numa tela de 60 Hz entrega quadros de 16,7 ms com um de 33,3 ms a cada cinco: a mediana engana, a média não.
+  d.reset();
+  const mixed = () => {
+    const out: string[] = [];
+    for (let i = 0; i < 40 * 4; i++) {
+      const dt = i % 5 === 4 ? 1 / 30 : 1 / 60;
+      now += dt;
+      const e = d.push(dt, now);
+      if (e) out.push(e);
+    }
+    return out;
+  };
+  ok(mixed().includes('down'), 'um quadro de 33 ms a cada cinco (50 qps) desce, embora a mediana seja 16,7 ms');
+  // Soluços (a peça assentou: poucos quadros de 150 ms) não descem.
+  d.reset();
+  run(1 / 60, 40);
+  for (let w = 0; w < 6; w++) {
+    now += 0.15 * 4;
+    for (let i = 0; i < 4; i++) d.push(0.15, now);
+    evs = run(1 / 60, 36);
+    ok(evs.length === 0 && d.step === 0, `soluço de 4 quadros de 150 ms na janela ${w}: a resolução fica`);
+  }
+  // Desce dois degraus, depois folga: sobe um por vez, e só depois de duas janelas folgadas.
   d.reset();
   run(0.04, 40 * 5);
   const low = d.step;
-  evs = run(0.012, 40 * 8);
+  evs = run(0.012, 40 * 12);
   ok(low >= 2 && d.step === 0 && evs.every((e) => e === 'up'), `com folga volta ao topo (${evs.join(' ')})`);
+  d.reset();
+  run(0.04, 40 * 3);
+  ok(d.step >= 1, 'desceu');
+  const before = d.step;
+  run(0.012, 40);
+  ok(d.step === before, 'uma janela folgada só não basta para subir');
+  run(0.012, 40);
+  ok(d.step === before - 1, 'a segunda sobe um degrau');
   // Oscilação: sobe e logo fica lento → o degrau é proibido por 60 s, e por 120 s na segunda vez.
   const when = (dt: number, seconds: number, ev: string) => {
     for (const end = now + seconds; now < end; ) {
@@ -166,22 +211,22 @@ console.log('Resolução dinâmica');
     return NaN;
   };
   d.reset();
-  run(0.04, 40 * 3); // desce para o degrau 1
+  run(0.04, 40 * 2); // carência e um degrau para baixo
   ok(d.step === 1, 'um degrau abaixo');
   when(0.012, 5, 'up');
   ok(d.step === 0, 'sobe com folga');
   const t0 = when(0.04, 5, 'down');
   ok(d.step === 1, 'lento logo depois de subir: desce de novo');
   const up0 = when(0.012, 120, 'up');
-  ok(up0 - t0 >= 59.9 && up0 - t0 < 61, `o degrau que falhou fica proibido por 60 s (${(up0 - t0).toFixed(1)} s)`);
+  ok(up0 - t0 >= 59.9 && up0 - t0 < 62, `o degrau que falhou fica proibido por 60 s (${(up0 - t0).toFixed(1)} s)`);
   const t1 = when(0.04, 5, 'down');
   const up1 = when(0.012, 300, 'up');
-  ok(up1 - t1 >= 119.9 && up1 - t1 < 121, `segunda falha: proibido por 120 s (${(up1 - t1).toFixed(1)} s)`);
+  ok(up1 - t1 >= 119.9 && up1 - t1 < 122, `segunda falha: proibido por 120 s (${(up1 - t1).toFixed(1)} s)`);
   // Lento sem ter subido antes (a cena ficou pesada): desce sem proibir nada.
   d.reset();
   const t2 = when(0.04, 5, 'down');
   const up2 = when(0.012, 5, 'up');
-  ok(up2 - t2 < 1.5 && d.step === 0, 'uma descida comum não proíbe o degrau de cima');
+  ok(up2 - t2 < 2.5 && d.step === 0, 'uma descida comum não proíbe o degrau de cima');
 }
 
 // ---------------------------------------------------------------- nível pela placa
@@ -221,7 +266,11 @@ console.log('Nível pela placa de vídeo');
   ok(autoStartTier({ renderer: '' }, false) === 'high', 'nome vazio no computador: Alta');
   ok(autoStartTier({}, true) === 'medium', 'placa desconhecida na tela de toque: Média');
   ok(autoStartTier({ renderer: 'ANGLE (Intel, Intel(R) UHD Graphics 620 (0x00005917) Direct3D11 vs_5_0 ps_5_0, D3D11)' }, false) === 'medium', 'Intel UHD no computador: Média');
-  ok(autoStartTier({ renderer: 'ANGLE (AMD, AMD Radeon RX 6700 XT (0x000073DF) Direct3D11 vs_5_0 ps_5_0, D3D11)' }, false) === 'ultra', 'placa conhecida ignora o padrão');
+  ok(autoStartTier({ renderer: 'ANGLE (AMD, AMD Radeon RX 6700 XT (0x000073DF) Direct3D11 vs_5_0 ps_5_0, D3D11)' }, false) === 'high', 'placa que aguenta o Ultra começa na Alta: o Ultra é escolha manual');
+  ok(autoStartTier({ renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002504) Direct3D11 vs_5_0 ps_5_0, D3D11)' }, false) === 'high', 'RTX 3060 começa na Alta');
+  ok(autoStartTier({ renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Laptop GPU (0x00002717) Direct3D11 vs_5_0 ps_5_0, D3D11)' }, false) === 'high', 'RTX 4090 também começa na Alta');
+  ok(autoStartTier({ renderer: 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Ti (0x00001C82) Direct3D11 vs_5_0 ps_5_0, D3D11)' }, false) === 'medium', 'GTX 1050 Ti continua na Média');
+  ok(autoStartTier({ vendor: 'nvidia', architecture: 'ampere' }, false) === 'high', 'só WebGPU: Ampere começa na Alta');
   ok(tierForGpu({}) === null && gpuName({ vendor: 'amd', architecture: 'rdna-3' }) === 'AMD rdna-3', 'sem nada: sem palpite; nome pelo fabricante');
 }
 
@@ -289,6 +338,30 @@ console.log('Economia de quadros');
   }
   ok(run(60, 0).n >= 599, 'sem limite desenha todo quadro do monitor');
   ok(dtCap(0) === 0.05 && dtCap(20) === 0.1 && dtCap(30) === 0.1, 'o teto do dt acomoda o intervalo da economia (o mundo não fica lento)');
+  // Teto do Auto em monitor de alta taxa.
+  ok(capFor(60) === 0 && capFor(75) === 0 && capFor(100) === 0 && capFor(0) === 0 && capFor(NaN) === 0, 'sem teto em 60, 75 e 100 Hz, nem sem estimativa');
+  ok(capFor(120) === 60 && capFor(144) === 72 && capFor(165) === 82.5 && capFor(240) === 60 && capFor(360) === 60, 'teto = submúltiplo do refresh a partir de 58 qps');
+  ok(targetFps(st({ cap: 72 })) === 72 && targetFps(st({ cap: 72, busy: true, idleMs: 99999 })) === 72, 'a taxa cheia vira o teto');
+  ok(targetFps(st({ cap: 72, idleMs: 5000 })) === 30 && targetFps(st({ cap: 72, idleMs: 20000 })) === 20 && targetFps(st({ cap: 72, focused: false })) === 20, 'a economia continua abaixo do teto');
+  ok(targetFps(st({ cap: 72, enabled: false })) === 0, 'medição e gravação ignoram o teto');
+  ok(isEconomy(30) && isEconomy(20) && !isEconomy(0) && !isEconomy(60) && !isEconomy(72), 'só 30 e 20 qps são economia (o quadro lento dela não conta para o Auto)');
+  for (const [hz, cap] of [[144, 72], [120, 60], [165, 82.5], [240, 60]] as const) {
+    const r = run(hz, cap);
+    ok(Math.abs(r.n / 10 - cap) < 1.5 && r.maxGap <= 1000 / cap + 0.1, `${hz} Hz com teto de ${cap}: ${(r.n / 10).toFixed(1)} quadros por segundo, ritmo parelho (maior intervalo ${r.maxGap.toFixed(1)} ms)`);
+  }
+  const meter = (hz: number, n: number, jitter = 0) => {
+    const m = new RefreshMeter();
+    for (let i = 0; i < n; i++) m.push(1000 / hz + (i % 2 ? jitter : -jitter));
+    return m.hz;
+  };
+  ok(meter(144, 120, 0.15) === 144 && meter(60, 120, 0.2) === 60 && meter(240, 120, 0.1) === 240 && meter(120, 100) === 120, 'estima 144, 60, 240 e 120 Hz pelos intervalos');
+  ok(meter(144, 50) === 0, 'poucas amostras: sem estimativa');
+  const slow = new RefreshMeter();
+  for (let i = 0; i < 120; i++) slow.push(i % 3 ? 16.7 : 33.4);
+  ok(slow.hz === 0, 'intervalos irregulares (quadros lentos): sem estimativa, sem teto');
+  const gpuBound = new RefreshMeter();
+  for (let i = 0; i < 120; i++) gpuBound.push(21);
+  ok(gpuBound.hz === 0, 'intervalos de 21 ms (não é taxa de monitor): sem estimativa');
 }
 
 if (bad) {

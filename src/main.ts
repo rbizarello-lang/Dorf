@@ -15,7 +15,7 @@ import { routeMarks, type RouteHit, type RouteMark } from './core/routes';
 import type { PassingWeather, Quality, TimeOfDay } from './render/world';
 import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
 import { DynRes } from './render/dynres';
-import { dtCap, shouldRender, targetFps } from './render/framePacing';
+import { RefreshMeter, capFor, dtCap, isEconomy, shouldRender, targetFps } from './render/framePacing';
 import { readGpuInfo } from './render/gpu';
 import { autoStartTier, gpuName } from './render/gpuTier';
 import { FX_FLAGS } from './render/post';
@@ -1211,7 +1211,7 @@ function pickTheme(t: Theme) {
 const qualityLabel: Record<QualityMode, string> = { auto: 'Auto', cinema: 'Cinema', ultra: 'Ultra', high: 'Alta', medium: 'Média', low: 'Baixa' };
 const QUALITY_NOTE: Record<Quality, string> = {
   cinema: 'Desenha 1,5× acima da tela, com mais luz, sombra e vegetação, grão e lente. Só na foto e no vídeo',
-  ultra: 'Oclusão reforçada, desfoque de miniatura, grão de filme e lente. Para placas acima da RX 580',
+  ultra: 'Oclusão reforçada, desfoque de miniatura, grão de filme e lente. Só à mão (o Auto não o escolhe): para placas bem acima da RTX 3060',
   high: 'Oclusão, bloom, desfoque de miniatura, grão de filme e lente',
   medium: 'Leve, para notebooks e celulares',
   low: 'Sem sombras nem pós-processamento',
@@ -1675,6 +1675,11 @@ let winFocused = document.hasFocus();
 let measuring = 0;
 let lastStep = 0;
 let paceFps = 0;
+/** Teto do Auto em monitor de alta taxa (framePacing.ts `capFor`), reavaliado uma vez por segundo. */
+const refresh = new RefreshMeter();
+let capFps = 0;
+let capAt = 0;
+let prevRaf = 0;
 let wasPaced = false;
 let stepCount = 0;
 const noPacing = params.has('stress') || params.has('perf') || params.has('bench') || params.has('auto') || params.has('demo') || params.get('economia') === '0';
@@ -1700,7 +1705,14 @@ function mapFrame() {
 
 function frame(now: number) {
   try {
+    if (prevRaf) refresh.push(now - prevRaf);
+    prevRaf = now;
+    if (now - capAt > 1000) {
+      capAt = now;
+      capFps = qualityMode === 'auto' ? capFor(refresh.hz) : 0;
+    }
     paceFps = targetFps({
+      cap: capFps,
       enabled: !noPacing && !measuring && capture.stage === 'play' && !capture.take && !capture.shooting,
       idleMs: now - lastInput,
       focused: winFocused,
@@ -1840,7 +1852,8 @@ function step(now: number) {
         `instâncias ${s.instances.toLocaleString('pt-BR')}`,
         `qualidade ${qualityLabel[qualityMode]}${qualityMode === 'auto' ? ` (${autoNote()})` : ''}`,
         `placa ${gpuLabel || '?'}`,
-        `taxa-alvo ${paceFps ? `${paceFps} qps (economia)` : `cheia${world.settlingWhy() ? ` (${world.settlingWhy()})` : ''}`}`,
+        `taxa-alvo ${paceFps ? `${paceFps} qps (${isEconomy(paceFps) ? 'economia' : 'teto do Auto'})` : `cheia${world.settlingWhy() ? ` (${world.settlingWhy()})` : ''}`}`,
+        `monitor ${refresh.hz ? `~${refresh.hz} Hz` : '?'}`,
         ...(perfNote ? [perfNote] : []),
       ].join('\n');
     }
@@ -1849,8 +1862,8 @@ function step(now: number) {
   }
   stepCount++;
   // Quadros espaçados pela economia não dizem nada sobre a velocidade da placa.
-  if (paceFps === 0 && !wasPaced) adaptQuality(realDt, now);
-  wasPaced = paceFps > 0;
+  if (!isEconomy(paceFps) && !wasPaced) adaptQuality(realDt, now);
+  wasPaced = isEconomy(paceFps);
 }
 
 // ------------------------------------------------------------------ início
