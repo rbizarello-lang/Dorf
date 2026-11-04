@@ -59,6 +59,8 @@ for (const c of cases) {
     const want = c.bench ? 61 : TILES;
     if (stats.tiles < want) problems.push(`tabuleiro com ${stats.tiles} peças, esperado ${want}`);
     if (c.bench && !(await page.evaluate(() => !!window.__bench && !!document.querySelector('.bench table')))) problems.push('o painel do ?bench não apareceu');
+    // O cabeçalho do ?bench (placa, navegador, tela, medidor de GPU, nível do Auto) precisa vir junto, para a tabela colada dizer onde foi medida.
+    if (c.bench && !(await page.evaluate(() => (window.__bench?.info?.length ?? 0) >= 5 && document.querySelectorAll('.bench li').length >= 5))) problems.push('o cabeçalho do ?bench (placa, tela, medidor de GPU) não apareceu');
     if (stats.backend !== c.backend) problems.push(`backend ${stats.backend}, esperado ${c.backend}`);
   }
   const s = ((Date.now() - t0) / 1000).toFixed(1);

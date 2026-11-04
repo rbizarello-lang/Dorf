@@ -27,9 +27,13 @@ function patchSwizzle() {
   G.prototype.__retalhos = true;
 }
 
-export async function createRenderer(canvas: HTMLCanvasElement, forceWebGL: boolean) {
+/**
+ * `trackTimestamp` liga as consultas de tempo da GPU (timestamp query no WebGPU, EXT_disjoint_timer_query
+ * no WebGL2): só para `?bench` e `?gpu`, porque cada passe ganha duas escritas e a leitura volta por mapAsync.
+ */
+export async function createRenderer(canvas: HTMLCanvasElement, forceWebGL: boolean, trackTimestamp = false) {
   patchSwizzle();
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: true, forceWebGL, powerPreference: 'high-performance' });
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: true, forceWebGL, powerPreference: 'high-performance', trackTimestamp });
   await renderer.init();
   const backend: Backend = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend ? 'webgpu' : 'webgl2';
   return { renderer, backend };
