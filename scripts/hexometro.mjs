@@ -1,6 +1,11 @@
 // Hexômetro: mede o quanto uma captura "lê hexágono". Fase 1 do plano Terra contínua (docs: AGENTS.md, "Bancada de encaixe").
 //
-// Uso: node scripts/hexometro.mjs [--json] [--esticar=1.6] [--suave=1.5] [--janela=10] [--topo=0.2] [--base=0.14] <png...>
+// Uso: node scripts/hexometro.mjs [--json] [--esticar=1.6] [--suave=1.5] [--janela=10] [--topo=0.2] [--base=0.14] [--mascara=<png>...] <png...>
+//
+// Máscara de decoração (`--mascara=<png>`, uma por imagem, na mesma ordem): a segunda captura é do MESMO enquadramento com `?silhueta`
+// (decoração preta sobre chão branco). Os pixels escuros da máscara (abaixo de `--limiar`, 128) e uma faixa de `--borda` px (3) em volta
+// saem da conta. O chão em volta preenche o buraco antes do Sobel (convolução normalizada), para a borda da decoração não vazar pelo
+// borrão. Sobra só o chão: a nota passa a ser o histograma do chão, e `uso` diz a fração da região medida que ficou. Sem a opção, a conta é a de sempre.
 //
 // Como funciona (Node puro; o PNG é decodificado com o zlib do próprio Node, sem dependência):
 //   1. tons de cinza, borrados com um gaussiano (σ = --suave px) para o ruído fino de folhas, trigo e telhas não pesar;
@@ -137,6 +142,10 @@ export const DEFAULTS = {
   janela: 10,
   /** Expoente da coerência no peso (só com `janela`). */
   coer: 1,
+  /** Com `--mascara`: luminância (0 a 255) abaixo da qual o pixel da máscara é decoração. */
+  limiar: 128,
+  /** Com `--mascara`: faixa (px) em volta da decoração que também sai da conta. */
+  borda: 3,
 };
 
 /** Harmônicos do histograma (k = 1..KMAX, período de 180°/k): os de 60° são os múltiplos de 3. */
@@ -149,9 +158,77 @@ const BINS = 180;
  * ser a magnitude × coerência^`coer`, e a orientação a do tensor. Folhas, telhas e casas têm orientações aleatórias nessa escala
  * (coerência baixa); a costa, o penhasco e a borda do hexágono são retas longas (coerência alta).
  */
+/** Marca os pixels de decoração da máscara (1 = fora da conta): escuros abaixo de `limiar`, dilatados por `borda` px (quadrado). */
+function decorExcl(mask, w, h, o) {
+  if (mask.w !== w || mask.h !== h) throw new Error(`máscara ${mask.w}×${mask.h} não bate com a imagem ${w}×${h}`);
+  const dec = new Uint8Array(w * h);
+  for (let n = 0; n < w * h; n++) {
+    const lum = 0.299 * mask.rgb[n * 3] + 0.587 * mask.rgb[n * 3 + 1] + 0.114 * mask.rgb[n * 3 + 2];
+    dec[n] = lum < o.limiar ? 1 : 0;
+  }
+  const r = Math.max(0, Math.round(o.borda));
+  const rows = new Uint8Array(w * h);
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let v = 0;
+      for (let i = Math.max(0, x - r); i <= Math.min(w - 1, x + r) && !v; i++) v = dec[y * w + i];
+      rows[y * w + x] = v;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let v = 0;
+      for (let j = Math.max(0, y - r); j <= Math.min(h - 1, y + r) && !v; j++) v = rows[j * w + x];
+      out[y * w + x] = v;
+    }
+  }
+  return out;
+}
+
+/**
+ * Preenche os pixels excluídos de `gray` com o chão em volta (convolução normalizada, com borrões de σ crescente até 24 px).
+ * Assim a borda da decoração não entra no Sobel nem no borrão do tensor. O que sobrar sem chão ao alcance recebe a média do chão.
+ */
+function inpaint(gray, excl, w, h) {
+  const known = new Float32Array(w * h);
+  const val = new Float32Array(w * h);
+  let holes = 0;
+  for (let n = 0; n < w * h; n++) {
+    if (excl[n]) holes++;
+    else {
+      known[n] = 1;
+      val[n] = gray[n];
+    }
+  }
+  if (!holes) return;
+  for (const s of [3, 6, 12, 24]) {
+    const num = blur(val, w, h, s);
+    const den = blur(known, w, h, s);
+    for (let n = 0; n < w * h; n++) {
+      if (!known[n] && den[n] > 1e-3) {
+        gray[n] = num[n] / den[n];
+        val[n] = gray[n];
+        known[n] = 1;
+      }
+    }
+  }
+  let sum = 0, cnt = 0;
+  for (let n = 0; n < w * h; n++) {
+    if (known[n] && !excl[n]) {
+      sum += gray[n];
+      cnt++;
+    }
+  }
+  const media = cnt ? sum / cnt : 128;
+  for (let n = 0; n < w * h; n++) if (!known[n]) gray[n] = media;
+}
+
 function gradients({ w, h, rgb }, o) {
   const gray = new Float32Array(w * h);
   for (let i = 0; i < w * h; i++) gray[i] = 0.299 * rgb[i * 3] + 0.587 * rgb[i * 3 + 1] + 0.114 * rgb[i * 3 + 2];
+  const excl = o.mascara ? decorExcl(o.mascara, w, h, o) : null;
+  if (excl) inpaint(gray, excl, w, h);
   const g = blur(gray, w, h, o.suave);
   const y0 = Math.max(1, Math.floor(h * o.topo));
   const y1 = Math.min(h - 1, Math.ceil(h * (1 - o.base)));
@@ -160,9 +237,13 @@ function gradients({ w, h, rgb }, o) {
   const gx = new Float32Array(w * h);
   const gy = new Float32Array(w * h);
   const use = new Uint8Array(w * h);
+  let area = 0, measured = 0;
   for (let y = y0; y < y1; y++) {
     for (let x = 1; x < w - 1; x++) {
       if (x >= cx && y >= cy) continue;
+      area++;
+      if (excl && excl[y * w + x]) continue;
+      measured++;
       const a = g[(y - 1) * w + x - 1], b = g[(y - 1) * w + x], c = g[(y - 1) * w + x + 1];
       const d = g[y * w + x - 1], f = g[y * w + x + 1];
       const e = g[(y + 1) * w + x - 1], i = g[(y + 1) * w + x], j = g[(y + 1) * w + x + 1];
@@ -171,14 +252,15 @@ function gradients({ w, h, rgb }, o) {
       use[y * w + x] = 1;
     }
   }
-  if (!(o.janela > 0)) return { gx, gy, use, w, h, tensor: null };
+  const uso = area ? measured / area : 1;
+  if (!(o.janela > 0)) return { gx, gy, use, w, h, tensor: null, uso };
   const jxx = new Float32Array(w * h), jyy = new Float32Array(w * h), jxy = new Float32Array(w * h);
   for (let n = 0; n < w * h; n++) {
     jxx[n] = gx[n] * gx[n];
     jyy[n] = gy[n] * gy[n];
     jxy[n] = gx[n] * gy[n];
   }
-  return { gx, gy, use, w, h, tensor: [blur(jxx, w, h, o.janela), blur(jyy, w, h, o.janela), blur(jxy, w, h, o.janela)] };
+  return { gx, gy, use, w, h, uso, tensor: [blur(jxx, w, h, o.janela), blur(jyy, w, h, o.janela), blur(jxy, w, h, o.janela)] };
 }
 
 /** Histograma (180 bins de 1°, soma 1) da orientação das bordas, ponderado pela magnitude. */
@@ -241,15 +323,17 @@ function ratio(c, ks) {
  *          excita, então ficam de fora da nota;
  *   bruta  a mesma razão com os quatro harmônicos de 60° (k = 3, 6, 9, 12), para comparar com a definição direta;
  *   h      o histograma de 180 bins (soma 1);
- *   c      as amplitudes |c_k| (k = 1..12).
+ *   c      as amplitudes |c_k| (k = 1..12);
+ *   uso    fração da região medida que entrou na conta (1 sem máscara; com `mascara`, o que sobrou do chão).
+ * `opts.mascara` é a máscara já decodificada (mesmo tamanho da imagem): ver `decorExcl`.
  */
 export function hexScore(img, opts = {}) {
   const o = { ...DEFAULTS, ...opts };
   const grad = gradients(img, o);
   const { hist, total } = histogram(grad, o);
-  if (total === 0) return { nota: 0, bruta: 0, h: Array.from(hist), c: [] };
+  if (total === 0) return { nota: 0, bruta: 0, uso: grad.uso, h: Array.from(hist), c: [] };
   const c = spectrum(hist);
-  return { nota: ratio(c, [3, 9]), bruta: ratio(c, [3, 6, 9, 12]), h: Array.from(hist), c };
+  return { nota: ratio(c, [3, 9]), bruta: ratio(c, [3, 6, 9, 12]), uso: grad.uso, h: Array.from(hist), c };
 }
 
 // ---------------------------------------------------------------- linha de comando
@@ -257,9 +341,11 @@ export function hexScore(img, opts = {}) {
 function main(argv) {
   const opts = {};
   const files = [];
+  const masks = [];
   let json = false;
   for (const a of argv) {
     if (a === '--json') json = true;
+    else if (a.startsWith('--mascara=')) masks.push(a.slice('--mascara='.length));
     else if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=');
       if (!(k in DEFAULTS) || v === undefined || !Number.isFinite(Number(v))) throw new Error(`opção inválida: ${a}`);
@@ -267,20 +353,23 @@ function main(argv) {
     } else files.push(a);
   }
   if (!files.length) {
-    console.error('uso: node scripts/hexometro.mjs [--json] [--esticar=1.6] [--suave=1.5] [--janela=10] [--topo=0.2] [--base=0.14] <png...>');
+    console.error('uso: node scripts/hexometro.mjs [--json] [--esticar=1.6] [--suave=1.5] [--janela=10] [--topo=0.2] [--base=0.14] [--mascara=<png>...] <png...>');
     process.exit(2);
   }
-  const rows = files.map((f) => {
-    const r = hexScore(decodePng(readFileSync(f)), opts);
-    return { arquivo: f, nota: r.nota, bruta: r.bruta };
+  // Uma máscara por imagem, na mesma ordem (cada captura tem a sua silhueta do mesmo enquadramento).
+  if (masks.length && masks.length !== files.length) throw new Error(`--mascara: ${masks.length} máscara(s) para ${files.length} imagem(ns); passe uma de cada, na mesma ordem`);
+  const rows = files.map((f, i) => {
+    const mascara = masks.length ? decodePng(readFileSync(masks[i])) : null;
+    const r = hexScore(decodePng(readFileSync(f)), { ...opts, mascara });
+    return { arquivo: f, nota: r.nota, bruta: r.bruta, uso: r.uso };
   });
   if (json) {
     console.log(JSON.stringify(rows, null, 2));
     return;
   }
   const width = Math.max(...rows.map((r) => r.arquivo.length));
-  console.log(`${'arquivo'.padEnd(width)}   nota  bruta`);
-  for (const r of rows) console.log(`${r.arquivo.padEnd(width)}  ${r.nota.toFixed(3).padStart(6)}  ${r.bruta.toFixed(3).padStart(5)}`);
+  console.log(`${'arquivo'.padEnd(width)}   nota  bruta   uso`);
+  for (const r of rows) console.log(`${r.arquivo.padEnd(width)}  ${r.nota.toFixed(3).padStart(6)}  ${r.bruta.toFixed(3).padStart(5)}  ${r.uso.toFixed(3).padStart(5)}`);
   const mean = rows.reduce((a, r) => a + r.nota, 0) / rows.length;
   console.log(`${'média'.padEnd(width)}  ${mean.toFixed(3).padStart(6)}`);
 }
