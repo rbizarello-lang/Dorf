@@ -47,6 +47,8 @@ export class GroundMap {
   readonly relief = new Uint16Array(GROUND_SIZE * GROUND_SIZE).fill(RELIEF_VOID);
   readonly reliefTexture: THREE.DataTexture;
   private dirty = false;
+  /** Pré-visualizações empilhadas (fantasma e peças caindo): o que havia sob cada uma, para `unpreview` devolver. */
+  private previews: Preview[] = [];
 
   constructor() {
     const t = new THREE.DataTexture(this.data, GROUND_SIZE, GROUND_SIZE, THREE.RGBAFormat, THREE.UnsignedByteType);
@@ -105,7 +107,62 @@ export class GroundMap {
     this.shade.fill(0);
     this.land.fill(0);
     this.relief.fill(RELIEF_VOID);
+    this.previews.length = 0;
     this.dirty = true;
+  }
+
+  /**
+   * Pinta uma peça que ainda não assentou (o fantasma, a peça caindo) no mapa, como `add` faria, guardando o que havia embaixo.
+   * Assim o campo de terreno, a normal suave e a cobertura já valem na peça viva e nas vizinhas, e o pouso não troca de desenho.
+   * Quem chama devolve tudo com `unpreview` antes de pintar de verdade (`add`) ou de mudar a pré-visualização.
+   */
+  preview(b: TileBuild, m: THREE.Matrix4, water: THREE.Color) {
+    const e = m.elements;
+    let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity;
+    for (const pos of [b.pos, b.water]) {
+      for (let i = 0; i < pos.length; i += 3) {
+        const x = pos[i], y = pos[i + 1], z = pos[i + 2];
+        const u = (e[0] * x + e[4] * y + e[8] * z + e[12] + GROUND_EXTENT) / TEXEL - 0.5;
+        const v = (e[2] * x + e[6] * y + e[10] * z + e[14] + GROUND_EXTENT) / TEXEL - 0.5;
+        if (u < u0) u0 = u;
+        if (u > u1) u1 = u;
+        if (v < v0) v0 = v;
+        if (v > v1) v1 = v;
+      }
+    }
+    if (!(u1 >= u0)) return;
+    const x0 = Math.max(0, Math.floor(u0) - 1), x1 = Math.min(GROUND_SIZE - 1, Math.ceil(u1) + 1);
+    const y0 = Math.max(0, Math.floor(v0) - 1), y1 = Math.min(GROUND_SIZE - 1, Math.ceil(v1) + 1);
+    if (x1 < x0 || y1 < y0) return;
+    const w = x1 - x0 + 1, h = y1 - y0 + 1;
+    const keep: Preview = { x0, y0, w, h, data: new Uint8Array(w * h * 4), cover: new Uint8Array(w * h), height: new Uint8Array(w * h), land: new Uint8Array(w * h * 4), relief: new Uint16Array(w * h) };
+    for (let y = 0; y < h; y++) {
+      const i = (y0 + y) * GROUND_SIZE + x0;
+      keep.data.set(this.data.subarray(i * 4, (i + w) * 4), y * w * 4);
+      keep.land.set(this.land.subarray(i * 4, (i + w) * 4), y * w * 4);
+      keep.cover.set(this.cover.subarray(i, i + w), y * w);
+      keep.height.set(this.height.subarray(i, i + w), y * w);
+      keep.relief.set(this.relief.subarray(i, i + w), y * w);
+    }
+    this.previews.push(keep);
+    this.add(b, m, water);
+  }
+
+  /** Devolve o que as pré-visualizações cobriram, da última para a primeira. */
+  unpreview() {
+    for (let k = this.previews.length - 1; k >= 0; k--) {
+      const p = this.previews[k];
+      for (let y = 0; y < p.h; y++) {
+        const i = (p.y0 + y) * GROUND_SIZE + p.x0;
+        this.data.set(p.data.subarray(y * p.w * 4, (y + 1) * p.w * 4), i * 4);
+        this.land.set(p.land.subarray(y * p.w * 4, (y + 1) * p.w * 4), i * 4);
+        this.cover.set(p.cover.subarray(y * p.w, (y + 1) * p.w), i);
+        this.height.set(p.height.subarray(y * p.w, (y + 1) * p.w), i);
+        this.relief.set(p.relief.subarray(y * p.w, (y + 1) * p.w), i);
+      }
+    }
+    if (this.previews.length) this.dirty = true;
+    this.previews.length = 0;
   }
 
   /** Pinta o chão e a água de uma peça já posta no mundo pela matriz `m`. */
@@ -219,6 +276,19 @@ export class GroundMap {
       }
     }
   }
+}
+
+/** O que havia no retângulo (x0, y0, w × h texels) do mapa antes de uma pré-visualização. */
+interface Preview {
+  x0: number;
+  y0: number;
+  w: number;
+  h: number;
+  data: Uint8Array;
+  cover: Uint8Array;
+  height: Uint8Array;
+  land: Uint8Array;
+  relief: Uint16Array;
 }
 
 /** O mapa do tabuleiro (um só por página): o World pinta, os materiais leem. */

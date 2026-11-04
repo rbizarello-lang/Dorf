@@ -90,3 +90,26 @@ export function warpBuild(b: TileBuild, e: ArrayLike<number>, w: Warp): TileBuil
   done.add(out);
   return out;
 }
+
+/**
+ * O caminho de um barco ou de um trem (pontos locais da peça centrada em (cx, cz)) com o mesmo deslocamento do desenho da água e do trilho.
+ * O trecho reto entre dois pontos é repartido em passos de `step` (senão cortaria a curva que o deslocamento faz); a emenda entre peças
+ * continua fechada porque o deslocamento é uma função só do mundo. Os pontos voltam locais, como entraram.
+ */
+export function warpPath(pts: readonly (readonly [number, number])[], cx: number, cz: number, w: Warp, step = 0.1): [number, number][] {
+  const d: [number, number] = [0, 0];
+  const out: [number, number][] = [];
+  const put = (x: number, z: number) => {
+    w.at(cx + x, cz + z, d);
+    out.push([x + d[0], z + d[1]]);
+  };
+  pts.forEach(([x, z], k) => {
+    if (k) {
+      const [px, pz] = pts[k - 1];
+      const n = Math.max(1, Math.ceil(Math.hypot(x - px, z - pz) / step));
+      for (let i = 1; i < n; i++) put(px + ((x - px) * i) / n, pz + ((z - pz) * i) / n);
+    }
+    put(x, z);
+  });
+  return out;
+}

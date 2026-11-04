@@ -631,6 +631,7 @@ export class World {
   setFluid(on: boolean) {
     if (on === !!this.warp) return;
     this.warp = on ? new Warp(0x2a) : null;
+    this.life.warp = this.warp && this.ghostTrue ? this.warp : null;
     // Terra contínua: o chão lê o campo de terreno do mundo, que só existe com o desenho deslocado.
     U.land.value = on ? 1 : 0;
     this.lib.land = on;
@@ -669,6 +670,10 @@ export class World {
   private markerLocal: THREE.Vector3[] = [];
   private ghost: LiveTile | null = null;
   private ghostKey = '';
+  /** Casa, giro e margem da saia do fantasma (para a pré-visualização no mapa do chão). */
+  private ghostCell: { q: number; r: number; rot: number; skirt: number } | null = null;
+  /** Assinatura das peças vivas hoje estampadas no mapa do chão; `null` = refazer (um `bake` ou `buildAll` desfez a estampa). */
+  private paintSig: string | null = '';
   private ghostTarget = new THREE.Vector3();
   private ghostAngle = 0;
   private drops: Drop[] = [];
@@ -1179,6 +1184,11 @@ export class World {
 
   /** Quando o encaixe fluido liga: `auto` = só no modo Relevo (`?fluido=0` e `?fluido` forçam). */
   fluidPref: 'auto' | 'on' | 'off' = 'auto';
+  /**
+   * Fidelidade do fantasma e da queda no encaixe fluido (`?fantasma=0` desliga, para comparar antes e depois): as peças vivas entram no mapa do
+   * chão como se já tivessem assentado (`restamp`) e os barcos e trens andam pela água e pelo trilho deslocados (`Life.warp`).
+   */
+  ghostTrue = true;
 
   setPieceRelief(on: boolean) {
     this.pieceRelief = on;
@@ -1419,6 +1429,7 @@ export class World {
     groundMap.clear();
     seaMap.clear();
     riverMap.clear();
+    this.paintSig = null;
     this.lib.setEra(board.era);
     this.syncedEra = board.era;
     // Easter eggs de peça: reavaliados na ordem das peças (em silêncio), então o replay mostra os mesmos kits.
@@ -1709,6 +1720,12 @@ export class World {
   }
 
   private bake(p: Placed, b0: TileBuild, flush = true) {
+    // A pintura de verdade vem sobre o chão como era: as pré-visualizações saem antes e voltam no próximo quadro (`restamp`).
+    if (this.paintSig !== '') {
+      groundMap.unpreview();
+      seaMap.unpreview();
+      this.paintSig = null;
+    }
     const m = tileMatrix(p.q, p.r, p.rot, this.heightOf(p.q, p.r));
     const b = this.shaped(b0, p.q, p.r, p.rot);
     const ch = this.chunkFor(p.q, p.r);
@@ -1717,7 +1734,7 @@ export class World {
     groundMap.add(b, m, this.waterColor);
     this.falls.append(b, m);
     // Modo Relevo: a saia das bordas altas avança sobre a casa vazia, e a areia e a espuma do mar começam no pé dela.
-    seaMap.add(p.q, p.r, this.pieceRelief && p.heights ? 0.4 * skirtWidth(Math.max(...p.heights)) : 0, this.warp ? (x, z) => this.warp!.inverse(x, z) : undefined);
+    seaMap.add(p.q, p.r, this.skirtOf(p.heights), this.warp ? (x, z) => this.warp!.inverse(x, z) : undefined);
     if (this.theme.floodplain && b.water.length) riverMap.add(b.water, m, this.theme.floodplain.reach);
     for (const d of b.decos) {
       if (d.transient) continue;
@@ -1849,6 +1866,44 @@ export class World {
     this.hoverRing.visible = false;
     for (const m of this.markers) m.visible = false;
     this.drops.push({ live, placed: p, t: 0, y0, ly, landed: false, hold: live.has(BUILDS) ? SCAFFOLD_DOWN + 0.3 : 0.55, cleared: false });
+  }
+
+  /** Depuração: leva as peças caindo ao instante `t` (segundos de queda; o `tick` com `timeScale` 0 só reavalia a pose). */
+  seekDrops(t: number) {
+    for (const d of this.drops) d.t = t;
+    return this.drops.length;
+  }
+
+  /**
+   * Terra contínua: o fantasma e as peças caindo entram no mapa do chão (o campo de terreno, a cobertura, o relevo e o mar) como se já
+   * tivessem assentado, então o chão delas e o das vizinhas leem a mesma paisagem de depois do pouso e nada salta quando a peça vira bloco.
+   * Só refaz quando o conjunto de peças vivas muda (trocar de casa, girar, soltar, pousar), não a cada quadro.
+   */
+  private restamp() {
+    const live: { l: LiveTile; q: number; r: number; rot: number; skirt: number }[] = [];
+    if (this.warp && this.ghostTrue) {
+      for (const d of this.drops) live.push({ l: d.live, q: d.placed.q, r: d.placed.r, rot: d.placed.rot, skirt: this.skirtOf(d.placed.heights) });
+      if (this.ghost?.group.visible && this.ghostCell) live.push({ l: this.ghost, ...this.ghostCell });
+    }
+    const sig = live.map((v) => `${v.l.id}@${v.q},${v.r}`).join('|');
+    if (sig === this.paintSig) return;
+    this.paintSig = sig;
+    const t0 = performance.now();
+    groundMap.unpreview();
+    seaMap.unpreview();
+    for (const v of live) {
+      groundMap.preview(v.l.build, tileMatrix(v.q, v.r, v.rot, this.heightOf(v.q, v.r)), this.waterColor);
+      seaMap.preview(v.q, v.r, v.skirt, (x, z) => this.warp!.inverse(x, z));
+    }
+    this.stampMs = performance.now() - t0;
+  }
+  /** Depuração (`window.__ghostCost`): ms da última pré-visualização no mapa e da última montagem do fantasma. */
+  stampMs = 0;
+  ghostMs = 0;
+
+  /** Margem que a saia de uma peça alta dá à areia e à espuma do mar (a mesma do `bake`). */
+  private skirtOf(heights: readonly number[] | undefined) {
+    return this.pieceRelief && heights ? 0.4 * skirtWidth(Math.max(...heights)) : 0;
   }
 
   /** Coloca várias peças de uma vez, sem animação (modo automático / teste de carga). */
@@ -2037,9 +2092,11 @@ export class World {
     const sig = `${check.water?.spring ? 's' : ''}${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}`;
     const key = `${def.seed}:${this.theme.id}:${sig}:${levelSig(lvs)}${this.warp ? `:${q},${r},${rot}` : ''}`;
     if (!this.ghost || this.ghostKey !== key) {
+      const t0 = performance.now();
       const old = this.ghost;
       this.ghost = new LiveTile(def, this.shaped(this.build(def, syn, flow, { eraMark: mark, site, wonder, widths, spring: check.water?.spring, levels: lvs }), q, r, rot), sig, this.lib, this.quality !== 'low');
       this.ghostKey = key;
+      this.ghostCell = { q, r, rot, skirt: this.skirtOf(this.pieceRelief ? worldHeights(tileProfile(def.edges, def.seed), rot) : undefined) };
       this.scene.add(this.ghost.group);
       if (old && old.def === def) {
         // Mesma peça, outras construções: preserva posição e giro para não "pular".
@@ -2053,6 +2110,7 @@ export class World {
         this.ghostVel.set(0, 0);
       }
       old?.dispose();
+      this.ghostMs = performance.now() - t0;
     }
     this.ghost.group.visible = true;
     this.ghostAngle = angle;
@@ -2086,6 +2144,7 @@ export class World {
     this.ghost?.dispose();
     this.ghost = null;
     this.ghostKey = '';
+    this.ghostCell = null;
   }
 
   // ---------------------------------------------------------------- efeitos
@@ -2611,6 +2670,7 @@ export class World {
     const near = THREE.MathUtils.lerp(near0, Math.max(near0, eye + this.voidU.radius.value * 2.2), open);
     A.near.value = near;
     A.far.value = near + eye * 2.7;
+    this.restamp();
     groundMap.flush();
     seaMap.flush();
     riverMap.flush();

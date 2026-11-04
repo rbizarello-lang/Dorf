@@ -9,6 +9,7 @@ import { instGeometry, setInstColor, type Lib } from './lib';
 import { WAKES, WAKE_MAX, WAKE_N } from './materials';
 import { LEVEL_STEP, railCurve, RAMP_ROAD, ROAD_Y, WATER_Y } from './tileBuilder';
 import { TJALK_MAST_FOOT } from './kits/holanda';
+import { warpPath, type Warp } from './fluid';
 
 // Vida do mapa: tudo que se move depois de assentado.
 // - pás de moinho e rodas d'água girando
@@ -236,12 +237,16 @@ const smooth01 = (a: number, b: number, x: number) => {
 export class Life {
   /** Nível de altura da casa (relevo, R2); o World põe o dele. Sem relevo, 0. */
   levelOf: (q: number, r: number) => number = () => 0;
+  /** Encaixe fluido: o deslocamento do desenho das peças (o World põe o dele); barcos e trens andam pela água e pelo trilho deslocados. */
+  warp: Warp | null = null;
 
   /**
    * Altura da via no ponto: o chão da casa, menos a descida da rampa de estrada na borda que dá numa casa mais baixa
    * (a mesma curva do `tileBuilder`: `RAMP_ROAD` da borda para dentro). Contínua entre as peças.
    */
   private roadLift(x: number, z: number): number {
+    // No fluido o ponto já vem deslocado; a casa é a da grade sem deslocamento.
+    if (this.warp) [x, z] = this.warp.inverse(x, z);
     const [q, r] = worldToHex(x, z);
     const own = this.levelOf(q, r);
     if (!own) return 0;
@@ -680,6 +685,8 @@ export class Life {
         pts.push([u * u * A[0] + t * t * B[0], u * u * A[1] + t * t * B[1]]);
       }
     } else pts = [end(m.a), [0, 0], end(m.b)];
+    // Encaixe fluido: a água e o trilho foram desenhados deslocados por uma função do mundo, então o caminho leva o mesmo deslocamento.
+    if (this.warp) pts = warpPath(pts, cx, cz, this.warp);
     m.route.length = 0;
     m.cum.length = 0;
     let acc = 0;
