@@ -627,10 +627,14 @@ export class World {
   private hoverRing: THREE.Mesh;
   /** Encaixe fluido (`?fluido`): o deslocamento do desenho das peças (`fluid.ts`); nulo = hexágonos de sempre. */
   private warp: Warp | null = null;
+  private unwarp?: (x: number, z: number) => readonly [number, number];
   /** Liga o desenho fluido (antes da primeira peça): chão, água e decoração deslocados, casas vazias em mancha. */
   setFluid(on: boolean) {
     if (on === !!this.warp) return;
     this.warp = on ? new Warp(0x2a) : null;
+    const w = this.warp;
+    // Uma função só por deslocamento: o mapa do mar guarda o inverso de cada texel enquanto ela for a mesma.
+    this.unwarp = w ? (x, z) => w.inverse(x, z) : undefined;
     // Terra contínua: o chão lê o campo de terreno do mundo, que só existe com o desenho deslocado.
     U.land.value = on ? 1 : 0;
     this.lib.land = on;
@@ -1717,7 +1721,7 @@ export class World {
     groundMap.add(b, m, this.waterColor);
     this.falls.append(b, m);
     // Modo Relevo: a saia das bordas altas avança sobre a casa vazia, e a areia e a espuma do mar começam no pé dela.
-    seaMap.add(p.q, p.r, this.pieceRelief && p.heights ? 0.4 * skirtWidth(Math.max(...p.heights)) : 0, this.warp ? (x, z) => this.warp!.inverse(x, z) : undefined);
+    seaMap.add(p.q, p.r, this.pieceRelief && p.heights ? 0.4 * skirtWidth(Math.max(...p.heights)) : 0, this.unwarp);
     if (this.theme.floodplain && b.water.length) riverMap.add(b.water, m, this.theme.floodplain.reach);
     for (const d of b.decos) {
       if (d.transient) continue;
@@ -1822,6 +1826,8 @@ export class World {
 
   /** Coloca com animação: a peça assenta, levanta poeira e depois é "cozida" no bloco. */
   placeAnimated(p: Placed) {
+    // A peça pousa e as vizinhas mudam: os fantasmas guardados da peça anterior não valem mais.
+    this.clearGhostCache();
     const syn = synBase(p.synergies, p.rot);
     const flow = this.settleFlow(p);
     const widths = this.settleWidths(p);
@@ -2038,9 +2044,17 @@ export class World {
     const key = `${def.seed}:${this.theme.id}:${sig}:${levelSig(lvs)}${this.warp ? `:${q},${r},${rot}` : ''}`;
     if (!this.ghost || this.ghostKey !== key) {
       const old = this.ghost;
-      this.ghost = new LiveTile(def, this.shaped(this.build(def, syn, flow, { eraMark: mark, site, wonder, widths, spring: check.water?.spring, levels: lvs }), q, r, rot), sig, this.lib, this.quality !== 'low');
+      const oldKey = this.ghostKey;
+      // No fluido cada casa (e cada giro) é uma peça nova; voltar a uma já montada não refaz a geometria (o custo é o `buildTile`, não o desenho).
+      if (this.ghostCacheDef !== def) {
+        this.clearGhostCache();
+        this.ghostCacheDef = def;
+      }
+      const cached = this.warp ? this.ghostCache.get(key) : undefined;
+      if (cached) this.ghostCache.delete(key);
+      this.ghost = cached ?? new LiveTile(def, this.shaped(this.build(def, syn, flow, { eraMark: mark, site, wonder, widths, spring: check.water?.spring, levels: lvs }), q, r, rot), sig, this.lib, this.quality !== 'low');
       this.ghostKey = key;
-      this.scene.add(this.ghost.group);
+      if (!cached) this.scene.add(this.ghost.group);
       if (old && old.def === def) {
         // Mesma peça, outras construções: preserva posição e giro para não "pular".
         this.ghost.group.position.copy(old.group.position);
@@ -2052,7 +2066,7 @@ export class World {
         this.ghostPrev.copy(this.ghost.group.position);
         this.ghostVel.set(0, 0);
       }
-      old?.dispose();
+      if (old) this.stashGhost(old, oldKey, def);
     }
     this.ghost.group.visible = true;
     this.ghostAngle = angle;
@@ -2086,6 +2100,34 @@ export class World {
     this.ghost?.dispose();
     this.ghost = null;
     this.ghostKey = '';
+    this.clearGhostCache();
+  }
+
+  /** Fantasmas já montados da peça da vez (só no fluido), os mais recentes por último: voltar a uma casa ou a um giro não refaz a peça. */
+  private ghostCache = new Map<string, LiveTile>();
+  private ghostCacheDef: TileDef | null = null;
+  private static readonly GHOST_CACHE = 8;
+  private clearGhostCache() {
+    for (const g of this.ghostCache.values()) g.dispose();
+    this.ghostCache.clear();
+    this.ghostCacheDef = null;
+  }
+  /** O fantasma que saiu de cena vai para o guardado (escondido) se é da mesma peça; de outra peça, ele e os guardados são descartados. */
+  private stashGhost(old: LiveTile, key: string, def: TileDef) {
+    if (!this.warp || old.def !== def) {
+      old.dispose();
+      if (this.ghostCacheDef !== def) this.clearGhostCache();
+      this.ghostCacheDef = def;
+      return;
+    }
+    this.ghostCacheDef = def;
+    old.group.visible = false;
+    this.ghostCache.set(key, old);
+    if (this.ghostCache.size > World.GHOST_CACHE) {
+      const first = this.ghostCache.keys().next().value!;
+      this.ghostCache.get(first)!.dispose();
+      this.ghostCache.delete(first);
+    }
   }
 
   // ---------------------------------------------------------------- efeitos
