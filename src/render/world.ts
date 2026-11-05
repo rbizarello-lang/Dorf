@@ -4,6 +4,7 @@ import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Board, Check, PlaceResult, Placed } from '../core/board';
 import type { WaterState } from '../core/water';
+import type { PatchView, TerraView } from '../core/terra';
 import { EggTracker, phaseOfTod, type EggSpec } from '../core/eggs';
 import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey, worldToHex } from '../core/hex';
 import { levelAt, tileProfile, worldHeights } from '../core/relief';
@@ -22,7 +23,8 @@ import { CL, makeCloudMesh } from './clouds';
 import { seaMap } from './seaMap';
 import { riverMap } from './riverMap';
 import { makeAuroraDome } from './aurora';
-import { groundMap } from './groundMap';
+import { GROUND_EXTENT, GROUND_SIZE, groundMap } from './groundMap';
+import { LandTrace, type TraceWorld } from './landTrace';
 import { P, buildPost, type Post, type Quality } from './post';
 import { SkyEnv } from './sky';
 import { FX, Fireflies, Sprites, Weather } from './fx';
@@ -87,6 +89,8 @@ const CASCADES: Record<Quality, number[]> = { cinema: [0.18, 0.34, 0.56, 1], ult
 const tmpM = new THREE.Matrix4();
 const tmpV2 = new THREE.Vector2();
 const tmpM2 = new THREE.Matrix4();
+const tmpTop = new THREE.Vector3();
+const tmpGoal = new THREE.Vector3();
 const tmpQ = new THREE.Matrix4();
 /** Seções de andaime em volta da maravilha (3 por lado). */
 const WONDER_SCAFFOLDS = 12;
@@ -626,6 +630,12 @@ export class World {
   private infl: THREE.InstancedMesh;
   private inflMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.95, depthWrite: false, fog: false });
   private hoverRing: THREE.Mesh;
+  /** Terra contínua (Fase 3): o fantasma que mostra a paisagem (contorno da mancha, bordas abertas, laço que fecha, umidade) e o laço do pouso. */
+  private readonly trace = new LandTrace();
+  /** A vista da jogada do fantasma, à espera do atraso de ~120 ms, e a casa (e giro) a que pertence; `traceShown` = já montada. */
+  private traceWant: { view: TerraView; q: number; r: number; rot: number } | null = null;
+  private traceShown = false;
+  private traceErr = '';
   /** Encaixe fluido (`?fluido`): o deslocamento do desenho das peças (`fluid.ts`); nulo = hexágonos de sempre. */
   private warp: Warp | null = null;
   private unwarp?: (x: number, z: number) => readonly [number, number];
@@ -810,6 +820,7 @@ export class World {
     this.hoverRing = new THREE.Mesh(new THREE.RingGeometry(0.84, 0.97, 6).rotateX(-Math.PI / 2), this.hoverMat);
     this.hoverRing.visible = false;
     this.scene.add(this.hoverRing);
+    this.scene.add(this.trace.group);
 
     const pill = new THREE.CapsuleGeometry(0.026, 0.5, 3, 8).rotateZ(Math.PI / 2);
     for (let i = 0; i < 6; i++) {
@@ -2166,13 +2177,186 @@ export class World {
     }
   }
 
+  /**
+   * Terra contínua: a vista da jogada do fantasma (de `Game.terraView`), ou null. Só é desenhada depois que o fantasma para na casa
+   * (`GHOST_SETTLE_MS`, o mesmo atraso do campo do chão): uma varredura rápida do mouse não monta nada.
+   */
+  setTerraView(view: TerraView | null, q = 0, r = 0, rot = 0) {
+    const same = this.traceWant && view && this.traceWant.q === q && this.traceWant.r === r && this.traceWant.rot === rot;
+    if (same) return;
+    if (this.traceShown) this.trace.hide();
+    this.traceShown = false;
+    this.traceWant = view ? { view, q, r, rot } : null;
+  }
+
+  /** Depuração (`window.__trace`): o fantasma da paisagem (quer, mostra, tempo parado) e o que a malha tem. */
+  traceInfo() {
+    return { want: !!this.traceWant, shown: this.traceShown, ghostOn: !!this.ghost?.group.visible, cell: this.ghostCell ? [this.ghostCell.q, this.ghostCell.r] : null, wantCell: this.traceWant ? [this.traceWant.q, this.traceWant.r] : null, settledMs: Math.round(performance.now() - this.ghostSince), err: this.traceErr, ticks: this.traceTicks, ...this.trace.stats };
+  }
+
+  /** Opção: o contorno do grupo de uma missão (de `Board.groupView`) no chão, por 8 s. */
+  showQuestTrace(view: PatchView) {
+    this.trace.showQuest(view, this.traceTint(), this.traceWorld());
+  }
+
+  /** O mundo visto pelas fitas: o deslocamento do desenho fluido, a altura do chão lida do mapa do chão (já com o fantasma) e a da casa. */
+  private traceWorld(): TraceWorld {
+    const out: [number, number] = [0, 0];
+    const texel = (GROUND_EXTENT * 2) / GROUND_SIZE;
+    return {
+      warp: (x, z) => (this.warp ? this.warp.at(x, z, out) : [0, 0]),
+      ground: (x, z) => {
+        const u = Math.round((x + GROUND_EXTENT) / texel - 0.5), v = Math.round((z + GROUND_EXTENT) / texel - 0.5);
+        if (u < 1 || v < 1 || u >= GROUND_SIZE - 1 || v >= GROUND_SIZE - 1) return NaN;
+        // O maior dos vizinhos em cruz: a encosta sobe até um texel (0,1) de distância, e a fita não pode afundar nela.
+        const i = v * GROUND_SIZE + u;
+        let y = -Infinity;
+        for (const k of [i, i - 1, i + 1, i - GROUND_SIZE, i + GROUND_SIZE]) {
+          const h = THREE.DataUtils.fromHalfFloat(groundMap.relief[k]);
+          if (h > y && h > -0.1) y = h;
+        }
+        return y === -Infinity ? THREE.DataUtils.fromHalfFloat(groundMap.relief[i]) : y;
+      },
+      levelAt: (x, z) => {
+        const [q, r] = worldToHex(x, z);
+        return this.heightOf(q, r);
+      },
+    };
+  }
+
+  private traceTint(): THREE.Color[] {
+    return this.theme.terrainColors.slice(0, 4).map((c) => tc(c));
+  }
+
+  /** Cada quadro: monta a vista do fantasma quando ele parou, e anda o laço dourado e a peça que volta à pilha do pouso. */
+  private traceTicks = 0;
+  private stepTrace(dt: number) {
+    this.traceTicks++;
+    const w = this.traceWant;
+    if (w && !this.traceShown && this.ghost?.group.visible && this.ghostCell && this.ghostCell.q === w.q && this.ghostCell.r === w.r && performance.now() - this.ghostSince >= World.GHOST_SETTLE_MS) {
+      const c = hexToWorld(w.q, w.r);
+      this.traceShown = true;
+      try {
+        const [fx, fz] = this.warp ? this.warp.at(c.x, c.z, [0, 0]) : [0, 0];
+        const cx = c.x + fx, cz = c.z + fz;
+        // O chão do mapa foi estampado na altura da casa; o fantasma está em `ghostTarget.y` (flutua e, com relevo por peça, tem o nível próprio).
+        const float = Math.max(0, this.ghostTarget.y - this.heightOf(w.q, w.r));
+        const INR = Math.sqrt(3) / 2;
+        const tw = this.traceWorld();
+        // O fantasma flutua sobre a casa: o contorno que passa por ela sobe junto (a borda do hexágono desce em suave).
+        tw.lift = (x, z) => {
+          let h = 0;
+          for (let k = 0; k < 6; k++) h = Math.max(h, (x - cx) * Math.cos(Math.PI / 6 + (Math.PI / 3) * k) + (z - cz) * Math.sin(Math.PI / 6 + (Math.PI / 3) * k));
+          return float * (1 - THREE.MathUtils.smoothstep(h, INR + 0.04, INR + 0.22));
+        };
+        this.trace.show(w.view, this.traceTint(), tw, c.x, c.z);
+      } catch (e) {
+        this.traceErr = String(e);
+      }
+    }
+    const age = this.trace.busy ? this.trace.step(dt, this.traceTint(), this.traceWorld()) : null;
+    this.stepLandFx(dt, age);
+  }
+
+  /** Depuração (`window.__land(idade)`): o pouso que fecha uma mancha na idade dada (s): laço, ondulação do chão e peça que sobe, sem esperar o relógio. */
+  seekLand(age: number) {
+    if (!this.trace.seek(age, this.traceTint(), this.traceWorld())) return false;
+    const L = this.landFx;
+    L.rippled = false;
+    L.burst = false;
+    L.t = -1;
+    this.stepLandFx(0, age);
+    if (L.burst) {
+      L.t = Math.max(0, age - 0.9);
+      this.stepLandFx(0, age);
+    }
+    const c = this.trace.fxCenter();
+    if (c && age >= 0.45) {
+      const [dx, dz] = this.traceWorld().warp(c.x, c.z);
+      this.ripple(c.x + dx, c.z + dz, 1.3, age - 0.45);
+    }
+    return true;
+  }
+
+  /** O pouso que fecha uma mancha: o chão respira (a onda de sempre) quando o laço está na metade, e a peça sobe da mancha para a pilha. */
+  private landFx = { rippled: false, burst: false, tile: null as THREE.Mesh<THREE.CylinderGeometry, THREE.MeshBasicNodeMaterial> | null, t: -1, from: new THREE.Vector3() };
+  private stepLandFx(dt: number, age: number | null) {
+    const L = this.landFx;
+    const c = age !== null ? this.trace.fxCenter() : null;
+    if (age !== null && c) {
+      const tw = this.traceWorld();
+      const [dx, dz] = tw.warp(c.x, c.z);
+      if (!L.rippled && age >= 0.45) {
+        L.rippled = true;
+        this.ripple(c.x + dx, c.z + dz, 1.3);
+      }
+      if (!L.burst && age >= 0.9) {
+        L.burst = true;
+        this.burst(c.x + dx, c.z + dz, 'sparkle', 28, 0.2);
+        let y = tw.ground(c.x + dx, c.z + dz);
+        if (!(y > -0.1)) y = tw.levelAt(c.x, c.z);
+        L.from.set(c.x + dx, y + 0.2, c.z + dz);
+        L.t = 0;
+        if (!L.tile) {
+          const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false });
+          L.tile = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.09, 6).rotateY(Math.PI / 6), m);
+          L.tile.renderOrder = 4;
+          L.tile.frustumCulled = false;
+          this.scene.add(L.tile);
+        }
+        L.tile.material.color.set('#ffcf5a').lerp(tc(this.theme.sparkle), 0.25).multiplyScalar(0.8);
+      }
+    } else if (age === null && (L.rippled || L.burst)) {
+      L.rippled = false;
+      L.burst = false;
+    }
+    const tile = L.tile;
+    if (!tile) return;
+    if (L.t < 0) {
+      tile.visible = false;
+      return;
+    }
+    L.t += dt;
+    const D = 1.6;
+    const u = L.t / D;
+    if (u >= 1) {
+      L.t = -1;
+      tile.visible = false;
+      return;
+    }
+    // Sobe da mancha e vai para o canto da tela onde fica a pilha (o ponto sai da câmera, então vale no jogo e no vídeo).
+    const up = 1 - Math.pow(1 - Math.min(1, u / 0.3), 3);
+    const fly = THREE.MathUtils.smoothstep(u, 0.3, 1);
+    const top = tmpTop.copy(L.from);
+    top.y += 1.4 * up;
+    const goal = tmpGoal.set(0.74, -0.62, 0.5).unproject(this.camera).sub(this.camera.position).normalize().multiplyScalar(this.rig.eye * 0.85).add(this.camera.position);
+    tile.position.lerpVectors(top, goal, fly);
+    tile.position.y += Math.sin(fly * Math.PI) * 0.6;
+    tile.scale.setScalar(1 - 0.7 * fly);
+    tile.rotation.y = fly * 2.2;
+    tile.visible = true;
+    tile.material.opacity = 0.9 * (1 - THREE.MathUtils.smoothstep(u, 0.82, 1));
+  }
+
+  /** Terra contínua: o laço dourado corre pelo contorno das manchas que a jogada fechou, o chão respira e uma peça sobe para a pilha. */
+  private landClosed(views: readonly PatchView[]) {
+    if (!views.length || this.reducedMotion) return;
+    this.landFx.rippled = false;
+    this.landFx.burst = false;
+    this.landFx.t = -1;
+    // Espera a peça cair (o campo dela ainda não está no mapa do chão) para o laço acompanhar o chão de verdade.
+    this.trace.play(views, 0.5);
+  }
+
   clearGhost() {
+    this.setTerraView(null);
     if (this.ghost) this.ghost.group.visible = false;
     this.hoverRing.visible = false;
     for (const m of this.markers) m.visible = false;
   }
 
   dropGhost() {
+    this.setTerraView(null);
     this.ghost?.dispose();
     this.ghost = null;
     this.ghostKey = '';
@@ -2266,6 +2450,8 @@ export class World {
         this.flushBirds(x, z);
       }
     }
+    // Terra contínua: a mancha que a jogada fechou (o laço dourado, o chão que respira, a peça que volta).
+    if (res.terra?.closedPatches) this.landClosed(res.terra.closedViews());
     if (res.eraUp !== null) {
       this.eraUp(res.eraUp);
       if (!this.reducedMotion) {
@@ -2731,6 +2917,7 @@ export class World {
     A.near.value = near;
     A.far.value = near + eye * 2.7;
     this.restamp();
+    this.stepTrace(dt);
     groundMap.flush();
     seaMap.flush();
     riverMap.flush();

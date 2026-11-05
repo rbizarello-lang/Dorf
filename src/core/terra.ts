@@ -200,6 +200,222 @@ export function patchField(w: TerraMap, backMin = 1, closeCap = 0): PatchField {
   return { patch: Math.round(v), closed: Math.round(c), closedN: cn, backN: bn };
 }
 
+/**
+ * Manchas incrementais: a mesma conta de `patchField`, mas mantida peça a peça (união-busca sobre (peça, setor) com massa, bordas expostas e
+ * bordas para o vazio por raiz). `add` custa O(1) por peça posta e `read` só varre as raízes, sem refazer a vizinhança de ninguém; o
+ * `Board` guarda um e a cópia da prévia herda o dele (`clone`). A soma vai na mesma ordem de raízes do `patchField`, então o resultado sai
+ * igual (conferido em tests/terra-bancada.ts contra o `patchField` e contra o oráculo de busca em largura).
+ */
+export class PatchCache {
+  parent: Int32Array;
+  mass: Int32Array;
+  exposed: Int32Array;
+  voids: Int32Array;
+  /** Setores já postos (6 por peça). */
+  n = 0;
+
+  constructor(cap = 6 * 128) {
+    this.parent = new Int32Array(cap);
+    this.mass = new Int32Array(cap);
+    this.exposed = new Int32Array(cap);
+    this.voids = new Int32Array(cap);
+  }
+
+  clone(extra = 6): PatchCache {
+    const c = new PatchCache(Math.max(this.parent.length, this.n + extra));
+    c.parent.set(this.parent.subarray(0, this.n));
+    c.mass.set(this.mass.subarray(0, this.n));
+    c.exposed.set(this.exposed.subarray(0, this.n));
+    c.voids.set(this.voids.subarray(0, this.n));
+    c.n = this.n;
+    return c;
+  }
+
+  find(x: number): number {
+    const parent = this.parent;
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  }
+
+  private union(a: number, b: number) {
+    const ra = this.find(a), rb = this.find(b);
+    if (ra === rb) return;
+    this.parent[ra] = rb;
+    this.mass[rb] += this.mass[ra];
+    this.exposed[rb] += this.exposed[ra];
+    this.voids[rb] += this.voids[ra];
+  }
+
+  /** Acrescenta a peça `t`, que acabou de entrar em `w` com o próximo índice. */
+  add(w: TerraMap, t: TerraTile) {
+    const base = t.index * 6;
+    if (base !== this.n) throw new Error('PatchCache: peça fora de ordem');
+    if (base + 6 > this.parent.length) {
+      const grown = this.clone(Math.max(this.parent.length, 6 * 128));
+      this.parent = grown.parent;
+      this.mass = grown.mass;
+      this.exposed = grown.exposed;
+      this.voids = grown.voids;
+    }
+    this.n = base + 6;
+    const e = t.edges;
+    for (let s = 0; s < 6; s++) {
+      const i = base + s;
+      this.parent[i] = i;
+      this.mass[i] = isStrict(e[s]) ? 0 : 1;
+      this.exposed[i] = 0;
+      this.voids[i] = 0;
+    }
+    // Bordas: a do setor novo e a do setor vizinho que olhava para esta casa (que estava virada para o vazio).
+    for (let s = 0; s < 6; s++) {
+      const terr = e[s];
+      if (isStrict(terr)) continue;
+      const nb = w.get(t.q + DIRS[s][0], t.r + DIRS[s][1]);
+      if (!nb) {
+        this.exposed[base + s]++;
+        this.voids[base + s]++;
+        continue;
+      }
+      const o = opposite(s);
+      const nt = nb.edges[o];
+      if (nt !== terr) this.exposed[base + s]++;
+      if (!isStrict(nt)) {
+        const root = this.find(nb.index * 6 + o);
+        this.voids[root]--;
+        if (nt === terr) this.exposed[root]--;
+      }
+    }
+    for (let s = 0; s < 6; s++) {
+      const terr = e[s];
+      if (isStrict(terr)) continue;
+      if (e[(s + 1) % 6] === terr) this.union(base + s, base + ((s + 1) % 6));
+      const nb = w.get(t.q + DIRS[s][0], t.r + DIRS[s][1]);
+      if (nb && nb.edges[opposite(s)] === terr) this.union(base + s, nb.index * 6 + opposite(s));
+    }
+  }
+
+  /** O campo lido sobre as manchas (a mesma conta de `patchField`). */
+  read(backMin = 1, closeCap = 0): PatchField {
+    let v = 0, c = 0, cn = 0, bn = 0;
+    const { mass, exposed, voids, parent } = this;
+    for (let i = 0; i < this.n; i++) {
+      if (mass[i] === 0 || parent[i] !== i) continue;
+      const a = mass[i] / 6;
+      const compact = Math.min(1, (6 * Math.sqrt(a)) / Math.max(1, exposed[i]));
+      const shape = TERRA.shapeBase + (1 - TERRA.shapeBase) * compact;
+      v += TERRA.patchK * a ** TERRA.patchExp * shape;
+      if (voids[i] === 0 && a >= TERRA.closeMin) {
+        const prize = TERRA.closeK * a ** TERRA.closeExp * shape;
+        c += closeCap > 0 ? Math.min(prize, closeCap) : prize;
+        cn++;
+        if (a >= backMin) bn++;
+      }
+    }
+    return { patch: Math.round(v), closed: Math.round(c), closedN: cn, backN: bn };
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// A mancha vista de fora (o fantasma que mostra a paisagem, Fase 3)
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Um trecho do contorno de uma mancha, na orientação do mundo: o lado `i` da casa (q, r) (do canto `i` ao `i+1`), ou, com `ray`, o raio do
+ * centro da casa ao canto `i` (a divisa entre o setor `i-1` e o `i` dentro da peça). `open` = o lado dá para uma casa vazia (o que falta
+ * para fechar); senão dá para outro terreno, rio ou trilho.
+ */
+export interface PatchSeg {
+  q: number;
+  r: number;
+  ray: boolean;
+  i: number;
+  open: boolean;
+}
+
+/** Uma mancha que a jogada candidata toca, já com a peça incluída. Sai da REGRA (setores de bordas), não do campo suavizado do desenho. */
+export interface PatchView {
+  terrain: T;
+  /** Área (em peças) com a peça incluída e a das manchas que ela juntou (0 = mancha nova: só os setores da própria peça). */
+  area: number;
+  before: number;
+  /** Quantas manchas antigas a peça uniu. */
+  merged: number;
+  /** A mancha fica cercada, sem borda para o vazio: o fechamento paga. */
+  closes: boolean;
+  segs: PatchSeg[];
+}
+
+/** O que a regra mostra do fantasma numa casa: as manchas, e as terras antigas que a água da jogada vai molhar (a umidade que sobe). */
+export interface TerraView {
+  patches: PatchView[];
+  moist: { q: number; r: number; gain: number }[];
+}
+
+/**
+ * As manchas que a peça `t` (já posta em `w`, com o cache `cache` em dia) toca. Com `base` (o tabuleiro de antes da peça), cada uma traz a
+ * área anterior e quantas manchas uniu, e a mancha só dos setores da própria peça (sem emenda, sem fechar) fica de fora. O contorno vai
+ * até `reach` casas da peça (a mancha pode atravessar o mapa); `onlyClosed` devolve só as que fecham.
+ */
+export function patchViews(
+  w: { get(q: number, r: number): TerraTile | undefined },
+  cache: PatchCache,
+  t: TerraTile,
+  base?: { w: { get(q: number, r: number): TerraTile | undefined }; cache: PatchCache },
+  reach = 9,
+  onlyClosed = false,
+): PatchView[] {
+  const out: PatchView[] = [];
+  const done = new Set<number>();
+  const b0 = t.index * 6;
+  for (let s = 0; s < 6; s++) {
+    const terr = t.edges[s];
+    if (isStrict(terr)) continue;
+    const root = cache.find(b0 + s);
+    if (done.has(root)) continue;
+    done.add(root);
+    const area = cache.mass[root] / 6;
+    const closes = cache.voids[root] === 0 && area >= TERRA.closeMin;
+    if (onlyClosed && !closes) continue;
+    let before = 0, merged = 0;
+    if (base) {
+      const seen = new Set<number>();
+      for (let k = 0; k < 6; k++) {
+        if (t.edges[k] !== terr) continue;
+        const nb = base.w.get(t.q + DIRS[k][0], t.r + DIRS[k][1]);
+        if (!nb || nb.edges[opposite(k)] !== terr) continue;
+        const br = base.cache.find(nb.index * 6 + opposite(k));
+        if (seen.has(br)) continue;
+        seen.add(br);
+        before += base.cache.mass[br] / 6;
+        merged++;
+      }
+      if (merged === 0 && !closes) continue;
+    }
+    const segs: PatchSeg[] = [];
+    for (let dq = -reach; dq <= reach; dq++) {
+      for (let dr = Math.max(-reach, -dq - reach); dr <= Math.min(reach, -dq + reach); dr++) {
+        const q = t.q + dq, r = t.r + dr;
+        const o = w.get(q, r);
+        if (!o) continue;
+        const ob = o.index * 6;
+        for (let k = 0; k < 6; k++) {
+          if (isStrict(o.edges[k]) || cache.find(ob + k) !== root) continue;
+          const nb = w.get(q + DIRS[k][0], r + DIRS[k][1]);
+          if (!nb) segs.push({ q, r, ray: false, i: k, open: true });
+          else if (nb.edges[opposite(k)] !== terr) segs.push({ q, r, ray: false, i: k, open: false });
+          if (isStrict(o.edges[(k + 5) % 6]) || o.edges[(k + 5) % 6] !== terr) segs.push({ q, r, ray: true, i: k, open: false });
+          if (isStrict(o.edges[(k + 1) % 6]) || o.edges[(k + 1) % 6] !== terr) segs.push({ q, r, ray: true, i: (k + 1) % 6, open: false });
+        }
+      }
+    }
+    out.push({ terrain: terr, area, before, merged, closes, segs });
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Umidade (a do Orvalho)
 // ---------------------------------------------------------------------------------------------------------------------

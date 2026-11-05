@@ -6,6 +6,7 @@ import { generateSites } from './sites';
 import { generateHiddenSprings } from './water';
 import { type SpecialKind, specialSlots, specialTile } from './specials';
 import { routePosts } from './routes';
+import type { TerraView } from './terra';
 import { T, generateTile, rotateEdges, type TileDef } from './tiles';
 
 export interface Move {
@@ -135,6 +136,13 @@ export class Game {
       res.leftoverBonus = bonus;
     }
     return res;
+  }
+
+  /** Terra contínua: as manchas, as bordas abertas e o fechamento da jogada em (q, r) com o giro atual, e a umidade que sobe (para o fantasma). */
+  terraView(q: number, r: number): TerraView | null {
+    const def = this.current;
+    if (!def || !this.rules.terra || !this.board.checkDef(q, r, def, this.rot).valid) return null;
+    return this.board.terraView(q, r, def, this.rot);
   }
 
   place(q: number, r: number): PlaceResult | null {

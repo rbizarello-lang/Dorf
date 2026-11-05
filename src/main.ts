@@ -159,6 +159,8 @@ const a11y = {
   safe: store.get('a11y-safe') === '1',
   /** Interface mínima: ligada por padrão; só o valor '0' guardado a desliga. */
   minimal: store.get('minimal') !== '0',
+  /** Contorno da missão no chão ao escolhê-la na lista: desligado por padrão; só o valor '1' guardado o liga. */
+  questTrace: store.get('quest-trace') === '1',
   calm: a11yCalm === '1' || (a11yCalm !== '0' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)),
 };
 
@@ -205,6 +207,8 @@ function showA11y() {
       <p>A onda dourada, os voos da câmera, o bando de pássaros e o quique da peça param. O vento e a água continuam.</p>
       <label><input type="checkbox" name="minimal"${a11y.minimal ? ' checked' : ''}> Interface mínima</label>
       <p>Esconde o brasão do placar e começa com o minimapa fechado. O Almanaque fica na tecla <kbd>I</kbd> (e no menu ⋯), o brasão no menu de temas, e o minimapa na tecla <kbd>M</kbd>.</p>
+      <label><input type="checkbox" name="questtrace"${a11y.questTrace ? ' checked' : ''}> Mostrar a missão no chão</label>
+      <p>Ao escolher uma missão de grupo na lista, o chão desenha o contorno do grupo e pulsa as bordas que ainda dão para o vazio (o que falta para fechar).</p>
       <button type="button" class="secondary">Fechar</button>
     </form>`);
   const form = hud.modalBody.querySelector('form')!;
@@ -218,6 +222,8 @@ function showA11y() {
     store.set('a11y-calm', a11y.calm ? '1' : '0');
     a11y.minimal = (form.querySelector('input[name="minimal"]') as HTMLInputElement).checked;
     store.set('minimal', a11y.minimal ? '1' : '0');
+    a11y.questTrace = (form.querySelector('input[name="questtrace"]') as HTMLInputElement).checked;
+    store.set('quest-trace', a11y.questTrace ? '1' : '0');
     applyA11y();
     const s = shownTheme();
     world.setTheme(s, game.board);
@@ -239,7 +245,7 @@ let routePeek: RouteHit[] = [];
 let scorePeek: number | null = null;
 /** Águas que descem: o que a água da peça do fantasma rende ("água +8", "chega ao mar", "água parada"); vazio sem água. */
 let waterPeek = '';
-/** Terra contínua: de onde vêm os pontos da jogada do fantasma ("emendas 28 · mancha 9 · fecha +120 +1 peça · umidade 11"); vazio nos outros modos. */
+/** Terra contínua: a etiqueta do fantasma leva só o total da jogada e, se ela fecha uma mancha, " · fecha" (o resto o fantasma mostra na paisagem); vazio nos outros modos. */
 let terraPeek = '';
 /** "Onde encaixa": as melhores casas da peça atual. Valem só para a jogada e o giro em que foram pedidas. */
 let hints: { q: number; r: number; rot: number; points: number }[] | null = null;
@@ -851,6 +857,7 @@ function refreshRoutePeek() {
     scorePeek = null;
     terraPeek = '';
     routePeekAt = '';
+    world.setTerraView(null);
     return;
   }
   const key = `${hover.q}:${hover.r}:${game.rot}`;
@@ -861,22 +868,16 @@ function refreshRoutePeek() {
   const cw = peek ? game.check(hover.q, hover.r)?.water : undefined;
   waterPeek = !cw ? '' : cw.sea ? ` · chega ao mar +${cw.gain}` : cw.flows ? (cw.hidden ? ` · nascente escondida +${cw.gain}` : cw.spring ? ` · nascente +${cw.gain}` : ` · água +${cw.gain}`) : ' · água parada';
   routePeek = peek?.routes ?? [];
-  terraPeek = peek?.terra ? terraLegend(peek, game.rules) : '';
-}
-
-/** Terra contínua: a legenda dos pontos de uma jogada (só o que rendeu algo), na ordem em que a regra os conta. */
-function terraLegend(res: PlaceResult, R: Rules): string {
-  const T = res.terra;
-  if (!T) return '';
-  const parts: string[] = [];
-  if (T.seams) parts.push(`emendas ${T.seams}`);
-  if (res.perfect) parts.push(`perfeito ${R.perfectBonus}`);
-  if (res.closed.length) parts.push(`cerco ${res.closed.length * R.closedBonus}`);
-  if (res.synergies.length) parts.push(`interações ${res.synergies.length * R.synergyPoints}`);
-  if (T.growth) parts.push(`mancha ${T.growth}`);
-  if (T.closedPatches) parts.push(`fecha +${T.closePoints}${T.backTiles ? ` +${T.backTiles} peça${T.backTiles > 1 ? 's' : ''}` : ''}`);
-  if (T.moisture) parts.push(`umidade ${T.moisture}`);
-  return parts.length ? ` (${parts.join(' · ')})` : '';
+  // Terra contínua: o fantasma mostra a paisagem (contorno da mancha, bordas abertas, laço que fecha, umidade que sobe); a etiqueta só leva o total e "fecha".
+  if (game.rules.terra) {
+    const view = peek ? game.terraView(hover.q, hover.r) : null;
+    world.setTerraView(view, hover.q, hover.r, game.rot);
+    terraPeek = view?.patches.some((v) => v.closes) ? ' · fecha' : '';
+    waterPeek = '';
+  } else {
+    world.setTerraView(null);
+    terraPeek = '';
+  }
 }
 
 function announce(res: PlaceResult) {
@@ -1053,7 +1054,7 @@ function showHelp(tab = 'basico') {
 function terraHelp(R: Rules) {
   const back = R.terraBackTiles > 0 ? ` Cada mancha fechada${R.terraBackMin > 1 ? ` de ${R.terraBackMin} peças ou mais` : ''} devolve ${R.terraBackTiles} peça${R.terraBackCap > 0 ? ` (no máximo ${R.terraBackCap} por partida)` : ''}.` : '';
   return `<ul class="terra-help">
-        <li><b>Manchas</b>: terrenos iguais que se encostam formam uma mancha. Ela paga ao crescer, mais se for gorda e redonda do que se for um fio, e paga <b>de uma vez</b> quando é fechada, isto é, cercada, sem nenhuma borda virada para o vazio. Fechar é o contrário de casar: cerque a mancha com outros terrenos.${back} A etiqueta do fantasma mostra "fecha" quando a jogada fecha uma.</li>
+        <li><b>Manchas</b>: terrenos iguais que se encostam formam uma mancha. Ela paga ao crescer, mais se for gorda e redonda do que se for um fio, e paga <b>de uma vez</b> quando é fechada, isto é, cercada, sem nenhuma borda virada para o vazio. Fechar é o contrário de casar: cerque a mancha com outros terrenos.${back} O fantasma desenha no chão o contorno da mancha a que a peça se junta; as bordas dela que ainda dão para o vazio pulsam devagar (é o que falta para fechar); se a jogada fecha, o contorno vira um laço dourado e a etiqueta diz "fecha".</li>
         <li><b>Perfeito e cerco</b>: valem quando todas as emendas têm continuidade alta (${R.perfectBonus} e ${R.closedBonus} pontos, o cerco devolve ${R.closedTiles} peça).</li>
         <li><b>Água</b>: o rio nasce numa nascente acima do nível do mar e só desce. Cada peça de água corrente rende ${R.flowPoints}, e o curso que chega ao mar rende ${R.seaPoints} e ${R.seaTiles} peças. A altura é a do terreno do mapa, não da peça.</li>
         <li><b>Umidade</b>: a água (e a mata) que chega faz render as terras que já estavam lá e gostam dela: prado, mata, plantação e vila têm cada um a sua faixa. A peça nova não recebe a própria umidade: quem a recebe é a vizinha, quando a água chega.</li>
@@ -1398,9 +1399,11 @@ const input = bindInput({
   choose: (pick) => !!hud.modalBody.querySelector('.blessings') && chooseBlessing(pick),
 });
 
-hud.onQuestGoto = (q, r) => {
+hud.onQuestGoto = (q, r, quest) => {
   const w = hexToWorld(q, r);
   world.rig.goal.set(w.x, 0, w.z);
+  // Opção (desligada por padrão): o contorno do grupo da missão e as bordas que faltam, no chão, com a mesma camada do fantasma da Terra.
+  if (a11y.questTrace && (quest.kind === 'group' || quest.kind === 'close') && quest.state === 'active') world.showQuestTrace(game.board.groupView(quest.anchor, quest.sector));
 };
 
 document.getElementById('rot-left')!.addEventListener('click', () => {
@@ -2141,9 +2144,51 @@ function start(data: unknown) {
   }
 };
 
+// Terra contínua: põe o fantasma na i-ésima jogada de um tipo (a ordem é a do ranking de pontos): `'cresce'` (junta uma mancha antiga), `'fecha'`
+// (fecha uma mancha), `'agua'` (a água dela molha terras antigas) ou `'une'` (junta duas manchas ou mais). Devolve `{ q, r, rot, n }` (n = quantas
+// há) ou null; com `zoom`, a câmera vai ao fantasma. Capturas do fantasma da paisagem.
+(window as unknown as { __ghostTerra: (kind?: string, i?: number, zoom?: number) => { q: number; r: number; rot: number; n: number } | null }).__ghostTerra = (kind = 'cresce', i = 0, zoom) => {
+  if (!game.current || !game.rules.terra) return null;
+  const found: { q: number; r: number; rot: number; points: number; w: number }[] = [];
+  for (const k of game.board.frontier) {
+    const [q, r] = unkey(k);
+    for (let rot = 0; rot < 6; rot++) {
+      game.rot = rot;
+      const v = game.terraView(q, r);
+      if (!v) continue;
+      const ok = kind === 'fecha' ? v.patches.some((p) => p.closes) : kind === 'agua' ? v.moist.length > 0 : kind === 'une' ? v.patches.some((p) => p.merged > 1) : v.patches.some((p) => p.merged > 0 && !p.closes && p.area >= 1.5 && p.area <= 12);
+      if (ok) found.push({ q, r, rot, points: game.preview(q, r)?.points ?? 0, w: kind === 'agua' ? v.moist.length : 0 });
+    }
+  }
+  game.rot = 0;
+  found.sort((a, b) => b.w - a.w || b.points - a.points || a.q - b.q || a.r - b.r || a.rot - b.rot);
+  const m = found[i];
+  if (!m) return null;
+  hover = { q: m.q, r: m.r };
+  while (game.rot !== m.rot) rotate(1);
+  updateGhost();
+  const { x, z } = hexToWorld(m.q, m.r);
+  world.rig.goal.set(x, 0, z);
+  if (zoom) {
+    world.rig.target.set(x, 0, z);
+    world.rig.dist = world.rig.goalDist = zoom;
+  }
+  return { q: m.q, r: m.r, rot: m.rot, n: found.length };
+};
+
+// Congela o mundo e põe o pouso que fecha uma mancha (laço dourado, chão que respira, peça que sobe) na idade dada, em segundos (0 a 2,5); depois de `__placeGhost` numa jogada que fecha.
+(window as unknown as { __land: (age: number) => boolean }).__land = (age) => {
+  world.timeScale = 0;
+  return world.seekLand(age);
+};
+
+(window as unknown as { __trace: () => unknown }).__trace = () => world.traceInfo();
+
 // Coloca a peça exatamente onde o fantasma está (a mesma jogada que o __ghostBest mostrou: o bestMove sorteia empates).
 (window as unknown as { __placeGhost: () => boolean }).__placeGhost = () => {
   if (!hover || !game.current || !game.board.frontier.has(hkey(hover.q, hover.r))) return false;
+  // As cartas de era que o `?auto=` deixou na mesa seguram a jogada: escolhe a primeira de cada uma (depuração).
+  while (game.offers.length) game.choose(0);
   place(hover.q, hover.r);
   return true;
 };

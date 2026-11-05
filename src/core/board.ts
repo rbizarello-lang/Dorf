@@ -6,7 +6,7 @@ import { SEASON_BONUS, SEASON_KIND, seasonAt } from './seasons';
 import { INFLUENCE, INFLUENCE_CAP, SYN_KINDS, type SynHit, type SynKind, synergyOf } from './synergy';
 import { payRoutes, type RouteHit, type RoutePost } from './routes';
 import { STARTER_PROFILE, heightFit, tileProfile, worldHeights } from './relief';
-import { TERRA, continuity, fitPoints, moistAffected, moistureAt, patchField, rotComp, seamPoints, smearComp, tileMix, type Comp, type PatchField } from './terra';
+import { PatchCache, TERRA, patchViews, continuity, fitPoints, moistAffected, moistureAt, rotComp, seamPoints, smearComp, tileMix, type Comp, type PatchField, type PatchView, type TerraView } from './terra';
 import { hiddenSpringAt, isSpring, springEligible, springRevealed, waterState, type SpringSite, type WaterState, type WaterTile } from './water';
 import { T, isStrict, rotateEdges, type QuestKind, type TileDef } from './tiles';
 
@@ -190,6 +190,8 @@ export interface TerraResult {
   backTiles: number;
   /** Umidade levada às peças que já estavam lá. */
   moisture: number;
+  /** Os contornos das manchas que esta jogada fechou (calculados na hora de pedir, só para o efeito de pouso; a mancha fechada nunca muda). */
+  closedViews: () => PatchView[];
 }
 
 export interface Quest {
@@ -314,6 +316,8 @@ export class Board {
   /** Terra contínua: maiores marcas das manchas (crescimento e fechamento; o replay as reconstrói) e peças já devolvidas por manchas fechadas. */
   terraBest: PatchField = { patch: 0, closed: 0, closedN: 0, backN: 0 };
   terraBack = 0;
+  /** Terra contínua: manchas mantidas peça a peça (união-busca incremental); a prévia herda a do tabuleiro. */
+  patches?: PatchCache;
   // Union-find sobre (peça, setor): refeito a cada jogada, O(n).
   private parent = new Int32Array(0);
   private groupTiles = new Int32Array(0);
@@ -492,14 +496,17 @@ export class Board {
   clone(): Board {
     const b = new Board(this.rules, this.seed);
     b.springSites = this.springSites;
+    // Cópia direta (sem `placeRaw`): peças, mapa e fronteira são copiados como estão; o que sai só da semente da peça não é recalculado.
     for (const p of this.list) {
-      const c = b.placeRaw(p.q, p.r, p.def, p.rot, p);
-      c.closed = p.closed;
-      c.synergies = p.synergies.map((s) => ({ ...s }));
-      if (p.eraMark !== undefined) c.eraMark = p.eraMark;
-      if (p.site) c.site = p.site;
-      if (p.wonder) c.wonder = true;
-      if (p.moist !== undefined) c.moist = p.moist;
+      const c: Placed = { ...p, synergies: p.synergies.map((s) => ({ ...s })) };
+      b.tiles.set(c.key, c);
+      b.list.push(c);
+    }
+    for (const k of this.frontier) b.frontier.add(k);
+    if (this.patches) b.patches = this.patches.clone();
+    if (this.parent.length === this.list.length * 6) {
+      b.parent = this.parent.slice();
+      b.groupTiles = this.groupTiles.slice();
     }
     b.terraBest = { ...this.terraBest };
     b.terraBack = this.terraBack;
@@ -518,8 +525,53 @@ export class Board {
     for (const k of this.routesPaid) b.routesPaid.add(k);
     b.posts = this.posts.map((p) => ({ ...p }));
     for (const q of this.quests) b.quests.push({ ...q, anchor: b.list[q.anchor.index] });
-    b.computeGroups();
+    if (b.parent.length !== b.list.length * 6) b.computeGroups();
     return b;
+  }
+
+  /**
+   * Terra contínua, o fantasma que mostra a paisagem: as manchas que a peça `def` girada `rot` toca na casa (q, r) (contorno, bordas abertas,
+   * se fecha) e as terras antigas que a água dela vai molhar. Sai da regra (setores de bordas), numa cópia, e não muda a pontuação.
+   */
+  terraView(q: number, r: number, def: TileDef, rot: number): TerraView | null {
+    if (!this.patches) return null;
+    const c = this.clone();
+    const p = c.placeRaw(q, r, def, rot);
+    const patches = patchViews(c, c.patches!, p, { w: this, cache: this.patches });
+    const moist: TerraView['moist'] = [];
+    for (const o of moistAffected(c, p)) {
+      if (o === p) continue;
+      const gain = fitPoints(tileMix(o.edges, o.comp!), moistureAt(c, o.q, o.r)) - (o.moist ?? 0);
+      if (gain > 0) moist.push({ q: o.q, r: o.r, gain });
+    }
+    return { patches, moist };
+  }
+
+  /**
+   * O grupo de (p, setor) visto de fora, no mesmo formato da mancha do fantasma (contorno, bordas que dão para o vazio): a missão de grupo ou
+   * de fechar mostra no chão o grupo dela e o que falta. Vale em qualquer modo (o grupo é o de `computeGroups`, não o da Terra contínua).
+   */
+  groupView(p: Placed, sector: number): PatchView {
+    const terrain = p.edges[sector];
+    const strict = isStrict(terrain);
+    const segs: PatchView['segs'] = [];
+    let open = 0;
+    for (const [t, s] of this.groupMembers(p, sector)) {
+      const nb = this.get(t.q + DIRS[s][0], t.r + DIRS[s][1]);
+      if (!nb) {
+        segs.push({ q: t.q, r: t.r, ray: false, i: s, open: true });
+        open++;
+      } else if (nb.edges[opposite(s)] !== terrain) segs.push({ q: t.q, r: t.r, ray: false, i: s, open: false });
+      if (strict) continue;
+      if (t.edges[(s + 5) % 6] !== terrain) segs.push({ q: t.q, r: t.r, ray: true, i: s, open: false });
+      if (t.edges[(s + 1) % 6] !== terrain) segs.push({ q: t.q, r: t.r, ray: true, i: (s + 1) % 6, open: false });
+    }
+    return { terrain, area: this.groupSize(p, sector), before: 0, merged: 0, closes: open === 0, segs };
+  }
+
+  /** Terra contínua: os contornos das manchas fechadas que tocam a peça `p` (depois do pouso). */
+  closedViews(p: Placed): PatchView[] {
+    return this.patches ? patchViews(this, this.patches, p, undefined, 40, true) : [];
   }
 
   /** Coloca sem pontuar (peça inicial, reconstrução de estado). */
@@ -551,10 +603,13 @@ export class Board {
       const k = hkey(q + dq, r + dr);
       if (!this.tiles.has(k)) this.frontier.add(k);
     }
-    // Terra contínua: a peça do centro nasce com a umidade e as manchas que já tem (não é jogada, não paga).
-    if (p.comp && p.index === 0) {
-      p.moist = fitPoints(tileMix(p.edges, p.comp), moistureAt(this, q, r));
-      this.terraBest = patchField(this, this.rules.terraBackMin, this.rules.terraCloseCap);
+    // Terra contínua: as manchas crescem com a peça; a do centro nasce com a umidade e as manchas que já tem (não é jogada, não paga).
+    if (p.comp) {
+      (this.patches ??= new PatchCache()).add(this, p);
+      if (p.index === 0) {
+        p.moist = fitPoints(tileMix(p.edges, p.comp), moistureAt(this, q, r));
+        this.terraBest = this.patches.read(this.rules.terraBackMin, this.rules.terraCloseCap);
+      }
     }
     return p;
   }
@@ -647,7 +702,7 @@ export class Board {
     // Terra contínua: manchas (crescimento e fechamento, com a peça devolvida) e a umidade que a água leva às peças vizinhas.
     let terra: TerraResult | undefined;
     if (R.terra) {
-      const f = patchField(this, R.terraBackMin, R.terraCloseCap);
+      const f = this.patches!.read(R.terraBackMin, R.terraCloseCap);
       const B = this.terraBest;
       const growth = Math.max(0, f.patch - B.patch);
       const closePoints = Math.max(0, f.closed - B.closed);
@@ -666,7 +721,7 @@ export class Board {
       }
       points += growth + closePoints + moisture;
       tilesGained += backTiles;
-      terra = { seams, growth, closePoints, closedPatches, backTiles, moisture };
+      terra = { seams, growth, closePoints, closedPatches, backTiles, moisture, closedViews: () => this.closedViews(placed) };
     }
     const candidates = [placed, ...DIRS.map(([dq, dr]) => this.get(q + dq, r + dr)).filter((x): x is Placed => !!x)];
     for (const t of candidates) {
@@ -677,7 +732,7 @@ export class Board {
       tilesGained += R.closedTiles + (this.blessed('builders') ? BLESSING.closed : 0);
     }
 
-    this.computeGroups();
+    this.extendGroups(placed);
 
     const questsDone: Quest[] = [];
     const questsFailed: Quest[] = [];
@@ -830,6 +885,29 @@ export class Board {
     if (ra !== rb) this.parent[ra] = rb;
   }
 
+  /**
+   * Os grupos depois de UMA peça nova (a última da lista): estende a união-busca que já existe em vez de refazê-la.
+   * Dá a mesma partição de `computeGroups` (as raízes podem ser outras; ninguém depende delas).
+   */
+  private extendGroups(t: Placed) {
+    const n = this.list.length * 6;
+    if (this.parent.length !== n - 6) return this.computeGroups();
+    const old = this.parent;
+    this.parent = new Int32Array(n);
+    this.parent.set(old);
+    const base = t.index * 6;
+    for (let s = 0; s < 6; s++) this.parent[base + s] = base + s;
+    for (let s = 0; s < 6; s++) {
+      const terr = t.edges[s];
+      if (isStrict(terr)) {
+        for (let s2 = s + 1; s2 < 6; s2++) if (t.edges[s2] === terr) this.union(base + s, base + s2);
+      } else if (t.edges[(s + 1) % 6] === terr) this.union(base + s, base + ((s + 1) % 6));
+      const nb = this.get(t.q + DIRS[s][0], t.r + DIRS[s][1]);
+      if (nb && nb.edges[opposite(s)] === terr) this.union(base + s, nb.index * 6 + opposite(s));
+    }
+    this.countGroupTiles();
+  }
+
   computeGroups() {
     const n = this.list.length * 6;
     this.parent = new Int32Array(n);
@@ -846,7 +924,12 @@ export class Board {
         if (nb && nb.index > t.index && nb.edges[opposite(s)] === terr) this.union(base + s, nb.index * 6 + opposite(s));
       }
     }
-    // Tamanho do grupo = número de peças distintas.
+    this.countGroupTiles();
+  }
+
+  /** Tamanho do grupo = número de peças distintas. */
+  private countGroupTiles() {
+    const n = this.list.length * 6;
     this.groupTiles = new Int32Array(n);
     const seen: number[] = [];
     for (const t of this.list) {

@@ -35,6 +35,25 @@ As emendas pagam pela continuidade da paisagem, cada mancha de terra paga de uma
 - `tests/terra-bancada.ts`: 100 partidas, 6.231 jogadas, 60.157 candidatas, com a altura por peça: diferença zero em todos os termos (também entra no `npm test` com 16 partidas).
 - Equilíbrio na bancada: `npm run bench -- terra 100` (padrões = o modo). No jogo inteiro (`npm run balance -- 40`, guloso): Terra 4.095, Relevo 5.346, Clássico 4.492; os jogadores do painel não miram manchas, então é piso, não medida.
 
-## Fica para a Fase 3
+## Fase 3: o fantasma que mostra a paisagem, e o "Onde encaixa" rápido
 
-O fantasma que mostra a paisagem (contorno da mancha, laço que fecha, umidade que esverdeia). Hoje só há a legenda de pontos na etiqueta ("emendas 28 · perfeito 28 · mancha 7 · fecha +98 +1 peça · umidade 11") e o aviso "Mancha fechada +N · +1 peça".
+**O que o fantasma mostra (só no modo `terra`).** Tudo sai da REGRA, não do campo suavizado do desenho: `patchViews` (`src/core/terra.ts`) devolve, para a jogada candidata, cada mancha que a peça toca já com a peça incluída (área, área de antes, quantas manchas uniu, se fecha) e o contorno dela em trechos (lado da casa ou raio do centro ao canto, aberto ou parede). `Game.terraView(q, r)` junta isso com a umidade que sobe (as terras antigas cuja faixa de umidade melhora). Não muda a pontuação: roda numa cópia.
+- **Contorno** da mancha a que a peça se junta, de cada terreno que ela toca; mais forte quando a peça junta duas manchas ou mais (0,95), depois quando cresce uma mancha antiga (0,7). A mancha só dos setores da própria peça (sem emenda e sem fechar) não aparece.
+- **Bordas abertas** (trechos que dão para o vazio) pulsam devagar (ciclo de ~3 s): é o que falta para fechar.
+- **Fechamento:** a mancha que a jogada fecha ganha um laço dourado firme (a etiqueta diz "fecha").
+- **Água:** as terras antigas que a umidade da jogada melhora esverdeiam de leve (disco suave verde com respiração lenta).
+- **Etiqueta:** só o total da jogada e " · fecha". Os termos (emendas, mancha, umidade) deixaram de aparecer; o "Como jogar" do modo explica o desenho.
+- **Técnica:** UMA malha de fitas (um draw call, `src/render/landTrace.ts`) que acompanha o chão (altura lida do mapa do chão, já no espaço do desenho fluido, com o fantasma estampado), com material em TSL (`U.time`); os trechos são ligados em fileiras e arredondados (Chaikin), então o contorno não lê como grade de hexágonos. Mais um `InstancedMesh` de discos para a umidade. A malha é refeita só depois que o fantasma para na casa (`World.GHOST_SETTLE_MS`, 120 ms), nunca a cada quadro.
+- **No pouso que fecha** (`World.placeFx`, então o vídeo também mostra): depois da queda (0,5 s), o laço dourado corre pelo contorno (0,9 volta por segundo, com rastro) e some; o chão respira com a onda de `ripple`; uma peça sobe da mancha e voa até o canto da tela onde fica a pilha. Tudo pelo `dt` do mundo.
+
+**Cache incremental das manchas.** `PatchCache` (`terra.ts`) mantém a união-busca por (peça, setor) com massa, bordas expostas e bordas para o vazio por raiz; `add` custa O(1) por peça e `read` só varre as raízes, na mesma ordem do `patchField` (que fica como referência e para a medida). O `Board` guarda um (`patches`) e a cópia da prévia herda o dele. Junto: `Board.clone()` copia as peças, o mapa, a fronteira e os grupos em vez de repor peça por peça, e `place` estende os grupos (`extendGroups`) em vez de refazê-los. O placar e o replay são os mesmos (bancada × jogo, oráculo de `tests/logic.ts` e `tests/terra-view.ts`).
+
+| 300 peças, ms por chamada | antes | depois |
+|---|---|---|
+| `rankMoves(5)` Terra | 617 | 177 |
+| `rankMoves(5)` Relevo | 315 | 101 |
+| `rankMoves(5)` Clássico | 176 | 37 |
+| prévia de uma jogada, Terra | 1,42 | 0,41 |
+| `clone()` Terra | 0,61 | 0,17 |
+
+**Conferências novas** (`tests/terra-view.ts`, `npm run terra:view`): cache incremental × `patchField` refeito (a cada jogada e em cada candidata), mancha da vista (área, bordas abertas, fecha) × busca em largura escrita no teste, candidatas que não mexem no tabuleiro de verdade, prévia × jogada, `closedViews` × manchas fechadas e umidade da vista × umidade da jogada.

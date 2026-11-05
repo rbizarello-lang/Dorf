@@ -264,7 +264,7 @@ export class Hud {
         el.className = 'quest';
         el.innerHTML = `<i class="ico" style="background:${questCard(q, theme).color}">${glyph(questGlyph(q), questCard(q, theme).color)}</i><b></b><span class="reward">+${q.reward} peças</span><span class="bar"><i></i></span>`;
         el.addEventListener('click', () => {
-          if (this.quests.classList.contains('open')) this.onQuestGoto?.(q.anchor.q, q.anchor.r);
+          if (this.quests.classList.contains('open')) this.onQuestGoto?.(q.anchor.q, q.anchor.r, q);
         });
         this.quests.appendChild(el);
         this.questEls.set(q.id, el);
@@ -292,7 +292,7 @@ export class Hud {
   }
 
   /** Clicar numa missão da lista leva a câmera até a peça dela. */
-  onQuestGoto: ((q: number, r: number) => void) | null = null;
+  onQuestGoto: ((q: number, r: number, quest: Quest) => void) | null = null;
 
   /** As missões ficam neste botão até alguém abrir a lista. */
   private ensureFold() {
