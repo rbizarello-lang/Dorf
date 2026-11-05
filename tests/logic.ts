@@ -74,6 +74,8 @@ function oHeights(b: Board, def: TileDef, rot: number): number[] | undefined {
 
 /** Altura da borda `i` da peça colocada `n`, como o oráculo a guardou: a inicial é plana no nível 1. */
 function oPlacedHeights(b: Board, n: Placed): number[] {
+  // Terra contínua: a altura é do mundo (a mesma em todas as bordas da casa), não da peça.
+  if (b.rules.terra) return Array<number>(6).fill(levelAt(b.seed, n.q, n.r, 2));
   const prof = n.index === 0 ? STARTER_PROFILE : tileProfile(n.def.edges, n.def.seed);
   return worldHeights(prof, n.rot);
 }
@@ -200,9 +202,146 @@ function oracleGroupMembers(b: Board, anchor: Placed, sector: number): Array<[Pl
 function oracleClosed(b: Board, t: Placed) {
   for (let i = 0; i < 6; i++) {
     const n = b.get(t.q + DIRS[i][0], t.r + DIRS[i][1]);
-    if (!n || n.edges[(i + 3) % 6] !== t.edges[i]) return false;
+    if (!n) return false;
+    // Terra contínua: as 6 emendas com continuidade de perfeito (0,8); nas outras regras, bordas iguais.
+    if (b.rules.terra ? oSeam(t.edges, oComp(t), i, n.edges, oComp(n), (i + 3) % 6) < 0.8 : n.edges[(i + 3) % 6] !== t.edges[i]) return false;
   }
   return true;
+}
+
+// ------------------------------------------------------------------ Terra contínua (oráculo próprio, sem importar src/core/terra.ts)
+// Reescrito da regra (docs/TERRA.md): o campo de cada peça como vetor de terreno, a continuidade por amostras ao longo da emenda, as manchas
+// por busca em largura (`oracleGroupMembers`), a umidade a partir da distância até a água. Nenhuma função do núcleo da regra é chamada.
+
+const O_LAND = [T.Grass, T.Forest, T.Field, T.Village];
+const oDelta = (t: T) => O_LAND.map((x) => (x === t ? 1 : 0));
+
+/** Campo suavizado das bordas (orientação de origem): c_i = δ(t_i) + Σ_{vizinhas de terra} λ_i·(δ(t_viz) − δ(t_i)), λ_i ∈ [0,08; 0,30] da semente da peça. */
+function oSmear(edges: readonly T[], seed: number): number[][] {
+  const rng = mulberry32((seed ^ 0x7e77a) >>> 0);
+  return edges.map((t, i) => {
+    const lam = 0.08 + rng() * 0.22;
+    const c = oDelta(t);
+    if (isStrict(t)) return c;
+    for (const v of [edges[(i + 5) % 6], edges[(i + 1) % 6]]) {
+      if (isStrict(v)) continue;
+      const dv = oDelta(v), dt = oDelta(t);
+      for (let k = 0; k < 4; k++) c[k] += lam * (dv[k] - dt[k]);
+    }
+    return c;
+  });
+}
+
+const oCompMemo = new WeakMap<Placed, number[][]>();
+/** Composição (mundo) de uma peça colocada: a da semente dela, girada junto com as bordas. */
+function oComp(t: Placed): number[][] {
+  let c = oCompMemo.get(t);
+  if (!c) {
+    const base = oSmear(t.def.edges, t.def.seed);
+    c = Array.from({ length: 6 }, () => [0, 0, 0, 0]);
+    for (let i = 0; i < 6; i++) c[(i + t.rot) % 6] = base[i];
+    oCompMemo.set(t, c);
+  }
+  return c;
+}
+
+/** O campo ao longo da borda `i`, de u = 0 (canto i) a u = 1 (canto i+1): no meio vale a borda; nos cantos, a média com a borda vizinha da peça; linear entre eles. */
+function oField(edges: readonly T[], comp: number[][], i: number, u: number): number[] {
+  const c = comp[i];
+  const corner = (j: number) => c.map((x, k) => (x + (isStrict(edges[j]) ? x : comp[j][k])) / 2);
+  if (u <= 0.5) {
+    const e = corner((i + 5) % 6), w = u / 0.5;
+    return c.map((x, k) => e[k] * (1 - w) + x * w);
+  }
+  const e = corner((i + 1) % 6), w = (u - 0.5) / 0.5;
+  return c.map((x, k) => x * (1 - w) + e[k] * w);
+}
+
+/** Continuidade da emenda entre a borda `i` de A e a `j` de B: 1 − ½·média de ‖F_A(u) − F_B(1−u)‖₁ em u = ¼, ½, ¾. Rio e trilho: 1 se iguais, 0 se não. */
+function oSeam(ea: readonly T[], ca: number[][], i: number, eb: readonly T[], cb: number[][], j: number): number {
+  if (isStrict(ea[i]) || isStrict(eb[j])) return ea[i] === eb[j] ? 1 : 0;
+  let tot = 0;
+  for (const u of [0.25, 0.5, 0.75]) {
+    const fa = oField(ea, ca, i, u), fb = oField(eb, cb, j, 1 - u);
+    for (let k = 0; k < 4; k++) tot += Math.abs(fa[k] - fb[k]);
+  }
+  return 1 - tot / 3 / 2;
+}
+
+/** Pontos da emenda: round(M · x³), x = max(0, (s − 0,5)/0,5). */
+const oSeamPay = (s: number, matchPoints: number) => Math.round(matchPoints * Math.max(0, (s - 0.5) / 0.5) ** 3);
+
+/** Manchas por busca em largura: valor do crescimento e do fechamento (não arredondados), quantas fecharam e quantas devolvem peça (área ≥ backMin). */
+function oPatches(b: Board, backMin: number, closeCap: number) {
+  const seen = new Set<string>();
+  let V = 0, F = 0, closedN = 0, backN = 0;
+  for (const t of b.list) {
+    for (let s = 0; s < 6; s++) {
+      if (isStrict(t.edges[s]) || seen.has(`${t.index}:${s}`)) continue;
+      const members = oracleGroupMembers(b, t, s);
+      let perimeter = 0, open = 0;
+      for (const [p, ss] of members) {
+        seen.add(`${p.index}:${ss}`);
+        const nb = b.get(p.q + DIRS[ss][0], p.r + DIRS[ss][1]);
+        if (!nb) {
+          perimeter++;
+          open++;
+        } else if (nb.edges[(ss + 3) % 6] !== p.edges[ss]) perimeter++;
+      }
+      const a = members.length / 6;
+      const form = 0.55 + 0.45 * Math.min(1, (6 * Math.sqrt(a)) / Math.max(1, perimeter));
+      V += 1.5 * a ** 1.8 * form;
+      if (open === 0 && a >= 1) {
+        F += closeCap > 0 ? Math.min(20 * a ** 1.5 * form, closeCap) : 20 * a ** 1.5 * form;
+        closedN++;
+        if (a >= backMin) backN++;
+      }
+    }
+  }
+  return { V, F, closedN, backN };
+}
+
+/** Umidade da casa (q, r): a água mais próxima (a própria casa conta; até 3 casas) e a mata nas 6 vizinhas. */
+function oMoisture(b: Board, q: number, r: number): number {
+  let near = Infinity;
+  for (const p of b.list) if (p.edges.includes(T.Water)) near = Math.min(near, hexDistance(q, r, p.q, p.r));
+  let m = near <= 3 ? [1.0, 0.7, 0.45, 0.25][near] : 0.1;
+  let boost = 0;
+  for (const [dq, dr] of DIRS) {
+    const n = b.get(q + dq, r + dr);
+    if (n && n.edges.filter((e) => e === T.Forest).length >= 3) boost += 0.1;
+  }
+  return Math.min(1, m + Math.min(0.2, boost));
+}
+
+/** Pontos de umidade da peça `t`: a mistura (média das bordas de terra) pesa a faixa de cada terreno; 8 na faixa, 11 no meio dela. */
+function oFit(b: Board, t: Placed): number {
+  const comp = oComp(t);
+  const land = [0, 1, 2, 3, 4, 5].filter((i) => !isStrict(t.edges[i]));
+  const m = oMoisture(b, t.q, t.r);
+  const RANGE = [[0.2, 0.6], [0.4, 1.0], [0.5, 0.8], [0.1, 0.4]];
+  let sum = 0;
+  for (let k = 0; k < 4; k++) {
+    const w = land.length ? land.reduce((a, i) => a + comp[i][k], 0) / land.length : 0;
+    const [lo, hi] = RANGE[k];
+    if (w === 0 || m < lo || m > hi) continue;
+    sum += w * (Math.abs(m - (lo + hi) / 2) <= (hi - lo) / 4 ? 11 : 8);
+  }
+  return Math.round(sum);
+}
+
+/** Estado do oráculo da Terra contínua numa partida: maiores marcas das manchas, peças já devolvidas e a umidade que cada peça já rendeu. */
+interface OTerra {
+  bestV: number;
+  bestF: number;
+  bestN: number;
+  bestB: number;
+  back: number;
+  paid: Map<number, number>;
+}
+function oTerraStart(b: Board): OTerra {
+  const P = oPatches(b, b.rules.terraBackMin, b.rules.terraCloseCap);
+  return { bestV: Math.round(P.V), bestF: Math.round(P.F), bestN: P.closedN, bestB: P.backN, back: 0, paid: new Map([[0, oFit(b, b.list[0])]]) };
 }
 
 interface QuestHist {
@@ -403,6 +542,8 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
   const oInf = new Map<string, Set<string>>();
   const game = new Game(seed, rules, specials);
   const b = game.board;
+  // Terra contínua: o estado do oráculo (marcas das manchas, peças devolvidas, umidade já rendida).
+  const oT = rules.terra ? oTerraStart(b) : null;
   const specialsSeen = new Set<SpecialKind>();
   const log: GameLog = { seed, themeId: theme.id, rules, specials, moves: [], snapshots: [], finalScore: 0, finalStack: 0, placed: 0, discarded: 0, quests: 0, mode: mode.id };
   const ts = (themeStats[theme.id] ??= { games: 0, moves: 0, score: 0, discards: 0, questsDone: 0, questsFailed: 0, exactDone: 0, exactFailed: 0, closed: 0, perfects: 0, maxActive: 0, overshootGames: 0 });
@@ -448,6 +589,10 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     let nbs = 0, mt = 0, syn = 0, oSteps = 0, oFalls = 0;
     const hts = oHeights(b, cur, m.rot);
     const synKinds: string[] = [];
+    // Terra contínua: o campo da peça da mão (girada) e a continuidade de cada emenda, pelo oráculo.
+    const tComp = rules.terra ? oSmear(cur.edges, cur.seed) : null;
+    const tCompW = tComp ? Array.from({ length: 6 }, (_, i) => tComp[(i + 6 - m.rot) % 6]) : null;
+    let tSeams = 0, tPerfect = true;
     // Interações (oráculo próprio): bordas comuns diferentes que formam um dos 4 pares.
     const SYN_PAIRS = [
       [T.Village, T.Forest],
@@ -464,10 +609,17 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
         oSteps++;
         if (a === T.Water && c === T.Water) oFalls++;
       }
-      if (c === a) mt++;
+      const sv = tCompW ? oSeam(edges, tCompW, i, n.edges, oComp(n), (i + 3) % 6) : 1;
+      const tp = tCompW ? oSeamPay(sv, rules.matchPoints) : 0;
+      if (tCompW) {
+        tSeams += tp;
+        if (sv < 0.8) tPerfect = false;
+      }
+      if (c === a || tp > 0) mt++;
       else {
         const pair = SYN_PAIRS.findIndex(([x, y]) => (a === x && c === y) || (a === y && c === x));
-        if (pair >= 0) {
+        // Terra contínua: a interação só entra onde a continuidade é baixa (< 0,55).
+        if (pair >= 0 && (!tCompW || sv < 0.55)) {
           syn++;
           synKinds.push(['lumber', 'mill', 'pasture', 'apiary'][pair]);
         }
@@ -497,7 +649,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     assert(b.tiles.size === b.list.length, `seed ${seed}: tiles.size != list.length`);
 
     // --- pontuação esperada (inclui os bônus do tema, recalculados aqui)
-    let pts = mt * rules.matchPoints + syn * rules.synergyPoints + oSteps * rules.stepPoints + oFalls * rules.fallPoints;
+    let pts = (rules.terra ? tSeams : mt * rules.matchPoints) + syn * rules.synergyPoints + oSteps * rules.stepPoints + oFalls * rules.fallPoints;
     if (rules.relief) {
       assert((res.steps ?? 0) === oSteps && (res.falls ?? 0) === oFalls, `seed ${seed}: degraus ${res.steps}/${res.falls} != oráculo ${oSteps}/${oFalls}`);
       inc('relevo_degraus', oSteps);
@@ -535,7 +687,8 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       if (a === c) pts += rules.matchBonus[a] ?? 0;
       else {
         const pair = SYN_PAIRS.findIndex(([x, y]) => (a === x && c === y) || (a === y && c === x));
-        if (pair >= 0) {
+        // Terra contínua: a interação só vale onde a continuidade é baixa (< 0,55).
+        if (pair >= 0 && (!tCompW || oSeam(edges, tCompW, i, n.edges, oComp(n), (i + 3) % 6) < 0.55)) {
           const kind = (['lumber', 'mill', 'pasture', 'apiary'] as const)[pair];
           pts += rules.synergyBonus[kind] ?? 0;
           if (oBless.has(kind)) pts += ORACLE_BLESS.synergy;
@@ -562,7 +715,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     pts += inf;
     assert(res.influence.points === inf, `seed ${seed}: influência ${res.influence.points} != oráculo ${inf}`);
     if (inf) inc('influencia');
-    const perfect = nbs >= 2 && mt === nbs;
+    const perfect = rules.terra ? nbs >= 2 && tPerfect : nbs >= 2 && mt === nbs;
     if (perfect) pts += rules.perfectBonus + (oBless.has('surveyors') ? ORACLE_BLESS.perfect : 0);
     assert(res.perfect === perfect, `seed ${seed}: perfect diverge`);
     if (perfect) oraclePerfects++;
@@ -576,6 +729,41 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
     let gained = waterTiles + newlyClosed.length * (rules.closedTiles + (oBless.has('builders') ? ORACLE_BLESS.closed : 0));
     ts.closed += newlyClosed.length;
     if (perfect) ts.perfects++;
+
+    // --- Terra contínua: emendas, crescimento e fechamento das manchas (com a peça devolvida) e a umidade levada às peças que já estavam lá
+    if (oT) {
+      const P = oPatches(b, rules.terraBackMin, rules.terraCloseCap);
+      const V = Math.round(P.V), F = Math.round(P.F);
+      const growth = Math.max(0, V - oT.bestV), closeGain = Math.max(0, F - oT.bestF);
+      const newClosed = Math.max(0, P.closedN - oT.bestN);
+      let back = Math.max(0, P.backN - oT.bestB) * rules.terraBackTiles;
+      if (rules.terraBackCap > 0) back = Math.min(back, Math.max(0, rules.terraBackCap - oT.back));
+      oT.back += back;
+      oT.bestV = Math.max(oT.bestV, V);
+      oT.bestF = Math.max(oT.bestF, F);
+      oT.bestN = Math.max(oT.bestN, P.closedN);
+      oT.bestB = Math.max(oT.bestB, P.backN);
+      // Umidade: todas as peças são relidas do zero; só rende a diferença das que já estavam lá (a peça nova guarda a dela sem receber).
+      let moisture = 0;
+      for (const t of b.list) {
+        const fit = oFit(b, t);
+        const before = oT.paid.get(t.index) ?? 0;
+        if (fit > before) {
+          if (t !== res.placed) moisture += fit - before;
+          oT.paid.set(t.index, fit);
+        }
+      }
+      pts += growth + closeGain + moisture;
+      gained += back;
+      const R = res.terra!;
+      assert(R.seams === tSeams && R.growth === growth && R.closePoints === closeGain && R.closedPatches === newClosed && R.backTiles === back && R.moisture === moisture, `seed ${seed} jogada ${log.moves.length}: terra ${JSON.stringify(R)} != oráculo ${JSON.stringify({ seams: tSeams, growth, closePoints: closeGain, closedPatches: newClosed, backTiles: back, moisture })}`);
+      for (const t of b.list) assert((t.moist ?? 0) === (oT.paid.get(t.index) ?? 0), `seed ${seed}: umidade guardada da peça ${t.index} ${t.moist} != oráculo ${oT.paid.get(t.index)}`);
+      inc('terra_fechamentos', newClosed);
+      inc('terra_pecas_de_volta', back);
+      inc('terra_pontos_crescimento', growth);
+      inc('terra_pontos_fechamento', closeGain);
+      inc('terra_pontos_umidade', moisture);
+    }
 
     // --- missões: progresso e estado esperados pelo oráculo
     for (let qi = 0; qi < prevQuestStates.length; qi++) {
@@ -757,7 +945,7 @@ function simulate(seed: number, themeIdx: number, checkEvery: boolean, policy: P
       expectedStack = 0;
       inc('exploradores_completos');
     }
-    assert(res.points === pts, `seed ${seed}: pontos da jogada ${res.points} != oráculo ${pts}`);
+    assert(res.points === pts, `seed ${seed}: pontos da jogada ${res.points} != oráculo ${pts}${res.terra ? ' ' + JSON.stringify(res.terra) : ''}`);
     assert(res.tilesGained === gained, `seed ${seed}: peças ganhas ${res.tilesGained} != oráculo ${gained}`);
     assert(b.score === expectedScore, `seed ${seed}: score acumulado ${b.score} != oráculo ${expectedScore}`);
 
@@ -871,7 +1059,7 @@ const t0 = Date.now();
 const logs: GameLog[] = [];
 const POLICIES: Policy[] = ['greedy', 'quest', 'random', 'worst'];
 // Os modos de antes do Relevo: a mistura das 600 partidas (e a saída delas) não muda com o modo novo.
-const OLD_MODES = MODES.filter((m) => m.id !== 'relevo');
+const OLD_MODES = MODES.filter((m) => m.id !== 'relevo' && m.id !== 'terra');
 for (let g = 0; g < N_GAMES; g++) {
   const themeIdx = g % THEMES.length;
   const policy = POLICIES[Math.floor(g / THEMES.length) % POLICIES.length];
@@ -900,6 +1088,22 @@ for (let g = 0; g < N_GAMES; g++) {
     inc('modo_relevo');
     logs.push(lg);
   }
+}
+// Modo Terra contínua: partidas à parte, com o oráculo da regra (campo, continuidade, manchas, umidade, peça de volta e água do mundo) e o
+// jogo inteiro por cima (missões, eras, sítios, cartas); cobrem os 5 temas e as 4 políticas. As 20 primeiras conferem o resto a cada jogada.
+{
+  const terra = MODES.find((m) => m.id === 'terra')!;
+  for (let g = 0; g < 60; g++) {
+    const themeIdx = g % THEMES.length;
+    const policy = POLICIES[Math.floor(g / THEMES.length) % POLICIES.length];
+    const seed = 700000 + g * 7919;
+    seedMathRandom(seed ^ 0xabcdef);
+    const lg = simulate(seed, themeIdx, g < 20, policy, terra, g % 3 === 1 ? [...SPECIAL_KINDS] : []);
+    (lg as GameLog & { policy?: string }).policy = policy;
+    inc('modo_terra');
+    logs.push(lg);
+  }
+  assert((counters.terra_fechamentos ?? 0) > 40 && (counters.terra_pecas_de_volta ?? 0) > 40 && (counters.terra_pontos_umidade ?? 0) > 500, `terra: pouca cobertura (${counters.terra_fechamentos} fechamentos, ${counters.terra_pecas_de_volta} peças de volta, ${counters.terra_pontos_umidade} pontos de umidade)`);
 }
 // Partida rápida: a pilha de 30 nunca cresce, então colocadas + descartadas ≤ 30 em toda partida.
 {

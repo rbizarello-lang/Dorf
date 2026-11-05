@@ -5,7 +5,8 @@ import { SPECIALS, type SpecialKind } from './specials';
 import { SEASON_BONUS, SEASON_KIND, seasonAt } from './seasons';
 import { INFLUENCE, INFLUENCE_CAP, SYN_KINDS, type SynHit, type SynKind, synergyOf } from './synergy';
 import { payRoutes, type RouteHit, type RoutePost } from './routes';
-import { STARTER_PROFILE, heightFit, tileProfile, worldHeights } from './relief';
+import { STARTER_PROFILE, heightFit, levelAt, tileProfile, worldHeights } from './relief';
+import { TERRA, continuity, fitPoints, moistAffected, moistureAt, patchField, rotComp, seamPoints, smearComp, tileMix, type Comp, type PatchField } from './terra';
 import { hiddenSpringAt, isSpring, springEligible, springRevealed, waterState, type SpringSite, type WaterState, type WaterTile } from './water';
 import { T, isStrict, rotateEdges, type QuestKind, type TileDef } from './tiles';
 
@@ -79,6 +80,17 @@ export interface Rules {
   /** Nascentes escondidas no mapa (src/core/water.ts) e os pontos de quem acha uma com uma peça de rio. */
   hiddenSprings: number;
   hiddenSpringPoints: number;
+  /**
+   * Terra contínua (src/core/terra.ts): a emenda paga pela continuidade do campo (`matchPoints` é a da emenda perfeita), a mancha de terra
+   * paga ao crescer e ao ser fechada, a umidade chega às terras que esperavam a água. A água usa a altura do mundo (`levelAt`), sem relevo por peça.
+   */
+  terra: boolean;
+  /** Terra: área mínima (em peças) da mancha cujo fechamento devolve peça, peças devolvidas por mancha fechada e teto de peças devolvidas por partida (0 = sem teto). */
+  terraBackMin: number;
+  terraBackTiles: number;
+  terraBackCap: number;
+  /** Terra: teto do prêmio de fechamento de UMA mancha, em pontos (0 = sem teto): segura a cauda alta das manchas grandes. */
+  terraCloseCap: number;
 }
 
 export const DEFAULT_RULES: Rules = {
@@ -122,6 +134,11 @@ export const DEFAULT_RULES: Rules = {
   seaTiles: 0,
   hiddenSprings: 0,
   hiddenSpringPoints: 0,
+  terra: false,
+  terraBackMin: 1,
+  terraBackTiles: 1,
+  terraBackCap: 0,
+  terraCloseCap: 0,
 };
 
 export interface Placed {
@@ -149,6 +166,31 @@ export interface Placed {
   spring?: boolean;
   /** A nascente era uma das escondidas no mapa (a peça pousou sobre ela). */
   hiddenSpring?: boolean;
+  /** Terra contínua: a composição de terreno de cada borda (mundo), o nível da casa (`levelAt`) e a umidade que a peça já rendeu. */
+  comp?: Comp;
+  level?: number;
+  moist?: number;
+}
+
+/** Terra contínua, na prévia de uma peça: continuidade e pontos de cada borda encostada (NaN / 0 sem vizinho) e se a peça é perfeita. */
+export interface TerraCheck {
+  s: number[];
+  pay: number[];
+  perfect: boolean;
+}
+
+/** Terra contínua, o que uma jogada rendeu além das emendas. */
+export interface TerraResult {
+  /** Pontos das emendas (já com o perfeito e as interações fora; só a soma das bordas). */
+  seams: number;
+  /** Crescimento das manchas (sobre a maior marca) e fechamento (manchas cercadas). */
+  growth: number;
+  closePoints: number;
+  /** Manchas fechadas nesta jogada e peças devolvidas por elas (já com o teto). */
+  closedPatches: number;
+  backTiles: number;
+  /** Umidade levada às peças que já estavam lá. */
+  moisture: number;
 }
 
 export interface Quest {
@@ -187,6 +229,8 @@ export interface Check {
   edgeState: number[];
   /** Relevo, por borda: 0 sem vizinho (ou sem relevo), 1 mesma altura, 2 degrau de 1 nível, 3 alto demais. */
   heightState: number[];
+  /** Terra contínua: continuidade, pontos de cada emenda e perfeito. */
+  terra?: TerraCheck;
   /** Águas que descem: o que a peça traria à água (pontos, se corre ou fica parada, se o curso chega ao mar); só com `rules.springs` e água na peça. */
   water?: { gain: number; flows: boolean; sea: boolean; spring: boolean; hidden: boolean };
   /** Relevo: bordas com degrau (mirante) e, dessas, as de rio (cachoeira). */
@@ -211,6 +255,8 @@ export interface PlaceResult {
   /** Relevo: degraus e cachoeiras desta jogada. */
   steps?: number;
   falls?: number;
+  /** Terra contínua: o que a jogada rendeu além das emendas. */
+  terra?: TerraResult;
   /** Águas que descem: pontos da água corrente desta jogada, nascente nova, peças com água corrente a mais e chegadas ao mar. */
   water?: { points: number; flowing: number; seas: number; spring: boolean; hidden: boolean };
   perfect: boolean;
@@ -266,11 +312,15 @@ export class Board {
   /** Postos desenhados no pergaminho quando o modo tem rotas. */
   posts: RoutePost[] = [];
   private questSeq = 0;
+  /** Terra contínua: maiores marcas das manchas (crescimento e fechamento; o replay as reconstrói) e peças já devolvidas por manchas fechadas. */
+  terraBest: PatchField = { patch: 0, closed: 0, closedN: 0, backN: 0 };
+  terraBack = 0;
   // Union-find sobre (peça, setor): refeito a cada jogada, O(n).
   private parent = new Int32Array(0);
   private groupTiles = new Int32Array(0);
 
-  constructor(public rules: Rules) {}
+  /** `seed` = semente da partida: só a Terra contínua a usa (a altura do mundo, `levelAt`). */
+  constructor(public rules: Rules, readonly seed = 0) {}
 
   get(q: number, r: number) {
     return this.tiles.get(hkey(q, r));
@@ -280,6 +330,14 @@ export class Board {
     return this.quests.filter((q) => q.state === 'active');
   }
 
+  /** Terra contínua: composição (mundo) de uma peça de mão girada `rot`. O campo suavizado sai só da semente da peça e é guardado por peça. */
+  private static smears = new WeakMap<TileDef, Comp>();
+  compOf(def: TileDef, rot: number): Comp {
+    let base = Board.smears.get(def);
+    if (!base) Board.smears.set(def, (base = smearComp(def.edges, def.seed)));
+    return rotComp(base, rot);
+  }
+
   /** Alturas (mundo) de uma peça de mão girada `rot`, ou undefined fora do modo Relevo. */
   heightsOf(def: TileDef, rot: number): number[] | undefined {
     return this.rules.relief ? worldHeights(tileProfile(def.edges, def.seed), rot) : undefined;
@@ -287,10 +345,10 @@ export class Board {
 
   /** `check` de uma peça de mão com o giro dado (bordas e alturas juntas). */
   checkDef(q: number, r: number, def: TileDef, rot: number): Check {
-    return this.check(q, r, rotateEdges(def.edges, rot), this.heightsOf(def, rot), def);
+    return this.check(q, r, rotateEdges(def.edges, rot), this.heightsOf(def, rot), def, this.rules.terra ? this.compOf(def, rot) : undefined);
   }
 
-  check(q: number, r: number, edges: readonly T[], heights?: readonly number[], def?: TileDef): Check {
+  check(q: number, r: number, edges: readonly T[], heights?: readonly number[], def?: TileDef, comp?: Comp): Check {
     const edgeState = [0, 0, 0, 0, 0, 0];
     const heightState = [0, 0, 0, 0, 0, 0];
     let steps = 0;
@@ -300,6 +358,8 @@ export class Board {
     let matches = 0;
     let conflict = false;
     const synergies: SynHit[] = [];
+    // Terra contínua: continuidade e pontos de cada emenda.
+    const terra: TerraCheck | undefined = comp ? { s: [NaN, NaN, NaN, NaN, NaN, NaN], pay: [0, 0, 0, 0, 0, 0], perfect: true } : undefined;
     for (let i = 0; i < 6; i++) {
       const n = this.get(q + DIRS[i][0], r + DIRS[i][1]);
       if (!n) continue;
@@ -315,7 +375,21 @@ export class Board {
           if (a === T.Water && b === T.Water) falls++;
         }
       }
-      if (a === b) {
+      if (terra && n.comp && !((isStrict(a) || isStrict(b)) && a !== b)) {
+        const s = continuity(edges, comp!, i, n.edges, n.comp, opposite(i));
+        const pay = seamPoints(s, this.rules.matchPoints);
+        terra.s[i] = s;
+        terra.pay[i] = pay;
+        if (s < TERRA.perfectS) terra.perfect = false;
+        if (a === b || pay > 0) {
+          matches++;
+          edgeState[i] = 1;
+        } else {
+          const kind = s < TERRA.synOpen ? synergyOf(a, b) : null;
+          edgeState[i] = kind ? 4 : 2;
+          if (kind) synergies.push({ edge: i, kind });
+        }
+      } else if (a === b) {
         matches++;
         edgeState[i] = 1;
       } else if (isStrict(a) || isStrict(b)) {
@@ -327,12 +401,15 @@ export class Board {
         if (kind) synergies.push({ edge: i, kind });
       }
     }
+    if (terra && neighbors < 2) terra.perfect = false;
     const eraMark = this.markPending !== null && edges.includes(T.Village) ? this.markPending : null;
     const R = this.rules;
     const lastEra = R.eraScores.length > 1 && this.era === R.eraScores.length - 1;
     const wonder = !this.wonder && R.wonderStages > 0 && lastEra && eraMark === null && edges.filter((e) => e === T.Village).length >= 2;
-    const water = heights && def && this.rules.springs && edges.includes(T.Water) && !occupied ? this.waterIf(q, r, edges, heights[edges.indexOf(T.Water)], def) : undefined;
-    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, heightState, steps, falls, water, synergies, site: this.siteAt(q, r), eraMark, wonder, influence: this.influenceAt(q, r, edges) };
+    // O nível da água: o da peça (modo Relevo) ou o do mundo (Terra contínua).
+    const wLevel = heights ? heights[edges.indexOf(T.Water)] : R.terra ? levelAt(this.seed, q, r, 2) : undefined;
+    const water = wLevel !== undefined && def && this.rules.springs && edges.includes(T.Water) && !occupied ? this.waterIf(q, r, edges, wLevel, def) : undefined;
+    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, heightState, terra, steps, falls, water, synergies, site: this.siteAt(q, r), eraMark, wonder, influence: this.influenceAt(q, r, edges) };
   }
 
   /**
@@ -369,7 +446,10 @@ export class Board {
   /** Peças com água do tabuleiro (e, se dada, uma peça a mais), no formato do núcleo da água. */
   private waterTiles(extra?: WaterTile): WaterTile[] {
     const out: WaterTile[] = [];
-    for (const p of this.list) if (p.heights && p.edges.includes(T.Water)) out.push({ q: p.q, r: p.r, edges: p.edges, level: p.heights[0], spring: !!p.spring });
+    for (const p of this.list) {
+      const level = p.heights ? p.heights[0] : p.level;
+      if (level !== undefined && p.edges.includes(T.Water)) out.push({ q: p.q, r: p.r, edges: p.edges, level, spring: !!p.spring });
+    }
     if (extra) out.push(extra);
     return out;
   }
@@ -414,16 +494,19 @@ export class Board {
    * não vazar para a partida.
    */
   clone(): Board {
-    const b = new Board(this.rules);
+    const b = new Board(this.rules, this.seed);
     b.springSites = this.springSites;
     for (const p of this.list) {
-      const c = b.placeRaw(p.q, p.r, p.def, p.rot);
+      const c = b.placeRaw(p.q, p.r, p.def, p.rot, p);
       c.closed = p.closed;
       c.synergies = p.synergies.map((s) => ({ ...s }));
       if (p.eraMark !== undefined) c.eraMark = p.eraMark;
       if (p.site) c.site = p.site;
       if (p.wonder) c.wonder = true;
+      if (p.moist !== undefined) c.moist = p.moist;
     }
+    b.terraBest = { ...this.terraBest };
+    b.terraBack = this.terraBack;
     b.score = this.score;
     b.perfects = this.perfects;
     b.questsCompleted = this.questsCompleted;
@@ -444,15 +527,31 @@ export class Board {
   }
 
   /** Coloca sem pontuar (peça inicial, reconstrução de estado). */
-  placeRaw(q: number, r: number, def: TileDef, rot: number): Placed {
+  placeRaw(q: number, r: number, def: TileDef, rot: number, from?: Placed): Placed {
     const key = hkey(q, r);
     const p: Placed = { q, r, key, def, rot, edges: rotateEdges(def.edges, rot), index: this.list.length, closed: false, synergies: [] };
-    if (this.rules.relief) {
+    if (from && (from.heights || from.comp)) {
+      // Cópia (prévia da jogada): o que sai só da semente da peça e da casa não é recalculado.
+      p.heights = from.heights;
+      p.hill = from.hill;
+      p.spring = from.spring;
+      p.hiddenSpring = from.hiddenSpring;
+      p.comp = from.comp;
+      p.level = from.level;
+    } else if (this.rules.relief) {
       const prof = this.list.length === 0 ? STARTER_PROFILE : tileProfile(def.edges, def.seed);
       p.heights = worldHeights(prof, rot);
       p.hill = prof.c;
       if (this.list.length > 0 && p.edges.includes(T.Water)) {
         const kind = this.springKind(q, r, p.edges, p.heights[0], def.seed);
+        if (kind) p.spring = true;
+        if (kind === 'hidden') p.hiddenSpring = true;
+      }
+    } else if (this.rules.terra && !this.rules.relief) {
+      p.comp = this.compOf(def, rot);
+      p.level = levelAt(this.seed, q, r, 2);
+      if (this.list.length > 0 && p.edges.includes(T.Water)) {
+        const kind = this.springKind(q, r, p.edges, p.level, def.seed);
         if (kind) p.spring = true;
         if (kind === 'hidden') p.hiddenSpring = true;
       }
@@ -464,17 +563,23 @@ export class Board {
       const k = hkey(q + dq, r + dr);
       if (!this.tiles.has(k)) this.frontier.add(k);
     }
+    // Terra contínua: a peça do centro nasce com a umidade e as manchas que já tem (não é jogada, não paga).
+    if (p.comp && p.index === 0) {
+      p.moist = fitPoints(tileMix(p.edges, p.comp), moistureAt(this, q, r));
+      this.terraBest = patchField(this, this.rules.terraBackMin, this.rules.terraCloseCap);
+    }
     return p;
   }
 
   place(q: number, r: number, def: TileDef, rot: number): PlaceResult {
     const edges = rotateEdges(def.edges, rot);
-    const c = this.check(q, r, edges, this.heightsOf(def, rot), def);
+    const c = this.checkDef(q, r, def, rot);
     const waterBefore = this.rules.springs && edges.includes(T.Water) ? this.waterNow() : null;
     const placed = this.placeRaw(q, r, def, rot);
     const R = this.rules;
-    let points = c.matches * R.matchPoints;
-    const perfect = c.neighbors >= 2 && c.matches === c.neighbors;
+    let points = c.terra ? c.terra.pay.reduce((a, b) => a + b, 0) : c.matches * R.matchPoints;
+    const seams = points;
+    const perfect = c.terra ? c.terra.perfect : c.neighbors >= 2 && c.matches === c.neighbors;
     if (perfect) {
       points += R.perfectBonus + (this.blessed('surveyors') ? BLESSING.perfect : 0);
       this.perfects++;
@@ -522,7 +627,8 @@ export class Board {
       this.influence.delete(placed.key);
     }
     // Bônus do tema por terreno encaixado.
-    for (let i = 0; i < 6; i++) if (c.edgeState[i] === 1) points += R.matchBonus[edges[i]] ?? 0;
+    // Terra contínua: o bônus do tema vale só onde o terreno é o mesmo (a emenda que paga por continuidade, com terrenos diferentes, não conta).
+    for (let i = 0; i < 6; i++) if (c.edgeState[i] === 1 && (!c.terra || this.get(q + DIRS[i][0], r + DIRS[i][1])!.edges[opposite(i)] === edges[i])) points += R.matchBonus[edges[i]] ?? 0;
 
     // Peças que acabaram de ficar cercadas por 6 vizinhos encaixados.
     const closed: Placed[] = [];
@@ -549,6 +655,30 @@ export class Board {
       points += special.points;
       tilesGained += sp.tiles;
       if (sp.lookout) this.lookout = Math.max(this.lookout, sp.lookout);
+    }
+    // Terra contínua: manchas (crescimento e fechamento, com a peça devolvida) e a umidade que a água leva às peças vizinhas.
+    let terra: TerraResult | undefined;
+    if (R.terra) {
+      const f = patchField(this, R.terraBackMin, R.terraCloseCap);
+      const B = this.terraBest;
+      const growth = Math.max(0, f.patch - B.patch);
+      const closePoints = Math.max(0, f.closed - B.closed);
+      const closedPatches = Math.max(0, f.closedN - B.closedN);
+      let backTiles = Math.max(0, f.backN - B.backN) * R.terraBackTiles;
+      if (R.terraBackCap > 0) backTiles = Math.min(backTiles, Math.max(0, R.terraBackCap - this.terraBack));
+      this.terraBack += backTiles;
+      this.terraBest = { patch: Math.max(B.patch, f.patch), closed: Math.max(B.closed, f.closed), closedN: Math.max(B.closedN, f.closedN), backN: Math.max(B.backN, f.backN) };
+      let moisture = 0;
+      for (const o of moistAffected(this, placed)) {
+        const fit = fitPoints(tileMix(o.edges, o.comp!), moistureAt(this, o.q, o.r));
+        if (fit > (o.moist ?? 0)) {
+          if (o !== placed) moisture += fit - (o.moist ?? 0);
+          o.moist = fit;
+        }
+      }
+      points += growth + closePoints + moisture;
+      tilesGained += backTiles;
+      terra = { seams, growth, closePoints, closedPatches, backTiles, moisture };
     }
     const candidates = [placed, ...DIRS.map(([dq, dr]) => this.get(q + dq, r + dr)).filter((x): x is Placed => !!x)];
     for (const t of candidates) {
@@ -645,7 +775,7 @@ export class Board {
       eraUp = this.era;
       this.markPending = this.era;
     }
-    return { placed, points, matches: c.matches, neighbors: c.neighbors, steps: c.steps, falls: c.falls, water, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special, influence: c.influence, routes };
+    return { placed, points, matches: c.matches, neighbors: c.neighbors, steps: c.steps, falls: c.falls, terra, water, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special, influence: c.influence, routes };
   }
 
   blessed(id: BlessingId) {
@@ -674,7 +804,11 @@ export class Board {
   private isClosedPerfect(t: Placed) {
     for (let i = 0; i < 6; i++) {
       const n = this.get(t.q + DIRS[i][0], t.r + DIRS[i][1]);
-      if (!n || n.edges[opposite(i)] !== t.edges[i]) return false;
+      if (!n) return false;
+      // Terra contínua: cerca a peça que tem as 6 emendas com continuidade de perfeito.
+      if (t.comp && n.comp) {
+        if (continuity(t.edges, t.comp, i, n.edges, n.comp, opposite(i)) < TERRA.perfectS) return false;
+      } else if (n.edges[opposite(i)] !== t.edges[i]) return false;
     }
     return true;
   }
