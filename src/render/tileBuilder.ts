@@ -3,6 +3,7 @@ import { corner, edgeMid, INR } from '../core/hex';
 import type { DayPhase, EggKit } from '../core/eggs';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
 import { FALL_D, HILL, hillProfile, PEAK, PEAK_CONES, PEAK_REACH } from './relief';
+import { MAGRA } from './magra';
 import { isFlat, makeTerrain, skirtDrop, skirtEnd, skirtWidth, type TerrainSpec } from './terrain';
 import type { SynKind } from '../core/synergy';
 import type { SiteKind } from '../core/sites';
@@ -15,9 +16,9 @@ import { CROP_LAYOUT, type HouseMeta } from './lib';
 // O mesmo resultado serve para o fantasma, a animação de queda e o "cozimento"
 // no bloco estático: só muda a matriz. Tudo é determinístico pela semente.
 
-export const TILE_T = 0.28;
+export const TILE_T = MAGRA.tileT;
 /** Altura de um nível de relevo (R2): `Theme.relief.levels` e `core/relief.ts`. Vizinhos diferem 1 nível, então o degrau é 0,3. */
-export const LEVEL_STEP = 0.3;
+export const LEVEL_STEP = MAGRA.levelStep;
 /** Inclinação (altura por distância) acima da qual a decoração não assenta: ~17°, o resto é encosta de rocha. */
 const STEEP_MAX = 0.3;
 /** Quanto a saia afunda (em níveis) abaixo da curva que a peça vizinha segue, para não ficar no mesmo plano que o chão dela. */
@@ -1242,8 +1243,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         out.push({
           // A saia fica um fio abaixo do chão que a vizinha vai ter ali (que segue a mesma curva): sem isso as duas superfícies coincidem e cintilam.
           p: [base.p[0] + dx * rho, base.p[1] - (dropAt(rho) + SKIRT_UNDER * smooth(0, 0.25, rho)) * LEVEL_STEP, base.p[2] + dz * rho],
-          c: grass.clone().lerp(soil, 0.7 * f),
-          s: base.s.map((v, j) => v + (SPLAT_WALL[j] - v) * f) as unknown as Splat,
+          c: grass.clone().lerp(soil, MAGRA.soil * f),
+          s: base.s.map((v, j) => v + (SPLAT_WALL[j] - v) * f * (MAGRA.soil / 0.7)) as unknown as Splat,
         });
       }
       return out;

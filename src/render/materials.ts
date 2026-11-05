@@ -1,3 +1,4 @@
+import { MAGRA } from './magra';
 import * as THREE from 'three/webgpu';
 import {
   BRDF_GGX,
@@ -1214,7 +1215,7 @@ export function makeVoidMaterial() {
     // Areia molhada logo abaixo da espuma, seca mais perto da peça.
     const wet = smoothstep(0.0, 0.3, dd);
     const sandNear = mix(u.sandCol, u.sandCol.mul(0.78), wet);
-    const shore = smoothstep(0.34, 0.2, dd);
+    const shore = smoothstep(0.34 * MAGRA.sand, 0.2 * MAGRA.sand, dd);
     let col: N = mix(water, sandNear, shore);
     col = mix(col, foamCol, foam);
     // Longe: a cor do fundo (a mesma da névoa).

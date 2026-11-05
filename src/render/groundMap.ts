@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import { MAGRA } from './magra';
 import type { TileBuild } from './tileBuilder';
 
 // Mapa do chão visto de cima, para a luz que não vem do sol nem do céu:
@@ -26,7 +27,7 @@ export const HEIGHT_RANGE = 1;
 const LANTERN_SIGMA = 0.17;
 
 /** Altura de um texel sem peça (o fundo da ilha, -TILE_T). */
-const RELIEF_VOID = THREE.DataUtils.toHalfFloat(-0.28);
+const RELIEF_VOID = THREE.DataUtils.toHalfFloat(-MAGRA.tileT);
 const to8 = (v: number) => (v <= 0 ? 0 : v >= 1 ? 255 : Math.round(v * 255));
 
 export class GroundMap {
@@ -105,6 +106,7 @@ export class GroundMap {
     this.shade.fill(0);
     this.land.fill(0);
     this.relief.fill(RELIEF_VOID);
+    this.stamped = null;
     this.dirty = true;
   }
 
@@ -115,6 +117,53 @@ export class GroundMap {
     const w = water.clone().multiplyScalar(0.55);
     this.raster(b.water, m, (_, out) => out.copy(w));
     this.dirty = true;
+  }
+
+  /** Carimbo provisório (estudo R7a, o fantasma fiel): o que havia sob a peça que paira, guardado para devolver. */
+  private stamped: { u0: number; v0: number; w: number; h: number; data: Uint8Array; cover: Uint8Array; height: Uint8Array; land: Uint8Array; relief: Uint16Array } | null = null;
+
+  /**
+   * Pinta uma peça que ainda não assentou (fantasma, queda) como se já estivesse no mapa, para o chão dela ler o campo contínuo
+   * (cor misturada, normal suave) e não o desenho por setor; `unstamp` devolve os texels como estavam. Só um carimbo por vez.
+   */
+  stamp(b: TileBuild, m: THREE.Matrix4, water: THREE.Color) {
+    this.unstamp();
+    const R = 2.4;
+    const cu = (m.elements[12] + GROUND_EXTENT) / TEXEL, cv = (m.elements[14] + GROUND_EXTENT) / TEXEL, r = Math.ceil(R / TEXEL);
+    const u0 = Math.max(0, Math.floor(cu) - r), v0 = Math.max(0, Math.floor(cv) - r);
+    const w = Math.min(GROUND_SIZE, Math.floor(cu) + r + 1) - u0, h = Math.min(GROUND_SIZE, Math.floor(cv) + r + 1) - v0;
+    if (w <= 0 || h <= 0) return;
+    const keep = { u0, v0, w, h, data: new Uint8Array(w * h * 4), cover: new Uint8Array(w * h), height: new Uint8Array(w * h), land: new Uint8Array(w * h * 4), relief: new Uint16Array(w * h) };
+    this.copyRegion(keep, true);
+    this.stamped = keep;
+    this.add(b, m, water);
+  }
+
+  unstamp() {
+    const k = this.stamped;
+    if (!k) return;
+    this.stamped = null;
+    this.copyRegion(k, false);
+    this.dirty = true;
+  }
+
+  private copyRegion(k: NonNullable<GroundMap['stamped']>, save: boolean) {
+    for (let y = 0; y < k.h; y++) {
+      const a = (k.v0 + y) * GROUND_SIZE + k.u0, b = y * k.w;
+      if (save) {
+        k.data.set(this.data.subarray(a * 4, (a + k.w) * 4), b * 4);
+        k.land.set(this.land.subarray(a * 4, (a + k.w) * 4), b * 4);
+        k.cover.set(this.cover.subarray(a, a + k.w), b);
+        k.height.set(this.height.subarray(a, a + k.w), b);
+        k.relief.set(this.relief.subarray(a, a + k.w), b);
+      } else {
+        this.data.set(k.data.subarray(b * 4, (b + k.w) * 4), a * 4);
+        this.land.set(k.land.subarray(b * 4, (b + k.w) * 4), a * 4);
+        this.cover.set(k.cover.subarray(b, b + k.w), a);
+        this.height.set(k.height.subarray(b, b + k.w), a);
+        this.relief.set(k.relief.subarray(b, b + k.w), a);
+      }
+    }
   }
 
   /** Soma a poça de luz de um lampião em (x, z), com força `amp` no centro (0 a 1). */

@@ -30,6 +30,7 @@ import { LiveTile } from './liveTile';
 import { PreviewView } from './preview';
 import { FallLayer } from './falls';
 import { FALL_D } from './relief';
+import { MAGRA } from './magra';
 import { skirtWidth } from './terrain';
 import { Warp, isWarped, warpBuild } from './fluid';
 import { LEVEL_STEP, TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type BuildOpts, type TileBuild } from './tileBuilder';
@@ -126,7 +127,7 @@ function levelSig(lvs: BuildOpts['levels']): string {
 }
 
 /** O morro no meio da peça sobe mais que o nível lógico dele (só a aparência; baixo, para o morro não virar uma cúpula por peça). */
-const MORRO_BONUS = 0.3;
+const MORRO_BONUS = MAGRA.morro;
 /**
  * O relevo é do mundo: onde a vizinha já assentada tem a borda mais baixa (ou mais alta), o alvo do setor puxa esta fração do caminho
  * até ela. Sem isso, cada peça cercada de vizinhas mais baixas vira uma almofada (platô no meio e encosta para todos os lados).
@@ -1034,7 +1035,7 @@ export class World {
     this.quality = q;
     // O reforço da luz rebatida do Ultra vale já; no construtor o céu ainda não existe.
     if (this.sky) this.applySky();
-    const shadows = q !== 'low';
+    const shadows = q !== 'low' && !MAGRA.noShadow;
     if (this.renderer.shadowMap.enabled !== shadows) {
       this.renderer.shadowMap.enabled = shadows;
       // Materiais precisam recompilar quando sombras ligam/desligam.
@@ -1842,6 +1843,7 @@ export class World {
       live = new LiveTile(p.def, this.shaped(this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths, eggs, spring: p.spring, levels: lvs }), p.q, p.r, p.rot), sig, this.lib, this.quality !== 'low');
       this.scene.add(live.group);
       this.dropGhost();
+      this.stampLive(live.build, p.q, p.r, p.rot);
     }
     live.inner.rotation.y = (-p.rot * Math.PI) / 3;
     const { x, z } = hexToWorld(p.q, p.r);
@@ -2054,11 +2056,15 @@ export class World {
       }
       old?.dispose();
     }
+    if (MAGRA.ghost && this.stampKey !== key) {
+      this.stampKey = key;
+      this.stampLive(this.ghost.build, q, r, rot);
+    }
     this.ghost.group.visible = true;
     this.ghostAngle = angle;
     const { x, z } = hexToWorld(q, r);
     const ly = lvs ? lvs.own * LEVEL_STEP : 0;
-    this.ghostTarget.set(x, 0.32 + ly, z);
+    this.ghostTarget.set(x, (MAGRA.ghost ? 0.14 : 0.32) + ly, z);
     this.hoverRing.visible = true;
     const hf = this.fl(x, z);
     this.hoverRing.position.set(hf.x, -0.1 + ly, hf.z);
@@ -2076,13 +2082,22 @@ export class World {
     }
   }
 
+  /** Fantasma fiel (`?magra=c`): a peça que paira ou cai já lê o campo contínuo do chão, como vai ler depois de assentar. */
+  private stampKey = '';
+  private stampLive(b: TileBuild, q: number, r: number, rot: number) {
+    if (!MAGRA.ghost || !this.pieceRelief || !this.warp) return;
+    groundMap.stamp(b, tileMatrix(q, r, rot, this.heightOf(q, r)), this.waterColor);
+  }
+
   clearGhost() {
+    if (MAGRA.ghost) (groundMap.unstamp(), (this.stampKey = ''));
     if (this.ghost) this.ghost.group.visible = false;
     this.hoverRing.visible = false;
     for (const m of this.markers) m.visible = false;
   }
 
   dropGhost() {
+    if (MAGRA.ghost && this.ghost) (groundMap.unstamp(), (this.stampKey = ''));
     this.ghost?.dispose();
     this.ghost = null;
     this.ghostKey = '';
@@ -2817,6 +2832,7 @@ export class World {
         });
       }
       if (d.t > fall + d.hold) {
+        if (MAGRA.ghost) (groundMap.unstamp(), (this.stampKey = ''));
         this.bake(d.placed, d.live.build);
         this.syncWater();
         d.live.dispose();
