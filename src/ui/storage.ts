@@ -18,6 +18,46 @@ export interface KeyStore {
   setItem(k: string, v: string): void;
 }
 
+/** Armazenamento em que se grava e apaga (o localStorage serve; os testes passam um falso). */
+export interface WritableStore {
+  setItem(k: string, v: string): void;
+  removeItem(k: string): void;
+}
+
+/** Texto do aviso quando o navegador recusa a gravação. */
+export const SAVE_FAIL_NOTICE = 'Não foi possível salvar neste navegador. Use Exportar no Almanaque para guardar o progresso.';
+
+/** Envolve `fn` para rodar só na primeira chamada (o aviso de falha aparece uma vez por sessão). */
+export function once(fn: () => void): () => void {
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    fn();
+  };
+}
+
+/**
+ * Grava (ou apaga, com `null`) sem nunca lançar: cota cheia, modo privado e armazenamento bloqueado
+ * viram `false` e chamam `onFail`. Passe um `onFail` que já seja `once(...)` para avisar uma vez só.
+ * `get` devolve o armazenamento na hora (acessar `localStorage` pode lançar).
+ */
+export function safeWrite(get: () => WritableStore, key: string, value: string | null, onFail: () => void): boolean {
+  try {
+    const s = get();
+    if (value === null) s.removeItem(key);
+    else s.setItem(key, value);
+    return true;
+  } catch {
+    try {
+      onFail();
+    } catch {
+      /* o aviso nunca quebra o jogo */
+    }
+    return false;
+  }
+}
+
 export const BACKUP_VERSION = 1;
 /** Tamanho máximo de um valor importado (UTF-16). Uma partida de 1000 jogadas fica bem abaixo. */
 export const MAX_VALUE = 1_000_000;

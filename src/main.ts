@@ -28,7 +28,7 @@ import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor
 import { Capture, VIDEO_QUALITIES } from './ui/capture';
 import { Hud, TIME_ICON, TIME_LABEL, TIME_ORDER, glyph, questLabel, questMarker } from './ui/hud';
 import { bindInput } from './ui/input';
-import { persist as requestPersistence, exportKeys, importKeys } from './ui/storage';
+import { persist as requestPersistence, exportKeys, importKeys, safeWrite, once, SAVE_FAIL_NOTICE } from './ui/storage';
 import { MONUMENT_KINDS, MONUMENT_NAME, Progress, cleanProgress, SPECIAL_NAME, UNLOCKS, type MonumentKind } from './ui/progress';
 import { Tutorial } from './ui/tutorial';
 import { blessingName, blessingRule, choiceHtml } from './ui/eraChoice';
@@ -70,6 +70,8 @@ interface Hot {
 }
 
 const params = new URLSearchParams(location.search);
+// `hud` nasce logo abaixo; o aviso só roda numa gravação, bem depois.
+const warnSaveFailed = once(() => hud.toast(SAVE_FAIL_NOTICE, 'bad'));
 const store = {
   get(k: string) {
     try {
@@ -79,12 +81,8 @@ const store = {
     }
   },
   set(k: string, v: string | null) {
-    try {
-      if (v === null) localStorage.removeItem(`retalhos.${k}`);
-      else localStorage.setItem(`retalhos.${k}`, v);
-    } catch {
-      /* armazenamento indisponível: segue sem salvar */
-    }
+    // Armazenamento indisponível: o jogo segue sem salvar e avisa uma vez por sessão.
+    safeWrite(() => localStorage, `retalhos.${k}`, v, warnSaveFailed);
   },
 };
 

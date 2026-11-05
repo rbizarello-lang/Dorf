@@ -39,7 +39,7 @@ npm install          # Node >= 22.12 (ver .nvmrc)
 npm run dev          # servidor de desenvolvimento (Vite)
 npm run check        # typecheck + testes + build: rode antes de todo commit
 npm run typecheck    # tsc --noEmit
-npm test             # 600 partidas simuladas com oráculos independentes, cenários sintéticos, legibilidade das cores (tests/legibility.ts), vídeo/câmera/nível por placa (tests/video.ts) e os gatilhos dos easter eggs (tests/eggs.ts)
+npm test             # 600 partidas simuladas com oráculos independentes, cenários sintéticos, legibilidade das cores (tests/legibility.ts; à noite os terrenos precisam de ΔE ≥ metade do dia e ≥ 2,3 em valor absoluto), vídeo/câmera/nível por placa (tests/video.ts) e os gatilhos dos easter eggs (tests/eggs.ts)
 npm run balance      # painel de equilíbrio (tests/balance.ts): média, p10/p50/p90 e origem dos pontos, por modo e por tema. Não entra no check. `npm run balance -- 40` muda o tamanho da amostra (padrão 80). Meta dos Exploradores: o jogador "caça sítios" acha os 10 em pelo menos 50% das partidas (linha "todos os sítios"); o guloso puro não mira sítios e fica bem abaixo, de propósito
 npm run build        # dist/index.html (arquivo único)
 npm run smoke        # depois do build: abre o jogo em WebGPU e WebGL2 e falha com erro no console
@@ -47,7 +47,7 @@ node scripts/pwa.mjs http://127.0.0.1:4173/   # depois do build e com o dist ser
 node scripts/artifact.mjs   # depois do build: dist/artifact/retalhos.html (formato de página publicável)
 ```
 
-A CI (`.github/workflows/ci.yml`) roda typecheck, testes e build em todo pull request e em todo push na `main`, e depois `npm run smoke` (`scripts/smoke.mjs`): abre o build no Chromium em WebGPU e em WebGL2, deixa a IA pôr 12 peças e falha com qualquer erro no console. Rode o mesmo localmente depois do build quando mexer em `src/render/` ou no `main.ts`. No Claude Code na web, o hook `.claude/hooks/session-start.sh` roda `npm install` no início da sessão.
+A CI (`.github/workflows/ci.yml`) roda typecheck, testes e build em todo pull request e em todo push na `main`, e depois `npm run smoke` (`scripts/smoke.mjs`): abre o build no Chromium em WebGPU e em WebGL2, deixa a IA pôr 12 peças em Baixa e falha com qualquer erro no console. Também abre Alta e Ultra nos dois backends (8 peças) e tem um caso `ao-vivo` que troca a qualidade (Baixa, Alta, Ultra, Média) e a hora (dia até a noite) com a partida aberta. Rode o mesmo localmente depois do build quando mexer em `src/render/` ou no `main.ts`. No Claude Code na web, o hook `.claude/hooks/session-start.sh` roda `npm install` no início da sessão.
 
 ### Verificação visual (Playwright, sem GPU)
 
@@ -194,7 +194,7 @@ src/video/       foto e vídeo (o modo foto e a exportação ficam em src/ui/cap
   render.ts      desenha o vídeo quadro a quadro, com world.tick(1/60), e entrega ao codificador
   encoder.ts     WebCodecs: escolhe H.264 ou VP9 e guarda os quadros codificados em Blobs
   mp4.ts         cabeçalho MP4 (ftyp, moov, mdat) escrito à mão, sem biblioteca
-src/ui/          HUD em HTML/CSS (hud.ts, style.css); eraChoice.ts: nomes e diálogo das cartas da era; banner.ts: cor da casa e brasão (troca o `ui.accent` do tema); tutorial.ts: dicas das primeiras partidas; progress.ts: progresso entre partidas e liberação das peças especiais; capture.ts: modo foto, gravação, filme da partida e exportação (`Capture`, com o estado da tela em `stage`); input.ts: mouse, toque e teclado no tabuleiro (`bindInput`); minimap.ts: minimapa e linha do tempo do fim da partida; frames.ts: moldura e emblema do tema em CSS e SVG; a11y.ts: paleta para daltonismo; a página é o index.html; storage.ts: `persist()` depois da primeira partida acabada, `exportKeys` e `importKeys` (módulo isolado, sem dependência do jogo, para outros jogos copiarem)
+src/ui/          HUD em HTML/CSS (hud.ts, style.css); eraChoice.ts: nomes e diálogo das cartas da era; banner.ts: cor da casa e brasão (troca o `ui.accent` do tema); tutorial.ts: dicas das primeiras partidas; progress.ts: progresso entre partidas e liberação das peças especiais; capture.ts: modo foto, gravação, filme da partida e exportação (`Capture`, com o estado da tela em `stage`); input.ts: mouse, toque e teclado no tabuleiro (`bindInput`); minimap.ts: minimapa e linha do tempo do fim da partida; frames.ts: moldura e emblema do tema em CSS e SVG; a11y.ts: paleta para daltonismo; a página é o index.html; storage.ts: `persist()` depois da primeira partida acabada, `safeWrite` e `once` (gravação que nunca lança: se o `localStorage` recusar, `store.set` mostra UMA vez por sessão o aviso `SAVE_FAIL_NOTICE`, que manda usar Exportar no Almanaque), `exportKeys` e `importKeys` (módulo isolado, sem dependência do jogo, para outros jogos copiarem)
 src/audio.ts     sons sintetizados com WebAudio: música, efeitos e ambiente (paisagem perto do foco da câmera, `setAmbience`)
 src/main.ts      entrada: fluxo da partida, telas e botões, qualidade, salvamento, parâmetros de URL, ganchos de depuração
 tests/logic.ts      simulação de partidas contra oráculos independentes (grupos por BFS, pontuação recalculada, replay)
