@@ -15,6 +15,7 @@ import { routeMarks, type RouteHit, type RouteMark } from './core/routes';
 import type { PassingWeather, Quality, TimeOfDay } from './render/world';
 import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
 import { DynRes } from './render/dynres';
+import { groundMap } from './render/groundMap';
 import { RefreshMeter, capFor, dtCap, isEconomy, shouldRender, targetFps } from './render/framePacing';
 import { readGpuInfo } from './render/gpu';
 import { autoStartTier, gpuName } from './render/gpuTier';
@@ -2114,9 +2115,11 @@ function start(data: unknown) {
 
 // Custo de mover o fantasma: passa por até `n` casas da fronteira (uma por quadro) e devolve, por troca de casa, os ms da montagem
 // da peça (`setGhost`) e da pré-visualização no mapa do chão (o GPU não entra: ele só enfileira o envio das texturas).
-(window as unknown as { __ghostCost: (n?: number) => Promise<{ ghost: number[]; stamp: number[]; frame: number[] }> }).__ghostCost = async (n = 20) => {
+(window as unknown as { __ghostCost: (n?: number, pausa?: number) => Promise<{ ghost: number[]; stamp: number[]; frame: number[]; uploads: number }> }).__ghostCost = async (n = 20, pausa = 0) => {
   const cells = [...game.board.frontier].slice(0, n).map((k) => unkey(k));
-  const out = { ghost: [] as number[], stamp: [] as number[], frame: [] as number[] };
+  const out = { ghost: [] as number[], stamp: [] as number[], frame: [] as number[], uploads: 0 };
+  // `pausa` (ms) = quanto o fantasma fica parado em cada casa: 0 é uma varredura rápida do mouse; 150 deixa o campo entrar nos mapas.
+  const up0 = groundMap.uploads;
   for (const [q, r] of cells) {
     hover = { q, r };
     updateGhost();
@@ -2124,9 +2127,29 @@ function start(data: unknown) {
     await new Promise<void>((res) => requestAnimationFrame(() => res()));
     out.frame.push(performance.now() - t0);
     out.ghost.push(world.ghostMs);
+    if (pausa) await new Promise<void>((res) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => res())), pausa));
     out.stamp.push(world.stampMs);
   }
+  out.uploads = groundMap.uploads - up0;
   return out;
+};
+
+// Varredura do mouse mais rápida que o desenho: troca de casa a cada `passo` ms, chamando a pintura do mapa a cada troca, e devolve quantas vezes o campo foi pintado.
+(window as unknown as { __ghostSweep: (n?: number, passo?: number, espera?: number) => Promise<{ pintou: number; depois: number }> }).__ghostSweep = async (n = 24, passo = 30, espera = 300) => {
+  const cells = [...game.board.frontier].slice(0, n).map((k) => unkey(k));
+  const r0 = world.stampRuns;
+  for (const [q, r] of cells) {
+    hover = { q, r };
+    updateGhost();
+    world.restampNow();
+    await new Promise<void>((res) => setTimeout(res, passo));
+    world.restampNow();
+  }
+  const pintou = world.stampRuns - r0;
+  // Parado na última casa: depois de ~120 ms o campo entra.
+  await new Promise<void>((res) => setTimeout(res, espera));
+  world.restampNow();
+  return { pintou, depois: world.stampRuns - r0 - pintou };
 };
 
 // Joga com a IA (sem animação) até a peça da vez ter rio e pelo menos `kinds` terrenos diferentes (capturas do fantasma com paisagem variada).

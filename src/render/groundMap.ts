@@ -212,9 +212,12 @@ export class GroundMap {
   }
 
   /** Envia a textura se algo mudou (uma vez por quadro). */
+  /** Depuração (`__ghostCost`): quantas vezes os mapas foram reenviados à GPU. */
+  uploads = 0;
   flush() {
     if (!this.dirty) return;
     this.dirty = false;
+    this.uploads++;
     this.texture.needsUpdate = true;
     this.coverTexture.needsUpdate = true;
     this.heightTexture.needsUpdate = true;

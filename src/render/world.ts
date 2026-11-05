@@ -1904,6 +1904,7 @@ export class World {
     const sig = live.map((v) => `${v.l.id}@${v.q},${v.r}`).join('|');
     if (sig === this.paintSig) return;
     this.paintSig = sig;
+    if (live.length) this.stampRuns++;
     const t0 = performance.now();
     groundMap.unpreview();
     seaMap.unpreview();
@@ -1915,6 +1916,12 @@ export class World {
   }
   /** Depuração (`window.__ghostCost`): ms da última pré-visualização no mapa e da última montagem do fantasma. */
   stampMs = 0;
+  /** Quantas vezes o fantasma ou uma queda foi pintado nos mapas (cada uma reenvia as texturas à GPU). */
+  stampRuns = 0;
+  /** Depuração: roda a pintura agora, sem esperar o quadro (varredura do mouse mais rápida que o desenho por software). */
+  restampNow() {
+    this.restamp();
+  }
   ghostMs = 0;
 
   /** Margem que a saia de uma peça alta dá à areia e à espuma do mar (a mesma do `bake`). */
