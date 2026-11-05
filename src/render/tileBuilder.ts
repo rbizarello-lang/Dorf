@@ -3,6 +3,7 @@ import { corner, edgeMid, INR } from '../core/hex';
 import type { DayPhase, EggKit } from '../core/eggs';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
 import { FALL_D, HILL, hillProfile, PEAK, PEAK_CONES, PEAK_REACH } from './relief';
+import { MAGRA, onMagra } from './magra';
 import { isFlat, makeTerrain, skirtDrop, skirtEnd, skirtWidth, type TerrainSpec } from './terrain';
 import type { SynKind } from '../core/synergy';
 import type { SiteKind } from '../core/sites';
@@ -15,9 +16,13 @@ import { CROP_LAYOUT, type HouseMeta } from './lib';
 // O mesmo resultado serve para o fantasma, a animação de queda e o "cozimento"
 // no bloco estático: só muda a matriz. Tudo é determinístico pela semente.
 
-export const TILE_T = 0.28;
+export let TILE_T = 0.28;
 /** Altura de um nível de relevo (R2): `Theme.relief.levels` e `core/relief.ts`. Vizinhos diferem 1 nível, então o degrau é 0,3. */
-export const LEVEL_STEP = 0.3;
+export let LEVEL_STEP = 0.3;
+onMagra((m) => {
+  TILE_T = m.tileT;
+  LEVEL_STEP = m.levelStep;
+});
 /** Inclinação (altura por distância) acima da qual a decoração não assenta: ~17°, o resto é encosta de rocha. */
 const STEEP_MAX = 0.3;
 /** Quanto a saia afunda (em níveis) abaixo da curva que a peça vizinha segue, para não ficar no mesmo plano que o chão dela. */
@@ -1091,7 +1096,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     return e > 0.03 ? Math.max(lift, WATER_Y + 0.01 - groundY(x, z)) : lift;
   };
   /** Inclinação do chão (altura por distância): a decoração, as casas principalmente, foge do que é íngreme. */
-  const steep = (x: number, z: number) => (terr ? terr.slope(x, z) * LEVEL_STEP : 0);
+  // O critério de aceitação da decoração é o da base (0,3 de altura por nível): níveis mais baixos não deixam mais árvore e casa nascer na encosta.
+  const steep = (x: number, z: number) => (terr ? terr.slope(x, z) * 0.3 : 0);
   /** Comprimento do traçado e quanto cada ponta desce: a descida acompanha o arco desde a borda (`len` de rampa). */
   const mkRamp = (paths: Path[], ends: number[][], reach: number, fade: number, len: number) => {
     const items = paths
@@ -1242,8 +1248,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         out.push({
           // A saia fica um fio abaixo do chão que a vizinha vai ter ali (que segue a mesma curva): sem isso as duas superfícies coincidem e cintilam.
           p: [base.p[0] + dx * rho, base.p[1] - (dropAt(rho) + SKIRT_UNDER * smooth(0, 0.25, rho)) * LEVEL_STEP, base.p[2] + dz * rho],
-          c: grass.clone().lerp(soil, 0.7 * f),
-          s: base.s.map((v, j) => v + (SPLAT_WALL[j] - v) * f) as unknown as Splat,
+          c: grass.clone().lerp(soil, MAGRA.soil * f),
+          s: base.s.map((v, j) => v + (SPLAT_WALL[j] - v) * f * (MAGRA.soil / 0.7)) as unknown as Splat,
         });
       }
       return out;

@@ -2078,14 +2078,20 @@ function start(data: unknown) {
 // Ajuda para capturas de tela automatizadas: mostra a peça atual na melhor posição.
 (window as unknown as { __over: () => void }).__over = () => showGameOver();
 
-(window as unknown as { __ghostBest: () => void }).__ghostBest = () => {
-  const m = game.bestMove();
+(window as unknown as { __ghostBest: (zoom?: number) => void }).__ghostBest = (zoom) => {
+  // Com `zoom` (capturas do estudo R7a) a jogada é a 1ª do ranking, que é determinística; sem ele, a da IA gulosa (desempate sorteado).
+  const m = zoom ? game.rankMoves(1)[0] ?? game.bestMove() : game.bestMove();
   if (!m) return;
   hover = { q: m.q, r: m.r };
   while (game.rot !== m.rot) rotate(1);
   updateGhost();
   const { x, z } = hexToWorld(m.q, m.r);
   world.rig.goal.set(x, 0, z);
+  // Com `zoom`, a câmera vai direto ao fantasma (capturas do estudo R7a).
+  if (zoom) {
+    world.rig.target.set(x, 0, z);
+    world.rig.dist = world.rig.goalDist = zoom;
+  }
 };
 
 // Coloca a peça exatamente onde o fantasma está (a mesma jogada que o __ghostBest mostrou: o bestMove sorteia empates).

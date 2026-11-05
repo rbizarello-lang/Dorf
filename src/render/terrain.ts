@@ -13,6 +13,7 @@
 //
 // Sem three.js: a altura é em NÍVEIS (1 nível = LEVEL_STEP), relativa ao `own` da peça. Só o render usa isto.
 import { corner, edgeMid, INR } from '../core/hex';
+import { MAGRA, onMagra } from './magra';
 
 export interface TerrainSpec {
   /** Altura-alvo de cada borda/setor (origem) e do meio da peça, em níveis relativos ao `own`. */
@@ -44,22 +45,22 @@ export interface Terrain {
 }
 
 /** Altura de um nível no mundo (a mesma de `LEVEL_STEP`, em tileBuilder) e a espessura da peça (`TILE_T`): o pé da saia desce até o fundo dela. */
-const LV = 0.3;
-const FLOOR_W = 0.28;
+let LV = 0.3;
+let FLOOR_W = 0.28;
 /** Largura máxima da saia (fica dentro da casa vizinha) e inclinação média alvo (altura por largura, no mundo: ~35°). */
-export const SKIRT_MAX = 1.0;
-const SKIRT_SLOPE = 0.7;
+export let SKIRT_MAX = 1.0;
+let SKIRT_SLOPE = 0.7;
 /**
  * Perfil da saia: mistura de uma curva em S (ombro arredondado, pé deitado) com uma curva de talude (começa mais firme e se deita
  * devagar até o chão). Menos S e mais talude: o topo fica chato com uma quina macia e o pé corre longo e suave, sem a barriga de almofada.
  */
 const SKIRT_S = 0.3;
-const SKIRT_TALUS = 1.4;
+let SKIRT_TALUS = 1.4;
 /**
  * Fundo do pé da saia, em níveis abaixo do chão comum (0): a borda baixa desce até o fundo da peça (sem parede), a alta termina
  * mais acima e deixa um beiral curto. Depende só da altura da borda, então os dois lados concordam.
  */
-export const skirtEnd = (hb: number) => (FLOOR_W - 0.095 * Math.min(2, Math.max(0, hb))) / LV;
+export const skirtEnd = (hb: number) => (FLOOR_W - 0.095 * MAGRA.beiral * Math.min(2, Math.max(0, hb))) / LV;
 /** Largura da saia numa borda de altura `hb` (níveis do mundo): a que dá a inclinação alvo até o pé, no máximo `SKIRT_MAX`. */
 export const skirtWidth = (hb: number) => Math.min(SKIRT_MAX, ((hb + skirtEnd(hb)) * LV) / SKIRT_SLOPE);
 /**
@@ -77,14 +78,24 @@ export function skirtDrop(hb: number, rho: number): number {
 
 const SIGMA = 0.72;
 /** Peso do pico do meio no kernel: segura o morro, que o vizinho de borda dilui (baixo: a cúpula por peça não incha o morro). */
-const CENTER_W = 1.5;
+let CENTER_W = 1.5;
 /** Largura (da borda para dentro) em que a correção da emenda some: o talude. */
 const TALUS = 0.85;
 /**
  * O ondulado do mundo: amplitude (níveis) e as três oitavas (peso, comprimento de onda em unidades do mundo). Colinas de 4 a 5
  * peças de largura (a peça tem 1,7), não uma saliência por peça: o relevo é do mundo e atravessa as emendas.
  */
-const SWELL_AMP = 0.8;
+let SWELL_AMP = 0.8;
+// Os valores acima seguem o `MAGRA` (base no Clássico, a variante escolhida no Relevo).
+onMagra((m) => {
+  LV = m.levelStep;
+  FLOOR_W = m.tileT;
+  SKIRT_MAX = m.skirtMax;
+  SKIRT_SLOPE = m.skirtSlope;
+  SKIRT_TALUS = m.skirtTalus;
+  CENTER_W = m.centerW;
+  SWELL_AMP = 0.8 * m.swell;
+});
 const SWELL: ReadonlyArray<readonly [number, number]> = [[0.65, 9], [0.27, 4], [0.08, 1.7]];
 
 const smooth = (a: number, b: number, x: number) => {

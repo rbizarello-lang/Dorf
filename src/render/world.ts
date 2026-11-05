@@ -30,6 +30,7 @@ import { LiveTile } from './liveTile';
 import { PreviewView } from './preview';
 import { FallLayer } from './falls';
 import { FALL_D } from './relief';
+import { MAGRA, setMagra } from './magra';
 import { skirtWidth } from './terrain';
 import { Warp, isWarped, warpBuild } from './fluid';
 import { LEVEL_STEP, TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type BuildOpts, type TileBuild } from './tileBuilder';
@@ -126,7 +127,6 @@ function levelSig(lvs: BuildOpts['levels']): string {
 }
 
 /** O morro no meio da peça sobe mais que o nível lógico dele (só a aparência; baixo, para o morro não virar uma cúpula por peça). */
-const MORRO_BONUS = 0.3;
 /**
  * O relevo é do mundo: onde a vizinha já assentada tem a borda mais baixa (ou mais alta), o alvo do setor puxa esta fração do caminho
  * até ela. Sem isso, cada peça cercada de vizinhas mais baixas vira uma almofada (platô no meio e encosta para todos os lados).
@@ -610,6 +610,7 @@ export class World {
   private env = new SkyEnv();
   private sky!: Sky;
   private skyTarget!: Sky;
+  private voidMesh!: THREE.Mesh;
   private voidU: ReturnType<typeof makeVoidMaterial>['u'];
   private voidMat: THREE.MeshStandardNodeMaterial;
   /** Raio explorado que o vazio persegue (terra incógnita). */
@@ -781,6 +782,7 @@ export class World {
     this.voidU = voidM.u;
     this.voidMat = voidM.material;
     const voidMesh = new THREE.Mesh(new THREE.PlaneGeometry(600, 600).rotateX(-Math.PI / 2), voidM.material);
+    this.voidMesh = voidMesh;
     voidMesh.position.y = -TILE_T - 0.1; // um palmo abaixo do fundo das peças: elas pousam no entorno, não flutuam
     voidMesh.renderOrder = -1;
     voidMesh.receiveShadow = true;
@@ -1046,7 +1048,7 @@ export class World {
     this.quality = q;
     // O reforço da luz rebatida do Ultra vale já; no construtor o céu ainda não existe.
     if (this.sky) this.applySky();
-    const shadows = q !== 'low';
+    const shadows = q !== 'low' && !MAGRA.noShadow;
     if (this.renderer.shadowMap.enabled !== shadows) {
       this.renderer.shadowMap.enabled = shadows;
       // Materiais precisam recompilar quando sombras ligam/desligam.
@@ -1199,6 +1201,10 @@ export class World {
 
   setPieceRelief(on: boolean) {
     this.pieceRelief = on;
+    // A peça magra (R7a) é só do Relevo; o Clássico segue a base. Vale antes de montar qualquer peça (a partida nova reconstrói tudo).
+    setMagra(on);
+    this.voidMesh.position.y = -TILE_T - 0.1;
+    this.voidU.sandK.value = MAGRA.sand;
     this.setFluid(this.fluidPref === 'on' || (this.fluidPref === 'auto' && on));
     U.rock.value = on ? 1 : 0;
     this.seams.clear();
@@ -1283,7 +1289,7 @@ export class World {
       } else return undefined;
       const own = Math.min(...hw);
       // Alvo do meio: o pico do morro, ou a média dos setores (o meio de uma encosta não é o topo dela).
-      let ct = c > Math.max(...hw) ? c + MORRO_BONUS : hw.reduce((p, v) => p + v, 0) / 6;
+      let ct = c > Math.max(...hw) ? c + MAGRA.morro : hw.reduce((p, v) => p + v, 0) / 6;
       const sm = this.seamOf(q, r, hw, ew, idx);
       // O relevo é do mundo: o alvo de cada setor (e do meio) já puxa para a borda da vizinha assentada, que é de terra (a água não copia).
       const tg = hw.map((v, w) => {
@@ -2135,7 +2141,7 @@ export class World {
     this.ghostAngle = angle;
     const { x, z } = hexToWorld(q, r);
     const ly = lvs ? lvs.own * LEVEL_STEP : 0;
-    this.ghostTarget.set(x, 0.32 + ly, z);
+    this.ghostTarget.set(x, (MAGRA.ghost ? 0.14 : 0.32) + ly, z);
     this.hoverRing.visible = true;
     const hf = this.fl(x, z);
     this.hoverRing.position.set(hf.x, -0.1 + ly, hf.z);
@@ -2924,7 +2930,7 @@ export class World {
         });
       }
       if (d.t > fall + d.hold) {
-        this.bake(d.placed, d.live.build);
+            this.bake(d.placed, d.live.build);
         this.syncWater();
         d.live.dispose();
         if (this.board) {

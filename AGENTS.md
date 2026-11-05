@@ -88,6 +88,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?gallery&theme=<id>` | mostra todos os kits do tema lado a lado; `window.__gallery` lista as chaves. `?gallery=casas` mostra só as casas (parede e telhado juntos, na era atual) |
 | `?auto=40` | a IA gulosa coloca 40 peças |
 | `?stress=1000` | teste de carga; o resultado fica em `window.__load` |
+| `?magra=<id>` / `#magra=<id>` | Estudo R7a (peça magra do Relevo, `src/render/magra.ts`): `a` a `e` são variantes (fatia fina, costa rente, fantasma fiel, sem almofada, combinação), `x-*` mexem numa causa só (diagnóstico), `base` = como sempre. Sem o parâmetro o jogo fica como a base; só o build de prévia (`VITE_PREVIEW=relevo`) abre com `e`. Valor fora da lista = base. O `#hash` é o único que a prévia publicada recebe. `__ghostBest(zoom)` leva a câmera ao fantasma e usa a 1ª jogada do ranking (determinística). |
 | `?levels=0` | desliga o relevo (platôs de `Theme.relief.levels`): o tabuleiro sai plano, para comparar capturas |
 | `?step=rail` ou `?step=water.1` / `window.__step(tipo, i, zoom)` | centraliza (de frente para a parede, de lado) na i-ésima borda de estrada ou de rio entre níveis diferentes: a rampa ou a cachoeira; devolve `{ q, r, edge, de, para }` ou null |
 | `?fall=1` / `window.__fall(i?, zoom?)` | centraliza (de frente, vista da casa mais baixa) na i-ésima cachoeira assentada (R3) e devolve `{ x, z, drop, w }` ou null |

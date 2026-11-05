@@ -6,6 +6,7 @@ import { createRenderer } from './gpu';
 import { instGeometry, setInstColor, type Lib } from './lib';
 import { LiveTile } from './liveTile';
 import { U } from './materials';
+import { MAGRA } from './magra';
 import { TILE_T, tc, type TileBuild } from './tileBuilder';
 
 const tmpM = new THREE.Matrix4();
@@ -83,7 +84,7 @@ export class PreviewView {
       }
     }
     this.angle = angle;
-    const n = Math.min(40, Math.max(0, stack - 1));
+    const n = Math.min(40, Math.ceil(Math.max(0, stack - 1) * MAGRA.pile));
     for (let i = 0; i < n; i++) this.pillar.setMatrixAt(i, tmpM.makeTranslation(0, -TILE_T - 0.035 - i * 0.075, 0));
     this.pillar.count = n;
     this.pillar.instanceMatrix.needsUpdate = true;

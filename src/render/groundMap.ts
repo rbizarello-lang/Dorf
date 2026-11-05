@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import { onMagra } from './magra';
 import type { TileBuild } from './tileBuilder';
 
 // Mapa do chão visto de cima, para a luz que não vem do sol nem do céu:
@@ -26,7 +27,10 @@ export const HEIGHT_RANGE = 1;
 const LANTERN_SIGMA = 0.17;
 
 /** Altura de um texel sem peça (o fundo da ilha, -TILE_T). */
-const RELIEF_VOID = THREE.DataUtils.toHalfFloat(-0.28);
+let RELIEF_VOID = THREE.DataUtils.toHalfFloat(-0.28);
+onMagra((m) => {
+  RELIEF_VOID = THREE.DataUtils.toHalfFloat(-m.tileT);
+});
 const to8 = (v: number) => (v <= 0 ? 0 : v >= 1 ? 255 : Math.round(v * 255));
 
 export class GroundMap {

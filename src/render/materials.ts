@@ -1119,6 +1119,8 @@ export function makeVoidMaterial() {
     /** Entorno do tema (aos poucos): mar e areia, de 0 a 1; o resto é pergaminho. */
     sea: uniform(0),
     sand: uniform(0),
+    /** Multiplicador da largura da faixa de areia do mar (a peça magra do Relevo estreita). */
+    sandK: uniform(1),
     /** 1 = a areia vira chapada: capim seco com manchas de terra vermelha, no lugar das dunas (só vale com `sand` em 1). */
     cap: uniform(0),
     /** Cores do mar (raso e fundo), da areia e do céu refletido na água. */
@@ -1214,7 +1216,7 @@ export function makeVoidMaterial() {
     // Areia molhada logo abaixo da espuma, seca mais perto da peça.
     const wet = smoothstep(0.0, 0.3, dd);
     const sandNear = mix(u.sandCol, u.sandCol.mul(0.78), wet);
-    const shore = smoothstep(0.34, 0.2, dd);
+    const shore = smoothstep(u.sandK.mul(0.34), u.sandK.mul(0.2), dd);
     let col: N = mix(water, sandNear, shore);
     col = mix(col, foamCol, foam);
     // Longe: a cor do fundo (a mesma da névoa).
