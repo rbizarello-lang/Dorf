@@ -42,7 +42,7 @@ export class Game {
   ) {
     this.rng = mulberry32(seed);
     this.slots = specialSlots(seed, specials);
-    this.board = new Board(rules);
+    this.board = new Board(rules, seed);
     if (rules.routes) this.board.posts = routePosts(seed);
     const starter: TileDef = {
       edges: [T.Grass, T.Grass, T.Forest, T.Forest, T.Field, T.Village],
@@ -52,7 +52,7 @@ export class Game {
     this.board.placeRaw(0, 0, starter, 0);
     this.board.computeGroups();
     this.board.sites = generateSites(seed, rules.sites, rules.siteScale);
-    if (rules.relief && rules.springs) this.board.springSites = generateHiddenSprings(seed, rules.hiddenSprings);
+    if ((rules.relief || rules.terra) && rules.springs) this.board.springSites = generateHiddenSprings(seed, rules.hiddenSprings);
     this.stack = rules.startTiles;
     this.current = this.draw();
     this.next = this.draw();
@@ -231,7 +231,10 @@ export class Game {
       for (let rot = 0; rot < 6; rot++) {
         const c = this.board.checkDef(q, r, def, rot);
         if (!c.valid) continue;
-        const score = c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) + (c.water?.gain ?? 0) * 0.3 + rand() * 0.5;
+        // Terra contínua: o que paga é a continuidade das emendas (os pontos de cada uma), não só o terreno igual.
+        const score = c.terra
+          ? c.terra.pay.reduce((a, b) => a + b, 0) * 0.3 - (c.neighbors - c.matches) * 2 + (c.terra.perfect ? c.neighbors : 0) + (c.water?.gain ?? 0) * 0.3 + rand() * 0.5
+          : c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) + (c.water?.gain ?? 0) * 0.3 + rand() * 0.5;
         if (!best || score > best.score) best = { q, r, rot, score };
       }
     }

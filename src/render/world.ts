@@ -1199,13 +1199,13 @@ export class World {
    */
   ghostTrue = true;
 
-  setPieceRelief(on: boolean) {
+  setPieceRelief(on: boolean, fluid = on) {
     this.pieceRelief = on;
     // A peça magra (R7a) é só do Relevo; o Clássico segue a base. Vale antes de montar qualquer peça (a partida nova reconstrói tudo).
     setMagra(on);
     this.voidMesh.position.y = -TILE_T - 0.1;
     this.voidU.sandK.value = MAGRA.sand;
-    this.setFluid(this.fluidPref === 'on' || (this.fluidPref === 'auto' && on));
+    this.setFluid(this.fluidPref === 'on' || (this.fluidPref === 'auto' && fluid));
     U.rock.value = on ? 1 : 0;
     this.seams.clear();
     this.reliefMax = this.levelsEnabled ? (on ? 2 : this.theme?.relief?.levels ?? 0) : 0;

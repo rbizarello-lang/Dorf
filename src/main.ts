@@ -239,6 +239,8 @@ let routePeek: RouteHit[] = [];
 let scorePeek: number | null = null;
 /** Águas que descem: o que a água da peça do fantasma rende ("água +8", "chega ao mar", "água parada"); vazio sem água. */
 let waterPeek = '';
+/** Terra contínua: de onde vêm os pontos da jogada do fantasma ("emendas 28 · mancha 9 · fecha +120 +1 peça · umidade 11"); vazio nos outros modos. */
+let terraPeek = '';
 /** "Onde encaixa": as melhores casas da peça atual. Valem só para a jogada e o giro em que foram pedidas. */
 let hints: { q: number; r: number; rot: number; points: number }[] | null = null;
 let hintsKey = '';
@@ -317,7 +319,9 @@ const rulesFor = (t: Theme, seed: number, m: Mode = mode): Rules => ({ ...DEFAUL
 /** Nome do modo no HUD; no desafio do dia, com a regra do dia. */
 const modeLabel = () => (mode.daily ? `${mode.name} · ${dailyRule(game.seed).name}` : mode.name);
 // A prévia publicada (`VITE_PREVIEW=relevo npm run build`) não recebe parâmetros de URL: abre no Relevo enquanto a pessoa não escolheu outro modo.
-let mode: Mode = modeById(params.get('mode') ?? store.get('mode') ?? (import.meta.env.VITE_PREVIEW === 'relevo' ? 'relevo' : null));
+// O que chega é o #hash: `#mode=terra` abre no modo Terra contínua (o id é conferido contra a lista de modos; outro valor é ignorado).
+const hashMode = MODES.find((m) => m.id === /^#mode=([a-z]{1,16})$/.exec(location.hash)?.[1]);
+let mode: Mode = modeById(params.get('mode') ?? hashMode?.id ?? store.get('mode') ?? (import.meta.env.VITE_PREVIEW === 'relevo' || import.meta.env.VITE_PREVIEW === 'terra' ? import.meta.env.VITE_PREVIEW : null));
 let undone = 0;
 const ERA_NAMES = ['Aldeia', 'Vila', 'Burgo', 'Cidade'];
 const eraName = (i: number) => (theme.eras ?? ERA_NAMES)[i] ?? ERA_NAMES[ERA_NAMES.length - 1];
@@ -352,7 +356,8 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   // Os níveis de altura (relevo) saem só da semente: o mundo os lê daqui até a próxima partida.
   world.reliefSeed = seed;
   // Modo Relevo: a altura é da peça (perfil sorteado com ela), não da casa.
-  world.setPieceRelief(game.rules.relief);
+  // A Terra contínua usa a altura do mundo (os platôs da semente), mas o encaixe fluido também lhe cai bem: a paisagem é um campo só.
+  world.setPieceRelief(game.rules.relief, game.rules.relief || game.rules.terra);
   // Partida nova (não um replay do desfazer ou do save): ainda não entrou no progresso.
   if (!replay.length) committed = false;
   undone = undos;
@@ -687,6 +692,8 @@ function offerTips(res: PlaceResult) {
   if (res.newQuest)
     tutorial.offer('missao', 'Nova missão', `${questLabel(res.newQuest, theme)}: cumprida, rende +${res.newQuest.reward} peças. Peças com "!" trazem missões; as ativas ficam no canto e com um estandarte no mapa.`);
   if (res.synergies.length) tutorial.offer('interacao', 'Interação', `Bordas diferentes que "conversam" também pontuam (+${R.synergyPoints}) e erguem uma construção. A prévia acende em dourado antes de colocar.`);
+  if (res.terra?.closedPatches)
+    tutorial.offer('mancha', 'Mancha fechada', `Uma mancha fechada, cercada sem borda aberta, paga de uma vez${res.terra.backTiles ? ' e devolve uma peça' : ''}. Fechar é o contrário de casar: cerque a mancha com outros terrenos.`);
   if (res.site) tutorial.offer('sitio', 'Sítio descoberto', 'Os carimbos no mapa escondem ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.');
   if (res.eraUp !== null) tutorial.offer('era', 'Nova era', `A vila mudou de era e ganhou +${R.eraTiles} peças. O Centro mudou de forma, e a próxima peça com vila ergue o marco da era.`);
   if (res.wonder?.started) tutorial.offer('maravilha', 'Maravilha', `Esta peça virou o canteiro da maravilha. Cada peça colocada depois avança uma etapa; pronta, rende +${R.wonderPoints} pontos e +${R.wonderTiles} peças.`);
@@ -843,6 +850,7 @@ function refreshRoutePeek() {
   if (!hover || !game.current) {
     routePeek = [];
     scorePeek = null;
+    terraPeek = '';
     routePeekAt = '';
     return;
   }
@@ -854,6 +862,22 @@ function refreshRoutePeek() {
   const cw = peek ? game.check(hover.q, hover.r)?.water : undefined;
   waterPeek = !cw ? '' : cw.sea ? ` · chega ao mar +${cw.gain}` : cw.flows ? (cw.hidden ? ` · nascente escondida +${cw.gain}` : cw.spring ? ` · nascente +${cw.gain}` : ` · água +${cw.gain}`) : ' · água parada';
   routePeek = peek?.routes ?? [];
+  terraPeek = peek?.terra ? terraLegend(peek, game.rules) : '';
+}
+
+/** Terra contínua: a legenda dos pontos de uma jogada (só o que rendeu algo), na ordem em que a regra os conta. */
+function terraLegend(res: PlaceResult, R: Rules): string {
+  const T = res.terra;
+  if (!T) return '';
+  const parts: string[] = [];
+  if (T.seams) parts.push(`emendas ${T.seams}`);
+  if (res.perfect) parts.push(`perfeito ${R.perfectBonus}`);
+  if (res.closed.length) parts.push(`cerco ${res.closed.length * R.closedBonus}`);
+  if (res.synergies.length) parts.push(`interações ${res.synergies.length * R.synergyPoints}`);
+  if (T.growth) parts.push(`mancha ${T.growth}`);
+  if (T.closedPatches) parts.push(`fecha +${T.closePoints}${T.backTiles ? ` +${T.backTiles} peça${T.backTiles > 1 ? 's' : ''}` : ''}`);
+  if (T.moisture) parts.push(`umidade ${T.moisture}`);
+  return parts.length ? ` (${parts.join(' · ')})` : '';
 }
 
 function announce(res: PlaceResult) {
@@ -902,6 +926,14 @@ function announce(res: PlaceResult) {
     notes.push({ text: `Missão perdida: ${questLabel(q, theme)} (passou de ${q.target})`, kind: 'bad' });
   }
   if (res.newQuest) notes.push({ text: `Nova missão: ${questLabel(res.newQuest, theme)}` });
+  // Terra contínua: fechar a mancha (cercada, sem borda aberta) paga de uma vez e devolve peça.
+  if (res.terra?.closedPatches) {
+    const t = res.terra;
+    const back = t.backTiles ? ` · +${t.backTiles} peça${t.backTiles > 1 ? 's' : ''}` : '';
+    notes.push({ text: `Mancha fechada${t.closedPatches > 1 ? `s (${t.closedPatches})` : ''} +${t.closePoints}${back}`, kind: 'good' });
+    hud.floater(s.x, s.y - (res.perfect ? 78 : 46), `Mancha fechada +${t.closePoints}${back}`, 'tiles');
+    sfx.discover();
+  }
   if (res.water?.hidden) notes.push({ text: `Nascente escondida achada · +${game.rules.hiddenSpringPoints}`, kind: 'good' });
   else if (res.water?.spring) notes.push({ text: 'Nascente: a água começa a correr', kind: 'good' });
   if (res.water && res.water.seas > 0) {
@@ -956,8 +988,9 @@ function showHelp(tab = 'basico') {
     [
       'basico',
       'Básico',
-      `<p>Monte uma paisagem peça por peça. Cada borda que combina com a vizinha vale ${R.matchPoints} pontos.</p>
+      `${R.terra ? `<p>Monte uma paisagem peça por peça. Aqui ela é um campo só: o terreno de cada borda se mistura com o das vizinhas dentro da peça, e a emenda paga pela <b>continuidade</b> (até ${R.matchPoints} pontos quando casa de verdade, quase nada quando mal casa).</p>` : `<p>Monte uma paisagem peça por peça. Cada borda que combina com a vizinha vale ${R.matchPoints} pontos.</p>`}
       <div class="legend">${legend}</div>
+      ${R.terra ? terraHelp(R) : ''}
       <ul>
         <li><b>${theme.terrainNames[4]}</b> e <b>${theme.terrainNames[5]}</b> precisam continuar: só encostam neles mesmos.</li>
         <li><b>Encaixe perfeito</b>: a peça encosta em 2 ou mais vizinhas e todas as bordas combinam (+${R.perfectBonus}).</li>
@@ -1015,6 +1048,18 @@ function showHelp(tab = 'basico') {
     <div class="tabs" role="tablist">${tabs.map(([id, name]) => `<button type="button" role="tab" data-tab="${id}" aria-selected="${id === pick}">${name}</button>`).join('')}</div>
     ${tabs.map(([id, , html]) => `<section class="tab" data-tab="${id}"${id === pick ? '' : ' hidden'}>${html}</section>`).join('')}
     <div class="row"><button class="primary" type="button" data-act="close">Jogar</button><button class="secondary" type="button" data-act="tips">Rever as dicas</button></div>`);
+}
+
+/** Terra contínua: o que o modo muda, no "Como jogar". */
+function terraHelp(R: Rules) {
+  const back = R.terraBackTiles > 0 ? ` Cada mancha fechada${R.terraBackMin > 1 ? ` de ${R.terraBackMin} peças ou mais` : ''} devolve ${R.terraBackTiles} peça${R.terraBackCap > 0 ? ` (no máximo ${R.terraBackCap} por partida)` : ''}.` : '';
+  return `<ul class="terra-help">
+        <li><b>Manchas</b>: terrenos iguais que se encostam formam uma mancha. Ela paga ao crescer, mais se for gorda e redonda do que se for um fio, e paga <b>de uma vez</b> quando é fechada, isto é, cercada, sem nenhuma borda virada para o vazio. Fechar é o contrário de casar: cerque a mancha com outros terrenos.${back} A etiqueta do fantasma mostra "fecha" quando a jogada fecha uma.</li>
+        <li><b>Perfeito e cerco</b>: valem quando todas as emendas têm continuidade alta (${R.perfectBonus} e ${R.closedBonus} pontos, o cerco devolve ${R.closedTiles} peça).</li>
+        <li><b>Água</b>: o rio nasce numa nascente acima do nível do mar e só desce. Cada peça de água corrente rende ${R.flowPoints}, e o curso que chega ao mar rende ${R.seaPoints} e ${R.seaTiles} peças. A altura é a do terreno do mapa, não da peça.</li>
+        <li><b>Umidade</b>: a água (e a mata) que chega faz render as terras que já estavam lá e gostam dela: prado, mata, plantação e vila têm cada um a sua faixa. A peça nova não recebe a própria umidade: quem a recebe é a vizinha, quando a água chega.</li>
+        <li>As interações entre terrenos diferentes (${R.synergyPoints} pontos) só contam onde a emenda não paga.</li>
+      </ul>`;
 }
 
 /** Maior recorde do tema entre os modos (cada modo guarda o seu). */
@@ -1920,7 +1965,7 @@ function step(now: number) {
   if (scorePeek !== null && hover) {
     const s = screenOf(hover.q, hover.r, 0.55);
     const route = routePeek.length ? ` · ${routePeek.map(routeLabel).join(' · ')}` : '';
-    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${waterPeek}${route}`, color: theme.ui.accent, kind: 'score' });
+    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${terraPeek}${waterPeek}${route}`, color: theme.ui.accent, kind: 'score' });
   }
   // Influência das construções: o ganho aparece com o fantasma numa casa contornada.
   const inf = hover && game.current && !st ? game.board.influenceAt(hover.q, hover.r, game.current.edges) : null;
@@ -1979,6 +2024,8 @@ function start(data: unknown) {
   // Um link com ?seed= (desafio) vence a partida salva de outra semente.
   const wantSeed = params.has('bench') ? BENCH_SEED : Math.floor(Number(params.get('seed'))) || 0;
   if (saved && wantSeed > 0 && saved.seed !== wantSeed) saved = null;
+  // O link com #mode= pede aquele modo: uma partida salva de outro modo não o atropela.
+  if (saved && hashMode && saved.mode !== hashMode.id) saved = null;
   let resumed = false;
   if (saved) {
     rulesTheme = themeById(saved.rulesId);

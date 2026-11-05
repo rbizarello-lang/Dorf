@@ -40,6 +40,10 @@ npm run dev          # servidor de desenvolvimento (Vite)
 npm run check        # typecheck + testes + build: rode antes de todo commit
 npm run typecheck    # tsc --noEmit
 npm test             # 600 partidas simuladas com oráculos independentes, cenários sintéticos, legibilidade das cores (tests/legibility.ts), vídeo/câmera/nível por placa (tests/video.ts) e os gatilhos dos easter eggs (tests/eggs.ts)
+npm run terra:bancada -- 100   # Terra contínua, bancada × jogo: o guloso da bancada (tests/bench/rules/terra.ts) joga e o `Game` do modo `terra` refaz as mesmas jogadas; compara pontos, peças e cada termo da regra (entra no `npm test` com 16 partidas)
+npm run terra:perf   # custo da Terra contínua com 300 peças (clone, prévia, `rankMoves`, `bestMove`, `patchField`) ao lado do Clássico e do Relevo
+npm run terra:risco -- cauda 1 500 | abuso 1 500 | abuso2 1 40   # riscos da Terra na bancada (cauda dos pontos de uma jogada; jogador que abusa da peça de volta); imprime uma linha JSON por partida
+npm run bench -- terra 100   # bancada de testes de encaixe (tests/bench/, ver o cabeçalho do run.ts): joga regras de encaixe sem gráficos e mede travamento, riqueza de decisão, profundidade e equilíbrio. Não entra no check
 npm run balance      # painel de equilíbrio (tests/balance.ts): média, p10/p50/p90 e origem dos pontos, por modo e por tema. Não entra no check. `npm run balance -- 40` muda o tamanho da amostra (padrão 80). Meta dos Exploradores: o jogador "caça sítios" acha os 10 em pelo menos 50% das partidas (linha "todos os sítios"); o guloso puro não mira sítios e fica bem abaixo, de propósito
 npm run cpu          # CPU de montar uma peça (buildTile) no Relevo e no Clássico (`npm run cpu -- 120 classico`), com soma de verificação da geometria: confere que uma otimização não mexe na peça. Fora do check (mede tempo)
 npm run build        # dist/index.html (arquivo único)
@@ -151,12 +155,13 @@ src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em
   game.ts        Game: semente, pilha, sorteio por peça, descarte, bestMove (IA gulosa), rankMoves (as n melhores casas com os pontos reais, determinística: alimenta o "Onde encaixa", tecla `O`), upcoming (mirante)
   blessings.ts   cartas da virada de era: 1 de 2 por era, oferecidas pela semente; a escolha vai no save junto da jogada
   sites.ts       sítios escondidos (ruína, tesouro, relíquia, mirante), da semente por um gerador à parte
-  modes.ts       modos: Clássico, Zen, Desafio do dia, Exploradores, Estrada Real, Partida rápida (regras + desfazer; `fixedStack` = pilha de 30 sem peças de volta; `more: true` manda o modo para "Mais modos" no menu, até ser equilibrado). O recorde é por modo e tema (`best.<modo>.<tema>`). `DAILY_RULES`/`dailyRule(seed)`: a regra do dia sai só da semente AAAAMMDD (data local), por dias seguidos em rodízio; `modeRules(modo, semente)` soma o modo e a regra do dia
+  modes.ts       modos: Clássico, Zen, Desafio do dia, Exploradores, Estrada Real, Partida rápida, Relevo e Terra contínua (`terra`, em "Mais modos"; regras + desfazer; `fixedStack` = pilha de 30 sem peças de volta; `more: true` manda o modo para "Mais modos" no menu, até ser equilibrado). O recorde é por modo e tema (`best.<modo>.<tema>`). `DAILY_RULES`/`dailyRule(seed)`: a regra do dia sai só da semente AAAAMMDD (data local), por dias seguidos em rodízio; `modeRules(modo, semente)` soma o modo e a regra do dia
   share.ts       texto de compartilhar do desafio (`shareLine`, `shareUrl`, `terrainPoints`): puro
   routes.ts      rotas de comércio do modo Estrada Real: mercados e portos ligados pela mesma rede rendem pela distância
   seasons.ts     estações da partida (a cada 20 jogadas), derivadas do índice da peça: o replay não guarda nada
   specials.ts    peças especiais (estação, moinho d'água, farol): bordas, pontos e posições na pilha
   eggs.ts        easter eggs genéricos (`Theme.eggs`): gatilhos de peça (`EggTracker`, reavaliado na ordem das peças) e de relógio (`clockEggs`), fase do dia (`phaseOfTod`); puro, testado em tests/eggs.ts
+  terra.ts       Terra contínua (modo `terra`, docs/TERRA.md): campo suavizado de cada peça (`smearComp`), continuidade da emenda (`continuity`, `seamPoints`), manchas e fechamento (`patchField`) e umidade que chega (`moistureAt`, `fitPoints`, `moistAffected`); puro, conferido por `tests/logic.ts` (oráculo próprio) e `tests/terra-bancada.ts` (bancada × jogo)
   relief.ts      nível de altura de cada casa (`levelAt(seed, q, r, maxLevel)`, 0 a 2): ruído suave de onda longa, vizinhos a no máximo 1 nível, origem no 0, sem casas soltas; só aparência
   rng.ts         mulberry32 e utilitários de sorteio
 src/themes/      temas como DADOS
@@ -209,14 +214,17 @@ src/video/       foto e vídeo (o modo foto e a exportação ficam em src/ui/cap
 src/ui/          HUD em HTML/CSS (hud.ts, style.css); eraChoice.ts: nomes e diálogo das cartas da era; banner.ts: cor da casa e brasão (troca o `ui.accent` do tema); tutorial.ts: dicas das primeiras partidas; progress.ts: progresso entre partidas e liberação das peças especiais; capture.ts: modo foto, gravação, filme da partida e exportação (`Capture`, com o estado da tela em `stage`); input.ts: mouse, toque e teclado no tabuleiro (`bindInput`); minimap.ts: minimapa e linha do tempo do fim da partida; frames.ts: moldura e emblema do tema em CSS e SVG; a11y.ts: paleta para daltonismo; a página é o index.html; storage.ts: `persist()` depois da primeira partida acabada, `exportKeys` e `importKeys` (módulo isolado, sem dependência do jogo, para outros jogos copiarem)
 src/audio.ts     sons sintetizados com WebAudio: música, efeitos e ambiente (paisagem perto do foco da câmera, `setAmbience`)
 src/main.ts      entrada: fluxo da partida, telas e botões, qualidade, salvamento, parâmetros de URL, ganchos de depuração
-tests/logic.ts      simulação de partidas contra oráculos independentes (grupos por BFS, pontuação recalculada, replay)
-tests/synthetic.ts  cenários montados à mão (peça travada, descarte, fim de jogo, semente → sequência)
+tests/logic.ts      simulação de partidas contra oráculos independentes (grupos por BFS, pontuação recalculada, replay); a Terra contínua tem oráculo próprio (campo, continuidade por amostras, manchas por BFS, umidade pela distância à água, peça de volta) em 60 partidas do modo `terra`
+tests/synthetic.ts  cenários montados à mão (peça travada, descarte, fim de jogo, semente → sequência; Terra contínua: fechar manchas de 1, 3 e 7 peças, a peça de volta e seus limites, a umidade que chega só às peças de antes)
 tests/legibility.ts telhados e paredes contra o chão da vila (ΔE em CIELAB, ponderado pelo peso das casas)
 tests/relief.ts     níveis de altura: determinismo, vizinhos a ≤1 degrau, origem no 0, distribuição, sem casas soltas
 tests/falls.ts      cachoeiras (`buildTile` em Node): lábio e lâmina na peça alta, espuma na baixa, largura igual nas duas metades, água plana, determinismo, nível 0 sem degrau = peça plana
 tests/storage.ts    ida e volta do backup com armazenamento falso e recusas sem gravar
 tests/eggs.ts       gatilhos dos easter eggs: horas, datas (inclusive virando o ano), sorte por semente, grupos conferidos por BFS numa partida de verdade e replay idêntico
 tests/themes.ts     os 5 temas, `?theme=` antigo, migração dos recordes dos temas fundidos e o progresso dos removidos
+tests/bench/        bancada de testes de encaixe (motor leve, regras como plugins em `rules/`, jogadores guloso, planejador e distraído): a regra da Terra contínua nasceu aqui, e `rules/terra.ts` guarda os botões da calibração (`BENCH_KNOBS`)
+tests/terra-bancada.ts  a mesma partida na bancada e no `Game` (modo `terra` sobre o encaixe puro), jogada a jogada e termo a termo; diferença esperada: zero
+tests/terra-perf.ts, tests/terra-risco.ts   desempenho da regra com 300 peças; cauda dos pontos e abuso da peça de volta (medidas à mão)
 tests/video.ts      MP4 conferido por um leitor de caixas próprio, resolução dinâmica, nível por placa, câmera e filme
 scripts/         capturas, teste de carga, conversão para página publicável; pwa-plugin.mjs (plugin do Vite: manifesto, ícones PNG desenhados em código e sw.js no dist); pwa.mjs (confere SW, offline, manifesto e backup)
 ```
@@ -292,6 +300,14 @@ scripts/         capturas, teste de carga, conversão para página publicável; 
     - A correnteza é forçada pelo nível (`flowAt`): a água sai pela borda da peça alta e entra pela da baixa, igual dos dois lados. O barco trata o degrau como fim de linha e a rota dele acaba antes do lábio (`Life.fallPull`, 0,18) e antes da espuma da bacia (0,27).
     - **Cachoeira (R3):** onde a borda de rio dá numa casa mais baixa (`opts.levels.nb[i] < own`), a peça alta sobe o fundo do rio até um lábio de pedra na borda (`FALL_LIP`, `LIP_Y`: 12 mm de água por cima, laje de pedra, pedras nos dois lados) e constrói a lâmina (`TileBuild.fall`, curva de lançamento que avança `FALL_D` além da borda, vertical até o chão do mundo: com a vizinha assentada o resto fica sob a água dela, com a casa vazia a queda segue até o mar e leva a espuma dele); onde dá numa casa mais alta, a peça baixa põe o anel de espuma na água (`TileBuild.foam`) e pedras na bacia. Cada lado sai só dos níveis, na orientação de origem, então a emenda não depende da ordem. A correnteza acelera perto do lábio. O `World` guarda as quedas assentadas em `falls` (`FallLayer`): névoa em sprites (`spawnMist`, 2 a 4 por queda, pelo `dt` do mundo, só perto da câmera) e som (`Ambience.fall`, ruído filtrado com volume pela distância do foco à queda mais próxima, `nearestFall`). Cores por tema: `relief.fall` (`tint`, `foam`, `mist`). Peça com rio entre níveis na galeria ou na pilha (sem `levels`) sai sem cachoeira.
     - O clique usa `World.pickHex` (um plano por nível, do mais alto ao chão); a câmera segue a altura da casa sob o alvo (`focusY`). O mapa do chão e a costura de cor continuam 2D.
+
+### Modo Terra contínua (`terra`, Fase 2)
+
+Regra, números e decisões em `docs/TERRA.md`. Resumo para quem mexe no código:
+- **Núcleo:** `Rules.terra` liga, em `Board`, a emenda por continuidade (`check` devolve `Check.terra`; `place` devolve `PlaceResult.terra`), as manchas e a umidade (`src/core/terra.ts`). `Placed.comp/level/moist` guardam campo, nível do mundo e umidade já rendida; `Board.terraBest` guarda as marcas do crescimento e do fechamento (o replay as refaz; nada vai no save). `Board` recebe a semente (`new Board(rules, seed)`) para ler `levelAt`. `Rules.terraCloseCap` (200), `terraBackMin`, `terraBackTiles` e `terraBackCap` são botões.
+- **Invariante 7 vale:** o oráculo de `tests/logic.ts` reimplementa a regra do zero (BFS, amostras ao longo da emenda, umidade pela distância); `tests/terra-bancada.ts` joga a bancada e o jogo lado a lado. Mudou a regra? Atualize `tests/bench/rules/terra.ts`, o oráculo e rode `npm run terra:bancada -- 100`; e `SAVE_VERSION` novo se o replay do modo mudar (os outros modos não mudaram: placares idênticos antes e depois).
+- **Interface:** etiqueta do fantasma com os termos (`terraLegend` em `main.ts`), aviso "Mancha fechada +N · +1 peça", dica `mancha` e a ajuda "Como jogar". `#mode=<id>` (validado contra `MODES`) abre num modo, inclusive na prévia publicada. O fantasma que mostra a paisagem é da Fase 3.
+- **Desempenho:** `placeRaw(..., from)` copia campo e nível no `clone()`; `npm run terra:perf` mede.
 
 ### Interface calma
 

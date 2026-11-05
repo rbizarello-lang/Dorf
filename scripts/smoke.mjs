@@ -36,6 +36,11 @@ const cases = [
   // O modo Relevo liga o encaixe fluido (chão, água e costa deslocados) por padrão: confere os dois backends.
   { name: 'relevo', q: 'mode=relevo&theme=holanda&seed=3&auto=12&quality=low', backend: 'webgpu' },
   { name: 'relevo-webgl', q: 'mode=relevo&theme=oriental&seed=3&auto=12&quality=low&webgl', backend: 'webgl2' },
+  // Terra contínua: pelo parâmetro e pelo #hash (a prévia publicada só recebe o hash), nos dois backends. O texto da era traz o nome do modo.
+  { name: 'terra', q: 'mode=terra&theme=holanda&seed=3&auto=12&quality=low', backend: 'webgpu', mode: 'Terra contínua' },
+  { name: 'terra-hash-webgl', q: 'theme=brasil&seed=3&auto=12&quality=low&webgl', hash: '#mode=terra', backend: 'webgl2', mode: 'Terra contínua' },
+  // Um #mode= inventado é ignorado (abre no modo de sempre).
+  { name: 'hash-invalido', q: 'theme=holanda&seed=3&auto=12&quality=low', hash: '#mode=inventado', backend: 'webgpu', mode: 'Clássico' },
 ];
 
 const browser = await launch(['--ignore-gpu-blocklist']);
@@ -47,7 +52,7 @@ for (const c of cases) {
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('response', (r) => r.status() >= 400 && r.url().startsWith(base) && errors.push(`${r.status()} ${r.url()}`));
   const t0 = Date.now();
-  await page.goto(base + '?' + c.q);
+  await page.goto(base + '?' + c.q + (c.hash ?? ''));
   let stats = null;
   while (Date.now() - t0 < TIMEOUT && !errors.length) {
     stats = await page.evaluate(() => window.__stats ?? null);
@@ -64,6 +69,7 @@ for (const c of cases) {
     if (c.bench && !(await page.evaluate(() => !!window.__bench && !!document.querySelector('.bench table')))) problems.push('o painel do ?bench não apareceu');
     // O cabeçalho do ?bench (placa, navegador, tela, medidor de GPU, nível do Auto) precisa vir junto, para a tabela colada dizer onde foi medida.
     if (c.bench && !(await page.evaluate(() => (window.__bench?.info?.length ?? 0) >= 5 && document.querySelectorAll('.bench li').length >= 5))) problems.push('o cabeçalho do ?bench (placa, tela, medidor de GPU) não apareceu');
+    if (c.mode && !(await page.evaluate((m) => document.getElementById('era')?.textContent?.includes(m) ?? false, c.mode))) problems.push(`o modo na tela não é ${c.mode}`);
     if (stats.backend !== c.backend) problems.push(`backend ${stats.backend}, esperado ${c.backend}`);
   }
   const s = ((Date.now() - t0) / 1000).toFixed(1);
