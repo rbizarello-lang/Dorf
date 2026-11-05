@@ -1,5 +1,5 @@
 // Ida e volta do backup (src/ui/storage.ts) com armazenamento falso, e recusas sem gravar nada.
-import { exportKeys, importKeys, MAX_VALUE, type KeyStore } from '../src/ui/storage';
+import { exportKeys, importKeys, safeWrite, once, MAX_VALUE, SAVE_FAIL_NOTICE, type KeyStore, type WritableStore } from '../src/ui/storage';
 import { cleanProgress } from '../src/ui/progress';
 
 let fails = 0;
@@ -75,6 +75,37 @@ ok(p.totals.games === 0 && p.totals.tiles === 0 && p.totals.quests === 7, 'totai
 ok(p.themes.holanda.era === 3 && !('Falso!' in p.themes), 'era limitada e id fora do formato de tema some');
 ok(p.themes.vale?.games === 5, 'tema removido (vale) fica guardado sem uso');
 ok(p.unlocked.length === 1 && p.unlocked[0] === 'station', 'só peças conhecidas');
+
+// gravação recusada (cota cheia, modo privado): não lança, devolve false e avisa uma vez só
+{
+  let avisos = 0;
+  const warn = once(() => void avisos++);
+  const cheio: WritableStore = {
+    setItem() {
+      throw new DOMException('cota cheia', 'QuotaExceededError');
+    },
+    removeItem() {
+      throw new Error('bloqueado');
+    },
+  };
+  ok(safeWrite(() => cheio, 'retalhos.save', '{}', warn) === false, 'gravação recusada devolve false');
+  ok(avisos === 1, 'o primeiro erro avisa');
+  safeWrite(() => cheio, 'retalhos.save', '{}', warn);
+  safeWrite(() => cheio, 'retalhos.save', null, warn);
+  ok(avisos === 1, 'erros seguintes não repetem o aviso');
+  // acessar o armazenamento pode lançar (cookies bloqueados)
+  let a2 = 0;
+  ok(safeWrite(() => { throw new Error('SecurityError'); }, 'k', 'v', () => void a2++) === false && a2 === 1, 'acesso bloqueado também avisa');
+  // um onFail que quebra não derruba o jogo
+  ok(safeWrite(() => cheio, 'k', 'v', () => { throw new Error('toast'); }) === false, 'aviso que lança não propaga');
+  // armazenamento sadio: grava, apaga e não avisa
+  const m = new Map<string, string>();
+  let a3 = 0;
+  const bom: WritableStore = { setItem: (k, v) => void m.set(k, v), removeItem: (k) => void m.delete(k) };
+  ok(safeWrite(() => bom, 'a', '1', () => void a3++) && m.get('a') === '1', 'grava');
+  ok(safeWrite(() => bom, 'a', null, () => void a3++) && !m.has('a') && a3 === 0, 'apaga sem avisar');
+  ok(SAVE_FAIL_NOTICE.includes('Exportar') && SAVE_FAIL_NOTICE.includes('Almanaque'), 'o aviso aponta o Exportar do Almanaque');
+}
 
 if (fails) {
   console.error(`storage: ${fails} falhas`);
