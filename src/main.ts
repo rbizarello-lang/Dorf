@@ -338,8 +338,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   // Os níveis de altura (relevo) saem só da semente: o mundo os lê daqui até a próxima partida.
   world.reliefSeed = seed;
   // Modo Relevo: a altura é da peça (perfil sorteado com ela), não da casa.
-  // A Terra contínua usa a altura do mundo (os platôs da semente), mas o encaixe fluido também lhe cai bem: a paisagem é um campo só.
-  world.setPieceRelief(game.rules.relief, game.rules.relief || game.rules.terra);
+  world.setPieceRelief(game.rules.relief);
   // Partida nova (não um replay do desfazer ou do save): ainda não entrou no progresso.
   if (!replay.length) committed = false;
   undone = undos;

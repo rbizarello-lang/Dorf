@@ -1180,9 +1180,9 @@ export class World {
   /** Quando o encaixe fluido liga: `auto` = só no modo Relevo (`?fluido=0` e `?fluido` forçam). */
   fluidPref: 'auto' | 'on' | 'off' = 'auto';
 
-  setPieceRelief(on: boolean, fluid = on) {
+  setPieceRelief(on: boolean) {
     this.pieceRelief = on;
-    this.setFluid(this.fluidPref === 'on' || (this.fluidPref === 'auto' && fluid));
+    this.setFluid(this.fluidPref === 'on' || (this.fluidPref === 'auto' && on));
     U.rock.value = on ? 1 : 0;
     this.seams.clear();
     this.reliefMax = this.levelsEnabled ? (on ? 2 : this.theme?.relief?.levels ?? 0) : 0;

@@ -52,7 +52,7 @@ export class Game {
     this.board.placeRaw(0, 0, starter, 0);
     this.board.computeGroups();
     this.board.sites = generateSites(seed, rules.sites, rules.siteScale);
-    if ((rules.relief || rules.terra) && rules.springs) this.board.springSites = generateHiddenSprings(seed, rules.hiddenSprings);
+    if (rules.relief && rules.springs) this.board.springSites = generateHiddenSprings(seed, rules.hiddenSprings);
     this.stack = rules.startTiles;
     this.current = this.draw();
     this.next = this.draw();

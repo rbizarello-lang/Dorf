@@ -12,8 +12,8 @@ import { baseRules } from './bench/coreWorld';
 import { ranked } from './bench/players';
 import { BY_ID } from './bench/rules/index';
 
-/** As regras do modo Terra contínua sobre o encaixe puro: a mesma base da bancada (sem as camadas de progressão do jogo) e sem teto de peças devolvidas. */
-export const terraBaseRules = (): Rules => ({ ...DEFAULT_RULES, ...baseRules(), ...modeById('terra').rules, terraBackMin: 1, terraBackCap: 0 });
+/** As regras do modo Terra contínua sobre o encaixe puro: a mesma base da bancada (sem as camadas de progressão do jogo) e sem teto de peças devolvidas e sem as nascentes escondidas (a bancada não as tem). A altura é a do Relevo, por peça, nos dois lados. */
+export const terraBaseRules = (): Rules => ({ ...DEFAULT_RULES, ...baseRules(), ...modeById('terra').rules, hiddenSprings: 0, hiddenSpringPoints: 0, terraBackMin: 1, terraBackCap: 0 });
 
 /** Os termos da bancada (`parts()`) que o jogo conta um a um. A água a bancada separa em duas (própria e a que chega); o jogo, em uma. */
 const TERMS = ['encaixe das bordas', 'perfeito', 'cerco da peça', 'interações', 'manchas (crescimento)', 'fechamento de mancha', 'umidade levada às peças vizinhas'] as const;
@@ -71,7 +71,7 @@ for (let seed = FIRST; seed < FIRST + N && fails.length <= 30; seed++) {
     const got = (k: string) => (parts[k] ?? 0) - (prev[k] ?? 0);
     const T = res.terra!;
     const mine: Record<(typeof TERMS)[number], number> = {
-      'encaixe das bordas': T.seams,
+      'encaixe das bordas': T.seams + (res.steps ?? 0) * game.rules.stepPoints + (res.falls ?? 0) * game.rules.fallPoints,
       perfeito: res.perfect ? game.rules.perfectBonus : 0,
       'cerco da peça': res.closed.length * game.rules.closedBonus,
       interações: res.synergies.length * game.rules.synergyPoints,

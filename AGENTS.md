@@ -295,10 +295,11 @@ scripts/         capturas, teste de carga, conversão para página publicável; 
 ### Modo Terra contínua (`terra`, Fase 2)
 
 Regra, números e decisões em `docs/TERRA.md`. Resumo para quem mexe no código:
-- **Núcleo:** `Rules.terra` liga, em `Board`, a emenda por continuidade (`check` devolve `Check.terra`; `place` devolve `PlaceResult.terra`), as manchas e a umidade (`src/core/terra.ts`). `Placed.comp/level/moist` guardam campo, nível do mundo e umidade já rendida; `Board.terraBest` guarda as marcas do crescimento e do fechamento (o replay as refaz; nada vai no save). `Board` recebe a semente (`new Board(rules, seed)`) para ler `levelAt`. `Rules.terraCloseCap` (200), `terraBackMin`, `terraBackTiles` e `terraBackCap` são botões.
+- **O modo é o Relevo com outra pontuação:** `relief: true` (altura por peça, `tileProfile`, saias, fluido, águas que descem com a altura da peça, nascentes escondidas); sem maravilha. Só a pontuação muda.
+- **Núcleo:** `Rules.terra` liga, em `Board`, a emenda por continuidade (`check` devolve `Check.terra`; `place` devolve `PlaceResult.terra`), as manchas e a umidade (`src/core/terra.ts`). `Placed.comp/moist` guardam o campo e a umidade já rendida; `Board.terraBest` guarda as marcas do crescimento e do fechamento (o replay as refaz; nada vai no save). `Rules.terraCloseCap` (200), `terraBackMin`, `terraBackTiles` e `terraBackCap` são botões.
 - **Invariante 7 vale:** o oráculo de `tests/logic.ts` reimplementa a regra do zero (BFS, amostras ao longo da emenda, umidade pela distância); `tests/terra-bancada.ts` joga a bancada e o jogo lado a lado. Mudou a regra? Atualize `tests/bench/rules/terra.ts`, o oráculo e rode `npm run terra:bancada -- 100`; e `SAVE_VERSION` novo se o replay do modo mudar (os outros modos não mudaram: placares idênticos antes e depois).
 - **Interface:** etiqueta do fantasma com os termos (`terraLegend` em `main.ts`), aviso "Mancha fechada +N · +1 peça", dica `mancha` e a ajuda "Como jogar". `#mode=<id>` (validado contra `MODES`) abre num modo, inclusive na prévia publicada. O fantasma que mostra a paisagem é da Fase 3.
-- **Desempenho:** `placeRaw(..., from)` copia campo e nível no `clone()`; `npm run terra:perf` mede.
+- **Desempenho:** `placeRaw(..., from)` copia campo e perfil no `clone()`; `npm run terra:perf` mede. Pendente: `rankMoves` com 300 peças leva ~640 ms (cache incremental das manchas, Fase 3).
 
 ### Interface calma
 

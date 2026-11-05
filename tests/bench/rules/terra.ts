@@ -34,7 +34,7 @@
 //
 // Fica de fora desta versão: as missões, as eras e os sítios do jogo (a bancada compara a regra de encaixe, não a progressão) e a
 // deformação visual das divisas (render).
-import { levelAt } from '../../../src/core/relief';
+import { STARTER_PROFILE, heightFit, levelAt, tileProfile } from '../../../src/core/relief';
 import { mulberry32 } from '../../../src/core/rng';
 import { T, isStrict, type TileDef } from '../../../src/core/tiles';
 import { isSpring } from '../../../src/core/water';
@@ -53,7 +53,7 @@ export const TERRA = knobs('terra', {
   lambdaMin: 0.08,
   lambdaMax: 0.3,
   /** Pontos de uma emenda perfeita, o bônus de peça perfeita e o de cerco da peça (os números do Clássico: 10, 20 e 30). */
-  matchPoints: 14,
+  matchPoints: 12,
   perfectBonus: 28,
   cercoBonus: 30,
   /** Continuidade mínima que paga e a que vale perfeito/cerco. */
@@ -74,6 +74,10 @@ export const TERRA = knobs('terra', {
   backCap: 0,
   /** Risco da cauda alta: teto do prêmio de fechamento de UMA mancha, em pontos (0 = sem teto). Os pontos do crescimento não mudam. */
   closeCap: 200,
+  /** Altura por peça do Relevo (1, o padrão: a água e o encaixe usam a altura da peça, como o jogo) ou do mundo (0, a calibração original). */
+  reliefH: 1,
+  stepPoints: 2,
+  fallPoints: 3,
   /** Argila: a mancha maior avança `clayAdvance` cunhas por borda sobre a vizinha e cada peça de área ganha paga `clayPerTile`. */
   clayAdvance: 0.5,
   clayPerTile: 0,
@@ -123,11 +127,28 @@ export class TerraWorld extends LiteWorld {
   }
 
   protected decorate(def: TileDef): LTile {
-    return makeLTile(def.seed, def.edges, compAux(smearComp(def.edges, def.seed)));
+    const aux = compAux(smearComp(def.edges, def.seed));
+    if (TERRA.reliefH) aux.h = tileProfile(def.edges, def.seed).h;
+    return makeLTile(def.seed, def.edges, aux);
   }
 
   protected makeStarter(seed: number): LTile {
-    return makeLTile(seed, [...STARTER_EDGES], compAux(smearComp(STARTER_EDGES, seed)));
+    const aux = compAux(smearComp(STARTER_EDGES, seed));
+    if (TERRA.reliefH) aux.h = [...STARTER_PROFILE.h];
+    return makeLTile(seed, [...STARTER_EDGES], aux);
+  }
+
+  /** Com altura por peça, o encaixe de altura do Relevo continua valendo (1 degrau vale, 2 não). */
+  protected compat(a: RTile, i: number, b: RTile, j: number): boolean {
+    return super.compat(a, i, b, j) && (!TERRA.reliefH || heightFit(a.aux.h[i], b.aux.h[j], a.edges[i]) !== 3);
+  }
+
+  /** Degrau de 1 nível entre terras rende (mirante) e o de rio, mais (cachoeira). */
+  protected edgePts(a: RTile, i: number, b: RTile, j: number): number {
+    if (!TERRA.reliefH) return 0;
+    const x = a.edges[i], y = b.edges[j];
+    if (Math.abs(a.aux.h[i] - b.aux.h[j]) !== 1 || x === T.Rail || y === T.Rail) return 0;
+    return TERRA.stepPoints + (x === T.Water && y === T.Water ? TERRA.fallPoints : 0);
   }
 
   /** Continuidade (0 a 1) entre a borda `i` de `a` e a `j` de `b`: 3 amostras ao longo da emenda. */
@@ -239,7 +260,7 @@ export class TerraWorld extends LiteWorld {
   }
 
   private level(p: Placed): number {
-    return levelAt(this.seed, p.q, p.r, 2);
+    return TERRA.reliefH ? p.v.aux.h[p.v.edges.indexOf(T.Water)] : levelAt(this.seed, p.q, p.r, 2);
   }
 
   protected extra(p: Placed, commit: boolean): number {
