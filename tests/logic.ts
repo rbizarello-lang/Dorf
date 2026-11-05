@@ -74,8 +74,6 @@ function oHeights(b: Board, def: TileDef, rot: number): number[] | undefined {
 
 /** Altura da borda `i` da peça colocada `n`, como o oráculo a guardou: a inicial é plana no nível 1. */
 function oPlacedHeights(b: Board, n: Placed): number[] {
-  // Terra contínua: a altura é do mundo (a mesma em todas as bordas da casa), não da peça.
-  if (b.rules.terra) return Array<number>(6).fill(levelAt(b.seed, n.q, n.r, 2));
   const prof = n.index === 0 ? STARTER_PROFILE : tileProfile(n.def.edges, n.def.seed);
   return worldHeights(prof, n.rot);
 }

@@ -5,7 +5,7 @@ import { SPECIALS, type SpecialKind } from './specials';
 import { SEASON_BONUS, SEASON_KIND, seasonAt } from './seasons';
 import { INFLUENCE, INFLUENCE_CAP, SYN_KINDS, type SynHit, type SynKind, synergyOf } from './synergy';
 import { payRoutes, type RouteHit, type RoutePost } from './routes';
-import { STARTER_PROFILE, heightFit, levelAt, tileProfile, worldHeights } from './relief';
+import { STARTER_PROFILE, heightFit, tileProfile, worldHeights } from './relief';
 import { TERRA, continuity, fitPoints, moistAffected, moistureAt, patchField, rotComp, seamPoints, smearComp, tileMix, type Comp, type PatchField } from './terra';
 import { hiddenSpringAt, isSpring, springEligible, springRevealed, waterState, type SpringSite, type WaterState, type WaterTile } from './water';
 import { T, isStrict, rotateEdges, type QuestKind, type TileDef } from './tiles';
@@ -82,7 +82,7 @@ export interface Rules {
   hiddenSpringPoints: number;
   /**
    * Terra contínua (src/core/terra.ts): a emenda paga pela continuidade do campo (`matchPoints` é a da emenda perfeita), a mancha de terra
-   * paga ao crescer e ao ser fechada, a umidade chega às terras que esperavam a água. A água usa a altura do mundo (`levelAt`), sem relevo por peça.
+   * paga ao crescer e ao ser fechada, a umidade chega às terras que esperavam a água. Vale em cima do modo Relevo (`relief`): altura por peça e águas que descem são as dele.
    */
   terra: boolean;
   /** Terra: área mínima (em peças) da mancha cujo fechamento devolve peça, peças devolvidas por mancha fechada e teto de peças devolvidas por partida (0 = sem teto). */
@@ -166,9 +166,8 @@ export interface Placed {
   spring?: boolean;
   /** A nascente era uma das escondidas no mapa (a peça pousou sobre ela). */
   hiddenSpring?: boolean;
-  /** Terra contínua: a composição de terreno de cada borda (mundo), o nível da casa (`levelAt`) e a umidade que a peça já rendeu. */
+  /** Terra contínua: a composição de terreno de cada borda (mundo), e a umidade que a peça já rendeu. */
   comp?: Comp;
-  level?: number;
   moist?: number;
 }
 
@@ -319,7 +318,7 @@ export class Board {
   private parent = new Int32Array(0);
   private groupTiles = new Int32Array(0);
 
-  /** `seed` = semente da partida: só a Terra contínua a usa (a altura do mundo, `levelAt`). */
+  /** `seed` = semente da partida (reservada; a altura sai do perfil da peça). */
   constructor(public rules: Rules, readonly seed = 0) {}
 
   get(q: number, r: number) {
@@ -406,9 +405,7 @@ export class Board {
     const R = this.rules;
     const lastEra = R.eraScores.length > 1 && this.era === R.eraScores.length - 1;
     const wonder = !this.wonder && R.wonderStages > 0 && lastEra && eraMark === null && edges.filter((e) => e === T.Village).length >= 2;
-    // O nível da água: o da peça (modo Relevo) ou o do mundo (Terra contínua).
-    const wLevel = heights ? heights[edges.indexOf(T.Water)] : R.terra ? levelAt(this.seed, q, r, 2) : undefined;
-    const water = wLevel !== undefined && def && this.rules.springs && edges.includes(T.Water) && !occupied ? this.waterIf(q, r, edges, wLevel, def) : undefined;
+    const water = heights && def && this.rules.springs && edges.includes(T.Water) && !occupied ? this.waterIf(q, r, edges, heights[edges.indexOf(T.Water)], def) : undefined;
     return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, heightState, terra, steps, falls, water, synergies, site: this.siteAt(q, r), eraMark, wonder, influence: this.influenceAt(q, r, edges) };
   }
 
@@ -447,8 +444,7 @@ export class Board {
   private waterTiles(extra?: WaterTile): WaterTile[] {
     const out: WaterTile[] = [];
     for (const p of this.list) {
-      const level = p.heights ? p.heights[0] : p.level;
-      if (level !== undefined && p.edges.includes(T.Water)) out.push({ q: p.q, r: p.r, edges: p.edges, level, spring: !!p.spring });
+      if (p.heights && p.edges.includes(T.Water)) out.push({ q: p.q, r: p.r, edges: p.edges, level: p.heights[0], spring: !!p.spring });
     }
     if (extra) out.push(extra);
     return out;
@@ -537,7 +533,6 @@ export class Board {
       p.spring = from.spring;
       p.hiddenSpring = from.hiddenSpring;
       p.comp = from.comp;
-      p.level = from.level;
     } else if (this.rules.relief) {
       const prof = this.list.length === 0 ? STARTER_PROFILE : tileProfile(def.edges, def.seed);
       p.heights = worldHeights(prof, rot);
@@ -547,15 +542,8 @@ export class Board {
         if (kind) p.spring = true;
         if (kind === 'hidden') p.hiddenSpring = true;
       }
-    } else if (this.rules.terra && !this.rules.relief) {
-      p.comp = this.compOf(def, rot);
-      p.level = levelAt(this.seed, q, r, 2);
-      if (this.list.length > 0 && p.edges.includes(T.Water)) {
-        const kind = this.springKind(q, r, p.edges, p.level, def.seed);
-        if (kind) p.spring = true;
-        if (kind === 'hidden') p.hiddenSpring = true;
-      }
     }
+    if (this.rules.terra) p.comp = from?.comp ?? this.compOf(def, rot);
     this.tiles.set(key, p);
     this.list.push(p);
     this.frontier.delete(key);

@@ -79,11 +79,11 @@ export const MODES: readonly Mode[] = [
   {
     id: 'terra',
     name: 'Terra contínua',
-    tagline: 'A paisagem é um campo só. A emenda paga pela continuidade, cada mancha de terra paga quando você a fecha (cerque com outros terrenos) e a água que chega faz render as terras que a esperavam.',
-    // As emendas pagam até 14 (o perfeito vale 28); a água é a do Relevo, com a altura do mundo. Sem relevo por peça (nem degraus), sem maravilha
-    // e sem nascentes escondidas: são os números calibrados na bancada (docs/TERRA.md). O fechamento de uma mancha paga no máximo 200 (a cauda
-    // medida em 1.000 partidas chegava a 918 numa jogada só); a peça de volta fica sem limite (o abuso medido não alonga a partida).
-    rules: { terra: true, matchPoints: 14, perfectBonus: 28, closedBonus: 30, terraCloseCap: 200, wonderStages: 0, springs: true, flowPoints: 8, seaPoints: 60, seaTiles: 2, waterChance: 0.24 },
+    tagline: 'O Relevo com a paisagem como um campo só. A emenda paga pela continuidade, cada mancha de terra paga quando você a fecha (cerque com outros terrenos) e a água que chega faz render as terras que a esperavam.',
+    // É o Relevo (altura por peça, degraus, águas que descem, nascentes escondidas, fluido) com a pontuação nova: as emendas pagam até 12, o degrau 2 e a cachoeira 3 (menos que no Relevo, para o placar não passar do dele)
+    // (o perfeito vale 28), a mancha paga ao crescer e ao ser fechada (no máximo 200 por mancha; a peça de volta fica sem limite), a umidade
+    // chega às peças de antes. Sem maravilha, como o Relevo. Números calibrados na bancada (docs/TERRA.md).
+    rules: { relief: true, stepPoints: 2, fallPoints: 3, wonderStages: 0, springs: true, flowPoints: 8, seaPoints: 60, seaTiles: 2, waterChance: 0.24, hiddenSprings: 4, hiddenSpringPoints: 30, terra: true, matchPoints: 12, perfectBonus: 28, closedBonus: 30, terraCloseCap: 200 },
     undos: 3,
     more: true,
   },
