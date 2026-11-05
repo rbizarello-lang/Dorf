@@ -143,24 +143,43 @@ export function swellAt(seed: number, X: number, Z: number): number {
   return v >= 0 ? v : v * 0.4;
 }
 
+/** Constantes por borda, em vetores planos (sem alocar na conta de cada ponto): normal, meio e os dois cantos, e o quadrado do comprimento. */
+const NX = new Float64Array(6), NZ = new Float64Array(6), MX = new Float64Array(6), MZ = new Float64Array(6);
+const AX = new Float64Array(6), AZ = new Float64Array(6), BX = new Float64Array(6), BZ = new Float64Array(6), LEN2 = new Float64Array(6);
+for (let i = 0; i < 6; i++) {
+  NX[i] = NORMS[i][0];
+  NZ[i] = NORMS[i][1];
+  MX[i] = MIDS[i][0];
+  MZ[i] = MIDS[i][1];
+  AX[i] = CORNERS[i][0];
+  AZ[i] = CORNERS[i][1];
+  BX[i] = CORNERS[(i + 1) % 6][0];
+  BZ[i] = CORNERS[(i + 1) % 6][1];
+  LEN2[i] = (BX[i] - AX[i]) ** 2 + (BZ[i] - AZ[i]) ** 2;
+}
+const SIG2 = SIGMA * SIGMA;
+
 export function makeTerrain(s: TerrainSpec): Terrain {
   const own = s.own ?? 0;
   const wd = s.world;
+  // O giro da peça no mundo não muda: seno e cosseno uma vez só, não a cada ponto.
+  const th = wd ? (-wd.rot * Math.PI) / 3 : 0, cosR = Math.cos(th), sinR = Math.sin(th);
   /** Ondulado no ponto local (x, z): o ponto vai para o mundo pelo giro da peça. */
   const swell = (x: number, z: number): number => {
     if (!wd) return 0;
-    const th = (-wd.rot * Math.PI) / 3, c = Math.cos(th), sn = Math.sin(th);
-    return swellAt(wd.seed, wd.x + x * c + z * sn, wd.z - x * sn + z * c);
+    return swellAt(wd.seed, wd.x + x * cosR + z * sinR, wd.z - x * sinR + z * cosR);
   };
   const nv = s.vil.reduce((p, v) => p + v, 0);
+  const sc = s.c;
+  const hh = s.h;
   const base = (x: number, z: number): number => {
-    let sw = CENTER_W * Math.exp(-(x * x + z * z) / (SIGMA * SIGMA));
-    let sv = sw * s.c;
+    let sw = CENTER_W * Math.exp(-(x * x + z * z) / SIG2);
+    let sv = sw * sc;
     for (let i = 0; i < 6; i++) {
-      const dx = x - MIDS[i][0], dz = z - MIDS[i][1];
-      const w = Math.exp(-(dx * dx + dz * dz) / (SIGMA * SIGMA));
+      const dx = x - MX[i], dz = z - MZ[i];
+      const w = Math.exp(-(dx * dx + dz * dz) / SIG2);
       sw += w;
-      sv += w * s.h[i];
+      sv += w * hh[i];
     }
     return sv / sw;
   };
@@ -172,7 +191,7 @@ export function makeTerrain(s: TerrainSpec): Terrain {
     if (r < 1e-6) return 0.85;
     let wsum = 0;
     for (let i = 0; i < 6; i++) {
-      const cos = (x * NORMS[i][0] + z * NORMS[i][1]) / r;
+      const cos = (x * NX[i] + z * NZ[i]) / r;
       wsum += s.vil[i] * smooth(0.2, 0.9, cos);
     }
     return Math.min(0.85, (wsum / 1.6) * 0.85) * (1 - smooth(0.5, 0.88, r));
@@ -182,11 +201,13 @@ export function makeTerrain(s: TerrainSpec): Terrain {
     let m = -Infinity;
     for (let i = 0; i < 6; i++) {
       if (!s.env?.[i]) continue;
-      const { t, rho } = nearestOnEdge(i, x, z);
+      // Ponto da borda `i` mais perto de (x, z) (fração `t` e distância `rho`), igual a `nearestOnEdge`, sem alocar.
+      const dx = BX[i] - AX[i], dz = BZ[i] - AZ[i];
+      const t = Math.max(0, Math.min(1, ((x - AX[i]) * dx + (z - AZ[i]) * dz) / (dx * dx + dz * dz)));
+      const rho = Math.hypot(x - (AX[i] + dx * t), z - (AZ[i] + dz * t));
       if (rho > SKIRT_MAX) continue;
-      const [ax, az] = CORNERS[i], [bx, bz] = CORNERS[(i + 1) % 6];
       // A altura da borda da vizinha já traz o ondulado: é a mesma que o `skirtFor` lê no vértice dela.
-      const hb = own + edgeProfile(s, i, t) + swell(ax + (bx - ax) * t, az + (bz - az) * t);
+      const hb = own + edgeProfile(s, i, t) + swell(AX[i] + (BX[i] - AX[i]) * t, AZ[i] + (BZ[i] - AZ[i]) * t);
       m = Math.max(m, hb - skirtDrop(hb, rho) - own);
     }
     return m;
@@ -198,14 +219,13 @@ export function makeTerrain(s: TerrainSpec): Terrain {
     // Distância às 6 retas das bordas e fração ao longo de cada uma.
     let num = 0, den = 0;
     for (let i = 0; i < 6; i++) {
-      const d = Math.max(0, INR - (x * NORMS[i][0] + z * NORMS[i][1]));
+      const d = Math.max(0, INR - (x * NX[i] + z * NZ[i]));
       const w = 1 / (d * d + 1e-12);
       den += w;
       const lam = 1 - smooth(0, TALUS, d);
       if (lam <= 0) continue;
-      const [ax, az] = CORNERS[i], [bx, bz] = CORNERS[(i + 1) % 6];
-      const t = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (z - az) * (bz - az)) / ((bx - ax) ** 2 + (bz - az) ** 2)));
-      const ex = ax + (bx - ax) * t, ez = az + (bz - az) * t;
+      const t = Math.max(0, Math.min(1, ((x - AX[i]) * (BX[i] - AX[i]) + (z - AZ[i]) * (BZ[i] - AZ[i])) / LEN2[i]));
+      const ex = AX[i] + (BX[i] - AX[i]) * t, ez = AZ[i] + (BZ[i] - AZ[i]) * t;
       const r = edgeProfile(s, i, t) - base(ex, ez);
       num += w * lam * r;
     }

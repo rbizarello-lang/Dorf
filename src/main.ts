@@ -70,6 +70,15 @@ interface Hot {
 }
 
 const params = new URLSearchParams(location.search);
+// A prévia publicada não recebe parâmetros de URL, só o #hash: `#bench`, `#bench=relevo`, `#gpu` e `#debug` valem como o `?` deles.
+// Só nomes e valores conhecidos (invariante 12); a query, quando existe, vence o hash.
+{
+  const HASH_FLAGS: Record<string, readonly string[] | undefined> = { bench: ['', 'tudo', 'classico', 'relevo'], gpu: [''], debug: [''] };
+  for (const part of location.hash.slice(1).split('&')) {
+    const [k, v = ''] = part.split('=');
+    if (Object.hasOwn(HASH_FLAGS, k) && HASH_FLAGS[k]!.includes(v) && !params.has(k)) params.set(k, v);
+  }
+}
 const store = {
   get(k: string) {
     try {
@@ -272,7 +281,13 @@ function loadBest() {
 const BENCH_SEED = 7;
 const BENCH_TILES = 60;
 const BENCH_SECONDS = 15;
+/**
+ * O que o `?bench` mede, passo a passo: `?bench` (ou `tudo`) = o Clássico na Alta de referência e depois o Relevo em Baixa, Média, Alta e
+ * Ultra; `?bench=classico` e `?bench=relevo` = os quatro níveis de um modo só. A prévia publicada usa `#bench`.
+ */
 const BENCH_LEVELS: Quality[] = ['low', 'medium', 'high', 'ultra'];
+const benchPlan = (what: string | null): { mode: string; level: Quality }[] =>
+  what === 'classico' || what === 'relevo' ? BENCH_LEVELS.map((level) => ({ mode: what, level })) : [{ mode: 'classico', level: 'high' }, ...BENCH_LEVELS.map((level) => ({ mode: 'relevo', level }))];
 // O seletor em tempo real vai até o Ultra. O Cinema só existe na foto e no vídeo; para medir o Cinema ao
 // vivo, `?quality=cinema` vale junto de um gancho de depuração (debug, perf, stress, auto ou demo).
 const QUALITIES: QualityMode[] = ['auto', 'ultra', 'high', 'medium', 'low'];
@@ -1544,6 +1559,7 @@ let last = performance.now();
 let ambienceAt = 0;
 
 interface BenchRow {
+  mode: string;
   quality: string;
   /** Resolução interna desenhada (pixels) e a densidade usada. */
   res: string;
@@ -1559,6 +1575,12 @@ interface BenchRow {
   triangles: number;
   /** Quanto sobra do orçamento de 16,7 ms (60 qps). */
   slack: string;
+  /** Pior quadro da janela de medição (soluço), em ms. */
+  worstMs: number;
+  /** Tempo de JS para trocar o fantasma de casa (média de 3 casas novas), para pôr a peça (`place`) e o pior quadro nos 3 s seguintes (a queda e a montagem), em ms. */
+  ghostMs: number;
+  placeMs: number;
+  landMs: number;
 }
 
 const pct = (sorted: number[], p: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] ?? 0;
@@ -1587,17 +1609,17 @@ async function runBench() {
     return [
       `Placa: ${gpuLabel || '?'} (${world.backend === 'webgpu' ? 'WebGPU' : 'WebGL2'}${gpu.vendor ? `, ${gpu.vendor}${gpu.architecture ? ' ' + gpu.architecture : ''}` : ''})`,
       `Navegador: ${navigator.userAgent.replace(/^Mozilla\/5\.0 /, '')}`,
-      `Tela: ${screen.width}x${screen.height}, janela ${d.cssW}x${d.cssH}, densidade do navegador ${d.dpr}`,
+      `Tela: ${screen.width}x${screen.height} (CSS), janela ${d.cssW}x${d.cssH}, densidade do navegador ${d.dpr} (escala do Windows ~${Math.round(d.dpr * 100)}%; tela física ~${Math.round(screen.width * d.dpr)}x${Math.round(screen.height * d.dpr)})`,
       `Medidor de GPU: ${world.gpuOn ? 'sim (timestamp query)' : 'não (o navegador não oferece; só FPS e CPU)'}`,
       `Auto começaria em: ${qualityLabel[autoStart]}`,
     ];
   };
-  const head = ['Nível', 'Resolução interna', 'FPS (mediana)', 'p95 (ms)', 'CPU (ms)', 'GPU (ms)', 'GPU p95 (ms)', 'Draw calls', 'Triângulos (mil)', 'Folga'];
-  const cells = (r: BenchRow) => [r.quality, `${r.res} (x${round1(r.ratio)})`, String(r.fps), String(r.p95Ms), String(r.cpuMs), r.gpuMs === null ? 'n/d' : String(r.gpuMs), r.gpuP95Ms === null ? 'n/d' : String(r.gpuP95Ms), String(r.calls), String(Math.round(r.triangles / 1000)), r.slack];
+  const head = ['Modo', 'Nível', 'Resolução interna', 'FPS (mediana)', 'p95 (ms)', 'Pior quadro (ms)', 'CPU (ms)', 'GPU (ms)', 'GPU p95 (ms)', 'Draw calls', 'Triângulos (mil)', 'Fantasma (ms)', 'Jogada (ms)', 'Pico da queda (ms)', 'Folga'];
+  const cells = (r: BenchRow) => [r.mode, r.quality, `${r.res} (x${round1(r.ratio)})`, String(r.fps), String(r.p95Ms), String(r.worstMs), String(r.cpuMs), r.gpuMs === null ? 'n/d' : String(r.gpuMs), r.gpuP95Ms === null ? 'n/d' : String(r.gpuP95Ms), String(r.calls), String(Math.round(r.triangles / 1000)), String(r.ghostMs), String(r.placeMs), String(r.landMs), r.slack];
   const render = (status: string) => {
     out.info = info();
     const body = rows.map(cells);
-    panel.innerHTML = `<h3>Medição (?bench)</h3><p></p><ul></ul><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map((r) => `<tr>${r.map(() => '<td></td>').join('')}</tr>`).join('')}</tbody></table><p class="sum"></p><button type="button" disabled>Copiar</button>`;
+    panel.innerHTML = `<h3>Medição (bench)</h3><p></p><ul></ul><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map((r) => `<tr>${r.map(() => '<td></td>').join('')}</tr>`).join('')}</tbody></table><p class="sum"></p><button type="button" disabled>Copiar</button>`;
     panel.querySelector('p')!.textContent = status;
     panel.querySelector('p.sum')!.textContent = out.summary;
     const ul = panel.querySelector('ul')!;
@@ -1614,9 +1636,19 @@ async function runBench() {
   const rig = world.rig;
   const yaw0 = rig.goalYaw;
   let bestFps = 0;
-  for (const level of BENCH_LEVELS) {
+  const plan = benchPlan(params.get('bench'));
+  for (const { mode: modeId, level } of plan) {
     applyQuality(level);
-    render(`Medindo ${qualityLabel[level]}… (${BENCH_SECONDS} s)`);
+    const label = `${modeById(modeId).name} · ${qualityLabel[level]}`;
+    render(`Medindo ${label}… (${BENCH_SECONDS} s)`);
+    // Mesmo tabuleiro (semente e peças) em todos os passos: o modo troca a partida, e os testes de jogada do passo anterior não sobram.
+    mode = modeById(modeId);
+    rulesTheme = theme;
+    newGame(BENCH_SEED);
+    autoPlace(BENCH_TILES, true);
+    // A virada de era abre a escolha de carta (modal) e trava a jogada: o bench escolhe a primeira e segue.
+    while (game.offers.length) game.choose(0);
+    hud.hideModal();
     // Um instante para os pipelines do nível compilarem fora da medição.
     await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
     await new Promise((r) => setTimeout(r, 1500));
@@ -1646,19 +1678,55 @@ async function runBench() {
     const gpuMs = gpuT.length >= 5 ? round1(pct(gpuT, 0.5)) : null;
     const gpuP95Ms = gpuT.length >= 5 ? round1(pct(gpuT, 0.95)) : null;
     const fps = mid > 0 ? round1(1000 / mid) : 0;
+    const worstMs = round1(samples[samples.length - 1] ?? 0);
     bestFps = Math.max(bestFps, fps);
+    // Soluços de jogada: trocar o fantasma de casa (no Relevo cada casa é uma peça nova), pôr a peça e o pior quadro da queda e da montagem.
+    const front = [...game.board.frontier];
+    const picks = [front[0], front[Math.floor(front.length / 2)], front[front.length - 1]].filter((k) => k !== undefined);
+    let ghostTotal = 0;
+    for (const k of picks) {
+      const [q, r] = unkey(k);
+      hover = { q, r };
+      const t = performance.now();
+      updateGhost();
+      ghostTotal += performance.now() - t;
+      await new Promise<void>((r2) => requestAnimationFrame(() => r2()));
+    }
+    let placeMs = 0;
+    let landMs = 0;
+    const best = game.bestMove();
+    if (best) {
+      hover = { q: best.q, r: best.r };
+      while (game.rot !== best.rot) rotate(1);
+      updateGhost();
+      await new Promise<void>((r2) => requestAnimationFrame(() => r2()));
+      const t = performance.now();
+      place(best.q, best.r);
+      placeMs = performance.now() - t;
+      await new Promise<void>((resolve) => {
+        const t1 = performance.now();
+        let p = t1;
+        const f = (now: number) => {
+          landMs = Math.max(landMs, now - p);
+          p = now;
+          if (now - t1 < 3000) requestAnimationFrame(f);
+          else resolve();
+        };
+        requestAnimationFrame(f);
+      });
+    }
     // Folga: sem o medidor de GPU, só dá para dizer que o quadro cabe quando o FPS encosta no refresh.
     const busy = Math.max(cpuMs, gpuP95Ms ?? 0);
     const slack = gpuP95Ms === null ? (fps < 55 ? 'pesado' : 'cabe (sem medidor de GPU)') : busy <= 10 ? 'folga' : busy <= 1000 / 60 ? 'no limite' : 'pesado';
-    rows.push({ quality: qualityLabel[level], res: `${d.w}x${d.h}`, ratio: d.ratio, fps, p95Ms: round1(p95), cpuMs: round1(cpuMs), gpuMs, gpuP95Ms, calls: s.calls, triangles: s.triangles, slack });
+    rows.push({ mode: modeById(modeId).name, quality: qualityLabel[level], res: `${d.w}x${d.h}`, ratio: d.ratio, fps, p95Ms: round1(p95), cpuMs: round1(cpuMs), gpuMs, gpuP95Ms, calls: s.calls, triangles: s.triangles, slack, worstMs, ghostMs: round1(picks.length ? ghostTotal / picks.length : 0), placeMs: round1(placeMs), landMs: round1(landMs) });
   }
   rig.goalYaw = yaw0;
   // Sem pelo menos ~24 qps em algum nível não há como adivinhar a taxa do monitor (placa lenta demais, ou software).
   const hz = bestFps >= 24 ? REFRESH_RATES.reduce((a, b) => (Math.abs(b - bestFps) < Math.abs(a - bestFps) ? b : a)) : 0;
-  const fits = rows.filter((r) => r.slack === 'folga' || r.slack === 'no limite' || r.slack.startsWith('cabe')).map((r) => r.quality);
+  const fits = rows.filter((r) => r.slack === 'folga' || r.slack === 'no limite' || r.slack.startsWith('cabe')).map((r) => `${r.mode} ${r.quality}`);
   out.summary = `${hz ? `Monitor: o melhor FPS parou em ~${hz} Hz.` : 'Monitor: poucos quadros para estimar a taxa.'} Cabem em 16,7 ms (60 qps): ${fits.length ? fits.join(', ') : 'nenhum nível'}. Folga = GPU e CPU até 10 ms.`;
   out.done = true;
-  render('Pronto. A câmera girou devagar sobre o mesmo tabuleiro em cada nível.');
+  render('Pronto. A câmera girou devagar sobre o mesmo tabuleiro em cada passo.');
 }
 
 /**

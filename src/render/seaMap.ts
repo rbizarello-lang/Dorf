@@ -27,6 +27,13 @@ export class SeaMap {
   readonly data = new Uint8Array(SEA_SIZE * SEA_SIZE).fill(255);
   readonly texture: THREE.DataTexture;
   private dirty = false;
+  /**
+   * Encaixe fluido: o ponto sem deslocamento de cada texel (x, z). O inverso do deslocamento é um ponto fixo de 4 iterações com 6 senos,
+   * e peças vizinhas cobrem os mesmos texels (cada peça varre ~7 unidades em volta): guardado, cada texel é resolvido uma vez só na partida.
+   * NaN = ainda não calculado. A função de deslocamento é fixa na partida (`unwarpFn`); trocar de função esvazia o guardado.
+   */
+  private unwarped: Float32Array | null = null;
+  private unwarpFn: ((x: number, z: number) => readonly [number, number]) | null = null;
 
   constructor() {
     const t = new THREE.DataTexture(this.data, SEA_SIZE, SEA_SIZE, THREE.RedFormat, THREE.UnsignedByteType);
@@ -49,6 +56,11 @@ export class SeaMap {
    */
   add(q: number, r: number, margin = 0, unwarp?: (x: number, z: number) => readonly [number, number]) {
     const { x: cx, z: cz } = hexToWorld(q, r);
+    if (unwarp !== this.unwarpFn) {
+      this.unwarpFn = unwarp ?? null;
+      this.unwarped = unwarp ? new Float32Array(SEA_SIZE * SEA_SIZE * 2).fill(NaN) : null;
+    }
+    const cache = this.unwarped;
     const reach = 1 + SEA_DMAX;
     const u0 = Math.max(0, Math.floor((cx - reach + GROUND_EXTENT) / TEXEL)), u1 = Math.min(SEA_SIZE - 1, Math.ceil((cx + reach + GROUND_EXTENT) / TEXEL));
     const v0 = Math.max(0, Math.floor((cz - reach + GROUND_EXTENT) / TEXEL)), v1 = Math.min(SEA_SIZE - 1, Math.ceil((cz + reach + GROUND_EXTENT) / TEXEL));
@@ -56,7 +68,12 @@ export class SeaMap {
       for (let u = u0; u <= u1; u++) {
         // Encaixe fluido: a peça foi desenhada deslocada, então a distância é ao hexágono de origem do ponto que o deslocamento leva até aqui.
         let wx = (u + 0.5) * TEXEL - GROUND_EXTENT, wz = (v + 0.5) * TEXEL - GROUND_EXTENT;
-        if (unwarp) [wx, wz] = unwarp(wx, wz);
+        if (unwarp) {
+          const k = (v * SEA_SIZE + u) * 2;
+          if (cache![k] !== cache![k]) [cache![k], cache![k + 1]] = unwarp(wx, wz);
+          wx = cache![k];
+          wz = cache![k + 1];
+        }
         const az = Math.abs(wz - cz), ax = Math.abs(wx - cx);
         // Distância ao hexágono flat-top: a "norma hexagonal" menos o raio interno (as linhas de mesma distância são hexágonos
         // maiores). No fluido, a distância de verdade (euclidiana): a espuma e a areia dobram os cantos em arco, sem quina.
