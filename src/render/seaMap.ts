@@ -34,6 +34,8 @@ export class SeaMap {
    */
   private unwarped: Float32Array | null = null;
   private unwarpFn: ((x: number, z: number) => readonly [number, number]) | null = null;
+  /** Pré-visualizações empilhadas: o retângulo (u0, v0, w × h) com o que havia antes. */
+  private previews: { u0: number; v0: number; w: number; h: number; data: Uint8Array }[] = [];
 
   constructor() {
     const t = new THREE.DataTexture(this.data, SEA_SIZE, SEA_SIZE, THREE.RedFormat, THREE.UnsignedByteType);
@@ -47,7 +49,31 @@ export class SeaMap {
 
   clear() {
     this.data.fill(255);
+    this.previews.length = 0;
     this.dirty = true;
+  }
+
+  /** Como `add`, para uma peça que ainda não assentou (fantasma, queda): guarda o que havia e `unpreview` devolve. */
+  preview(q: number, r: number, margin = 0, unwarp?: (x: number, z: number) => readonly [number, number]) {
+    const { x: cx, z: cz } = hexToWorld(q, r);
+    const reach = 1 + SEA_DMAX;
+    const u0 = Math.max(0, Math.floor((cx - reach + GROUND_EXTENT) / TEXEL)), u1 = Math.min(SEA_SIZE - 1, Math.ceil((cx + reach + GROUND_EXTENT) / TEXEL));
+    const v0 = Math.max(0, Math.floor((cz - reach + GROUND_EXTENT) / TEXEL)), v1 = Math.min(SEA_SIZE - 1, Math.ceil((cz + reach + GROUND_EXTENT) / TEXEL));
+    const w = u1 - u0 + 1, h = v1 - v0 + 1;
+    if (w <= 0 || h <= 0) return;
+    const keep = new Uint8Array(w * h);
+    for (let v = 0; v < h; v++) keep.set(this.data.subarray((v0 + v) * SEA_SIZE + u0, (v0 + v) * SEA_SIZE + u0 + w), v * w);
+    this.previews.push({ u0, v0, w, h, data: keep });
+    this.add(q, r, margin, unwarp);
+  }
+
+  unpreview() {
+    for (let k = this.previews.length - 1; k >= 0; k--) {
+      const p = this.previews[k];
+      for (let v = 0; v < p.h; v++) this.data.set(p.data.subarray(v * p.w, (v + 1) * p.w), (p.v0 + v) * SEA_SIZE + p.u0);
+    }
+    if (this.previews.length) this.dirty = true;
+    this.previews.length = 0;
   }
 
   /**

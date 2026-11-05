@@ -118,6 +118,8 @@ const world = await createWorld();
 {
   const fl = params.get('fluido');
   world.fluidPref = fl === null ? 'auto' : fl === '0' ? 'off' : 'on';
+  // `?fantasma=0`: o fantasma e a queda voltam ao desenho de antes do pouso e os barcos e trens ao hexágono (comparar capturas).
+  world.ghostTrue = params.get('fantasma') !== '0';
 }
 // `?levels=0` desliga o relevo (platôs): o tabuleiro sai plano, como antes (comparar capturas).
 world.levelsEnabled = params.get('levels') !== '0';
@@ -2084,6 +2086,53 @@ function start(data: unknown) {
   updateGhost();
   const { x, z } = hexToWorld(m.q, m.r);
   world.rig.goal.set(x, 0, z);
+};
+
+// Coloca a peça exatamente onde o fantasma está (a mesma jogada que o __ghostBest mostrou: o bestMove sorteia empates).
+(window as unknown as { __placeGhost: () => boolean }).__placeGhost = () => {
+  if (!hover || !game.current || !game.board.frontier.has(hkey(hover.q, hover.r))) return false;
+  place(hover.q, hover.r);
+  return true;
+};
+
+// Congela o mundo e leva a peça caindo ao instante `t` (0,05 = no meio da queda, 0,7 = o último quadro antes de virar chão); `t` > 0,72 assenta.
+// Com `t` nulo, solta o mundo. Capturas antes e depois do pouso sem depender do relógio.
+(window as unknown as { __drop: (t?: number) => number }).__drop = (t) => {
+  if (t === undefined) {
+    world.timeScale = 1;
+    return 0;
+  }
+  world.timeScale = 0;
+  return world.seekDrops(t);
+};
+
+// Custo de mover o fantasma: passa por até `n` casas da fronteira (uma por quadro) e devolve, por troca de casa, os ms da montagem
+// da peça (`setGhost`) e da pré-visualização no mapa do chão (o GPU não entra: ele só enfileira o envio das texturas).
+(window as unknown as { __ghostCost: (n?: number) => Promise<{ ghost: number[]; stamp: number[]; frame: number[] }> }).__ghostCost = async (n = 20) => {
+  const cells = [...game.board.frontier].slice(0, n).map((k) => unkey(k));
+  const out = { ghost: [] as number[], stamp: [] as number[], frame: [] as number[] };
+  for (const [q, r] of cells) {
+    hover = { q, r };
+    updateGhost();
+    const t0 = performance.now();
+    await new Promise<void>((res) => requestAnimationFrame(() => res()));
+    out.frame.push(performance.now() - t0);
+    out.ghost.push(world.ghostMs);
+    out.stamp.push(world.stampMs);
+  }
+  return out;
+};
+
+// Joga com a IA (sem animação) até a peça da vez ter rio e pelo menos `kinds` terrenos diferentes (capturas do fantasma com paisagem variada).
+// Devolve quantas peças pôs, ou -1 se não achou em `max`.
+(window as unknown as { __autoUntil: (kinds?: number, max?: number) => number }).__autoUntil = (kinds = 3, max = 40) => {
+  for (let i = 0; i < max && game.current; i++) {
+    const e = game.current.edges;
+    if (e.includes(T.Water) && new Set(e).size >= kinds) return i;
+    if (game.offers.length) return -1;
+    autoPlace(1, false);
+  }
+  return -1;
 };
 
 // Águas que descem: põe o fantasma na jogada em que a água da peça rende mais (devolve o ganho, 0 se a peça da vez não tem rio).
