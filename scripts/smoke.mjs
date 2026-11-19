@@ -39,6 +39,9 @@ const cases = [
   // Terra contínua: pelo parâmetro e pelo #hash (a prévia publicada só recebe o hash), nos dois backends. O texto da era traz o nome do modo.
   { name: 'terra', q: 'mode=terra&theme=holanda&seed=3&auto=12&quality=low', backend: 'webgpu', mode: 'Terra contínua' },
   { name: 'terra-hash-webgl', q: 'theme=brasil&seed=3&auto=12&quality=low&webgl', hash: '#mode=terra', backend: 'webgl2', mode: 'Terra contínua' },
+  // Limite de buffers de vértice do WebGPU (maxVertexBuffers = 8): a Alta com a Paisagem viva e o TRAA tem o pior caso (matriz anterior da instância).
+  // O `?vbuf` conta, em qualquer backend, os buffers que cada malha usa; roda em WebGL2 para valer também sem GPU.
+  { name: 'buffers-de-vertice', q: 'theme=holanda&seed=7&auto=60&quality=high&mode=zen&viva=1&vbuf&webgl', backend: 'webgl2', vbuf: true, tiles: 61 },
   // Um #mode= inventado é ignorado (abre no modo de sempre).
   { name: 'hash-invalido', q: 'theme=holanda&seed=3&auto=12&quality=low', hash: '#mode=inventado', backend: 'webgpu', mode: 'Clássico' },
 ];
@@ -56,20 +59,25 @@ for (const c of cases) {
   let stats = null;
   while (Date.now() - t0 < TIMEOUT && !errors.length) {
     stats = await page.evaluate(() => window.__stats ?? null);
-    if (stats?.tiles >= (c.bench ? 61 : TILES)) break;
+    if (stats?.tiles >= (c.tiles ?? (c.bench ? 61 : TILES))) break;
     await page.waitForTimeout(1000);
   }
   // Mais alguns quadros: pipelines de materiais novos compilam no primeiro desenho e podem falhar depois.
-  if (stats?.tiles >= (c.bench ? 61 : TILES) && !errors.length) await page.waitForTimeout(5000);
+  if (stats?.tiles >= (c.tiles ?? (c.bench ? 61 : TILES)) && !errors.length) await page.waitForTimeout(5000);
   const problems = [...errors];
   if (!stats) problems.push('o jogo não desenhou nenhum quadro (window.__stats vazio)');
   else {
-    const want = c.bench ? 61 : TILES;
+    const want = c.tiles ?? (c.bench ? 61 : TILES);
     if (stats.tiles < want) problems.push(`tabuleiro com ${stats.tiles} peças, esperado ${want}`);
     if (c.bench && !(await page.evaluate(() => !!window.__bench && !!document.querySelector('.bench table')))) problems.push('o painel do ?bench não apareceu');
     // O cabeçalho do ?bench (placa, navegador, tela, medidor de GPU, nível do Auto) precisa vir junto, para a tabela colada dizer onde foi medida.
     if (c.bench && !(await page.evaluate(() => (window.__bench?.info?.length ?? 0) >= 5 && document.querySelectorAll('.bench li').length >= 5))) problems.push('o cabeçalho do ?bench (placa, tela, medidor de GPU) não apareceu');
     if (c.mode && !(await page.evaluate((m) => document.getElementById('era')?.textContent?.includes(m) ?? false, c.mode))) problems.push(`o modo na tela não é ${c.mode}`);
+    if (c.vbuf) {
+      const over = await page.evaluate(() => window.__vbuf?.(9) ?? null);
+      if (over === null) problems.push('o gancho __vbuf não existe');
+      else for (const r of over) problems.push(`malha ${r.key} (${r.material}) usa ${r.n} buffers de vértice (pior caso ${r.pior}), o WebGPU aceita 8: ${r.attrs.join(',')}`);
+    }
     if (stats.backend !== c.backend) problems.push(`backend ${stats.backend}, esperado ${c.backend}`);
   }
   const s = ((Date.now() - t0) / 1000).toFixed(1);

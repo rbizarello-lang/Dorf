@@ -41,6 +41,7 @@ import type { HillSurface } from './hillSurface';
 import { Warp, isWarped, warpBuild } from './fluid';
 import { LEVEL_STEP, TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type BuildOpts, type TileBuild } from './tileBuilder';
 import { NIGHT_LIGHT } from './nightLight';
+import { VertexBufferWatch } from './vbuf';
 
 export type { Quality };
 export type TimeOfDay = 'dawn' | 'aurora' | 'day' | 'golden' | 'dusk' | 'night';
@@ -717,6 +718,7 @@ export class World {
   readonly falls: FallLayer;
   private chunks = new Map<number, Chunk>();
   private pools = new Map<string, Pool>();
+  private vbufWatch: VertexBufferWatch | null = null;
   private board: Board | null = null;
   private chimneys: number[] = [];
   private sun = new THREE.DirectionalLight();
@@ -3072,6 +3074,20 @@ export class World {
       }
     }
     return all[i] ?? null;
+  }
+
+  /** Liga a conferência de buffers de vértice (`?vbuf`): precisa vir antes do primeiro quadro. */
+  watchVbuf() {
+    this.vbufWatch ??= new VertexBufferWatch(this.renderer, (o) => {
+      for (const [k, p] of this.pools) if (p.mesh === o) return k;
+      const g = (o as THREE.Mesh).geometry;
+      return o.name || `${o.constructor.name}[${g ? Object.keys(g.attributes).join(',') : ''}]`;
+    });
+  }
+
+  /** Malhas cujo pior caso chega a `perto` buffers de vértice ou mais (padrão 7); o WebGPU aceita 8. */
+  vbufReport(perto?: number) {
+    return this.vbufWatch?.report(perto) ?? null;
   }
 
   /** Custo por kit: instâncias e triângulos (para achar o que pesa). */
