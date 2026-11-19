@@ -1,6 +1,8 @@
-// Nível de qualidade inicial do modo Auto pelo nome da placa de vídeo: não começa no Ultra numa
+// Nível de qualidade inicial do modo Auto pelo nome da placa de vídeo: não começa na Alta numa
 // placa integrada nem na Média numa placa de sobra. Só escolhe o começo; se o quadro ficar lento,
-// o Auto ainda baixa a resolução e depois o nível. Funções puras (testes em tests/video.ts).
+// o Auto ainda baixa a resolução e depois o nível. O Auto nunca começa no Ultra: o Ultra é escolha
+// manual (`tierForGpu` diz o que a placa aguenta, `autoStartTier` limita a Alta). Funções puras
+// (testes em tests/video.ts).
 
 export type StartTier = 'ultra' | 'high' | 'medium' | 'low';
 
@@ -35,7 +37,7 @@ export function gpuName(info: GpuInfo): string {
   return '';
 }
 
-/** Nível inicial sugerido para a placa, ou null quando o nome não diz o bastante. */
+/** Nível que a placa aguenta (Ultra inclusive), ou null quando o nome não diz o bastante. */
 export function tierForGpu(info: GpuInfo): StartTier | null {
   const r = (info.renderer ?? '').toLowerCase();
   const arch = (info.architecture ?? '').toLowerCase();
@@ -95,10 +97,12 @@ export function tierForGpu(info: GpuInfo): StartTier | null {
 }
 
 /**
- * Nível em que o Auto começa. Placa desconhecida no computador começa na Alta (prudente: o Ultra
- * custa caro numa integrada que o nome não denunciou, e o Auto ainda sobe a resolução e desce
- * de nível se faltar); telas de toque continuam na Média.
+ * Nível em que o Auto começa: o que a placa aguenta, até a Alta. O Ultra (sombra em 3 cascatas de
+ * 4096, oclusão com 16 amostras, até 4K de pixels, vegetação extra) custa bem mais que a Alta e fica
+ * para quem o escolhe à mão. Placa desconhecida no computador começa na Alta (prudente: o Auto ainda
+ * baixa a resolução e depois o nível se faltar); telas de toque continuam na Média.
  */
 export function autoStartTier(info: GpuInfo, coarsePointer: boolean): StartTier {
-  return tierForGpu(info) ?? (coarsePointer ? 'medium' : 'high');
+  const t = tierForGpu(info) ?? (coarsePointer ? 'medium' : 'high');
+  return t === 'ultra' ? 'high' : t;
 }

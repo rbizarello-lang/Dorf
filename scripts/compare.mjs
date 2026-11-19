@@ -5,7 +5,8 @@
 //   node scripts/compare.mjs confere <pastaRef>         grava em .cache/compare/agora e compara com a referência
 // Variáveis: BASE (URL do servidor, padrão http://127.0.0.1:4173/), WAIT (ms, padrão 9000),
 //   TOL_PCT (máx. % de pixels diferentes por captura, padrão 0.5), TOL_MEAN (máx. diferença média 0 a 255, padrão 0.5),
-//   CH (limiar por canal, 0 a 255, padrão 12).
+//   CH (limiar por canal, 0 a 255, padrão 12), QUALITY (acrescenta ?quality=…: high, medium, ultra; sem ele vale o Auto, que no SwiftShader é a Baixa),
+//   SHOT_TIMEOUT (ms da captura, padrão 30000; a Alta no SwiftShader com a máquina ocupada pode passar disso: use 240000).
 // Grava na pasta B uma imagem de diferença ampliada (diff-<nome>.png, ×4) por captura.
 // Roda à mão, fora da CI: o SwiftShader varia. Use a mesma máquina e o mesmo servidor nas duas rodadas.
 import fs from 'node:fs';
@@ -34,9 +35,9 @@ async function grava(dir) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 860 } });
     const errors = [];
     page.on('pageerror', (e) => errors.push(String(e)));
-    await page.goto(`${base}?${q}`);
+    await page.goto(`${base}?${q}${process.env.QUALITY ? `&quality=${process.env.QUALITY}` : ''}`);
     await page.waitForTimeout(Number(process.env.WAIT ?? 9000));
-    await page.screenshot({ path: path.join(dir, `${name}.png`) });
+    await page.screenshot({ path: path.join(dir, `${name}.png`), timeout: Number(process.env.SHOT_TIMEOUT ?? 30000) });
     console.log('gravou', name, errors.length ? `(${errors.length} erro(s) de página)` : '');
     await page.close();
   }
