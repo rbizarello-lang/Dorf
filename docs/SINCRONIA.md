@@ -16,10 +16,14 @@ O Roger pediu que os dois agentes trabalhem em sincronia no mesmo repositório. 
 |---|---|---|---|
 | E5 Encostas no jogo todo (modelo do Astra) | Claude | `dorf/e5-encostas` | E5c feita (`3f2cccf`); espera o olhar do Roger |
 | E6 Paisagem viva no jogo (ideia do Roger, referência do Astra) | Claude | `dorf/e5-encostas` | feita (`a2b9157`; relatório em `docs/propostas/e6/`); falta: canal mais largo, celeiro com desenho próprio, conferir o WebGPU e a GPU real |
-| Patamares de vila em geometria (muro de arrimo, como a Aldeia na crista) | Astra | `astra/e5-patamares` a partir de `fcc7530` | feita (`774c2a2`), [relatório e prancha](propostas/e5-patamares/RELATORIO.md) |
-| E7 Limite de buffers de vértice no WebGPU (árvores com 9 buffers acima de 1000 instâncias; também na `main`) | Claude | `dorf/e5-encostas` | feita; atributos do kit intercalados em `instGeometry`, gancho `?vbuf`, teste e caso no smoke ([relatório](propostas/e7/RELATORIO.md)); falta conferir na GPU real; a correção vale para a `main` por PR à parte |
-| Casas vazias internas com contorno redondo (hoje leem como baías hexagonais) | livre | — | livre |
+| Patamares de vila em geometria (muro de arrimo, como a Aldeia na crista) | Astra | `astra/e5-patamares` a partir de `fcc7530` | feita (`774c2a2`), [relatório e prancha](propostas/e5-patamares/RELATORIO.md); juntada à `dorf/e5-encostas` (`91084f3`) |
+| E7 Limite de buffers de vértice no WebGPU (árvores com 9 buffers acima de 1000 instâncias; também na `main`) | Claude | `dorf/e5-encostas` | feita; atributos do kit intercalados em `instGeometry`, gancho `?vbuf`, teste e caso no smoke ([relatório](propostas/e7/RELATORIO.md)); falta conferir na GPU real; na `main` pelo PR #116 (`dorf/d43-webgpu-buffers`) |
+| Casas vazias internas com contorno redondo (hoje leem como baías hexagonais) | Astra | `astra/baias-internas` a partir de `91084f3` | em andamento (issue #115) |
+| E8 Atualização das vizinhas: emissor de fumaça que sobra (semente 1, (1,0) giro 2), peça que assenta durante a queda da anterior (semente 3, Viva), corredeira nas duas ordens, prévia da vizinha que vai subir | Claude | `dorf/e5-encostas` | em andamento (issue #115) |
 | Entrepostos como modo sobre a base (cais, fretes, oráculo independente do contrato) | livre (sugestão: Astra) | `astra/entrepostos-modo` | livre, depois da E6 |
+
+## Coordenação
+A conversa entre os agentes fica na issue #115 ("Continuidade das Encostas entre Claude e Codex"). Ao pegar ou terminar uma tarefa, comente lá, com a branch e o commit, e atualize esta tabela.
 
 ## Onde está cada coisa
 - **Avaliação do Entrepostos:** `docs/propostas/entrepostos/AVALIACAO.md`.
