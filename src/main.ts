@@ -9,7 +9,8 @@ import { shareLine, shareUrl, terrainPoints } from './core/share';
 import { LOOKOUT_MOVES, SITE_REWARD, type SiteKind } from './core/sites';
 import { SPECIALS, SPECIAL_KINDS, type SpecialKind } from './core/specials';
 import { mulberry32 } from './core/rng';
-import { T } from './core/tiles';
+import { T, rotateEdges } from './core/tiles';
+import { previewGrowth } from './core/living';
 import { DIRS, edgeMid, hexDistance, hexToWorld, hkey, unkey, worldToHex } from './core/hex';
 import { routeMarks, type RouteHit, type RouteMark } from './core/routes';
 import type { PassingWeather, Quality, TimeOfDay } from './render/world';
@@ -263,6 +264,8 @@ let scorePeek: number | null = null;
 let waterPeek = '';
 /** Terra contínua: a etiqueta do fantasma leva só o total da jogada e, se ela fecha uma mancha, " · fecha" (o resto o fantasma mostra na paisagem); vazio nos outros modos. */
 let terraPeek = '';
+/** Paisagem viva: no fantasma, quantas vizinhas ganham um estágio (" · N crescem"); vazio sem a opção ou sem ganho. */
+let vivaPeek = '';
 /** "Onde encaixa": as melhores casas da peça atual. Valem só para a jogada e o giro em que foram pedidas. */
 let hints: { q: number; r: number; rot: number; points: number }[] | null = null;
 let hintsKey = '';
@@ -873,6 +876,7 @@ function refreshRoutePeek() {
     routePeek = [];
     scorePeek = null;
     terraPeek = '';
+    vivaPeek = '';
     routePeekAt = '';
     world.setTerraView(null);
     return;
@@ -885,6 +889,9 @@ function refreshRoutePeek() {
   const cw = peek ? game.check(hover.q, hover.r)?.water : undefined;
   waterPeek = !cw ? '' : cw.sea ? ` · chega ao mar +${cw.gain}` : cw.flows ? (cw.hidden ? ` · nascente escondida +${cw.gain}` : cw.spring ? ` · nascente +${cw.gain}` : ` · água +${cw.gain}`) : ' · água parada';
   routePeek = peek?.routes ?? [];
+  // Paisagem viva: custa só a conta dos encaixes das vizinhas (sem refazer nada na cena); o próprio fantasma já aparece desenvolvido.
+  const grow = peek && world.vivaOn && game.current ? previewGrowth(game.board, hover.q, hover.r, rotateEdges(game.current.edges, game.rot)) : 0;
+  vivaPeek = grow ? ` · ${grow} cresc${grow > 1 ? 'em' : 'e'}` : '';
   // Terra contínua: o fantasma mostra a paisagem (contorno da mancha, bordas abertas, laço que fecha, umidade que sobe); a etiqueta só leva o total e "fecha".
   if (game.rules.terra) {
     const view = peek ? game.terraView(hover.q, hover.r) : null;
@@ -1984,7 +1991,7 @@ function step(now: number) {
   if (scorePeek !== null && hover) {
     const s = screenOf(hover.q, hover.r, 0.55);
     const route = routePeek.length ? ` · ${routePeek.map(routeLabel).join(' · ')}` : '';
-    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${terraPeek}${waterPeek}${route}`, color: theme.ui.accent, kind: 'score' });
+    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${terraPeek}${waterPeek}${vivaPeek}${route}`, color: theme.ui.accent, kind: 'score' });
   }
   // Influência das construções: o ganho aparece com o fantasma numa casa contornada.
   const inf = hover && game.current && !st ? game.board.influenceAt(hover.q, hover.r, game.current.edges) : null;

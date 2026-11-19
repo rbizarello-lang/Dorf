@@ -160,6 +160,7 @@ Eram 14 temas. O Jardim Sakura, o Jade Song e o Edo Tranquilo viraram o Terraço
 | `?quality=high` | `auto`, `ultra`, `high`, `medium` ou `low` (`cinema` vira `ultra`; só vale junto de `?debug`, `?perf`, `?stress`, `?auto` ou `?demo`, para medir) |
 | `?webgl` | força o WebGL2 em vez do WebGPU |
 | `?mode=zen` | modo inicial: `classico`, `zen`, `diario`, `exploradores`, `rotas`, `rapida`, `relevo` ou `terra`; o `#mode=terra` (hash) vale igual e chega à prévia publicada |
+| `?viva=1` / `?viva=0` (ou `#viva=1`) | força a Paisagem viva ligada ou desligada. Sem o parâmetro vale a opção em Aa ("Paisagem viva"); sem opção gravada, vem ligada no Zen e na Terra contínua (e em todos os modos na prévia publicada) e desligada nos outros |
 | `?debug` | mostra FPS, draw calls, triângulos e instâncias |
 | `?bench` (ou `#bench` no fim do endereço, para a prévia publicada, que não recebe parâmetros) | mede o desempenho do seu aparelho: o Clássico na Alta e o Relevo em Baixa, Média, Alta e Ultra (cerca de 1 minuto e meio), e mostra uma tabela que dá para copiar: resolução interna, FPS, p95, pior quadro, tempo de CPU e, onde o navegador oferece, o de GPU por quadro, o custo de trocar o fantasma de casa e de pôr uma peça, e a folga contra os 16,7 ms de 60 qps. `?bench=classico` e `?bench=relevo` medem os quatro níveis de um modo só |
 | `?gpu` | liga o medidor de GPU (consulta de tempo do WebGPU ou do WebGL2) sem rodar o `?bench`; `window.__gpu()` devolve o tempo por quadro e por passe |

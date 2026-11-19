@@ -9,7 +9,7 @@ import type { Stages } from '../core/living';
 import type { Deco, TileBuild } from './tileBuilder';
 
 /** Quanto cada estágio soma (por estágio): altura e largura das casas, das copas e altura das plantas; tamanho do celeiro. */
-export const GROW = { house: 0.22, houseWide: 0.05, treeH: 0.16, treeW: 0.06, cropH: 0.12, barn: 0.55 } as const;
+export const GROW = { house: 0.22, houseWide: 0.05, treeH: 0.18, treeW: 0.08, cropH: 0.12, barn: 0.55 } as const;
 
 const MIDS = [0, 1, 2, 3, 4, 5].map((i) => edgeMid(i));
 
@@ -45,11 +45,11 @@ export function developBuild(tile: TileBuild, edges: readonly T[], stages: Stage
       d.sy *= 1 + GROW.treeH * forest;
       d.sx *= 1 + GROW.treeW * forest;
       d.sz *= 1 + GROW.treeW * forest;
-      // Mais copas: uma árvore em cada quatro ganha uma vizinha menor (1, 2 ou 3 em cada 4 conforme o estágio).
-      if (tree++ % 4 < forest) add.push(copy(d, { x: d.x * 0.93, z: d.z * 0.93, sx: d.sx * 0.72, sy: d.sy * 0.8, sz: d.sz * 0.72, ry: d.ry + 0.8 }));
+      // Mais copas: uma árvore em cada seis ganha uma vizinha menor (1, 2 ou 3 em cada 6 conforme o estágio).
+      if (tree++ % 6 < forest) add.push(copy(d, { x: d.x * 0.93, z: d.z * 0.93, sx: d.sx * 0.72, sy: d.sy * 0.8, sz: d.sz * 0.72, ry: d.ry + 0.8 }));
     } else if (field && k.startsWith('crop:') && edges[sectorAt(d.x, d.z)] === T.Field) {
       d.sy *= 1 + GROW.cropH * field;
-      if (crop++ % 5 < field) add.push(copy(d, { x: d.x * 0.985, z: d.z * 0.985, sx: d.sx * 0.8, sz: d.sz * 0.8, ry: d.ry + 0.1 }));
+      if (crop++ % 8 < field) add.push(copy(d, { x: d.x * 0.985, z: d.z * 0.985, sx: d.sx * 0.8, sz: d.sz * 0.8, ry: d.ry + 0.1 }));
       const r = Math.hypot(d.x, d.z);
       if (field >= 2 && !barnAt && r > 0.42 && r < 0.65) barnAt = d;
     } else if (grass && k === 'flower' && edges[sectorAt(d.x, d.z)] === T.Grass && flower++ % 3 < grass) {
