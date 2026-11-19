@@ -15,7 +15,7 @@ O Roger pediu que os dois agentes trabalhem em sincronia no mesmo repositório. 
 | Tarefa | Dono | Branch | Estado |
 |---|---|---|---|
 | E5 Encostas no jogo todo (modelo do Astra) | Claude | `dorf/e5-encostas` | E5c feita (`3f2cccf`); espera o olhar do Roger |
-| E6 Paisagem viva no jogo (ideia do Roger, referência do Astra) | Claude | `dorf/e5-encostas` | em andamento |
+| E6 Paisagem viva no jogo (ideia do Roger, referência do Astra) | Claude | `dorf/e5-encostas` | feita (commit na mensagem de entrega; relatório em `docs/propostas/e6/`); falta: canal mais largo, celeiro com desenho próprio, conferir o WebGPU e a GPU real |
 | Patamares de vila em geometria (muro de arrimo, como a Aldeia na crista) | livre (sugestão: Astra) | `astra/e5-patamares` a partir de `dorf/e5-encostas` | livre |
 | Casas vazias internas com contorno redondo (hoje leem como baías hexagonais) | livre | — | livre |
 | Entrepostos como modo sobre a base (cais, fretes, oráculo independente do contrato) | livre (sugestão: Astra) | `astra/entrepostos-modo` | livre, depois da E6 |
