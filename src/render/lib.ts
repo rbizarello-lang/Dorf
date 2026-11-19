@@ -2535,6 +2535,12 @@ export class Lib {
       this.farGeos.set('hill', hillGeometry({ far: true }));
     }
     if (theme.irrigation) set('shaduf', shadufGeometry());
+    // Paisagem viva (estágio 2 do cultivo): o celeiro da plantação, na cor das casas do tema (um pool só; `render/livingBuild.ts`).
+    set('barn', kit([
+      { geo: box(0.07, 0.034, 0.05), color: theme.houses[0].walls[0] },
+      { geo: pyramid(0.082, 0.03, 0.062, 0.034), color: theme.houses[0].roofs[0] },
+      { geo: box(0.018, 0.022, 0.004, 0, 0, 0.026), color: DOOR },
+    ]));
     set('flower', kit([{ geo: oct(0.014).translate(0, 0.024, 0), color: '#fff', tint: 1 }, { geo: tri([-0.002, 0, 0], [0.002, 0, 0], [0, 0.02, 0]), color: '#4f7a3a' }]));
     set('lily', kit([{ geo: cyl(0.035, 0.035, 0.006, 7, 0, 0.011), color: '#fff', tint: 1 }, { geo: oct(0.008).translate(0.01, 0.02, 0.006), color: '#f7c6d8' }]));
     set('animal', animalGeometry(theme.animals.kind));

@@ -74,7 +74,7 @@ const params = new URLSearchParams(location.search);
 // A prévia publicada não recebe parâmetros de URL, só o #hash: `#bench`, `#bench=relevo`, `#gpu` e `#debug` valem como o `?` deles.
 // Só nomes e valores conhecidos (invariante 12); a query, quando existe, vence o hash.
 {
-  const HASH_FLAGS: Record<string, readonly string[] | undefined> = { bench: ['', 'tudo', 'classico', 'relevo'], gpu: [''], debug: [''], encostas: ['0', '1'] };
+  const HASH_FLAGS: Record<string, readonly string[] | undefined> = { bench: ['', 'tudo', 'classico', 'relevo'], gpu: [''], debug: [''], encostas: ['0', '1'], viva: ['0', '1'] };
   for (const part of location.hash.slice(1).split('&')) {
     const [k, v = ''] = part.split('=');
     if (Object.hasOwn(HASH_FLAGS, k) && HASH_FLAGS[k]!.includes(v) && !params.has(k)) params.set(k, v);
@@ -124,6 +124,16 @@ const world = await createWorld();
 }
 // `?encostas=0` (ou `#encostas=0`) desliga as Encostas (relevo de toda peça, em todos os modos) e volta ao desenho de antes (comparar capturas).
 world.hillsOn = params.get('encostas') !== '0';
+// Paisagem viva (`core/living.ts`, `render/livingBuild.ts`): casas que sobem, mata que adensa, cultivo com celeiro, conforme os encaixes
+// (e, na Terra, as manchas). Só aparência. `?viva=0|1` (ou `#viva=0|1`) força; sem isso vale a preferência gravada em Aa (`retalhos.viva`,
+// '0' ou '1'); sem preferência, liga no Zen e na Terra contínua e, na prévia publicada, em todos os modos.
+const vivaForce = params.get('viva') === '1' ? true : params.get('viva') === '0' ? false : null;
+const vivaDefault = (m: { id: string }) => import.meta.env?.VITE_PREVIEW === 'relevo' || m.id === 'zen' || m.id === 'terra';
+function vivaWanted(m: { id: string }): boolean {
+  if (vivaForce !== null) return vivaForce;
+  const v = store.get('viva');
+  return v === '1' ? true : v === '0' ? false : vivaDefault(m);
+}
 // `?levels=0` desliga o relevo (platôs): o tabuleiro sai plano, como antes (comparar capturas).
 world.levelsEnabled = params.get('levels') !== '0';
 {
@@ -209,6 +219,8 @@ function showA11y() {
       <p>A onda dourada, os voos da câmera, o bando de pássaros e o quique da peça param. O vento e a água continuam.</p>
       <label><input type="checkbox" name="minimal"${a11y.minimal ? ' checked' : ''}> Interface mínima</label>
       <p>Esconde o brasão do placar e começa com o minimapa fechado. O Almanaque fica na tecla <kbd>I</kbd> (e no menu ⋯), o brasão no menu de temas, e o minimapa na tecla <kbd>M</kbd>.</p>
+      <label><input type="checkbox" name="viva"${vivaWanted(mode) ? ' checked' : ''}> Paisagem viva</label>
+      <p>As casas sobem, a mata adensa e o cultivo ganha celeiro conforme as bordas iguais se encaixam (na Terra contínua, também com as manchas grandes e fechadas). É só a aparência: os pontos não mudam. Vem ligada no Zen e na Terra contínua.</p>
       <label><input type="checkbox" name="questtrace"${a11y.questTrace ? ' checked' : ''}> Mostrar a missão no chão</label>
       <p>Ao escolher uma missão de grupo na lista, o chão desenha o contorno do grupo e pulsa as bordas que ainda dão para o vazio (o que falta para fechar).</p>
       <button type="button" class="secondary">Fechar</button>
@@ -226,6 +238,8 @@ function showA11y() {
     store.set('minimal', a11y.minimal ? '1' : '0');
     a11y.questTrace = (form.querySelector('input[name="questtrace"]') as HTMLInputElement).checked;
     store.set('quest-trace', a11y.questTrace ? '1' : '0');
+    store.set('viva', (form.querySelector('input[name="viva"]') as HTMLInputElement).checked ? '1' : '0');
+    world.vivaOn = vivaWanted(mode);
     applyA11y();
     const s = shownTheme();
     world.setTheme(s, game.board);
@@ -328,7 +342,7 @@ const rulesFor = (t: Theme, seed: number, m: Mode = mode): Rules => ({ ...DEFAUL
 const modeLabel = () => (mode.daily ? `${mode.name} · ${dailyRule(game.seed).name}` : mode.name);
 // A prévia publicada (`VITE_PREVIEW=relevo npm run build`) não recebe parâmetros de URL: abre no Clássico (as Encostas valem em todos os modos).
 // O que chega é o #hash: `#mode=relevo` e `#mode=terra` abrem os outros modos (o id é conferido contra a lista de modos; outro valor é ignorado).
-const hashMode = MODES.find((m) => m.id === /^#mode=([a-z]{1,16})$/.exec(location.hash)?.[1]);
+const hashMode = MODES.find((m) => m.id === /^#mode=([a-z]{1,16})(?:&|$)/.exec(location.hash)?.[1]);
 let mode: Mode = modeById(params.get('mode') ?? hashMode?.id ?? store.get('mode'));
 let undone = 0;
 const ERA_NAMES = ['Aldeia', 'Vila', 'Burgo', 'Cidade'];
@@ -365,6 +379,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   world.reliefSeed = seed;
   // Modo Relevo: a altura é da peça (perfil sorteado com ela), não da casa.
   world.setPieceRelief(game.rules.relief);
+  world.vivaOn = vivaWanted(mode);
   // Partida nova (não um replay do desfazer ou do save): ainda não entrou no progresso.
   if (!replay.length) committed = false;
   undone = undos;
@@ -2564,6 +2579,8 @@ function start(data: unknown) {
 
 // Coloca a peça atual na melhor posição, com animação (capturas da queda e da onda).
 (window as unknown as { __hills: () => { rebakes: number; ms: number } }).__hills = () => ({ rebakes: world.hillRebakes, ms: world.hillMs });
+// Paisagem viva: ligada, peças refeitas por estágio e o pior tempo de uma rodada (ms); `stages` = quantas peças têm algum estágio, por estágio 0 a 3.
+(window as unknown as { __living: () => unknown }).__living = () => ({ on: world.vivaOn, rebakes: world.livingRebakes, maxMs: world.livingMaxMs, stages: world.livingHistogram() });
 (window as unknown as { __placeBest: () => boolean }).__placeBest = () => {
   const m = game.bestMove();
   if (!m) return false;

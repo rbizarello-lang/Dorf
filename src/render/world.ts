@@ -8,6 +8,8 @@ import type { PatchView, TerraView } from '../core/terra';
 import { EggTracker, phaseOfTod, type EggSpec } from '../core/eggs';
 import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey, worldToHex } from '../core/hex';
 import { boardHill, handHill, hillSignature, logicLevels } from '../core/hills';
+import { NO_STAGES, livingStages, previewStages, stageSig, type StageMap, type Stages } from '../core/living';
+import { developBuild } from './livingBuild';
 import { levelAt, tileProfile, worldHeights } from '../core/relief';
 import { seasonAt } from '../core/seasons';
 import type { SiteKind } from '../core/sites';
@@ -1500,6 +1502,43 @@ export class World {
     return { hill, hand, skirt, rapids };
   }
 
+  /**
+   * Paisagem viva (`core/living.ts`): o estágio de cada terreno das peças (casas sobem, mata adensa, cultivo ganha celeiro). Só aparência.
+   * Desligada por padrão no World; o jogo a liga (Zen e Terra por padrão, ou a opção em Aa, `?viva=`/`#viva=`).
+   */
+  vivaOn = false;
+  private stageCache: { board: Board; n: number; map: StageMap } | null = null;
+  /** Estágios de todas as peças assentadas, refeitos só quando o tabuleiro cresceu (o mapa é função do tabuleiro final: sem ordem). */
+  private stageMap(): StageMap {
+    const b = this.board!;
+    if (!this.stageCache || this.stageCache.board !== b || this.stageCache.n !== b.list.length) this.stageCache = { board: b, n: b.list.length, map: livingStages(b) };
+    return this.stageCache.map;
+  }
+  /** Estágios da peça `def` na casa e giro `at`: os da partida se ela já está assentada, os de encaixe se é o fantasma. */
+  private stagesAt(def: TileDef, at?: { q: number; r: number; rot: number }): Stages {
+    if (!this.vivaOn || !this.board || !at) return NO_STAGES;
+    const here = this.board.get(at.q, at.r);
+    if (here && here.def === def) return this.stageMap().get(here.key) ?? NO_STAGES;
+    if (here) return NO_STAGES;
+    return previewStages(this.board, at.q, at.r, rotateEdges(def.edges, at.rot));
+  }
+  /** Quantas peças têm cada estágio máximo (0 a 3), para depuração e testes. */
+  livingHistogram(): number[] {
+    const h = [0, 0, 0, 0];
+    if (this.board) for (const st of this.stageMap().values()) h[Math.max(...st)]++;
+    return h;
+  }
+  /** Liga ou desliga a paisagem viva; com a partida aberta, refaz o mapa no estado novo. */
+  setViva(on: boolean, board?: Board) {
+    if (on === this.vivaOn) return;
+    this.vivaOn = on;
+    this.stageCache = null;
+    if (board ?? this.board) this.rebuild((board ?? this.board)!);
+  }
+  private vivaSig(def: TileDef, at?: { q: number; r: number; rot: number }) {
+    return this.vivaOn ? stageSig(this.stagesAt(def, at)) : '';
+  }
+
   /** Assinatura de tudo o que, na vizinhança, muda o chão da peça: o perfil, as bordas abertas e as corredeiras. */
   private hillSig(def: TileDef, at: { q: number; r: number; rot: number }) {
     const o = this.hillFor(def, at);
@@ -1508,7 +1547,9 @@ export class World {
 
   private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; spring?: boolean; eggs?: BuildOpts['eggs']; levels?: BuildOpts['levels']; at?: { q: number; r: number; rot: number } }) {
     const { at, ...rest } = extra ?? {};
-    return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, special: def.special, continuous: !!this.warp, ...this.hillFor(def, at), ...rest });
+    const tb = buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, special: def.special, continuous: !!this.warp, ...this.hillFor(def, at), ...rest });
+    if (this.vivaOn) developBuild(tb, def.edges, this.stagesAt(def, at));
+    return tb;
   }
 
   /** Superfície (Encostas) de cada peça assentada: a `Life` lê daqui a altura do chão sob o que se move. */
@@ -1579,7 +1620,7 @@ export class World {
    * É o que permite refazer a peça quando uma vizinha muda a encosta dela (`rebakeHill`): os blocos continuam só crescendo
    * (invariante 10), mas o trecho antigo é reescrito no lugar ou esvaziado, e as instâncias soltas voltam ao lote.
    */
-  private baked = new Map<number, { sig: string; chunk: Chunk; gStart: number; gCount: number; decos: ({ pool: Pool; i: number } | null)[]; chim: number }>();
+  private baked = new Map<number, { sig: string; vsig: string; keys: string[]; chunk: Chunk; gStart: number; gCount: number; decos: ({ pool: Pool; i: number } | null)[]; chim: number }>();
   /** Quantas peças foram refeitas por causa de uma vizinha e o último custo (ms): para as medidas (`window.__hills`). */
   hillRebakes = 0;
   hillMs = 0;
@@ -1645,6 +1686,8 @@ export class World {
     for (const c of this.chunks.values()) c.dispose(this.staticRoot);
     this.chunks.clear();
     this.baked.clear();
+    this.livingQueue = [];
+    this.stageCache = null;
     this.surfaces.clear();
     this.falls.clear();
     for (const p of this.pools.values()) p.dispose();
@@ -1964,7 +2007,7 @@ export class World {
     const ch = this.chunkFor(p.q, p.r);
     const slot = ch.append(b, m);
     if (slot.count) this.waterSlots.set(p.key, { chunk: ch, start: slot.start, count: slot.count });
-    const rec: { sig: string; chunk: Chunk; gStart: number; gCount: number; decos: ({ pool: Pool; i: number } | null)[]; chim: number } = { sig: this.hillSig(p.def, p), chunk: ch, gStart: slot.gStart, gCount: slot.gCount, decos: [], chim: this.chimneys.length };
+    const rec: { sig: string; vsig: string; keys: string[]; chunk: Chunk; gStart: number; gCount: number; decos: ({ pool: Pool; i: number } | null)[]; chim: number } = { sig: this.hillSig(p.def, p), vsig: this.vivaSig(p.def, p), keys: b.decos.map((d) => d.key), chunk: ch, gStart: slot.gStart, gCount: slot.gCount, decos: [], chim: this.chimneys.length };
     this.baked.set(p.key, rec);
     this.surfaces.set(p.key, b.hill);
     groundMap.add(b, m, this.waterColor);
@@ -2019,12 +2062,15 @@ export class World {
    * dependem da encosta; o mapa do chão é repintado só nos texels da peça.
    */
   private refreshHills(p: Placed) {
-    if (!this.hillsOn || !this.board) return;
+    if (!this.board) return;
     const t0 = performance.now();
-    let n = this.rebakeHill(p) ? 1 : 0;
-    for (const [dq, dr] of DIRS) {
-      const nb = this.board.get(p.q + dq, p.r + dr);
-      if (nb && nb !== p && this.rebakeHill(nb)) n++;
+    let n = 0;
+    if (this.hillsOn) {
+      n = this.rebakeHill(p) ? 1 : 0;
+      for (const [dq, dr] of DIRS) {
+        const nb = this.board.get(p.q + dq, p.r + dr);
+        if (nb && nb !== p && this.rebakeHill(nb)) n++;
+      }
     }
     if (n) {
       for (const pool of this.pools.values()) pool.flush();
@@ -2033,23 +2079,65 @@ export class World {
       this.hillRebakes += n;
       this.hillMs = performance.now() - t0;
     }
+    // Paisagem viva: as peças cujo estágio mudou (as vizinhas e, na Terra, as da mancha) entram numa fila, que a `tick` esvazia em
+    // poucas por quadro (uma mancha grande que fecha muda dezenas de uma vez: o pior quadro não pode juntar todas).
+    this.queueLiving();
   }
 
-  /** Refaz uma peça assentada se o perfil dela mudou. Devolve se refez. */
+  /** Paisagem viva: as peças assentadas cujo estágio é outro que o desenhado, em ordem de chave (a ordem não importa ao resultado). */
+  private livingQueue: number[] = [];
+  /** Quantas peças a paisagem viva refez desde o começo e o pior tempo de CPU de uma rodada, em ms (`window.__living`). */
+  livingRebakes = 0;
+  livingMaxMs = 0;
+  private queueLiving() {
+    if (!this.vivaOn || !this.board) return;
+    const map = this.stageMap();
+    this.livingQueue = [];
+    for (const [key, rec] of this.baked) {
+      const s = map.get(key);
+      if (s && stageSig(s) !== rec.vsig) this.livingQueue.push(key);
+    }
+  }
+  /** Refaz até `max` peças da fila (ou tudo, com `all`). Devolve se ainda resta. */
+  private drainLiving(max: number, all = false): boolean {
+    if (!this.livingQueue.length || !this.board) return false;
+    const t0 = performance.now();
+    let n = 0;
+    while (this.livingQueue.length && (all || n < max)) {
+      const p = this.board.tiles.get(this.livingQueue.shift()!);
+      if (p && this.rebakeHill(p)) n++;
+    }
+    if (n) {
+      for (const pool of this.pools.values()) pool.flush();
+      groundMap.flush();
+      this.shadowClock = 0.25;
+      this.livingRebakes += n;
+      this.livingMaxMs = Math.max(this.livingMaxMs, performance.now() - t0);
+    }
+    return this.livingQueue.length > 0;
+  }
+
+  /** Refaz uma peça assentada se o perfil (o chão) ou o estágio da paisagem viva dela mudou. Devolve se refez. */
   private rebakeHill(p: Placed): boolean {
     const rec = this.baked.get(p.key);
     if (!rec || !this.board) return false;
-    const sig = this.hillSig(p.def, p);
-    if (sig === rec.sig) return false;
+    const sig = this.hillsOn ? this.hillSig(p.def, p) : rec.sig;
+    const vsig = this.vivaSig(p.def, p);
+    const ground = sig !== rec.sig;
+    if (!ground && vsig === rec.vsig) return false;
     const flow = flowBase(this.flows.get(p.key) ?? [0, 0, 0, 0, 0, 0], p.rot);
     const widths = flowBase(this.widths.get(p.key) ?? [0, 0, 0, 0, 0, 0], p.rot);
     const b = this.shaped(this.build(p.def, synBase(p.synergies, p.rot), flow, { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths, eggs: this.eggKits.get(p.key), spring: p.spring, levels: this.levelsFor(p.q, p.r, p.rot, p.def), at: p }), p.q, p.r, p.rot);
     const m = tileMatrix(p.q, p.r, p.rot, this.heightOf(p.q, p.r));
-    rec.chunk.replaceGround(rec, b, m);
-    groundMap.add(b, m, this.waterColor);
-    this.surfaces.set(p.key, b.hill);
-    // A decoração tem a mesma ordem e a mesma quantidade (o sorteio não depende da encosta): cada instância muda só de altura.
-    if (b.decos.length === rec.decos.length) {
+    // Só o estágio mudou: o chão é o mesmo (a paisagem viva só mexe na decoração).
+    if (ground) {
+      rec.chunk.replaceGround(rec, b, m);
+      groundMap.add(b, m, this.waterColor);
+      this.surfaces.set(p.key, b.hill);
+    }
+    const keys = b.decos.map((d) => d.key);
+    if (keys.length === rec.keys.length && keys.every((k, i) => k === rec.keys[i])) {
+      // A decoração tem a mesma ordem e a mesma quantidade (o sorteio não depende da encosta): cada instância muda só de altura e escala.
       b.decos.forEach((d, k) => {
         const slot = rec.decos[k];
         if (!slot) return;
@@ -2057,6 +2145,19 @@ export class World {
         tmpM.premultiply(m);
         slot.pool.set(slot.i, tmpM, d.color);
       });
+    } else {
+      // O estágio mudou o número de instâncias (copas a mais, celeiro): solta as vagas da peça e põe as novas (`Pool.add` reaproveita as soltas).
+      // Quem anda (`Life`) não muda de estágio e não é refeito.
+      for (const slot of rec.decos) if (slot) slot.pool.remove(slot.i);
+      rec.decos = b.decos.map((d) => {
+        if (d.transient || d.anim === 'spin-z' || d.anim === 'spin-x' || d.anim === 'wander' || d.anim === 'chop' || d.anim === 'tend' || d.anim === 'carry' || d.anim === 'swim' || d.anim === 'bob') return null;
+        const pool = this.pool(this.isLod(d.key) && this.lodFlip++ % 2 ? `${d.key}~` : d.key, p.q, p.r);
+        if (!pool) return null;
+        decoMatrix(d, tmpM);
+        tmpM.premultiply(m);
+        return { pool, i: pool.add(tmpM, d.color) };
+      });
+      rec.keys = keys;
     }
     const v = new THREE.Vector3();
     for (let i = 0; i < b.chimneys.length; i += 4) {
@@ -2064,6 +2165,7 @@ export class World {
       this.chimneys[rec.chim + i + 1] = v.y;
     }
     rec.sig = sig;
+    rec.vsig = vsig;
     return true;
   }
 
@@ -2150,7 +2252,7 @@ export class World {
     const eggs = this.eggKits.get(p.key);
     const lvs = this.levelsFor(p.q, p.r, p.rot, p.def);
     const hillSig = this.hillSig(p.def, p);
-    const sig = `${p.spring ? 's' : ''}${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${eggs?.map((e) => e.kit).join('+') ?? ''}|${levelSig(lvs)}|${hillSig}`;
+    const sig = `${p.spring ? 's' : ''}${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${eggs?.map((e) => e.kit).join('+') ?? ''}|${levelSig(lvs)}|${hillSig}|${this.vivaSig(p.def, p)}`;
     let live: LiveTile;
     const ly = this.heightOf(p.q, p.r);
     let y0 = ly + 1.2;
@@ -2229,6 +2331,9 @@ export class World {
       const nb = board.get(p.q + dq, p.r + dr);
       if (nb && !fresh.has(nb)) this.rebakeHill(nb);
     }
+    // Paisagem viva: as peças antigas cujo estágio mudou com o lote (vizinhas e manchas da Terra) são refeitas já, sem fila.
+    this.queueLiving();
+    this.drainLiving(0, true);
     for (const pool of this.pools.values()) pool.flush();
     groundMap.flush();
     this.updateFrontier(board);
@@ -2411,7 +2516,7 @@ export class World {
     const mark = check.valid && !def.special ? (check.eraMark ?? undefined) : undefined;
     const site = check.valid ? check.site?.kind : undefined;
     const wonder = check.valid && check.wonder && !def.special ? true : undefined;
-    const sig = `${check.water?.spring ? 's' : ''}${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}|${hillSig}`;
+    const sig = `${check.water?.spring ? 's' : ''}${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}|${hillSig}|${this.vivaSig(def, { q, r, rot })}`;
     const key = `${def.seed}:${this.theme.id}:${sig}:${levelSig(lvs)}${this.warp ? `:${q},${r},${rot}` : ''}`;
     if (!this.ghost || this.ghostKey !== key) {
       const t0 = performance.now();
@@ -3426,6 +3531,9 @@ export class World {
       } else still.push(d);
     }
     this.drops = still;
+
+    // Paisagem viva: refaz poucas peças por quadro (o pior quadro de uma jogada que desenvolve muitas fica limitado).
+    if (this.livingQueue.length) this.drainLiving(2);
 
     // Nível de detalhe: de longe, metade das plantas basta (as parcelas já têm a cor da cultura).
     // Entre 11,5 e 14,5 de distância, cada planta dessa metade afunda no chão na sua vez.
