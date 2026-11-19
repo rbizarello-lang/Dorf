@@ -1,3 +1,4 @@
+import { RIDGE_LOTS, ridgeEdges } from './ridge';
 import { type BlessingId, blessingOffer } from './blessings';
 import { Board, type PlaceResult, type Rules } from './board';
 import { chart, channelTile } from './ports';
@@ -54,6 +55,9 @@ export class Game {
       this.board.ports = map.ports;
     }
     this.board.placeRaw(0, 0, starter, 0);
+    if (rules.riverTrade && rules.layout === 'crista') {
+      for (const {q,r} of RIDGE_LOTS) this.board.placeRaw(q,r,{ edges:ridgeEdges(q,r), seed:(seed ^ (q+3)*7247 ^ r*9839) >>> 0, quest:null },0);
+    }
     this.board.computeGroups();
     this.board.sites = generateSites(seed, rules.sites);
     this.stack = rules.startTiles;

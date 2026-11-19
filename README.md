@@ -1,9 +1,16 @@
-# Entrepostos · Cartas fluviais (0.3)
+# Entrepostos · Aldeia na Crista (0.4)
 
-Abra **dist/index.html** no Chrome ou Edge. O jogo roda em um único arquivo, inclusive sem servidor. Na tela inicial, abra **Escolher frete**, selecione a carta e confirme o contrato. Em telas pequenas, o botão **0/3 cais** abre a carta. As setas percorrem as casas livres, **R** gira e **Enter** coloca. **WASD** move a câmera, **U** desfaz e **Ver mapa** enquadra os três cais.
+Abra [o jogo](dist/index.html) no Chrome ou Edge. O jogo roda em um único arquivo, inclusive sem servidor. A primeira partida abre na **Aldeia na crista**, no tema Costa dos Terraços.
+
+1. Abra **Guiar encaixe na crista** na carta fluvial. Em telas pequenas, o botão **0/3 cais** abre a carta.
+2. Aponte o primeiro canal para o hexágono marcado, mantendo a orientação inicial. Leia a prévia com o avanço de Campanário e Belvedere. Use as setas para percorrer as casas livres pelo teclado.
+3. Clique ou pressione **Enter** para colocar. Cada um dos dois patamares ganha uma casa. Pressione **U** para desfazer e ver a aldeia voltar ao estágio anterior. **R** gira a peça, **WASD** move a câmera e **Ver mapa** enquadra os cais.
+
+Use **Escolher frete** para mudar de carta ou contrato.
 
 | Carta | Como jogar |
 |---|---|
+| Aldeia na crista | Três hexágonos acima da confluência formam Baluarte, Campanário e Belvedere. A primeira peça oferece um canal entre margens de vila. A rota até os cais segue os braços da Confluência. |
 | Confluência | Três braços saem da vila. **Guiar primeira entrega** marca as duas casas até a Feira. Use **Pular guia** para seguir por conta própria. |
 | Rio bifurcado | A Feira e a Serraria ficam além de um trecho comum. Reserve espaço para a bifurcação e decida qual ramal abrir primeiro. |
 | Cais da enseada | A Serraria fica perto e o Estaleiro está além da curva. A Feira fica no outro braço. |
@@ -12,9 +19,9 @@ Abra **dist/index.html** no Chrome ou Edge. O jogo roda em um único arquivo, in
 
 A linha sobre a água mostra a rota da carga. **Rever a travessia** acompanha a barca. **Câmera fixa na travessia** conserva o enquadramento e vem selecionada quando o sistema pede movimento reduzido.
 
-A 0.3 grava suas partidas em `entrepostos.cartas.` no navegador. Na primeira abertura, copia o progresso anterior disponível na mesma origem. Uma viagem de madeira salva pela 0.2 continua com o prêmio antigo. Ao abrir arquivos em pastas diferentes, o navegador pode lhes atribuir armazenamentos separados.
+A Crista guarda seus próprios saves, preferências e recordes sob o prefixo `entrepostos.crista.` no navegador. A Confluências 0.3 guarda os seus em `entrepostos.cartas.`.
 
-[Revisão e medições da edição 0.3](docs/REVISAO_0_3.md) · [Plano de dez pontos](docs/PLANO_REVISAO_FRETES_0_2.md) · [Pesquisa de motores da 0.2](docs/MOTORES_E_FRETE.md)
+[Revisão da edição 0.4](docs/REVISAO_0_4.md) · [Verificação jogável da Crista](docs/QA_CRISTA.md) · [Medição da primeira troca de qualidade](docs/QUALIDADE_0_4.md) · [Revisão e medições da edição 0.3](docs/REVISAO_0_3.md)
 
 ## Paisagem viva e Costa dos Terraços
 
@@ -22,11 +29,11 @@ A edição abre com o tema **Costa dos Terraços**, inspirado na referência vis
 
 **Paisagem viva** vem selecionada na preparação da viagem e também atua no modo **Zen**. Cada terreno pode desenvolver três estágios conforme aumenta seu número de bordas encaixadas com o mesmo terreno. A peça nova e as vizinhas recebem o desenvolvimento. As casas crescem em altura, a mata ganha copas e densidade, o cultivo aumenta e recebe um celeiro, e os canais conectados ficam mais largos. A prévia indica o desenvolvimento esperado. Para construir uma cidade sem limite de peças, abra **Nova → Zen**.
 
-O desenvolvimento é derivado do tabuleiro salvo. Suas recompensas atuais são o crescimento visual e o registro no resumo da viagem. As regras de frete e de pontuação continuam descritas abaixo.
+Na 0.3, a vila começava em uma peça plana. A carta Aldeia na crista acrescenta três hexágonos ao tabuleiro inicial, sem custo de estoque. Eles compõem uma encosta contínua com muros de arrimo, patamares, casario e uma torre no Campanário. Os encaixes de vila mudam a implantação das casas sobre os patamares. A prévia nomeia os lugares que vão mudar, e o replay recompõe o estágio a partir das jogadas salvas. As entregas continuam a pagar segundo o contrato escolhido.
 
 ## A viagem
 
-A vila começa na confluência de três canais. Você tem **24 peças para abrir uma rota de água até três cais**. A carta no canto mostra o que cada um precisa. Clique no nome do cais para aproximar a câmera. “Ver mapa” reenquadra a região. O tracejado no pergaminho indica a direção do destino. Seu rio pode fazer curvas e chegar por qualquer lado.
+A vila começa na confluência de três canais. Você tem **24 peças para abrir uma rota de água até três cais**. A carta no canto mostra o que cada um precisa. Clique no nome do cais para aproximar a câmera. **Ver mapa** reenquadra a região. O tracejado no pergaminho indica a direção do destino. Seu rio pode fazer curvas e chegar por qualquer lado.
 
 | Cais | Entrega | Retorno à pilha |
 |---|---|---|
@@ -34,11 +41,11 @@ A vila começa na confluência de três canais. Você tem **24 peças para abrir
 | Serraria | Madeira | 6 peças |
 | Estaleiro | Ferragens | 8 peças |
 
-Gire a primeira peça e prolongue uma das bocas do rio da vila. As duas primeiras peças são retas. Na Confluência, elas permitem fazer a primeira entrega na Feira em duas jogadas. Em uma partida nova, a semente muda a orientação do mapa, das peças e a paisagem que as acompanha.
+Gire a primeira peça e prolongue uma das bocas do rio da vila. Na Confluência e na Crista, as duas primeiras peças de canal permitem fazer a primeira entrega na Feira em duas jogadas. A Crista começa voltada para os patamares. Nas outras cartas, a semente também pode mudar a orientação do mapa.
 
 Um cais aceita uma peça com rio. Se você construir um trecho isolado, pode ligá-lo à vila por uma jogada posterior. Quando o caminho se completa, o cais exibe a carga e uma embarcação percorre a ligação. O crédito entra quando o caminho e o contrato estiverem completos. A terceira entrega encerra a viagem e cada peça restante vale 20 pontos. A pilha também pode acabar com cais por atender.
 
-**Controles.** Clique para colocar, use R para girar e arraste para mover a câmera. No toque, selecione a casa e confirme com ✓ ou com um segundo toque. A partida permite cinco desfazeres. O menu Nova oferece também Clássico, Zen, Exploradores e Desafio do dia. Os 14 temas, a fotografia e a exportação de vídeo continuam disponíveis.
+**Controles.** Clique para colocar, use R para girar e arraste para mover a câmera. No toque, selecione a casa e confirme com ✓ ou com um segundo toque. A partida permite cinco desfazeres. O menu Nova oferece também Clássico, Zen, Exploradores e Desafio do dia. Há 15 temas, modo foto e exportação de vídeo.
 
 ## Avaliação e decisões desta edição
 
@@ -57,8 +64,9 @@ A sobreposição com Dorfromantik aparece no primeiro turno. O jogador gira um h
 
 ## Como verificar
 
-- `npm run cartas` joga as três cartas em 100 sementes e compara a previsão com as entregas.
-- `npm run teclado` percorre os mapas por teclado e verifica a retomada de um frete da edição 0.2.
+- `npm run cartas` percorre cada carta em 100 sementes e compara a previsão com as entregas.
+- `npm run teclado` percorre as três cartas fluviais da edição 0.3 por teclado e verifica o replay de um frete no formato v11.
+- `node scripts/qa-crista.mjs` verifica a primeira jogada da Crista, reabertura, desfazer e renderização. Gera capturas e métricas em `.cache/capturas/crista`.
 - `node scripts/medir-cartas.mjs regioes` mede as regiões 0, 4 e 8 nos dois backends. Para comparar edições, use `node scripts/medir-cartas.mjs edicoes "caminho/da/0.2/dist/index.html"` depois de gerar o roteiro com `npm run viagem`. As medições brutas ficam em `.cache/`.
 
 Com Node 22.12 ou superior, execute `npm ci` nesta pasta. Para desenvolvimento, `npm run dev`. Para reconstruir o arquivo jogável, `npm run build`.

@@ -60,6 +60,12 @@ async function pageFor(caseId, entries) {
     if (localStorage.getItem(marker) === id) return;
     localStorage.clear();
     for (const [key, value] of Object.entries(values)) localStorage.setItem(key, value);
+    // A Crista lê o formato legado somente em seu próprio armazenamento.
+    if (id !== 'v12-corrupt') {
+      for (const [key, value] of Object.entries(values)) {
+        localStorage.setItem(key.replace('entrepostos.', 'entrepostos.crista.'), value);
+      }
+    }
     localStorage.setItem(marker, id);
   }, { id: caseId, values: entries });
   await page.goto(`${url}?quality=low&seed=${seed}&saves=${caseId}`, { waitUntil: 'domcontentloaded' });
@@ -69,7 +75,7 @@ async function pageFor(caseId, entries) {
 
 async function waitForSave(page, expected) {
   await page.waitForFunction((want) => {
-    const raw = localStorage.getItem('entrepostos.cartas.save');
+    const raw = localStorage.getItem('entrepostos.crista.save');
     if (!raw) return false;
     try {
       const save = JSON.parse(raw);
@@ -77,7 +83,7 @@ async function waitForSave(page, expected) {
         && save.combinedFreight === want.combinedFreight && save.legacyFreight === true;
     } catch { return false; }
   }, expected, { timeout: 30000 });
-  return page.evaluate(() => JSON.parse(localStorage.getItem('entrepostos.cartas.save')));
+  return page.evaluate(() => JSON.parse(localStorage.getItem('entrepostos.crista.save')));
 }
 
 try {
@@ -100,8 +106,8 @@ try {
     assert.match(await page.locator('#best').innerText(), /1\.111/, 'carrega o recorde específico v11, não o recorde Madeira atual');
     assert.equal(await page.locator('#best').getAttribute('title'), 'Confluência · Madeira');
     assert.equal(await page.evaluate(() => localStorage.getItem('entrepostos.save')), oldRaw, 'save antigo permanece intacto');
-    assert.equal(await page.evaluate((key) => localStorage.getItem(key), legacyBestKey.replace('entrepostos.', 'entrepostos.cartas.')), legacyBest);
-    assert.equal(await page.evaluate((key) => localStorage.getItem(key), modernBestKey.replace('entrepostos.', 'entrepostos.cartas.')), modernBest);
+    assert.equal(await page.evaluate((key) => localStorage.getItem(key), legacyBestKey.replace('entrepostos.', 'entrepostos.crista.')), legacyBest);
+    assert.equal(await page.evaluate((key) => localStorage.getItem(key), modernBestKey.replace('entrepostos.', 'entrepostos.crista.')), modernBest);
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => (window).__stats, null, { timeout: 120000 });
@@ -146,16 +152,17 @@ try {
     console.log('v10 parcial: migração, score direto, reload e undo');
   }
 
-  // Um save v12 inválido não apaga nem substitui o save legado da origem.
+  // O descarte local preserva o armazenamento das duas edições anteriores.
   {
     const oldRaw = JSON.stringify(v10.save);
     const corrupt = JSON.stringify({ v: 12, layout: 'inventado', seed, rulesId: 'holanda', mode: 'entrepostos', moves: 'inválidas', undone: 0, score: 90, specials: [] });
     const page = await pageFor('v12-corrupt', {
       'entrepostos.save': oldRaw,
-      'entrepostos.cartas.save': corrupt,
+      'entrepostos.cartas.save': oldRaw,
+      'entrepostos.crista.save': corrupt,
     });
     const save = await page.waitForFunction(() => {
-      const raw = localStorage.getItem('entrepostos.cartas.save');
+      const raw = localStorage.getItem('entrepostos.crista.save');
       if (!raw) return null;
       try { const value = JSON.parse(raw); return value.v === 12 && value.moves.length === 0 ? value : null; }
       catch { return null; }
@@ -163,6 +170,7 @@ try {
     const fresh = await save.jsonValue();
     assert.equal(fresh.seed, seed);
     assert.equal(await page.evaluate(() => localStorage.getItem('entrepostos.save')), oldRaw, 'migração não altera a cópia antiga mesmo quando o destino está corrompido');
+    assert.equal(await page.evaluate(() => localStorage.getItem('entrepostos.cartas.save')), oldRaw, 'a Crista preserva o namespace da Confluências');
     await page.close();
     console.log('v12 corrompido: descarte local sem apagar a origem antiga');
   }

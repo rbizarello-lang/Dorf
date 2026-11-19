@@ -18,7 +18,11 @@ try {
       const direct=sail(seed,false,layout);
       const old=new direct.game.constructor(seed,{...direct.game.rules,combinedFreight:true,legacyFreight:true});
       old.rot=first[2];old.place(first[0],first[1]);
-      await p.addInitScript(s=>localStorage.setItem('entrepostos.save',JSON.stringify(s)),{v:11,seed,rulesId:'holanda',mode:'entrepostos',undone:0,score:old.board.score,specials:[],combinedFreight:true,moves:[first]});
+      await p.addInitScript(s => {
+        const raw = JSON.stringify(s);
+        localStorage.setItem('entrepostos.save', raw);
+        localStorage.setItem('entrepostos.crista.save', raw);
+      }, {v:11,seed,rulesId:'holanda',mode:'entrepostos',undone:0,score:old.board.score,specials:[],combinedFreight:true,moves:[first]});
     }
     await p.goto(url+`?debug&seed=42&theme=${theme}&time=${time}&quality=high`,{waitUntil:'domcontentloaded'});
     await p.waitForFunction(()=>window.__stats);
@@ -30,7 +34,7 @@ try {
       }
       throw Error('Sem acesso por Tab: '+selector);
     }
-    const save=()=>p.evaluate(()=>JSON.parse(localStorage.getItem('entrepostos.cartas.save')));
+    const save=()=>p.evaluate(()=>JSON.parse(localStorage.getItem('entrepostos.crista.save')));
     if(!legacy) {
       await tabTo('#choose-freight');await key('Enter');
       const dialog=p.getByRole('dialog',{name:'Preparar a viagem'});
@@ -41,7 +45,7 @@ try {
       await key('Tab');assert(await p.locator('#voyage-map').evaluate(e=>document.activeElement===e));
       await key('Escape');assert(await p.locator('#choose-freight').evaluate(e=>document.activeElement===e));
       await key('Enter');await key('Home');
-      for(let i=0;i<['confluencia','forquilha','enseada'].indexOf(layout);i++)await key('ArrowDown');
+      for(let i=0;i<['crista','confluencia','forquilha','enseada'].indexOf(layout);i++)await key('ArrowDown');
       await key('Tab');await key('Tab');await key('Tab');await key('Enter');
       assert.equal((await save()).layout,layout);
       assert.equal((await save()).combinedFreight,true);

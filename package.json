@@ -1,6 +1,6 @@
 {
   "name": "retalhos-entrepostos",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Protótipo de puzzle relaxante de peças hexagonais com temas trocáveis (inspirado no gênero de Dorfromantik).",
   "engines": {
     "node": ">=22.12"

@@ -1,3 +1,5 @@
+import { buildRidge } from './ridgeView';
+import { RIDGE_LOTS, ridgeStage } from '../core/ridge';
 import { LivingLandscape } from './developmentView';
 import { developBuild } from './developmentBuild';
 import { developmentAt, previewDevelopment, type DevelopmentValues } from '../core/development';
@@ -885,12 +887,13 @@ export class World {
 
   // ---------------------------------------------------------------- mapa
 
-  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; development?: DevelopmentValues; waterGrowth?: number }) {
+  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { ridgeLot?: number; center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; development?: DevelopmentValues; waterGrowth?: number }) {
     const tile: TileBuild = buildTile(def.edges, def.seed, this.theme, { detail: 1.6, synergies, houses: this.lib.houseMeta, flow, special: def.special, ...extra });
     if (extra?.development) {
       developBuild(tile, def.edges, extra.development);
       this.visualSignatures.set(tile, this.landscapeSignature(extra.development, extra.widths!));
     }
+    if (extra?.ridgeLot !== undefined && extra.ridgeLot >= 0) buildRidge(tile,this.theme,extra.ridgeLot,ridgeStage(extra.development ?? [],def.edges));
     tile.allDecos = tile.decos;
     tile.decos = tile.decos.filter((d) => vegetationBand(d, def.seed) <= BAND[this.quality]);
     return tile;
@@ -898,7 +901,8 @@ export class World {
 
   /** Peça do mapa já colocada: a inicial reserva o Centro, e a do marco o ergue. */
   private buildPlaced(p: Placed) {
-    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, ...this.developmentOptions(p.q, p.r, p.def, p.rot, this.settleWidths(p)) });
+    const ridgeLot = this.board?.rules.layout === 'crista' ? RIDGE_LOTS.findIndex(l => l.q === p.q && l.r === p.r) : -1;
+    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { ridgeLot, center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, ...this.developmentOptions(p.q, p.r, p.def, p.rot, this.settleWidths(p)) });
   }
 
   private developmentOptions(q: number, r: number, def: TileDef, rot: number, widths: number[]) {

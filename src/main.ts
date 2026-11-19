@@ -1,4 +1,5 @@
-import { developmentAt, previewDevelopment } from './core/development';
+import { RIDGE_LOTS, ridgeStage, ridgeSnapshot } from './core/ridge';
+import { developmentAt, previewDevelopment, type DevelopmentChange } from './core/development';
 import { fitChart } from './ui/chartCamera';
 import * as THREE from 'three/webgpu';
 import { Sfx } from './audio';
@@ -61,17 +62,7 @@ interface Hot {
 
 
 const params = new URLSearchParams(location.search);
-const namespace = 'entrepostos.cartas.';
-try {
-  if (!localStorage.getItem(namespace + 'importado')) {
-    for (const key of Object.keys(localStorage)) {
-      if (!key.startsWith('entrepostos.') || key.startsWith(namespace)) continue;
-      const target = namespace + key.slice('entrepostos.'.length);
-      if (localStorage.getItem(target) === null) localStorage.setItem(target, localStorage.getItem(key)!);
-    }
-    localStorage.setItem(namespace + 'importado', '1');
-  }
-} catch { /* A partida também funciona sem persistência. */ }
+const namespace = 'entrepostos.crista.';
 const store = {
   get(k: string) {
     try {
@@ -135,7 +126,7 @@ let scoutPending = false;
 let best = 0;
 let bestSeed = 0;
 const bestKey = () => game.rules.riverTrade ? `best.${mode.id}.${rulesTheme.id}.${game.rules.layout}.${game.rules.combinedFreight ? (game.rules.legacyFreight ? 'madeira-v11' : 'madeira') : 'direto'}` : `best.${mode.id}.${rulesTheme.id}`;
-const chartFrom = (value: unknown): ChartId => typeof value === 'string' && Object.hasOwn(CHARTS, value) ? value as ChartId : 'confluencia';
+const chartFrom = (value: unknown): ChartId => typeof value === 'string' && Object.hasOwn(CHARTS, value) ? value as ChartId : 'crista';
 function loadBest() {
   best = 0;
   bestSeed = 0;
@@ -240,7 +231,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
       `Coloque a peça encostada no mapa: cada borda igual à vizinha vale ${game.rules.matchPoints} pontos. Gire com <kbd>R</kbd> ou o botão direito (no toque, os botões de girar). A partida acaba quando a pilha esvazia.`,
     );
   refreshHud(true);
-  collapseChart(); frameCamera(true);
+  collapseChart(); frameCamera(true,true);
   persist();
   return true;
 }
@@ -315,7 +306,7 @@ function undo() {
   hud.toast(left - 1 > 0 && left - 1 < 99 ? `Jogada desfeita · restam ${left - 1}` : 'Jogada desfeita');
 }
 
-function frameCamera(instant: boolean) {
+function frameCamera(instant: boolean, opening = false) {
   const b = game.board;
   const landmarks = b.ports.length ? [...b.list, ...b.ports] : b.list;
   let cx = 0, cz = 0, maxR = 2;
@@ -337,12 +328,31 @@ function frameCamera(instant: boolean) {
   overview = true;
   world.releaseBargeCamera();
   if (b.ports.length) fitChart(world.rig, world.camera, [b.list[0], ...b.ports]);
+  if (b.rules.layout === 'crista' && game.placedCount <= 1 && opening && !smallChart.matches && aspect >= 0.86) {
+    overview = false;
+    world.rig.goal.set(-.28,0,1.45);
+    world.rig.goalDist = Math.max(10.8,8.8/aspect);
+    world.rig.yaw = world.rig.goalYaw = 0.23;
+  }
   if (instant || reducedMotion.matches) {
     world.rig.target.copy(world.rig.goal);
     world.rig.dist = world.rig.goalDist;
   }
 }
 
+function ridgeChanges(changes: DevelopmentChange[]) {
+  if (game.rules.layout !== 'crista' || !world.livingEnabled) return [];
+  return changes.flatMap(change => {
+    const index = RIDGE_LOTS.findIndex(p => p.q === change.q && p.r === change.r);
+    if (index < 0) return [];
+    const lot = RIDGE_LOTS[index];
+    const edges = game.board.get(lot.q,lot.r)!.edges;
+    const before = ridgeStage(change.before.levels,edges), after = ridgeStage(change.after.levels,edges);
+    return after > before ? [{ id:916100+index, q:lot.q, r:lot.r, text:lot.name+' '+before+' → '+after }] : [];
+  });
+}
+
+let ridgeMarkers: ReturnType<typeof ridgeChanges> = [];
 const manifest = document.getElementById('manifest')!;
 const sailingOrder = document.getElementById('sailing-order')!;
 const developmentOrder = document.getElementById('development-order')!;
@@ -401,7 +411,16 @@ collapseChart();
 chartToggle.onclick = () => setChartOpen(chartToggle.getAttribute('aria-expanded') !== 'true');
 guideBtn.onclick = () => {
   guided = !guided; guideHint = false; showManifest();
-  if (guided) { collapseChart(); frameCamera(false); canvas.focus(); }
+  if (guided) {
+    collapseChart();
+    if (game.rules.layout === 'crista') {
+      overview = false;
+      world.rig.goal.set(.35,0,1.15);
+      world.rig.goalDist = window.innerWidth < 700 ? 14 : 10.8;
+      world.rig.goalYaw = .23;
+    } else frameCamera(false);
+    canvas.focus();
+  }
 };
 function updateSailingOrder() {
   if (guided && game.board.ports[0].connectedAt === undefined) {
@@ -412,7 +431,7 @@ function updateSailingOrder() {
     sailingOrder.textContent = game.board.ports[1].delivered ? 'A madeira está na Serraria. Leve o rio até a Feira.' : game.rules.legacyFreight ? 'Ligue os dois cais para receber 10 peças pelo frete.' : game.board.ports[0].connectedAt ? 'A Feira espera. Ligue a Serraria para entregar a madeira por 4 peças.' : 'Ligue a Serraria antes da Feira para receber o prêmio de 10 peças.';
     return;
   }
-  sailingOrder.textContent = game.rules.layout === 'forquilha' ? 'Abra um tronco comum e bifurque o canal para a Feira e a Serraria.' : game.rules.layout === 'enseada' ? 'A Serraria fica na enseada, no caminho do Estaleiro.' : game.placedCount < 2 ? 'Gire as duas primeiras peças e leve o rio da vila até a Feira.' : 'Ligue os três cais à vila por um rio contínuo.';
+  sailingOrder.textContent = game.rules.layout === 'crista' && !moves.length ? 'Encaixe o canal entre a vila e a Feira para ampliar o casario.' : game.rules.layout === 'forquilha' ? 'Abra um tronco comum e bifurque o canal para a Feira e a Serraria.' : game.rules.layout === 'enseada' ? 'A Serraria fica na enseada, no caminho do Estaleiro.' : game.placedCount < 2 ? 'Gire as duas primeiras peças e leve o rio da vila até a Feira.' : 'Ligue os três cais à vila por um rio contínuo.';
 }
 
 function showManifest() {
@@ -428,8 +447,8 @@ function showManifest() {
   charter.textContent = game.rules.combinedFreight ? 'Mudar frete · Madeira para a Feira' : 'Escolher frete';
   document.getElementById('chart-name')!.textContent = CHARTS[game.rules.layout];
   document.getElementById('chart-progress')!.textContent = `${ports.filter((p) => p.delivered).length}/3 cais`;
-  guideBtn.hidden = game.rules.layout !== 'confluencia' || ports[0].connectedAt !== undefined || (moves.length > 1 && !guided);
-  guideBtn.textContent = guided ? 'Pular guia' : 'Guiar primeira entrega';
+  guideBtn.hidden = (game.rules.layout !== 'confluencia' && game.rules.layout !== 'crista') || ports[0].connectedAt !== undefined || (moves.length > 1 && !guided);
+  guideBtn.textContent = guided ? 'Pular guia' : game.rules.layout === 'crista' ? 'Guiar encaixe na crista' : 'Guiar primeira entrega';
   fixedCamera.parentElement!.hidden = watchFreight.hidden;
   updateSailingOrder();
   for (const p of ports) {
@@ -477,6 +496,7 @@ function showInfluence() {
 }
 
 function updateGhost() {
+  ridgeMarkers = [];
   if (!game.current || !hover || !game.board.frontier.has(hkey(hover.q, hover.r)) || hud.modalOpen || capture.stage !== 'play') {
     world.clearGhost();
     if (game.rules.riverTrade) {
@@ -507,7 +527,9 @@ function updateGhost() {
       for (let i=0;i<6;i++) if (change.after.levels[i]>change.before.levels[i] && [T.Forest,T.Field,T.Village,T.Water].includes(edges[i])) terrains.add(edges[i]);
     }
     const words = [theme.terrainNames[T.Grass], 'bosque mais alto', 'cultivo desenvolvido', 'vila maior', 'rio mais amplo', theme.terrainNames[T.Rail]];
-    developmentOrder.textContent = check.valid && terrains.size ? [...terrains].map((t)=>words[t]).join(' · ') : 'Procure bordas iguais para desenvolver a paisagem.';
+    ridgeMarkers = check.valid ? ridgeChanges(preview.neighbors) : [];
+    const ridge = ridgeMarkers.map(p=>p.text).join(' · ');
+    developmentOrder.textContent = ridge ? 'Novo casario · ' + ridge : check.valid && terrains.size ? [...terrains].map((t)=>words[t]).join(' · ') : 'Procure bordas iguais para desenvolver a paisagem.';
   }
   world.setGhost(game.current, game.rot, rotSteps * (Math.PI / 3), hover.q, hover.r, check);
   capture.take?.event({ kind: 'ghost', q: hover.q, r: hover.r, rot: game.rot, angle: rotSteps * (Math.PI / 3) });
@@ -558,6 +580,8 @@ function place(q: number, r: number) {
     return;
   }
   const rot = game.rot;
+  const ridge = game.rules.layout === 'crista' && world.livingEnabled
+    ? ridgeChanges(previewDevelopment(game.board,q,r,game.currentEdges()!).neighbors).map(p=>p.text).join(' · ') : '';
   const res = game.place(q, r)!;
   moves.push([q, r, rot]);
   if (guided && game.board.ports[0]?.connectedAt !== undefined) {
@@ -570,6 +594,7 @@ function place(q: number, r: number) {
   rotSteps = 0;
   hud.confirm.hidden = true;
   announce(res);
+  if (ridge) hud.toast('Casario ampliado · ' + ridge, 'good');
   if (!special) for (const k of progress.unlockLive(game.board)) unlockedToast(k);
   let discarded = 0;
   while (game.discardIfStuck()) discarded++;
@@ -1392,6 +1417,9 @@ function step(now: number, sampleQuality: boolean) {
   if (capture.take && !capture.take.frame(realDt, { x: world.rig.target.x, z: world.rig.target.z, dist: world.rig.dist, yaw: world.rig.yaw, tilt: world.rig.tilt })) capture.stopTake('A gravação chegou a 2 minutos.');
   hud.tick(dt);
   const markers = [];
+  for (const p of ridgeMarkers) {
+    markers.push({ id:p.id,...screenOf(p.q,p.r,1.35),text:p.text,color:'#f3cb81',kind:'port' });
+  }
   if (guided && game.rules.riverTrade) {
     const p = game.board.ports[0], halfway = !game.board.get(p.q / 2, p.r / 2);
     const pos = screenOf(halfway ? p.q / 2 : p.q, halfway ? p.r / 2 : p.r, 0.12);
@@ -1465,6 +1493,7 @@ function start(data: unknown) {
   let saved = special ? null : (validSave(hotData) ?? readSave());
   // Um link com ?seed= (desafio) vence a partida salva de outra semente.
   const wantSeed = Math.floor(Number(params.get('seed'))) || 0;
+  if (saved && params.has('mapa') && chartFrom(params.get('mapa')) !== saved.layout) saved = null;
   if (saved && wantSeed > 0 && saved.seed !== wantSeed) saved = null;
   let resumed = false;
   if (saved) {
@@ -1476,8 +1505,9 @@ function start(data: unknown) {
   }
   if (!resumed) {
     rulesTheme = theme;
-    newGame(wantSeed > 0 ? wantSeed : undefined);
+    newGame(wantSeed > 0 ? wantSeed : (!special && mode.id === 'entrepostos' && chartFrom(params.get('mapa') ?? store.get('layout')) === 'crista' ? 42 : undefined));
   }
+  Object.assign(window, { __crista: () => ridgeSnapshot(game.board,world.livingEnabled) });
   if (params.has('stress')) {
     const r = autoPlace(Number(params.get('stress')) || 1000, true);
     hud.stats.hidden = false;

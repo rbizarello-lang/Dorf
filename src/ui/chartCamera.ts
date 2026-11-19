@@ -6,8 +6,9 @@ import { hexToWorld } from '../core/hex';
 export function fitChart(rig: CameraRig, source: THREE.PerspectiveCamera, points: { q: number; r: number }[]) {
   const w = innerWidth, h = innerHeight;
   const obstacles = [...document.querySelectorAll('.score-block,.tools,#manifest,.stack')].map((e) => e.getBoundingClientRect()).filter((r) => r.width && r.height);
+  const gutter = h <= 530 ? 12 : 4;
   const xs = [4, w - 4], ys = [4, h - 4];
-  for (const r of obstacles) { xs.push(Math.max(4, r.left - 4), Math.min(w - 4, r.right + 4)); ys.push(Math.max(4, r.top - 4), Math.min(h - 4, r.bottom + 4)); }
+  for (const r of obstacles) { xs.push(Math.max(4, r.left - gutter), Math.min(w - 4, r.right + gutter)); ys.push(Math.max(4, r.top - gutter), Math.min(h - 4, r.bottom + gutter)); }
   const free: { x: number; y: number; width: number; height: number; score: number }[] = [];
   for (const x of xs) for (const right of xs) for (const y of ys) for (const bottom of ys) {
     const width = right - x, height = bottom - y;

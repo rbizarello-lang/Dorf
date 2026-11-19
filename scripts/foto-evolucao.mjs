@@ -14,7 +14,7 @@ try {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   const url = pathToFileURL(resolve(process.env.QA_HTML ?? 'dist/index.html')).href;
-  await page.goto(url + '?debug&seed=42&theme=riviera&time=day&quality=high&zoom=9.5&pitch=50&focus=4', { waitUntil: 'domcontentloaded' });
+  await page.goto(url + '?debug&seed=42&theme=riviera&mapa=confluencia&time=day&quality=high&zoom=9.5&pitch=50&focus=4', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.__stats?.tiles === 1, null, { timeout: 120000 });
   await page.locator('#toasts').evaluate((toasts) => { toasts.style.display = 'none'; });
   await page.locator('#scene').focus();

@@ -9,6 +9,7 @@ export const HARBORS = [
 ] as const;
 
 export const CHARTS = {
+  crista: 'Aldeia na crista',
   confluencia: 'Confluência',
   forquilha: 'Rio bifurcado',
   enseada: 'Cais da enseada',
@@ -26,7 +27,7 @@ export interface Port {
 }
 
 export function chart(seed: number, layout: ChartId = 'confluencia') {
-  const heading = Math.floor(mulberry32(seed ^ 0x52746173)() * 6);
+  const heading = layout === 'crista' ? 0 : Math.floor(mulberry32(seed ^ 0x52746173)() * 6);
   // Cada sequência descreve um corredor viável. A água que o jogador construir continua livre.
   const paths = layout === 'forquilha' ? [[0, 0, 0, 1], [0, 0, 0, 5, 5], [2, 2, 2]]
     : layout === 'enseada' ? [[0, 0, 0, 0], [2, 2], [2, 2, 3, 3]] : [[0, 0], [2, 2, 2], [4, 4, 4, 4]];
@@ -44,6 +45,7 @@ export function chart(seed: number, layout: ChartId = 'confluencia') {
  * bifurcações se intercalam com as peças comuns da paisagem. */
 export function channelTile(rng: Rng, index: number, layout: ChartId): TileDef | null {
   // Uma clareira cedo oferece uma margem para descarregar peças enquanto se prepara a bifurcação.
+  if (layout === 'crista' && index === 1) return { edges: [T.Water,T.Village,T.Village,T.Water,T.Grass,T.Field], seed: Math.floor(rng()*2**31), quest: null };
   if (layout !== 'confluencia' && index === 3) return { edges: [T.Grass,T.Grass,T.Field,T.Village,T.Forest,T.Grass], seed: Math.floor(rng() * 2 ** 31), quest: null };
   if (index % 3 === 0) return null;
   const land = [T.Grass, T.Forest, T.Field, T.Village];

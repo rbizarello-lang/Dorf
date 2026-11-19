@@ -1,3 +1,4 @@
+import { RIDGE_LOTS } from '../core/ridge';
 import type { Board } from '../core/board';
 import type { SiteKind } from '../core/sites';
 import { SPECIAL_KINDS, type SpecialKind } from '../core/specials';
@@ -86,7 +87,7 @@ function countBoard(b: Board, wonderDone: boolean) {
   return {
     totals: {
       games: 1,
-      tiles: b.list.length - 1,
+      tiles: b.list.length - 1 - (b.rules.layout === 'crista' ? RIDGE_LOTS.length : 0),
       quests: b.questsCompleted,
       synergies: Object.values(b.synergyCount).reduce((a, c) => a + c, 0),
       sites: b.sites.filter((s) => s.found).length,

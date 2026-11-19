@@ -1,3 +1,4 @@
+import { RIDGE_LOTS } from './ridge';
 import { BLESSING, SYN_BLESSING, type BlessingId } from './blessings';
 import { DIRS, hexDistance, hkey, opposite } from './hex';
 import { LOOKOUT_MOVES, SITE_REWARD, type Site, type SiteKind } from './sites';
@@ -405,10 +406,11 @@ export class Board {
 
     this.computeGroups();
     const deliveries = voyage.shipments.map((s) => s.port);
-    for (const p of voyage.connected) p.connectedAt ??= placed.index;
+    const turn = placed.index - (R.layout === 'crista' ? RIDGE_LOTS.length : 0);
+    for (const p of voyage.connected) p.connectedAt ??= turn;
     for (const { port, tiles } of voyage.shipments) {
       port.delivered = true;
-      port.paidAt = placed.index;
+      port.paidAt = turn;
       port.reward = tiles;
       tilesGained += tiles;
     }

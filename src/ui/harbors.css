@@ -79,6 +79,7 @@ body.capture #manifest { display: none; }
 }
 @media (max-height: 530px) {
   #manifest { width: min(254px, calc(100vw - 158px)); max-height: calc(100dvh - 78px); }
+  #manifest:has(#chart-body[hidden]) { width: min(228px, calc(100vw - 158px)); }
   #manifest:has(#chart-body[hidden]) #development-order { display: none; }
   .river-trade .tools { max-width: 65vw; }
 }

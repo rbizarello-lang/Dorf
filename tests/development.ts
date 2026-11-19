@@ -142,3 +142,41 @@ function sharedWaterWidths() {
 }
 assert.deepEqual(sharedWaterWidths(), sharedWaterWidths(), 'reconstruir a sequência reproduz as larguras');
 console.log('Água: larguras compartilhadas, rotações, estágios e reconstrução passaram');
+
+import { Game } from '../src/core/game';
+import { RIDGE_LOTS, ridgeSection, ridgeSnapshot } from '../src/core/ridge';
+import { hexToWorld } from '../src/core/hex';
+
+{
+  const rules = { ...DEFAULT_RULES, riverTrade:true, layout:'crista' as const };
+  const game = new Game(42,rules), before=ridgeSnapshot(game.board);
+  assert.deepEqual(before.map(p=>p.stage),[1,2,1]);
+  assert.ok(game.check(1,0)?.valid);
+  const preview = previewDevelopment(game.board,1,0,game.currentEdges()!);
+  assert.deepEqual(ridgeSnapshot(game.board),before);
+  assert.ok(game.place(1,0));
+  const after=ridgeSnapshot(game.board);
+  assert.deepEqual(after.map(p=>p.stage),[1,3,2]);
+  for (const i of [1,2]) {
+    const p=after[i];
+    assert.equal(p.buildings.length,before[i].buildings.length+1);
+    assert.deepEqual(p.buildings.slice(0,-1),before[i].buildings);
+    assert.deepEqual(preview.neighbors.find(n=>n.q===p.q && n.r===p.r)?.after,
+      developmentAt(game.board,p.q,p.r));
+  }
+  const replay=new Game(42,rules);
+  assert.deepEqual(ridgeSnapshot(replay.board),before);
+  replay.place(1,0);
+  assert.deepEqual(ridgeSnapshot(replay.board),after);
+  for (let i=0;i<RIDGE_LOTS.length-1;i++) {
+    const a=ridgeSection(i,1), b=ridgeSection(i+1,0);
+    const left=hexToWorld(RIDGE_LOTS[i].q,RIDGE_LOTS[i].r);
+    const right=hexToWorld(RIDGE_LOTS[i+1].q,RIDGE_LOTS[i+1].r);
+    for(const v of [-1.34,-.64,.22,.74,1.33]) {
+      assert.ok(Math.abs(left.x+a.x+a.nx*a.width*v-right.x-b.x-b.nx*b.width*v)<1e-9);
+      assert.ok(Math.abs(left.z+a.z+a.nz*a.width*v-right.z-b.z-b.nz*b.width*v)<1e-9);
+    }
+    assert.equal(a.height,b.height);
+  }
+  console.log('Crista: dois bairros previstos, casas preservadas, emendas e reconstrução passaram');
+}

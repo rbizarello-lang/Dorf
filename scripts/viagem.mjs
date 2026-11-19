@@ -24,7 +24,7 @@ try {
   const desktop = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   report(desktop);
   await desktop.addInitScript(() => { if (!localStorage.getItem('retalhos.save')) localStorage.setItem('retalhos.save', 'partida anterior'); });
-  await desktop.goto(url + '?debug&seed=42&theme=holanda&quality=high', {waitUntil:'domcontentloaded'});
+  await desktop.goto(url + '?debug&seed=42&theme=holanda&mapa=confluencia&quality=high', {waitUntil:'domcontentloaded'});
   await desktop.waitForFunction(() => window.__stats?.tiles === 1, null, {timeout:90000});
   await desktop.keyboard.press('f');
   assert.equal(await desktop.locator('#modal').isVisible(), false);
@@ -43,17 +43,17 @@ try {
     assert(pos.visible, 'A jogada do roteiro precisa estar na tela');
     await desktop.mouse.click(pos.x,pos.y);
   }
-  const saved = () => desktop.evaluate(() => JSON.parse(localStorage.getItem('entrepostos.cartas.save')));
+  const saved = () => desktop.evaluate(() => JSON.parse(localStorage.getItem('entrepostos.crista.save')));
   await play(moves[0]);
   await play(moves[1]);
   assert.equal((await saved()).moves.length, 2);
   assert.equal(await desktop.locator('#ports .delivered').count(), combined ? 0 : 1);
   if (combined) assert.match(await desktop.locator('#ports').innerText(), /Em espera/);
   else await desktop.evaluate(() => {
-    const s = JSON.parse(localStorage.getItem('entrepostos.cartas.save'));
+    const s = JSON.parse(localStorage.getItem('entrepostos.crista.save'));
     s.v = 10;
     delete s.combinedFreight;
-    localStorage.setItem('entrepostos.cartas.save', JSON.stringify(s));
+    localStorage.setItem('entrepostos.crista.save', JSON.stringify(s));
   });
   await desktop.reload({waitUntil:'domcontentloaded'});
   await desktop.waitForFunction(() => window.__stats?.tiles === 3);
@@ -95,7 +95,7 @@ try {
 
   const mobile = await browser.newPage({ viewport:{width:390,height:844}, isMobile:true, hasTouch:true });
   report(mobile);
-  await mobile.goto(url + '?seed=42&theme=holanda&quality=medium&webgl&debug' + (combined ? '&time=night' : ''), {waitUntil:'domcontentloaded'});
+  await mobile.goto(url + '?seed=42&theme=holanda&mapa=confluencia&quality=medium&webgl&debug' + (combined ? '&time=night' : ''), {waitUntil:'domcontentloaded'});
   await mobile.waitForFunction(() => window.__stats?.tiles === 1);
   await mobile.keyboard.press('f');
   if (combined) {
@@ -144,7 +144,7 @@ try {
 
   const landscape = await browser.newPage({ viewport: { width: 667, height: 375 }, isMobile: true, hasTouch: true });
   report(landscape);
-  await landscape.goto(url + '?seed=42&theme=holanda&quality=medium&webgl' + (combined ? '&time=night' : ''), { waitUntil: 'domcontentloaded' });
+  await landscape.goto(url + '?seed=42&theme=holanda&mapa=confluencia&quality=medium&webgl' + (combined ? '&time=night' : ''), { waitUntil: 'domcontentloaded' });
   await landscape.waitForFunction(() => window.__stats?.tiles === 1);
   await checkMap(landscape);
   console.log('Toque', backend, 'rotação, encaixe e carta; três etiquetas sem colisão em retrato e paisagem, inclusive na abertura');
