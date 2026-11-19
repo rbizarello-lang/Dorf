@@ -43,6 +43,9 @@ const cases = [
   // No WebGL2 (a partida custa ~25 s por caso no SwiftShader) Alta e Ultra entram pela troca ao vivo,
   // que também cobre a mudança de nível com a partida aberta. Troca: qualidade pelo menu do botão e
   // hora pelo botão de hora (ciclo dawn, aurora, day, golden, dusk, night).
+  // Limite de buffers de vértice do WebGPU (maxVertexBuffers = 8): a Alta com o TRAA tem o pior caso (matriz anterior da instância).
+  // O `?vbuf` conta, em qualquer backend, os buffers que cada malha usa; roda em WebGL2 para valer também sem GPU.
+  { name: 'buffers-de-vertice', q: 'theme=holanda&seed=7&auto=60&quality=high&mode=zen&vbuf&webgl', backend: 'webgl2', tiles: 61, vbuf: true },
   { name: 'ao-vivo-webgl', q: 'theme=holanda&seed=3&auto=6&quality=low&time=day&webgl', backend: 'webgl2', tiles: 7, live: true },
 ];
 
@@ -93,6 +96,11 @@ for (const c of cases) {
     if (c.bench && !(await page.evaluate(() => !!window.__bench && !!document.querySelector('.bench table')))) problems.push('o painel do ?bench não apareceu');
     // O cabeçalho do ?bench (placa, navegador, tela, medidor de GPU, nível do Auto) precisa vir junto, para a tabela colada dizer onde foi medida.
     if (c.bench && !(await page.evaluate(() => (window.__bench?.info?.length ?? 0) >= 5 && document.querySelectorAll('.bench li').length >= 5))) problems.push('o cabeçalho do ?bench (placa, tela, medidor de GPU) não apareceu');
+    if (c.vbuf) {
+      const over = await page.evaluate(() => window.__vbuf?.(9) ?? null);
+      if (over === null) problems.push('o gancho __vbuf não existe');
+      else for (const r of over) problems.push(`malha ${r.key} (${r.material}) usa ${r.n} buffers de vértice (pior caso ${r.pior}), o WebGPU aceita 8: ${r.attrs.join(',')}`);
+    }
     if (stats.backend !== c.backend) problems.push(`backend ${stats.backend}, esperado ${c.backend}`);
   }
   const s = ((Date.now() - t0) / 1000).toFixed(1);

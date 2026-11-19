@@ -2366,13 +2366,46 @@ function specialsFor(theme: Theme, walls: string, roofs: string) {
 
 // ---------------------------------------------------------------- instâncias
 
+const interleavedOf = new WeakMap<THREE.BufferGeometry, Record<string, THREE.BufferAttribute | THREE.InterleavedBufferAttribute>>();
+
+/**
+ * Os atributos do kit (`position`, `normal`, `color`, `tint`, `glow`, `vol`...) num buffer intercalado só: o WebGPU aceita 8 buffers de
+ * vértice por malha e cada atributo solto conta um (mais `iColor` e a matriz da instância, que passa a 2 quando há mais de 1000
+ * instâncias e o TRAA pede a matriz anterior). Intercalado, os nomes e a leitura nos materiais não mudam, e o kit usa 1 buffer.
+ * Vale por geometria-base (cache), então todos os lotes do mesmo kit dividem o mesmo buffer.
+ */
+function interleaved(base: THREE.BufferGeometry) {
+  let out = interleavedOf.get(base);
+  if (out) return out;
+  const plain = Object.entries(base.attributes).filter(([, a]) => (a as THREE.BufferAttribute).isBufferAttribute && a.array instanceof Float32Array && !(a as THREE.BufferAttribute).normalized);
+  out = { ...base.attributes } as Record<string, THREE.BufferAttribute | THREE.InterleavedBufferAttribute>;
+  if (plain.length >= 3) {
+    const count = plain[0][1].count;
+    const stride = plain.reduce((n, [, a]) => n + a.itemSize, 0);
+    const data = new Float32Array(count * stride);
+    let off = 0;
+    for (const [, a] of plain) {
+      for (let i = 0; i < count; i++) for (let c = 0; c < a.itemSize; c++) data[i * stride + off + c] = a.array[i * a.itemSize + c];
+      off += a.itemSize;
+    }
+    const buf = new THREE.InterleavedBuffer(data, stride);
+    off = 0;
+    for (const [k, a] of plain) {
+      out[k] = new THREE.InterleavedBufferAttribute(buf, a.itemSize, off);
+      off += a.itemSize;
+    }
+  }
+  interleavedOf.set(base, out);
+  return out;
+}
+
 /**
  * Geometria para um InstancedMesh: compartilha os atributos do kit e acrescenta
  * `iColor`, a cor de cada instância (a mesma geometria base serve a vários meshes).
  */
 export function instGeometry(base: THREE.BufferGeometry, cap: number, colors?: Float32Array) {
   const g = new THREE.BufferGeometry();
-  for (const [k, a] of Object.entries(base.attributes)) g.setAttribute(k, a);
+  for (const [k, a] of Object.entries(interleaved(base))) g.setAttribute(k, a);
   if (base.index) g.setIndex(base.index);
   const arr = new Float32Array(cap * 3).fill(1);
   if (colors) arr.set(colors.subarray(0, Math.min(colors.length, arr.length)));

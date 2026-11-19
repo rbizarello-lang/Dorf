@@ -1888,6 +1888,11 @@ function start(data: unknown) {
     newGame(wantSeed > 0 ? wantSeed : undefined);
     if (mode.daily && !special) announceDaily();
   }
+  // `?vbuf`: liga a contagem de buffers de vértice por malha antes de qualquer quadro (ver render/vbuf.ts).
+  if (params.has('vbuf')) {
+    world.watchVbuf();
+    (window as unknown as { __vbuf: (n?: number) => unknown }).__vbuf = (n?: number) => world.vbufReport(n);
+  }
   if (params.has('stress')) {
     const r = autoPlace(Number(params.get('stress')) || 1000, true);
     hud.stats.hidden = false;
