@@ -109,6 +109,10 @@ export interface TileBuild {
   splat: Float32Array;
   /** Quantos números de `pos` são o chão em si (topo, saia e laterais); o que vem depois são decalques (estradas, parcelas) sobre ele. */
   groundEnd: number;
+  /** Início das bancadas, faces e capas de arrimo, no fim do chão. Elas também pintam as cotas íngremes no mapa. */
+  terraceStart?: number;
+  /** Triângulos de origem dos arrimos e seus offsets em `pos`, relativos a `terraceStart`, para o encaixe fluido. */
+  terracePatches?: { offset: number; source: readonly [V3, V3, V3] }[];
   water: Float32Array;
   /** Por vértice da água: correnteza (x, z, em unidades/s relativas). */
   wflow: Float32Array;
@@ -1103,6 +1107,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const frng = mulberry32((seed ^ FOREST_SEED) >>> 0);
   const detail = opts.detail;
   const g = new Buf(true);
+  let terraces: Buf | undefined;
+  const terracePatches: TileBuild['terracePatches'] = opts.continuous ? [] : undefined;
     const decos: Deco[] = [];
   const chimneys: number[] = [];
   // Cada peça desloca valor e matiz do prado pela semente (gerador à parte, para não mexer no resto da
@@ -1141,7 +1147,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   let hillSurf: HillSurface | undefined;
   const hillSteep = (x: number, z: number) => {
     const e = 0.05;
-    return Math.hypot(hillSurf!.at(x + e, z) - hillSurf!.at(x - e, z), hillSurf!.at(x, z + e) - hillSurf!.at(x, z - e)) / (2 * e);
+    return Math.hypot(hillSurf!.at(x + e, z, true) - hillSurf!.at(x - e, z, true), hillSurf!.at(x, z + e, true) - hillSurf!.at(x, z - e, true)) / (2 * e);
   };
   const clear = (x: number, z: number) => Math.min(road.paths.length ? distToPaths(x, z, road.paths) : Infinity, field ? field.e(x, z) - (shape.lake ? BANK_EXTRA : 0) : Infinity, terr && steep(x, z) > STEEP_MAX ? -0.05 : Infinity, hillSurf && hillSteep(x, z) > HILL_STEEP ? -0.05 : Infinity);
   // --- Relevo (R2): peça mais alta que a vizinha. Estrada e trilho descem em rampa até a borda, no nível dela
@@ -1254,7 +1260,6 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   /** O meio da peça fica plano onde há objeto no centro (Centro da vila, canteiro da maravilha, peça especial, marco de era). */
   const flatCore = !!(opts.center || opts.wonder || opts.special || opts.eraMark || opts.site || opts.spring);
   const hand = hillOn ? opts.hand ?? opts.hill : undefined;
-  const wallC = tc(theme.houses[0]?.walls[0] ?? theme.rock);
   const hill = hillOn ? new HillSurface(opts.hill!, N, (x, z, side, boundary) => {
     const h = hillHeight(opts.hill!, x, z);
     if (h <= 0) return 0;
@@ -1280,6 +1285,22 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     return (top + (h - top) * seam) * podium;
   }) : undefined;
   hillSurf = hill;
+  // Arrimos seguem a cota da encosta. Na faixa da emenda e perto do leito ou da via vale o perfil original.
+  const terraceStrength = (side: number, x: number, z: number, rise: number) => {
+    if (!hill || edges[side] !== T.Village || rise < 0.035) return 0;
+    let strength = smooth(0.12, 0.27, edgeDist(side, x, z));
+    for (const j of [side, side + 1]) {
+      if (edges[(j === side ? side + 5 : side + 1) % 6] === T.Village) continue;
+      const [cx, cz] = corner(j);
+      strength *= smooth(0.015, 0.13, Math.abs(x * cz - z * cx));
+    }
+    if (flatCore) strength *= smooth(0.47, 0.66, Math.hypot(x, z));
+    if (strength > 0 && field) strength *= smooth(0.16, 0.29, field.e(x, z));
+    if (strength > 0 && road.paths.length) strength *= smooth(0.21, 0.33, distToPaths(x, z, road.paths));
+    return strength;
+  };
+  const wallC = tc(theme.houses[0]?.walls[0] ?? theme.rock).clone().lerp(tc(theme.rock), 0.35);
+  const copingC = shade(wallC, 1.21);
   const center = new THREE.Color(0, 0, 0);
   for (const c of groundCols) center.add(c);
   center.multiplyScalar(1 / 6);
@@ -1423,35 +1444,54 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   for (let i = 0; i < 6; i++) {
     const A = corner(i);
     const B = corner((i + 1) % 6);
-    const vs = new Map<number, { p: V3; c: THREE.Color; s: Splat }>();
+    type GroundVertex = { p: V3; c: THREE.Color; s: Splat; rise: number; strength: number };
+    const vs = new Map<number, GroundVertex>();
     const V = (a: number, b: number) => {
       const k = a * 64 + b;
       let v = vs.get(k);
       if (!v) {
         const x = (a / N) * A[0] + (b / N) * B[0], z = (a / N) * A[1] + (b / N) * B[1];
         const rise = hill?.node(i, a, b) ?? 0;
-        v = { p: [x, groundY(x, z) + liftAt(x, z) + rise, z], ...topColor(i, a, b, x, z) };
-        // Muro de arrimo: na subida entre dois patamares o chão da vila toma a cor de parede do tema. Rocha só na encosta forte de mata.
-        if (hill && rise > 0.04) {
+        v = { p: [x, groundY(x, z) + liftAt(x, z) + rise, z], ...topColor(i, a, b, x, z), rise, strength: terraceStrength(i, x, z, rise) };
+        if (hill && rise > 0.04 && edges[i] !== T.Village) {
           const riser = hillRiser(opts.hill!, x, z);
-          // O plano do patamar mantém o calçamento; a face da subida é o muro de arrimo (cor da parede do tema) na vila, terra do tema no resto.
-          if (edges[i] === T.Village) v.c.lerp(wallC, 0.25 * riser);
-          else if (edges[i] !== T.Forest) v.c.lerp(tc(theme.side), 0.3 * riser);
-          else if (edges[i] === T.Forest && rise > 0.3) v.c.lerp(tc(theme.rock), Math.min(0.1, (rise - 0.3) * 0.5));
+          if (edges[i] !== T.Forest) v.c.lerp(tc(theme.side), 0.3 * riser);
+          else if (rise > 0.3) v.c.lerp(tc(theme.rock), Math.min(0.1, (rise - 0.3) * 0.5));
         }
         vs.set(k, v);
       }
       return v;
     };
+    const top = (a: number, b: number, p0: GroundVertex, p1: GroundVertex, p2: GroundVertex, upper: boolean) => {
+      wb?.tri(p0, p1, p2);
+      if (!hill || !(p0.strength || p1.strength || p2.strength)) {
+        g.tri(p0.p, p1.p, p2.p, p0.c, p1.c, p2.c, UP, p0.s, p1.s, p2.s);
+        return;
+      }
+      const faces = hill.terrace(i, a, b, upper, [p0.strength, p1.strength, p2.strength]);
+      const mesh = (terraces ??= new Buf(true));
+      terracePatches?.push({ offset: mesh.pos.length, source: [p0.p, p1.p, p2.p] });
+      for (const { kind, points } of faces) {
+        const stone = kind === 'wall' ? wallC : kind === 'coping' ? copingC : null;
+        const vertices = points.map(({ u, v, y, strength }) => {
+          const blend = (a: number, b: number, c: number) => a + (b - a) * u + (c - a) * v;
+          const p: V3 = [blend(p0.p[0], p1.p[0], p2.p[0]), y + blend(p0.p[1] - p0.rise, p1.p[1] - p1.rise, p2.p[1] - p2.rise), blend(p0.p[2], p1.p[2], p2.p[2])];
+          const c = new THREE.Color(blend(p0.c.r, p1.c.r, p2.c.r), blend(p0.c.g, p1.c.g, p2.c.g), blend(p0.c.b, p1.c.b, p2.c.b));
+          if (stone) c.lerp(stone, strength * 0.93);
+          const s = p0.s.map((value, k) => blend(value, p1.s[k], p2.s[k]) * (stone ? 1 - 0.8 * strength : 1)) as unknown as Splat;
+          return { p, c, s };
+        });
+        const [p, q, r] = vertices;
+        mesh.tri(p.p, q.p, r.p, p.c, q.c, r.c, UP, p.s, q.s, r.s);
+      }
+    };
     for (let a = 0; a < N; a++) {
       for (let b = 0; b < N - a; b++) {
         const p0 = V(a, b), p1 = V(a + 1, b), p2 = V(a, b + 1);
-        g.tri(p0.p, p1.p, p2.p, p0.c, p1.c, p2.c, UP, p0.s, p1.s, p2.s);
-        wb?.tri(p0, p1, p2);
+        top(a, b, p0, p1, p2, false);
         if (a + b < N - 1) {
           const p3 = V(a + 1, b + 1);
-          g.tri(p1.p, p3.p, p2.p, p1.c, p3.c, p2.c, UP, p1.s, p3.s, p2.s);
-          wb?.tri(p1, p3, p2);
+          top(a, b, p1, p3, p2, true);
         }
       }
     }
@@ -1566,6 +1606,12 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     }
   }
 
+  const terraceStart = terraces ? g.pos.length : undefined;
+  if (terraces) {
+    g.pos.push(...terraces.pos);
+    g.col.push(...terraces.col);
+    g.spl.push(...terraces.spl);
+  }
   const groundEnd = g.pos.length;
   const chimneyHomes: V2[] = [];
   // --- Lugares reservados para construções especiais (a decoração desvia deles).
@@ -3224,6 +3270,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     col: new Float32Array(g.col),
     splat: new Float32Array(g.spl),
     groundEnd,
+    terraceStart,
+    terracePatches,
     water: new Float32Array([...(wb?.pos ?? []), ...(pad?.pos ?? [])]),
     wflow: new Float32Array([...(wb?.flow ?? []), ...(pad?.flow ?? [])]),
     wbed: new Float32Array([...(wb?.bed ?? []), ...(pad?.bed ?? [])]),

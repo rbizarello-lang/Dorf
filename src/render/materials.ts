@@ -122,9 +122,6 @@ export const U = {
   land: uniform(0),
   /** Encostas fora do encaixe fluido: o chão lê a normal suave do mapa de alturas (no fluido isso já vale por `land`). */
   hillN: uniform(0),
-  /** Encostas ligadas (1) e a cor de parede do tema: nas vilas o chão tinge de parede a subida entre dois patamares (faixas de 0,075 de altura). */
-  terrace: uniform(0),
-  wall: uniform(new THREE.Color('#d8c9a8')),
   /** Cor de cada terreno do tema [prado, mata, plantação, vila]: a cor do campo de terreno, para somar só a diferença à cor do vértice. */
   landCol: [uniform(new THREE.Color()), uniform(new THREE.Color()), uniform(new THREE.Color()), uniform(new THREE.Color())],
   /** Modo Relevo: 1 mostra a rocha das encostas íngremes no chão (0 nos outros modos e na pilha) e a cor dela (a rocha do tema). */
@@ -790,13 +787,7 @@ export function makeGroundMaterial(land = false) {
   const rockK = smoothstep(0.28, 0.45, lean.add(grain.sub(0.5).mul(0.08))).mul(smoothstep(0.35, 0.55, nG.y)).mul(U.rock);
   // A rocha leva um tanto da cor do vértice (o pé da encosta é terra escura): nada de cinza chapado ao lado do verde.
   const rockCol = mix(U.rockColor, vertexColor().rgb.mul(1.15), 0.4).mul(rockTone);
-  // Muro de arrimo das vilas: a altura do ponto (não o vértice) decide a faixa, então o degrau fica nítido em qualquer malha. Plano do patamar = calçamento.
-  const yb = positionWorld.y.div(0.075);
-  const yph = yb.sub(floor(yb));
-  const wallM = smoothstep(0.1, 0.3, yph).mul(float(1).sub(smoothstep(0.62, 0.82, yph))).mul(sp.w.min(1)).mul(U.terrace).mul(smoothstep(0.6, 0.9, normalWorld.y));
-  const capM = float(1).sub(smoothstep(0.0, 0.1, yph.min(float(1).sub(yph)))).mul(sp.w.min(1)).mul(U.terrace).mul(smoothstep(0.6, 0.9, normalWorld.y));
-  const terraced = mix(mix(ground, U.wall.mul(0.92), wallM.mul(0.6)), ground.mul(1.14), capM.mul(0.5));
-  m.colorNode = mix(mix(terraced, rockCol, rockK), vec3(1), U.silhouette);
+  m.colorNode = mix(mix(ground, rockCol, rockK), vec3(1), U.silhouette);
   // Micro-relevo: três escalas do mapa de declive (a mesma textura da água) inclinam a normal, então a luz rasante lê tufos de
   // capim, folhiço, torrões e pedregulhos; as escalas finas somem com a distância (cintilariam). Nos campos, sulcos na direção do pincel.
   const wField = sp.z, wVill = sp.w;

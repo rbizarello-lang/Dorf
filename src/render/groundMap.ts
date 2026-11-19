@@ -171,7 +171,7 @@ export class GroundMap {
 
   /** Pinta o chão e a água de uma peça já posta no mundo pela matriz `m`. */
   add(b: TileBuild, m: THREE.Matrix4, water: THREE.Color) {
-    this.raster(b.pos, m, (i, out) => out.setRGB(b.col[i * 3], b.col[i * 3 + 1], b.col[i * 3 + 2]), b.splat, b.groundEnd);
+    this.raster(b.pos, m, (i, out) => out.setRGB(b.col[i * 3], b.col[i * 3 + 1], b.col[i * 3 + 2]), b.splat, b.groundEnd, b.terraceStart);
     // A água vista de cima: a cor do tema, mais escura que o leito (ela absorve).
     const w = water.clone().multiplyScalar(0.55);
     this.raster(b.water, m, (_, out) => out.copy(w));
@@ -227,10 +227,10 @@ export class GroundMap {
   }
 
   /**
-   * Rasteriza os triângulos virados para cima (o topo da peça; as laterais ficam de fora):
+   * Rasteriza os triângulos virados para cima, inclusive as faces de arrimo que ligam dois pisos:
    * cada texel cujo centro cai num triângulo recebe a cor interpolada dos vértices.
    */
-  private raster(pos: Float32Array, m: THREE.Matrix4, colorAt: (vertex: number, out: THREE.Color) => void, splat?: Float32Array, groundEnd = 0) {
+  private raster(pos: Float32Array, m: THREE.Matrix4, colorAt: (vertex: number, out: THREE.Color) => void, splat?: Float32Array, groundEnd = 0, terraceStart = groundEnd) {
     const e = m.elements;
     const level = to8(e[13] / HEIGHT_RANGE);
     const c0 = new THREE.Color(), c1 = new THREE.Color(), c2 = new THREE.Color();
@@ -240,7 +240,8 @@ export class GroundMap {
       const ax = pos[t + 3] - pos[t], ay = pos[t + 4] - pos[t + 1], az = pos[t + 5] - pos[t + 2];
       const bx = pos[t + 6] - pos[t], by = pos[t + 7] - pos[t + 1], bz = pos[t + 8] - pos[t + 2];
       const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
-      if (ny < 0.5 * Math.hypot(nx, ny, nz)) continue;
+      const hasRelief = t < groundEnd;
+      if (ny <= 0 || (!(hasRelief && t >= terraceStart) && ny < 0.5 * Math.hypot(nx, ny, nz))) continue;
       for (let k = 0; k < 3; k++) {
         const x = pos[t + k * 3], y = pos[t + k * 3 + 1], z = pos[t + k * 3 + 2];
         u[k] = (e[0] * x + e[4] * y + e[8] * z + e[12] + GROUND_EXTENT) / TEXEL - 0.5;
@@ -254,7 +255,6 @@ export class GroundMap {
       colorAt(vi + 1, c1);
       colorAt(vi + 2, c2);
       // Altura de cada vértice no mundo (só o chão: os decalques acima de `groundEnd` — parcelas, ruas — não entram no relevo).
-      const hasRelief = t < groundEnd;
       if (hasRelief) for (let k = 0; k < 3; k++) wy[k] = e[1] * pos[t + k * 3] + e[5] * pos[t + k * 3 + 1] + e[9] * pos[t + k * 3 + 2] + e[13];
       const umin = Math.max(0, Math.ceil(Math.min(u[0], u[1], u[2]) - 1e-6));
       const umax = Math.min(GROUND_SIZE - 1, Math.floor(Math.max(u[0], u[1], u[2]) + 1e-6));

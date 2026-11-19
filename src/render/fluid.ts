@@ -60,9 +60,8 @@ export function warpBuild(b: TileBuild, e: ArrayLike<number>, w: Warp): TileBuil
     w.at(e[0] * x + e[8] * z + e[12], e[2] * x + e[10] * z + e[14], d);
     return [e[0] * d[0] + e[2] * d[1], e[8] * d[0] + e[10] * d[1]];
   };
-  const pts = (src: Float32Array): Float32Array => {
-    const out = new Float32Array(src.length);
-    for (let i = 0; i < src.length; i += 3) {
+  const pts = (src: Float32Array, out = new Float32Array(src.length), start = 0, end = src.length): Float32Array => {
+    for (let i = start; i < end; i += 3) {
       const [sx, sz] = shift(src[i], src[i + 2]);
       out[i] = src[i] + sx;
       out[i + 1] = src[i + 1];
@@ -70,6 +69,26 @@ export function warpBuild(b: TileBuild, e: ArrayLike<number>, w: Warp): TileBuil
     }
     return out;
   };
+  const pos = new Float32Array(b.pos.length);
+  if (b.terraceStart !== undefined && b.terracePatches?.length) {
+    pts(b.pos, pos, 0, b.terraceStart);
+    pts(b.pos, pos, b.groundEnd);
+    for (let i = 0; i < b.terracePatches.length; i++) {
+      const { offset, source: [[x, , z], [bx, , bz], [cx, , cz]] } = b.terracePatches[i];
+      const a = shift(Math.fround(x), Math.fround(z)), u = shift(Math.fround(bx), Math.fround(bz)), v = shift(Math.fround(cx), Math.fround(cz));
+      const ux = bx - x, uz = bz - z, vx = cx - x, vz = cz - z;
+      const det = ux * vz - uz * vx;
+      const from = b.terraceStart + offset, end = b.terracePatches[i + 1] ? b.terraceStart + b.terracePatches[i + 1].offset : b.groundEnd;
+      // Os cortes herdam o deslocamento do triângulo original. Uma aresta recortada continua encostada na vizinha sem corte.
+      for (let j = from; j < end; j += 3) {
+        const dx = b.pos[j] - x, dz = b.pos[j + 2] - z;
+        const s = (dx * vz - dz * vx) / det, t = (ux * dz - uz * dx) / det;
+        pos[j] = b.pos[j] + a[0] + (u[0] - a[0]) * s + (v[0] - a[0]) * t;
+        pos[j + 1] = b.pos[j + 1];
+        pos[j + 2] = b.pos[j + 2] + a[1] + (u[1] - a[1]) * s + (v[1] - a[1]) * t;
+      }
+    }
+  } else pts(b.pos, pos);
   const decos: Deco[] = b.decos.map((o) => {
     const [sx, sz] = shift(o.x, o.z);
     return { ...o, x: o.x + sx, z: o.z + sz };
@@ -86,7 +105,7 @@ export function warpBuild(b: TileBuild, e: ArrayLike<number>, w: Warp): TileBuil
     falls[i] += sx;
     falls[i + 1] += sz;
   }
-  const out: TileBuild = { ...b, pos: pts(b.pos), water: pts(b.water), decos, chimneys, falls, fall: { ...b.fall, pos: pts(b.fall.pos) }, foam: { ...b.foam, pos: pts(b.foam.pos) } };
+  const out: TileBuild = { ...b, pos, water: pts(b.water), decos, chimneys, falls, fall: { ...b.fall, pos: pts(b.fall.pos) }, foam: { ...b.foam, pos: pts(b.foam.pos) } };
   done.add(out);
   return out;
 }
