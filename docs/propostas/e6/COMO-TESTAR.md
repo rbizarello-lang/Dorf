@@ -33,3 +33,10 @@ Em desenvolvimento (`npm run dev`) os mesmos valores valem como `?viva=0`, `?mod
 ## Ganchos
 
 `window.__living()` devolve `{ on, rebakes, maxMs, stages }`. Teste: `npm run living` (também no `npm test`).
+
+## Prévia publicada (E6, commit c9367e9)
+
+https://claude.ai/artifact/3ZeHrwEeUVfL3d7W2FTH2c (privada). É a mais recente: tem as Encostas no jogo todo e a Paisagem viva, ligada em todos os modos na prévia.
+
+- `#mode=zen`, `#mode=relevo` e `#mode=terra` abrem esses modos. `#viva=0` desliga a Paisagem viva e `#encostas=0` volta ao desenho de antes das Encostas. Dá para combinar, como em `#mode=zen&viva=0`.
+- `#bench` mede o desempenho na placa de quem abre.
