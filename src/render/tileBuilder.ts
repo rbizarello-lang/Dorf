@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { corner, edgeMid, INR } from '../core/hex';
-import { hillFlat, hillHeight, type HillProfile } from '../core/hills';
+import { hillFlat, hillHeight, hillRiser, type HillProfile } from '../core/hills';
 import { HillSurface } from './hillSurface';
 import type { DayPhase, EggKit } from '../core/eggs';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
@@ -27,6 +27,8 @@ onMagra((m) => {
 });
 /** Inclinação (altura por distância) acima da qual a decoração não assenta: ~17°, o resto é encosta de rocha. */
 const STEEP_MAX = 0.3;
+/** Encostas: inclinação (altura por distância) a partir da qual árvores, plantas e casas fogem. */
+const HILL_STEEP = 0.75;
 /** Quanto a saia afunda (em níveis) abaixo da curva que a peça vizinha segue, para não ficar no mesmo plano que o chão dela. */
 const SKIRT_UNDER = 0.1;
 /** Comprimento da rampa de estrada e trilho na peça alta, contado da borda para dentro. */
@@ -134,6 +136,18 @@ export interface BuildOpts {
   hill?: HillProfile;
   /** O perfil da peça "na mão" (sem vizinhas): decide onde cada casa assenta, então ela não pula quando um encaixe sobe a encosta. */
   hand?: HillProfile;
+  /**
+   * Relevo e Terra com as Encostas: borda (origem) virada para o vazio. Em vez do paredão, a peça ganha a costa da base: a encosta
+   * desce curta, do lado de fora, até a areia no nível do mar (a saia de `skirtFor`, rente porque a borda aberta fica em 0).
+   * Quando a vizinha chega, a peça é refeita sem a saia desse lado.
+   */
+  skirt?: readonly boolean[];
+  /**
+   * Corredeira no vale (Relevo e Terra com as Encostas, onde o desenho não tem platô por peça): borda (origem) de água em que a água
+   * pontuada desce de nível para a vizinha assentada ANTES desta peça. Valor = quantos níveis desce (positivo: esta peça é a alta;
+   * negativo: a baixa). A peça põe espuma, degraus de pedra e a névoa; a água não muda.
+   */
+  rapids?: readonly number[];
   /** 1 = densidade total de plantas e capim; menor em qualidade baixa. */
   detail: number;
   /** Interações nas bordas (setor na orientação de origem). */
@@ -272,7 +286,7 @@ class Buf {
 }
 
 /** Encostas: desvio máximo (altura) entre o decalque e o chão antes de dividir o triângulo, e a profundidade máxima da divisão. */
-const DRAPE_TOL = 0.01;
+const DRAPE_TOL = 0.016;
 const DRAPE_DEPTH = 1;
 const UP: V3 = [0, 1, 0];
 const WHITE = new THREE.Color(1, 1, 1);
@@ -1123,7 +1137,13 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const flow = opts.flow ?? resolveFlow(edges);
   const field = hasWater ? waterField(shape, water.paths, widths, flow, seed) : null;
   /** Distância até a água ou a via mais próxima (negativa dentro): a decoração desvia. */
-  const clear = (x: number, z: number) => Math.min(road.paths.length ? distToPaths(x, z, road.paths) : Infinity, field ? field.e(x, z) - (shape.lake ? BANK_EXTRA : 0) : Infinity, terr && steep(x, z) > STEEP_MAX ? -0.05 : Infinity);
+  // Encostas: a decoração foge da subida forte (a mesma ideia do `steep` do campo de altura da base).
+  let hillSurf: HillSurface | undefined;
+  const hillSteep = (x: number, z: number) => {
+    const e = 0.05;
+    return Math.hypot(hillSurf!.at(x + e, z) - hillSurf!.at(x - e, z), hillSurf!.at(x, z + e) - hillSurf!.at(x, z - e)) / (2 * e);
+  };
+  const clear = (x: number, z: number) => Math.min(road.paths.length ? distToPaths(x, z, road.paths) : Infinity, field ? field.e(x, z) - (shape.lake ? BANK_EXTRA : 0) : Infinity, terr && steep(x, z) > STEEP_MAX ? -0.05 : Infinity, hillSurf && hillSteep(x, z) > HILL_STEEP ? -0.05 : Infinity);
   // --- Relevo (R2): peça mais alta que a vizinha. Estrada e trilho descem em rampa até a borda, no nível dela
   // (`rampR`: 0 ou negativo, função só da peça, da borda e da vizinha, então a emenda casa em qualquer ordem).
   // O rio não desce em rampa: termina num lábio de pedra e cai (cachoeira, R3).
@@ -1181,7 +1201,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const fallHi: number[] = [], fallLo: number[] = [];
   /** Bordas de água sem vizinha assentada (modo Relevo): a água escorre pela saia em vez de acabar num corte de vidro. */
   const openWater: number[] = [];
-  if (spec) for (let i = 0; i < 6; i++) if (edges[i] === T.Water && !opts.levels?.placed?.[i]) openWater.push(i);
+  for (let i = 0; i < 6; i++) if (edges[i] === T.Water && (spec ? !opts.levels?.placed?.[i] : !!opts.skirt?.[i])) openWater.push(i);
   if (opts.levels && hasWater) {
     for (const i of water.idx) {
       if (opts.levels.nb[i] < edgeLv(i)) fallHi.push(i);
@@ -1234,6 +1254,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   /** O meio da peça fica plano onde há objeto no centro (Centro da vila, canteiro da maravilha, peça especial, marco de era). */
   const flatCore = !!(opts.center || opts.wonder || opts.special || opts.eraMark || opts.site || opts.spring);
   const hand = hillOn ? opts.hand ?? opts.hill : undefined;
+  const wallC = tc(theme.houses[0]?.walls[0] ?? theme.rock);
   const hill = hillOn ? new HillSurface(opts.hill!, N, (x, z, side, boundary) => {
     const h = hillHeight(opts.hill!, x, z);
     if (h <= 0) return 0;
@@ -1258,6 +1279,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const podium = flatCore ? smooth(0.43, 0.65, Math.hypot(x, z)) : 1;
     return (top + (h - top) * seam) * podium;
   }) : undefined;
+  hillSurf = hill;
   const center = new THREE.Color(0, 0, 0);
   for (const c of groundCols) center.add(c);
   center.multiplyScalar(1 / 6);
@@ -1302,7 +1324,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
    * casa vizinha (o limite dela com a casa do lado é o raio do canto).
    */
   const skirtFor = (i: number, V: (a: number, b: number) => { p: V3; c: THREE.Color; s: Splat }) => {
-    const sp = spec!, own0 = sp.own!;
+    const own0 = spec?.own ?? 0;
     const [mx, mz] = edgeMid(i);
     const nrm: V3 = [mx / INR, 0, mz / INR];
     // O pé da encosta vira terra escura (a cor da lateral do tema), nunca areia cinzenta: é a ilha que desce para a água.
@@ -1409,8 +1431,11 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         const x = (a / N) * A[0] + (b / N) * B[0], z = (a / N) * A[1] + (b / N) * B[1];
         const rise = hill?.node(i, a, b) ?? 0;
         v = { p: [x, groundY(x, z) + liftAt(x, z) + rise, z], ...topColor(i, a, b, x, z) };
-        // A encosta puxa um fio da cor da rocha do tema: o relevo lê melhor de longe.
-        if (rise > 0) v.c.lerp(tc(theme.rock), Math.min(0.14, rise * 0.25));
+        // Muro de arrimo: na subida entre dois patamares o chão da vila toma a cor de parede do tema. Rocha só na encosta forte de mata.
+        if (hill && rise > 0.04) {
+          if (edges[i] === T.Village) v.c.lerp(wallC, 0.7 * hillRiser(opts.hill!, x, z));
+          else if (edges[i] === T.Forest && rise > 0.3) v.c.lerp(tc(theme.rock), Math.min(0.1, (rise - 0.3) * 0.5));
+        }
         vs.set(k, v);
       }
       return v;
@@ -1453,11 +1478,19 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const floor = -TILE_T - (lv?.own ?? 0) * LEVEL_STEP;
     const rockC = tc(theme.relief?.rock ?? theme.rock);
     // Borda de terra virada para o vazio com altura: em vez de um paredão, uma saia (encosta arredondada que desce do lado de fora).
-    const skirted = !!spec && !hidden && !lv?.placed?.[i];
+    const skirted = (!!spec && !hidden && !lv?.placed?.[i]) || (!spec && !!opts.skirt?.[i]);
     if (skirted) skirtFor(i, V);
-    for (let k = 0; k < N && !hidden; k++) {
+    // Encostas: a borda baixa e reta (divisa sem par) tem a parede inteira num trecho só, em vez de um por divisão da malha.
+    let wallStep = 1;
+    if (hill && !lv && !hasWater && !skirted) {
+      const yRef = V(N, 0).p[1];
+      let same = true;
+      for (let k = 1; k <= N && same; k++) same = Math.abs(V(N - k, k).p[1] - yRef) < 1e-4;
+      if (same) wallStep = N;
+    }
+    for (let k = 0; k < N && !hidden; k += wallStep) {
       if (skirted) continue;
-      const v0 = V(N - k, k), v1 = V(N - k - 1, k + 1);
+      const v0 = V(N - k, k), v1 = V(N - k - wallStep, k + wallStep);
       const [x0, y0, z0] = v0.p, [x1, y1, z1] = v1.p;
       const l0 = shade(v0.c, 0.72), l1 = shade(v1.c, 0.72);
       if (lv) {
@@ -1519,7 +1552,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const b0 = Math.min(y0 - 0.05, -0.05), b1 = Math.min(y1 - 0.05, -0.05);
       g.quad([x0, y0, z0], [x1, y1, z1], [x1, b1, z1], [x0, b0, z0], l0, l1, l1, l0, nrm);
       g.quad([x0, b0, z0], [x1, b1, z1], [x1, -0.11, z1], [x0, -0.11, z0], side, side, midC, midC, nrm);
-      const r0 = rockY[k], r1 = rockY[k + 1];
+      const r0 = rockY[k], r1 = rockY[k + wallStep];
       g.quad([x0, -0.11, z0], [x1, -0.11, z1], [x1, r1, z1], [x0, r0, z0], midC, midC, soilC, soilC, nrm);
       g.quad([x0, r0, z0], [x1, r1, z1], [x1, -TILE_T, z1], [x0, -TILE_T, z0], rockTop, rockTop, rockBot, rockBot, nrm);
       // Corte da água na lateral (só aparece na beira aberta do mapa, como num aquário).
@@ -3069,6 +3102,45 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     }
   }
 
+  // --- Corredeira no vale (Relevo e Terra com as Encostas): a água pontuada desce de nível para a vizinha, mas o chão é desenhado no
+  // nível 0, então a queda vira um degrau baixo de pedra atravessando o rio, espuma dos dois lados da borda, pedras e a névoa da queda.
+  if (opts.rapids && hasWater) {
+    const rr = mulberry32((seed ^ 0x7a91d5) >>> 0);
+    const rockR = tc(theme.relief?.rock ?? theme.rock);
+    for (const i of water.idx) {
+      const d = opts.rapids[i];
+      if (!d) continue;
+      const [mx, mz] = edgeMid(i);
+      const nx = mx / INR, nz = mz / INR, tx = -nz, tz = nx;
+      const Wf = widths[i] + 0.012;
+      const seedF = rr();
+      const at = (b: number, sj: number): V2 => {
+        const k = 1 - b / INR;
+        return [mx * k + tx * sj, mz * k + tz * sj];
+      };
+      const q = [[0, -Wf * 1.15], [0, Wf * 1.15], [0.2, -Wf * 1.15], [0.2, Wf * 1.15]].map(([b, sj]) => {
+        const [x, z] = at(b, sj);
+        return { p: [x, WATER_Y + 0.004, z] as V3, d: [b, sj, Wf * 1.15, seedF] };
+      });
+      for (const [a, b, c2] of [[q[0], q[2], q[1]], [q[1], q[2], q[3]]]) {
+        for (const v of [a, b, c2]) {
+          foamPos.push(...v.p);
+          foamDat.push(...v.d);
+        }
+      }
+      if (d > 0) {
+        // Degrau de pedra: uma laje baixa atravessando o rio, um fio acima da água, e a névoa da queda.
+        const c = at(0.025, 0);
+        beam(g, [c[0] - tx * (Wf + 0.025), c[1] - tz * (Wf + 0.025)], [c[0] + tx * (Wf + 0.025), c[1] + tz * (Wf + 0.025)], 0.024, -0.1, WATER_Y + 0.008, rockR.clone().lerp(WHITE, 0.1), shade(rockR, 0.5));
+        falls.push(mx, mz, nx, nz, Wf, Math.min(2, d) * LEVEL_STEP * 0.5);
+      }
+      for (let k = 0; k < 3; k++) {
+        const [x, z] = at(0.05 + rr() * 0.1, (k - 1) * Wf * 0.62 + (rr() - 0.5) * 0.02);
+        D('rock', x, WATER_Y - 0.012, z, rr() * 6, randRange(rr, 0.9, 1.4), vary(rr, rockR, 0.1));
+      }
+    }
+  }
+
   // Uma peça de vila em cada quatro tem um aldeão levando um saco da primeira casa ao meio da peça.
   const home = houses.find((h) => h.sector >= 0);
   if (home && (seed >>> 0) % 4 === 0) {
@@ -3116,6 +3188,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const earth = tc(theme.ground[T.Village]).clone().lerp(tc(theme.rock), 0.26);
       for (let k = 0; k < 4; k++) {
         const j = (k + 1) % 4, a = pad[k], b = pad[j];
+        // Só o lado de baixo precisa de embasamento: onde o chão já está junto do piso, o muro seria só triângulos a mais.
+        if (Math.min(a[1], b[1]) > floor - 0.03) continue;
         const n: V3 = [(a[0] + b[0]) * 0.5 - d.x, 0, (a[2] + b[2]) * 0.5 - d.z];
         const lipA: V3 = [a[0], floor - 0.026, a[2]], lipB: V3 = [b[0], floor - 0.026, b[2]];
         g.quad(lipA, lipB, top[j], top[k], stone, stone, stone, stone, n);

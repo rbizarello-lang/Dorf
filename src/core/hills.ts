@@ -32,9 +32,9 @@ export const NORMAL = Array.from({ length: 6 }, (_, i) => {
   return [Math.cos(angle), Math.sin(angle)] as const;
 });
 /** Altura própria de cada terreno (índice = `T`): mata e casario têm mais massa; prado e cultivo formam o sopé; rio e trilho, o vale. */
-export const MASS: readonly number[] = [0.16, 0.36, 0.25, 0.43, 0, 0];
+export const MASS: readonly number[] = [0.16, 0.3, 0.22, 0.26, 0, 0];
 /** Quanto o ombro de uma borda sobe a cada encaixe igual (até 3). */
-export const RISE: readonly number[] = [0.085, 0.13, 0.12, 0.16, 0, 0];
+export const RISE: readonly number[] = [0.085, 0.1, 0.09, 0.09, 0, 0];
 /** Altura da faixa da bancada. */
 export const BAND = 0.16;
 /** Relevo por peça (Relevo e Terra): quanto cada nível lógico de altura da borda ergue o ombro e a divisa (só aparência). */
@@ -150,6 +150,28 @@ export function hillHeight(profile: HillProfile, x: number, z: number) {
   const rim = profile.rims[edge] * (1 - ease(0.38, 0.8, across));
   const boundary = ease(0.56, 1, radius);
   return inner * (1 - boundary) + rim * boundary;
+}
+
+/**
+ * Quanto o ponto está na subida entre duas bancadas (0 no patamar, 1 no meio do degrau): o desenho tinge essa faixa com a cor da
+ * parede do tema, como um muro de arrimo baixo. Só olha o miolo da peça (na divisa a bancada some).
+ */
+export function hillRiser(profile: HillProfile, x: number, z: number) {
+  let sum = 0, weights = 0, projection = -Infinity;
+  for (let i = 0; i < 6; i++) {
+    const [nx, nz] = NORMAL[i];
+    projection = Math.max(projection, x * nx + z * nz);
+    const dx = x - 0.64 * nx, dz = z - 0.64 * nz;
+    const proximity = Math.max(0, 1 - (dx * dx + dz * dz) / 1.42);
+    const weight = proximity * proximity * proximity;
+    sum += weight * profile.shoulders[i];
+    weights += weight;
+  }
+  const raw = sum / weights;
+  if (raw < BAND * 0.5) return 0;
+  const phase = raw / BAND - Math.floor(raw / BAND);
+  const e = ease(0.18, 0.82, phase);
+  return 4 * e * (1 - e) * (1 - ease(0.7, 0.95, Math.max(0, projection) / INR));
 }
 
 /** Identifica o perfil: duas peças com a mesma assinatura têm o mesmo chão (o mundo só refaz a peça quando ela muda). */

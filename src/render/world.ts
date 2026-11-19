@@ -1475,11 +1475,34 @@ export class World {
    * Encostas da peça `def`: com `at`, o perfil dela naquela casa e giro (com as vizinhas assentadas); sem `at` (a pilha), o perfil
    * "na mão". `hand` fixa onde as casas assentam. Sem `hillsOn`, nada (o chão de antes).
    */
-  private hillFor(def: TileDef, at?: { q: number; r: number; rot: number }): Pick<BuildOpts, 'hill' | 'hand'> {
+  private hillFor(def: TileDef, at?: { q: number; r: number; rot: number }): Pick<BuildOpts, 'hill' | 'hand' | 'skirt' | 'rapids'> {
     if (!this.hillsOn || !this.board) return {};
     const hand = handHill(def, logicLevels(this.board, def));
     const hill = at ? boardHill(this.board, at.q, at.r, def, at.rot, this.reliefMax && !this.pieceRelief ? (q, r) => this.levelOf(q, r) : undefined) : hand;
-    return { hill, hand };
+    if (!this.flatDraw) return { hill, hand };
+    // Relevo e Terra: costa da base nas bordas abertas (a vizinha ainda não veio) e corredeira onde a água pontuada desce de nível
+    // para uma vizinha assentada ANTES desta peça (a peça que chega depois é quem desenha a corredeira: a mais velha não muda).
+    const skirt = [true, true, true, true, true, true];
+    const rapids = [0, 0, 0, 0, 0, 0];
+    if (at) {
+      const here = this.board.get(at.q, at.r);
+      const my = here ? here.index : Infinity;
+      const mine = here?.heights ?? this.board.heightsOf(def, at.rot);
+      const own = mine ? Math.min(...mine) : 0;
+      for (let i = 0; i < 6; i++) {
+        const w = (i + at.rot) % 6;
+        const nb = this.board.get(at.q + DIRS[w][0], at.r + DIRS[w][1]);
+        skirt[i] = !nb;
+        if (nb && nb.index < my && def.edges[i] === T.Water && nb.edges[opposite(w)] === T.Water) rapids[i] = own - this.levelOf(nb.q, nb.r);
+      }
+    }
+    return { hill, hand, skirt, rapids };
+  }
+
+  /** Assinatura de tudo o que, na vizinhança, muda o chão da peça: o perfil, as bordas abertas e as corredeiras. */
+  private hillSig(def: TileDef, at: { q: number; r: number; rot: number }) {
+    const o = this.hillFor(def, at);
+    return `${hillSignature(o.hill)}|${o.skirt?.map(Number).join('') ?? ''}|${o.rapids?.join(',') ?? ''}`;
   }
 
   private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; spring?: boolean; eggs?: BuildOpts['eggs']; levels?: BuildOpts['levels']; at?: { q: number; r: number; rot: number } }) {
@@ -1938,7 +1961,7 @@ export class World {
     const ch = this.chunkFor(p.q, p.r);
     const slot = ch.append(b, m);
     if (slot.count) this.waterSlots.set(p.key, { chunk: ch, start: slot.start, count: slot.count });
-    const rec: { sig: string; chunk: Chunk; gStart: number; gCount: number; decos: ({ pool: Pool; i: number } | null)[]; chim: number } = { sig: hillSignature(b.hill?.profile), chunk: ch, gStart: slot.gStart, gCount: slot.gCount, decos: [], chim: this.chimneys.length };
+    const rec: { sig: string; chunk: Chunk; gStart: number; gCount: number; decos: ({ pool: Pool; i: number } | null)[]; chim: number } = { sig: this.hillSig(p.def, p), chunk: ch, gStart: slot.gStart, gCount: slot.gCount, decos: [], chim: this.chimneys.length };
     this.baked.set(p.key, rec);
     this.surfaces.set(p.key, b.hill);
     groundMap.add(b, m, this.waterColor);
@@ -2013,7 +2036,7 @@ export class World {
   private rebakeHill(p: Placed): boolean {
     const rec = this.baked.get(p.key);
     if (!rec || !this.board) return false;
-    const sig = hillSignature(this.hillFor(p.def, p).hill);
+    const sig = this.hillSig(p.def, p);
     if (sig === rec.sig) return false;
     const flow = flowBase(this.flows.get(p.key) ?? [0, 0, 0, 0, 0, 0], p.rot);
     const widths = flowBase(this.widths.get(p.key) ?? [0, 0, 0, 0, 0, 0], p.rot);
@@ -2123,7 +2146,7 @@ export class World {
     if (this.board) this.feedEggs(this.board.list, p.index + 1, true);
     const eggs = this.eggKits.get(p.key);
     const lvs = this.levelsFor(p.q, p.r, p.rot, p.def);
-    const hillSig = hillSignature(this.hillFor(p.def, p).hill);
+    const hillSig = this.hillSig(p.def, p);
     const sig = `${p.spring ? 's' : ''}${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${eggs?.map((e) => e.kit).join('+') ?? ''}|${levelSig(lvs)}|${hillSig}`;
     let live: LiveTile;
     const ly = this.heightOf(p.q, p.r);
@@ -2189,7 +2212,8 @@ export class World {
 
   /** Margem que a saia de uma peça alta dá à areia e à espuma do mar (a mesma do `bake`). */
   private skirtOf(heights: readonly number[] | undefined) {
-    return this.pieceRelief && !this.hillsOn && heights ? 0.4 * skirtWidth(Math.max(...heights)) : 0;
+    if (this.flatDraw) return 0.4 * skirtWidth(0);
+    return this.pieceRelief && heights ? 0.4 * skirtWidth(Math.max(...heights)) : 0;
   }
 
   /** Coloca várias peças de uma vez, sem animação (modo automático / teste de carga). */
@@ -2377,7 +2401,7 @@ export class World {
     const ew = rotateEdges(def.edges, rot);
     const own = this.pieceRelief ? lvs?.own ?? Math.min(...worldHeights(tileProfile(def.edges, def.seed), rot)) : undefined;
     const flow = flowBase(this.flowAt(q, r, ew, own, Infinity, !!check.water?.spring), rot);
-    const hillSig = hillSignature(this.hillFor(def, { q, r, rot }).hill);
+    const hillSig = this.hillSig(def, { q, r, rot });
     const widths = flowBase(this.widthsAt(q, r, def, rot), rot);
     // O fantasma já mostra o marco da era que a peça ergueria.
     // A peça especial não ergue marco nem começa a maravilha (Board.place): o fantasma também não.
