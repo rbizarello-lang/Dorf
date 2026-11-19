@@ -11,7 +11,8 @@ const output = '.cache/capturas';
 fs.mkdirSync(output, { recursive: true });
 const url = pathToFileURL(path.resolve('dist/index.html')).href;
 const seed = 42;
-const { game, moves } = sail(seed);
+const combined = process.env.FRETE === 'madeira';
+const { game, moves } = sail(seed, combined);
 assert(game.over && game.board.ports.every((p) => p.delivered));
 const errors = [];
 const browser = await launch();
@@ -28,6 +29,10 @@ try {
   await desktop.keyboard.press('f');
   assert.equal(await desktop.locator('#modal').isVisible(), false);
   assert.equal(await desktop.locator('#ports button').count(), 3);
+  if (combined) {
+    await desktop.getByRole('button', { name: 'Escolher frete' }).click();
+    await desktop.getByRole('button', { name: /^Madeira para a Feira/ }).click();
+  }
   const baseStats = await desktop.evaluate(() => window.__stats);
   console.log('Desktop', baseStats.backend, baseStats.gpu);
   await desktop.screenshot({ path: output + '/abertura.png' });
@@ -42,16 +47,37 @@ try {
   await play(moves[0]);
   await play(moves[1]);
   assert.equal((await saved()).moves.length, 2);
-  assert.equal(await desktop.locator('#ports .delivered').count(), 1);
+  assert.equal(await desktop.locator('#ports .delivered').count(), combined ? 0 : 1);
+  if (combined) assert.match(await desktop.locator('#ports').innerText(), /Em espera/);
+  else await desktop.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem('entrepostos.save'));
+    s.v = 10;
+    delete s.combinedFreight;
+    localStorage.setItem('entrepostos.save', JSON.stringify(s));
+  });
   await desktop.reload({waitUntil:'domcontentloaded'});
   await desktop.waitForFunction(() => window.__stats?.tiles === 3);
-  assert.equal(await desktop.locator('#ports .delivered').count(), 1);
+  assert.equal(await desktop.locator('#ports .delivered').count(), combined ? 0 : 1);
+  assert.equal((await saved()).v, 11);
+  assert.equal((await saved()).combinedFreight, combined);
   await desktop.locator('#btn-undo').click();
   assert.equal((await saved()).moves.length, 1);
+  assert.equal((await saved()).combinedFreight, combined);
   assert.equal(await desktop.locator('#ports .delivered').count(), 0);
   await desktop.keyboard.press('f');
+  let sawFreight = false;
   for (let i=1; i<moves.length; i++) {
     await play(moves[i]);
+    if (combined && !sawFreight && await desktop.locator('#ports .delivered').count() === 2) {
+      const state = await saved();
+      await desktop.getByRole('button', { name: 'Rever a travessia' }).click();
+      await desktop.waitForTimeout(450);
+      await desktop.screenshot({ path: output + '/frete.png' });
+      assert.deepEqual(await saved(), state);
+      await desktop.getByRole('button', { name: 'Ver mapa' }).click();
+      await desktop.waitForTimeout(1200);
+      sawFreight = true;
+    }
     if (i < moves.length - 1) assert.equal((await saved()).moves.length, i+1, 'Jogada ' + i);
     if (i === 9) {
       await desktop.mouse.move(1,799);
@@ -60,6 +86,7 @@ try {
     }
   }
   await desktop.getByRole('heading', { name: 'Os três cais estão abastecidos!' }).waitFor();
+  if (combined) assert(sawFreight, 'A Serraria e a Feira precisam estar entregues antes da última jogada');
   assert.equal(await desktop.locator('.final [data-count]').getAttribute('data-count'), String(game.board.score));
   console.log('Vitória na interface', moves.length, 'jogadas,', game.board.score, 'pontos');
   assert.equal(await desktop.evaluate(() => localStorage.getItem('retalhos.save')), 'partida anterior');
@@ -67,9 +94,13 @@ try {
 
   const mobile = await browser.newPage({ viewport:{width:390,height:844}, isMobile:true, hasTouch:true });
   report(mobile);
-  await mobile.goto(url + '?seed=42&quality=medium&webgl&debug', {waitUntil:'domcontentloaded'});
+  await mobile.goto(url + '?seed=42&quality=medium&webgl&debug' + (combined ? '&time=night' : ''), {waitUntil:'domcontentloaded'});
   await mobile.waitForFunction(() => window.__stats?.tiles === 1);
   await mobile.keyboard.press('f');
+  if (combined) {
+    await mobile.getByRole('button', {name: 'Escolher frete'}).tap();
+    await mobile.getByRole('button', {name: /^Madeira para a Feira/}).tap();
+  }
   const [q,r,rot] = moves[0];
   for (let j=0; j<rot; j++) await mobile.locator('#rot-right').tap();
   const point = await mobile.evaluate(([x,y]) => window.__projectTile(x,y), [q,r]);
@@ -79,7 +110,7 @@ try {
   await mobile.getByRole('button', {name:/Localizar Feira/}).tap();
   await mobile.getByRole('button', {name:'Ver mapa'}).tap();
   await mobile.waitForTimeout(1000);
-  await mobile.screenshot({path:output+'/celular.png'});
+  await mobile.screenshot({path:output+(combined ? '/frete-noite.png' : '/celular.png')});
   console.log('Toque', await mobile.evaluate(()=>window.__stats.backend), 'rotação, encaixe e carta');
   assert.deepEqual(errors, []);
 } finally { await browser.close(); }

@@ -8,8 +8,7 @@ import type { Board, Placed } from '../core/board';
 type Point = ReturnType<typeof hexToWorld>;
 
 /** Só busca o trajeto quando sai uma entrega. O desempate segue a ordem fixa das bordas. */
-function shippingLane(board: Board, port: Port) {
-  const origin = board.list[0];
+function shippingLane(board: Board, port: Port, origin: Placed) {
   const queue = [origin];
   const parent = new Map<Placed, Placed | null>([[origin, null]]);
   for (let i = 0; i < queue.length; i++) {
@@ -28,6 +27,24 @@ function shippingLane(board: Board, port: Port) {
     }
   }
   return [];
+}
+
+/** Recorta só o miolo da curva para a barca continuar cruzando a borda entre hexágonos. */
+function sailingTrack(points: Point[]) {
+  const centers = points.map(({ x, z }) => new THREE.Vector2(x, z));
+  const track = [centers[0]];
+  for (let i = 1; i < centers.length - 1; i++) {
+    const center = centers[i];
+    const enter = center.clone().lerp(centers[i - 1], 0.22);
+    const exit = center.clone().lerp(centers[i + 1], 0.22);
+    track.push(...new THREE.QuadraticBezierCurve(enter, center, exit).getPoints(6));
+  }
+  track.push(centers[centers.length - 1]);
+  let length = 0;
+  return track.map((point, i) => {
+    if (i) length += point.distanceTo(track[i - 1]);
+    return { point, length };
+  });
 }
 
 function paint(geometry: THREE.BufferGeometry, color: string) {
@@ -84,12 +101,17 @@ function timber(x: number, y: number, z: number, w: number, h: number, d: number
   return paint(new THREE.BoxGeometry(w, h, d).translate(x, y, z), color);
 }
 
+function sailcloth(outline: THREE.Shape, color: string) {
+  return paint(new THREE.ExtrudeGeometry(outline, { depth: 0.008, bevelEnabled: false, curveSegments: 3 }).rotateY(-Math.PI / 2), color);
+}
+
 /** Os três cais usam um único desenho. Só o casco de cada entrega em trânsito se move. */
 export class HarborView extends THREE.Group {
   private material = new THREE.MeshBasicNodeMaterial({ vertexColors: true });
   private docks = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
-  private barges: { mesh: THREE.Mesh; path: Point[]; progress: number }[] = [];
+  private barges: { mesh: THREE.Mesh; track: ReturnType<typeof sailingTrack>; distance: number; next: number }[] = [];
   private state = '';
+  private timberBarge: THREE.Mesh | undefined;
 
   constructor() {
     super();
@@ -103,6 +125,7 @@ export class HarborView extends THREE.Group {
       b.mesh.geometry.dispose();
     }
     this.barges.length = 0;
+    this.timberBarge = undefined;
   }
 
   sync(ports: readonly Port[]) {
@@ -137,31 +160,62 @@ export class HarborView extends THREE.Group {
   }
 
   depart(board: Board, port: Port) {
-    const path = shippingLane(board, port);
+    const timberFreight = board.rules.combinedFreight && port.id === 0;
+    const sawmill = board.ports[1];
+    const origin = timberFreight ? board.get(sawmill.q, sawmill.r) : board.list[0];
+    if (!origin) return;
+    const path = shippingLane(board, port, origin);
     if (path.length < 2) return;
+    if (timberFreight && this.timberBarge) {
+      const old = this.barges.findIndex((b) => b.mesh === this.timberBarge);
+      if (old >= 0) {
+        const [b] = this.barges.splice(old, 1);
+        this.remove(b.mesh);
+        b.mesh.geometry.dispose();
+      }
+    }
     const hull = paint(new THREE.SphereGeometry(1, 8, 4).scale(0.12, 0.055, 0.25), '#663f2e');
-    const sail = timber(0.024, 0.18, 0, 0.018, 0.22, 0.18, '#fff1bd');
-    const cargo = timber(0, 0.081, 0.13, 0.12, 0.09, 0.11, HARBORS[port.id].color);
-    const mesh = new THREE.Mesh(combine([hull, sail, cargo]), this.material);
+    const mast = timber(0, 0.20, -0.065, 0.016, 0.37, 0.016, '#795637');
+    const sheet = new THREE.Shape();
+    sheet.moveTo(-0.06, 0.32);
+    sheet.quadraticCurveTo(0.00, 0.25, 0.15, 0.14);
+    sheet.quadraticCurveTo(0.02, 0.09, -0.06, 0.13);
+    sheet.closePath();
+    const sail = sailcloth(sheet, timberFreight ? '#63c5a3' : '#fff1bd');
+    const flag = new THREE.Shape();
+    flag.moveTo(-0.065, 0.385);
+    flag.lineTo(0.07, 0.36);
+    flag.lineTo(-0.065, 0.34);
+    flag.closePath();
+    const cargo = timberFreight
+      ? [log(-0.045, 0.08, 0.08, 0.045, 0.21), log(0.045, 0.08, 0.08, 0.045, 0.21), sailcloth(flag, '#f4c663')]
+      : [timber(0, 0.081, 0.13, 0.12, 0.09, 0.11, HARBORS[port.id].color)];
+    const mesh = new THREE.Mesh(combine([hull, mast, sail, ...cargo]), this.material);
     mesh.position.set(path[0].x, 0.09, path[0].z);
     this.add(mesh);
-    this.barges.push({ mesh, path, progress: 0 });
+    mesh.rotation.y = Math.atan2(path[1].x - path[0].x, path[1].z - path[0].z);
+    this.barges.push({ mesh, track: sailingTrack(path), distance: 0, next: 1 });
+    if (timberFreight) this.timberBarge = mesh;
+    return mesh;
   }
 
   tick(dt: number) {
     for (let i = this.barges.length - 1; i >= 0; i--) {
       const b = this.barges[i];
-      b.progress += dt * 1.8;
-      const index = Math.floor(b.progress);
-      if (index >= b.path.length - 1) {
+      b.distance += dt * 3.1;
+      while (b.next < b.track.length && b.track[b.next].length <= b.distance) b.next++;
+      if (b.next >= b.track.length) {
         this.remove(b.mesh);
         b.mesh.geometry.dispose();
+        if (b.mesh === this.timberBarge) this.timberBarge = undefined;
         this.barges.splice(i, 1);
         continue;
       }
-      const a = b.path[index], c = b.path[index + 1], t = b.progress - index;
-      b.mesh.position.set(a.x + (c.x - a.x) * t, 0.09, a.z + (c.z - a.z) * t);
-      b.mesh.rotation.y = Math.atan2(c.x - a.x, c.z - a.z);
+      const a = b.track[b.next - 1], c = b.track[b.next];
+      const t = (b.distance - a.length) / (c.length - a.length);
+      const dx = c.point.x - a.point.x, dz = c.point.y - a.point.y;
+      b.mesh.position.set(a.point.x + dx * t, 0.09, a.point.y + dz * t);
+      b.mesh.rotation.y = Math.atan2(dx, dz);
     }
   }
 }

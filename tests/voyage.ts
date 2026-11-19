@@ -7,8 +7,8 @@ import { rotateEdges, T } from '../src/core/tiles';
 
 /** Roteiro de navegação por retas. Mantém as margens dos trechos futuros livres e
  * tenta os cais na ordem das distâncias. Só usa jogadas oferecidas pela partida. */
-export function sail(seed: number) {
-  const rules = { ...DEFAULT_RULES, ...themeById('holanda').rules, ...modeById('entrepostos').rules };
+export function sail(seed: number, combinedFreight = false) {
+  const rules = { ...DEFAULT_RULES, ...themeById('holanda').rules, ...modeById('entrepostos').rules, combinedFreight };
   const game = new Game(seed, rules);
   const moves: number[][] = [];
   const reserved = new Map<number, number>();

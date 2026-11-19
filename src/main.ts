@@ -10,7 +10,7 @@ import { T } from './core/tiles';
 import { DIRS, hexDistance, hexToWorld, hkey, unkey, worldToHex } from './core/hex';
 import type { Quality, TimeOfDay } from './render/world';
 import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
-import { HARBORS } from './core/ports';
+import { HARBORS, portSupply } from './core/ports';
 import { FramePacer } from './render/framePacer';
 import { DynRes } from './render/dynres';
 import { readGpuInfo } from './render/gpu';
@@ -36,7 +36,8 @@ type QualityMode = 'auto' | Quality;
 type MoveRec = number[];
 /** v4: modos, eras, sítios e bônus por tema. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 10;
+  v: 11;
+  combinedFreight: boolean;
   seed: number;
   rulesId: string;
   mode: ModeId;
@@ -47,7 +48,7 @@ interface Save {
   /** Peças especiais que entraram nesta partida (mudam a sequência da pilha). */
   specials: SpecialKind[];
 }
-const SAVE_VERSION = 10;
+const SAVE_VERSION = 11;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -173,13 +174,15 @@ const siteReward = (kind: SiteKind) => {
  */
 const synTimers: number[] = [];
 
-function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number, undos = 0, specials?: readonly SpecialKind[]): boolean {
+function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number, undos = 0, specials?: readonly SpecialKind[], combinedFreight = false): boolean {
   // A gravação vale para uma partida só (desfazer refaz a partida pelo replay).
   if (capture.take) capture.stopTake('A gravação terminou aqui: o vídeo não acompanha o desfazer nem uma partida nova.');
   clearTimeout(overTimer);
   for (const t of synTimers.splice(0)) clearTimeout(t);
   // Peças especiais: as liberadas entram em toda partida nova, menos no Desafio do dia (igual para todos).
-  game = new Game(seed, rulesFor(rulesTheme), specials ?? forcedSpecials ?? (mode.daily ? [] : progress.unlocked));
+  const rules = rulesFor(rulesTheme);
+  rules.combinedFreight = rules.riverTrade && combinedFreight;
+  game = new Game(seed, rules, specials ?? forcedSpecials ?? (mode.daily ? [] : progress.unlocked));
   // Partida nova (não um replay do desfazer ou do save): ainda não entrou no progresso.
   if (!replay.length) committed = false;
   undone = undos;
@@ -227,12 +230,15 @@ function persist() {
 }
 
 function snapshot(): Save {
-  return { v: SAVE_VERSION, seed: game.seed, rulesId: rulesTheme.id, mode: mode.id, moves, undone, score: game.board.score, specials: [...game.specials] };
+  return { v: SAVE_VERSION, combinedFreight: game.rules.combinedFreight, seed: game.seed, rulesId: rulesTheme.id, mode: mode.id, moves, undone, score: game.board.score, specials: [...game.specials] };
 }
 
-/** Aceita só saves completos e da versão atual; qualquer outra coisa é descartada. */
+/** A v10 só tinha entrega direta. As duas versões passam pela mesma conferência de replay. */
 function validSave(raw: unknown): Save | null {
-  const s = raw as Partial<Save> | null;
+  if (!raw || typeof raw !== 'object') return null;
+  const s = raw as Partial<Omit<Save, 'v'>> & { v?: number };
+  if (s.v === 10) return validSave({ ...s, v: SAVE_VERSION, combinedFreight: false });
+  if (typeof s.combinedFreight !== 'boolean' || (s.combinedFreight && s.mode !== 'entrepostos')) return null;
   const okMove = (m: unknown) => Array.isArray(m) && m.length >= 3 && m.length <= 6 && m.every(Number.isInteger) && m[2] >= 0 && m[2] < 6 && m.slice(3).every((p) => p === 0 || p === 1);
   if (s && s.v === SAVE_VERSION && Number.isInteger(s.seed) && s.seed! > 0 && typeof s.rulesId === 'string' && MODES.some((m) => m.id === s.mode) && Number.isInteger(s.undone) && s.undone! >= 0 && Array.isArray(s.moves) && s.moves.every(okMove) && Number.isFinite(s.score) && Array.isArray(s.specials) && s.specials.every((k) => SPECIAL_KINDS.includes(k))) return s as Save;
   return null;
@@ -281,7 +287,7 @@ function undo() {
   const left = mode.undos - undone;
   if (left <= 0 || !moves.length || hud.modalOpen) return;
   const keep = moves.slice(0, -1);
-  if (!newGame(game.seed, keep, undefined, undone + 1, game.specials)) return;
+  if (!newGame(game.seed, keep, undefined, undone + 1, game.specials, game.rules.combinedFreight)) return;
   sfx.undo();
   hud.toast(left - 1 > 0 && left - 1 < 99 ? `Jogada desfeita · restam ${left - 1}` : 'Jogada desfeita');
 }
@@ -313,6 +319,20 @@ function frameCamera(instant: boolean) {
 
 const manifest = document.getElementById('manifest')!;
 const sailingOrder = document.getElementById('sailing-order')!;
+const charter = document.querySelector<HTMLButtonElement>('#choose-freight')!;
+const watchFreight = document.querySelector<HTMLButtonElement>('#watch-freight')!;
+watchFreight.addEventListener('click', () => {
+  world.replayFreight(true);
+  capture.take?.event({ kind: 'freight' });
+});
+charter.addEventListener('click', () => {
+  if (!game.rules.riverTrade || moves.length) return;
+  hud.showModal(`<h2>Escolha o frete da viagem</h2>
+    <p>O acordo vale até o fim desta viagem.</p>
+    <button class="mode-card" type="button" data-act="freight-direct"><strong>Entrega direta</strong><span>Receba 4 peças assim que ligar a Feira à vila.</span></button>
+    <button class="mode-card" type="button" data-act="freight-combined"><strong>Madeira para a Feira</strong><span>A Feira espera a Serraria. Quando as duas estiverem ligadas, a barca leva madeira à Feira e você recebe 10 peças por esse frete. A Serraria paga suas 6 peças ao abrir.</span></button>
+    <div class="row"><button class="secondary" type="button" data-act="close">Voltar à carta</button></div>`);
+});
 const portButtons = HARBORS.map((h, i) => {
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -331,6 +351,10 @@ const portButtons = HARBORS.map((h, i) => {
 document.getElementById('chart-fit')!.addEventListener('click', () => frameCamera(false));
 
 function updateSailingOrder() {
+  if (game.rules.combinedFreight && !game.board.ports[0].delivered) {
+    sailingOrder.textContent = game.board.ports[1].delivered ? 'A madeira está na Serraria. Leve o rio até a Feira.' : 'Ligue a Serraria e a Feira à vila para receber 10 peças pelo frete.';
+    return;
+  }
   sailingOrder.textContent = game.placedCount < 2 ? 'Gire as duas primeiras peças e leve o rio da vila até a Feira.' : 'Ligue os três cais à vila por um rio contínuo.';
 }
 
@@ -340,13 +364,19 @@ function showManifest() {
   document.body.classList.toggle('river-trade', !!ports.length);
   document.querySelector('.brand')!.textContent = ports.length ? 'Entrepostos' : 'Retalhos';
   if (!ports.length) return;
+  charter.hidden = moves.length > 0;
+  watchFreight.hidden = !game.rules.combinedFreight || !ports[0].delivered;
+  charter.textContent = game.rules.combinedFreight ? 'Mudar frete · Madeira para a Feira' : 'Escolher frete';
   updateSailingOrder();
   for (const p of ports) {
     const h = HARBORS[p.id], btn = portButtons[p.id];
-    const status = p.delivered ? 'Entregue' : `+${h.tiles} peças`;
+    const waits = game.rules.combinedFreight && p.id === 0 && !p.delivered && game.board.onMainRiver(game.board.get(p.q, p.r));
+    const cargo = game.rules.combinedFreight && p.id === 0 ? 'Madeira da Serraria' : h.cargo;
+    const status = p.delivered ? 'Entregue' : waits ? 'Em espera' : `+${portSupply(p.id, game.rules.combinedFreight)} peças`;
     btn.classList.toggle('delivered', p.delivered);
     btn.querySelector('strong')!.textContent = status;
-    btn.setAttribute('aria-label', `Localizar ${h.name}. ${h.cargo}. ${status}.`);
+    btn.querySelector('small')!.textContent = cargo;
+    btn.setAttribute('aria-label', `Localizar ${h.name}. ${cargo}. ${status}.`);
   }
 }
 
@@ -398,7 +428,8 @@ function updateGhost() {
     });
     if (port && !edges.includes(T.Water)) sailingOrder.textContent = 'Este cais precisa de uma peça com rio.';
     else if (!check.valid) sailingOrder.textContent = 'Gire a peça para alinhar as bordas ou tente outra casa.';
-    else if (port && connected) sailingOrder.textContent = `Entrega em ${HARBORS[port.id].name} · +${HARBORS[port.id].tiles} peças.`;
+    else if (port?.id === 0 && connected && game.rules.combinedFreight && !game.board.ports[1].delivered) sailingOrder.textContent = 'A Feira recebe a madeira quando a Serraria também estiver ligada.';
+    else if (port && connected) sailingOrder.textContent = `Entrega em ${HARBORS[port.id].name} · +${portSupply(port.id, game.rules.combinedFreight)} peças.`;
     else if (edges.includes(T.Water)) sailingOrder.textContent = connected ? 'Este trecho prolonga o rio da vila.' : 'Trecho isolado. Uma ligação futura pode uni-lo à vila.';
     else updateSailingOrder();
   }
@@ -568,7 +599,8 @@ function announce(res: PlaceResult) {
   world.placeFx(res);
   for (const p of res.deliveries) {
     const h = HARBORS[p.id];
-    hud.toast(`${h.cargo} no cais · ${h.name} · +${h.tiles} peças`, 'good');
+    const cargo = game.rules.combinedFreight && p.id === 0 ? 'Madeira da Serraria' : h.cargo;
+    hud.toast(`${cargo} no cais · ${h.name} · +${portSupply(p.id, game.rules.combinedFreight)} peças`, 'good');
     sfx.quest();
   }
   offerTips(res);
@@ -699,6 +731,7 @@ function showHelp(tab = 'basico') {
   if (game.rules.riverTrade) {
     tabs[0][2] = `<p><b>Abasteça os três cais.</b> Gire a peça e prolongue o rio azul a partir da vila no centro. Cada cais precisa de uma peça com água. Se o trecho estiver isolado, a entrega espera a ligação com a vila.</p>
       <p>Comece com 24 peças. A Feira recebe grãos e devolve 4 peças, a Serraria recebe madeira e devolve 6, e o Estaleiro recebe ferragens e devolve 8. Você escolhe a ordem. Ao terminar, cada peça restante vale ${R.leftoverPoints} pontos.</p>
+      <p>Antes da primeira peça, “Escolher frete” permite reservar a Feira para a madeira da Serraria. A Feira paga 10 peças quando ambas estiverem ligadas.</p>
       <p>Escolha um cais na carta para aproximar a câmera. “Ver mapa” mostra os três. Use <kbd>R</kbd> para girar ou as setas junto à pilha no toque.</p>`;
   }
   const pick = tabs.some(([id]) => id === tab) ? tab : 'basico';
@@ -805,6 +838,13 @@ hud.modal.addEventListener('click', (e) => {
     chooseBlessing(Number(btn?.dataset.pick));
     return;
   }
+  if (act === 'freight-direct' || act === 'freight-combined') {
+    if (!game.rules.riverTrade || moves.length) return;
+    const combined = act === 'freight-combined';
+    hud.hideModal();
+    if (combined !== game.rules.combinedFreight) newGame(game.seed, [], undefined, undone, game.specials, combined);
+    return;
+  }
   if (act === 'film') {
     // O diálogo de exportação toma o lugar do placar final.
     capture.showExportDialog('film');
@@ -835,7 +875,7 @@ hud.modal.addEventListener('click', (e) => {
     commitProgress();
     const seed = game.seed;
     rulesTheme = theme;
-    newGame(seed);
+    newGame(seed, [], undefined, 0, undefined, game.rules.combinedFreight);
     hud.toast(`Mesma semente (${seed}) · ${mode.name} · ${theme.name}`);
   } else if (act === 'mode') {
     hud.hideModal();
@@ -882,7 +922,7 @@ function pickTheme(t: Theme) {
   if (game.over) {
     rulesTheme = t;
     newGame();
-  } else if (!mode.daily && JSON.stringify(rulesFor(t)) !== JSON.stringify(game.rules)) {
+  } else if (!mode.daily && JSON.stringify({ ...rulesFor(t), combinedFreight: game.rules.combinedFreight }) !== JSON.stringify(game.rules)) {
     hud.toast(`${t.ruleNote ?? 'Regras padrão.'} Vale a partir da próxima partida.`);
   }
 }
@@ -1172,7 +1212,10 @@ let lastInput = 0;
 const pacer = new FramePacer();
 let wasLimited = false;
 for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart'])
-  window.addEventListener(ev, () => (lastInput = performance.now()), { capture: true, passive: true });
+  window.addEventListener(ev, () => {
+    lastInput = performance.now();
+    if (ev !== 'pointermove') world.releaseBargeCamera();
+  }, { capture: true, passive: true });
 
 function frame(now: number) {
   try {
@@ -1283,7 +1326,7 @@ function start(data: unknown) {
   if (saved) {
     rulesTheme = themeById(saved.rulesId);
     mode = modeById(saved.mode);
-    resumed = newGame(saved.seed, saved.moves, saved.score, saved.undone, saved.specials);
+    resumed = newGame(saved.seed, saved.moves, saved.score, saved.undone, saved.specials, saved.combinedFreight);
     if (resumed && saved.moves.length) hud.toast(`Partida retomada · ${saved.moves.length} peças`);
     else if (!resumed) hud.toast('A partida salva é de uma versão anterior e não pôde ser retomada. Começando outra.');
   }

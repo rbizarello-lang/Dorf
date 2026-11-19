@@ -8,6 +8,10 @@ export const HARBORS = [
   { name: 'Estaleiro', cargo: 'Ferragens', color: '#e28e74', tiles: 8 },
 ] as const;
 
+export function portSupply(id: number, combinedFreight: boolean) {
+  return id === 0 && combinedFreight ? 10 : HARBORS[id].tiles;
+}
+
 export interface Port {
   id: number;
   q: number;

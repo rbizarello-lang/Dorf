@@ -138,7 +138,8 @@ export class Hud {
   readonly hint = $('hint');
   readonly confirm = $<HTMLButtonElement>('confirm');
   private questEls = new Map<number, HTMLElement>();
-  private markerEls = new Map<number, HTMLElement>();
+  private markerEls = new Map<number, { el: HTMLElement; last: MarkerView; narrow: boolean; frame: number }>();
+  private markerFrame = 0;
   private shownScore = 0;
   private targetScore = 0;
 
@@ -154,7 +155,7 @@ export class Hud {
     $('theme-swatch').innerHTML = theme.terrainColors.slice(0, 5).map((c) => `<i style="background:${c}"></i>`).join('');
     for (const el of this.questEls.values()) el.remove();
     this.questEls.clear();
-    for (const el of this.markerEls.values()) el.remove();
+    for (const { el } of this.markerEls.values()) el.remove();
     this.markerEls.clear();
   }
 
@@ -273,19 +274,16 @@ export class Hud {
   }
 
   updateMarkers(list: MarkerView[]) {
-    const alive = new Set<number>();
+    const frame = ++this.markerFrame;
     const narrow = window.innerWidth <= 520;
     for (const m of list) {
-      alive.add(m.id);
-      let el = this.markerEls.get(m.id);
-      if (!el) {
-        el = document.createElement('div');
+      const previous = this.markerEls.get(m.id);
+      const el = previous?.el ?? document.createElement('div');
+      if (!previous) {
         el.className = m.kind ? `marker site ${m.kind}` : 'marker';
         this.markers.appendChild(el);
-        this.markerEls.set(m.id, el);
       }
-      if (el.dataset.text !== m.text) {
-        el.dataset.text = m.text;
+      if (previous?.last.text !== m.text) {
         if (m.kind) el.textContent = m.text;
         else {
           // Estandarte: o pano (com a bolinha do terreno) leva o número.
@@ -294,15 +292,22 @@ export class Hud {
           el.replaceChildren(span);
         }
       }
-      el.style.setProperty('--c', m.color);
-      el.style.display = m.visible ? '' : 'none';
-      el.classList.toggle('dim', !!m.dim);
+      if (previous?.last.color !== m.color) el.style.setProperty('--c', m.color);
+      if (previous?.last.visible !== m.visible) el.style.display = m.visible ? '' : 'none';
+      if (!!previous?.last.dim !== !!m.dim) el.classList.toggle('dim', !!m.dim);
       // O pé do mastro (ou a ponta da etiqueta do sítio) fica no ponto da peça.
       // No celular o estandarte encolhe em volta do pé do mastro, para tapar menos peças.
-      el.style.transform = m.kind ? `translate(${(m.x - 4).toFixed(1)}px, ${(m.y - 44).toFixed(1)}px)` : `translate(${(m.x - 1).toFixed(1)}px, ${(m.y - 64).toFixed(1)}px)${narrow ? ' scale(0.7)' : ''}`;
+      if (!previous || previous.last.x !== m.x || previous.last.y !== m.y || previous.narrow !== narrow) {
+        el.style.transform = m.kind ? `translate(${(m.x - 4).toFixed(1)}px, ${(m.y - 44).toFixed(1)}px)` : `translate(${(m.x - 1).toFixed(1)}px, ${(m.y - 64).toFixed(1)}px)${narrow ? ' scale(0.7)' : ''}`;
+      }
+      if (previous) {
+        previous.last = m;
+        previous.frame = frame;
+        previous.narrow = narrow;
+      } else this.markerEls.set(m.id, { el, last: m, frame, narrow });
     }
-    for (const [id, el] of this.markerEls) {
-      if (!alive.has(id)) {
+    for (const [id, { el, frame: lastFrame }] of this.markerEls) {
+      if (lastFrame !== frame) {
         el.remove();
         this.markerEls.delete(id);
       }

@@ -106,6 +106,8 @@ export async function renderVideo(world: World, s: Script, o: RenderOptions, pic
       while (game.discardIfStuck());
     } else if (e.kind === 'choose') {
       game.choose(e.pick);
+    } else if (e.kind === 'freight') {
+      world.replayFreight(false);
     } else if (e.kind === 'time') {
       if (TIMES.includes(e.tod)) world.setTimeOfDay(e.tod as TimeOfDay);
     } else if (e.kind === 'ghost') {

@@ -437,6 +437,7 @@ export class World {
   timeOfDay: TimeOfDay = 'day';
 
   private readonly harbors = new HarborView();
+  private followedBarge?: THREE.Mesh;
   private readonly staticRoot = new THREE.Group();
   private chunks = new Map<number, Chunk>();
   private pools = new Map<string, Pool>();
@@ -895,6 +896,7 @@ export class World {
 
   rebuild(board: Board) {
     this.harbors.reset();
+    this.followedBarge = undefined;
     this.board = board;
     for (const c of this.chunks.values()) c.dispose(this.staticRoot);
     this.chunks.clear();
@@ -1515,6 +1517,20 @@ export class World {
     U.ripple.value.set(x, z, this.time - age, strength);
   }
 
+  replayFreight(follow: boolean) {
+    const board = this.board;
+    if (!board?.rules.combinedFreight || !board.ports[0]?.delivered) return;
+    const barge = this.harbors.depart(board, board.ports[0]);
+    if (follow && barge) {
+      this.followedBarge = barge;
+      this.rig.goal.set(barge.position.x, 0, barge.position.z);
+      this.rig.target.copy(this.rig.goal);
+      this.rig.dist = this.rig.goalDist = 4.5;
+    }
+  }
+
+  releaseBargeCamera() { this.followedBarge = undefined; }
+
   tick(realDt: number) {
     this.renderer.info.reset();
     // A câmera, o fantasma e a troca de hora seguem o tempo real; o resto, o tempo do mundo.
@@ -1527,6 +1543,8 @@ export class World {
     U.wind.value.set(Math.cos(wa), Math.sin(wa));
     this.stepSky(realDt);
     this.voidU.radius.value += (this.voidGoal - this.voidU.radius.value) * Math.min(1, realDt / 1.2);
+    if (this.followedBarge?.parent) this.rig.goal.set(this.followedBarge.position.x, 0, this.followedBarge.position.z);
+    else this.followedBarge = undefined;
     this.rig.update(realDt);
     this.rig.apply(this.camera);
 

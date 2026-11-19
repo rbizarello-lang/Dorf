@@ -16,6 +16,7 @@
 .manifest-head h2 { font: 600 20px/1.1 Georgia, serif; margin: 0; }
 .manifest-head button { white-space: nowrap; border: 0; border-bottom: 1px solid #9fb2a9; padding: 4px 0; font-size: 12px; background: none; color: #e7eddf; }
 #sailing-order { font-size: 13px; line-height: 1.4; margin: 8px 0; color: #d6e1d5; }
+#choose-freight, #watch-freight { width: 100%; text-align: left; margin-bottom: 6px; border: 1px solid #8fa798; border-radius: 4px; padding: 6px 9px; background: #294d49; color: #ffe2a1; font-weight: 600; }
 #ports button {
   width: 100%; display: flex; align-items: center; text-align: left; gap: 10px;
   padding: 6px 0; border: 0; border-top: 1px solid #496567; background: transparent; color: inherit;

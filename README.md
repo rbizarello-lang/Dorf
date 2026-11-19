@@ -4,6 +4,16 @@ Abra **dist/index.html** no Chrome ou no Edge para jogar. O arquivo contém o jo
 
 [Validação, medições e capturas da edição](docs/VALIDACAO.md)
 
+## Madeira para a Feira · edição 0.2
+
+Antes da primeira jogada, abra **Escolher frete** na carta fluvial. Na entrega direta, a Feira recebe grãos e repõe quatro peças assim que você chega. Se aceitar **Madeira para a Feira**, ela guarda o pedido até estar ligada à Serraria pelo rio da vila. Você abre mão da reposição imediata e recebe dez peças quando o frete se completa. A Serraria paga suas seis peças assim que abre, inclusive se for o primeiro cais da viagem.
+
+A barca de vela verde e flâmula dourada sai da Serraria carregada de toras. **Rever a travessia** aproxima a câmera para acompanhar o percurso. Arraste para assumir a câmera ou use **Ver mapa** para voltar à carta. Reveja a viagem quantas vezes quiser, com a mesma pilha e pontuação. As partidas da edição 0.1 são retomadas como entregas diretas.
+
+O navegador precisa encontrar o save na mesma origem. Quando as duas edições são abertas de pastas diferentes pelo sistema de arquivos, cada HTML pode ter seu próprio armazenamento. A edição anterior continua acessível na sua pasta.
+
+[Pesquisa dos motores, ferramentas instaladas e verificação da edição 0.2](docs/MOTORES_E_FRETE.md)
+
 ## A viagem
 
 A vila começa na confluência de três canais. Você tem **24 peças para abrir uma rota de água até três cais**. A carta no canto mostra o que cada um precisa. Clique no nome do cais para aproximar a câmera. “Ver mapa” reenquadra a região. O tracejado no pergaminho indica a direção do destino. Seu rio pode fazer curvas e chegar por qualquer lado.
