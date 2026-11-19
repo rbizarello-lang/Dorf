@@ -39,3 +39,33 @@ Pranchas (base × E5; `base` = `?encostas=0`): `prancha-temas-longe.jpg`, `pranc
 
 ## Arquivos
 Código: `src/core/hills.ts`, `src/render/hillSurface.ts`, `tileBuilder.ts`, `world.ts`, `life.ts`, `lib.ts` (export BODY), `main.ts`. Testes: `tests/hills.ts`, `tests/hills-cost.ts` (`npm run hills:custo`). Prévia: `/tmp/claude-0/-home-user-Dorf/428237ba-b457-5f52-95bd-57828975f58f/scratchpad/e5/retalhos-encostas.html` (abre sem erro em Clássico, `#mode=relevo`, `#mode=terra`).
+
+# E5b: correção das regressões visuais
+
+Commit `5c36983` e seguintes. Pranchas novas: `prancha-e5b-costa.jpg`, `prancha-e5b-vilas.jpg`, `prancha-e5b-astra.jpg`, `prancha-e5b-rio.jpg` (capturas em `quality=medium`, WebGL2).
+
+## O que mudou
+1. **Costa (Relevo e Terra):** a borda aberta volta a ter a costa da base. `BuildOpts.skirt` (por borda, só com as Encostas em Relevo/Terra) reaproveita a saia de `skirtFor`: como a borda aberta fica em altura 0, ela desce curta até a areia no nível do mar, sem parede e sem saia alta, e o contorno segue o `seaMap` (margem `0,4 · skirtWidth(0)`). Quando a vizinha chega, a peça é refeita sem a saia desse lado (a assinatura do chão agora inclui as bordas abertas). No Clássico a placa hexagonal fica.
+2. **Vilas:** massa e subida baixas (`MASS` mata 0,30, cultivo 0,22, vila 0,26; `RISE` 0,10/0,09/0,09); sem tinta de rocha em vila, cultivo e prado (rocha só em mata com subida forte, até 10%); na subida entre dois patamares o chão da vila toma a cor de parede do tema (`hillRiser`, 70%), como muro de arrimo; fundação só no lado de baixo da casa.
+3. **Água (Relevo e Terra):** `BuildOpts.rapids`: onde a água pontuada desce de nível para uma vizinha assentada antes, a peça que chega depois desenha um degrau de pedra baixo atravessando o rio, espuma, pedras e a névoa da queda existente. O núcleo não muda. Só a peça mais nova desenha (a mais velha não é refeita, para não duplicar espuma).
+4. **Custo:** decoração foge de subida forte (`HILL_STEEP` 0,75, como o `steep` da base), decalques adaptativos, parede inteira numa só faixa nas bordas baixas, fundações só do lado baixo.
+
+## Custo (stress 300:high, WebGL2 por software, Holanda, seed 42, contra `f3-terra-fantasma`)
+| Modo | Triângulos | Montagem |
+|---|---|---|
+| Clássico | 1.476 mil → 1.428 mil (−3%) | 1.234 → 1.511 ms (+22%) |
+| Relevo | 1.466 mil → 1.493 mil (+1,8%) | 2.810 → 2.228 ms (−21%) |
+| Terra | 1.520 mil → 1.509 mil (−0,7%) | 3.000 → 2.223 ms (−26%) |
+
+Metas de custo atendidas. Parte da queda vem da decoração que agora foge da encosta forte (instâncias do Clássico 80 mil → 72 mil).
+
+## Verificação
+`npm run check` verde (inclui `tests/hills.ts`). Smoke: `webgl`, `relevo-webgl` e `terra-hash-webgl` ok; os casos WebGPU falham aqui ("Instance dropped", ambiente; a `main` também). Prévia regenerada e aberta sem erro no Clássico, `#mode=relevo` e `#mode=terra`.
+
+## Critérios de aceite (conferidos nas imagens com Read)
+- **(i) Costa Terra e Relevo longe:** fecha em parte. A costa voltou a ser redonda e contínua, sem parede, como na base (`prancha-e5b-costa.jpg`). Ainda sobram algumas casas vazias que leem como baías hexagonais claras (uma no centro-direita da Terra), mais visíveis que as da base.
+- **(ii) Vila de perto, 5 temas:** NÃO fecha por completo. A vila já não é morro de pedreira, mas Holanda, Oriental e Inverno ainda leem como colina cinza-acastanhada (a cor de chão da vila desses temas já é cinza na base) e os patamares com muro de arrimo quase não aparecem na malha de 6 divisões. Egito e Brasil estão melhores.
+- **(iii) Vista de perto ao lado do Astra:** NÃO fecha. A captura de perto é uma vila (Holanda), não uma crista com rio como a dele. A corredeira não apareceu nas capturas (sem desnível de água na vista); só foi conferida por execução sem erros.
+
+## Pendências
+Patamares legíveis (bancada e muro maiores na vila, ou degrau em geometria), baías das casas vazias e uma captura da corredeira.
