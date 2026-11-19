@@ -1,0 +1,62 @@
+/* A carta ocupa o canto das missões no modo de navegação. */
+#manifest {
+  position: fixed;
+  left: var(--gutter-l);
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  width: min(268px, calc(100vw - 168px));
+  box-sizing: border-box;
+  padding: 14px 16px 10px;
+  border: 1px solid #658582;
+  border-radius: 8px;
+  background: #173b3e;
+  color: #f6f0dc;
+  box-shadow: 0 5px 20px #16323935;
+}
+.manifest-head { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+.manifest-head h2 { font: 600 20px/1.1 Georgia, serif; margin: 0; }
+.manifest-head button { white-space: nowrap; border: 0; border-bottom: 1px solid #9fb2a9; padding: 4px 0; font-size: 12px; background: none; color: #e7eddf; }
+#sailing-order { font-size: 13px; line-height: 1.4; margin: 8px 0; color: #d6e1d5; }
+#ports button {
+  width: 100%; display: flex; align-items: center; text-align: left; gap: 10px;
+  padding: 6px 0; border: 0; border-top: 1px solid #496567; background: transparent; color: inherit;
+}
+#ports button:hover, #ports button:focus-visible { background: #284a4c; }
+#manifest button:focus-visible { outline-color: #f8cd85; }
+#ports i {
+  display: grid; place-items: center; width: 22px; height: 27px;
+  background: var(--flag); color: #18363a; font: bold 13px Georgia, serif;
+  clip-path: polygon(0 0,100% 0,100% 100%,50% 81%,0 100%); padding-bottom: 2px; box-sizing: border-box;
+}
+#ports b, #ports small { display: block; }
+#ports b { font: 600 16px/1.1 Georgia, serif; }
+#ports small { margin-top: 1px; color: #ceddcf; font-size: 11px; }
+#ports strong { margin-left: auto; color: #ffe2a1; font: 600 12px var(--font-body); white-space: nowrap; }
+#ports .delivered strong { color: #b5e8c2; }
+.river-trade .score-block { background: #f6f2e6; border: 1px solid #bcbeae; border-radius: 6px; }
+.river-trade .brand { color: #255759; font: bold 22px/1.2 Georgia, serif; letter-spacing: -0.02em; }
+.river-trade .hint { left: 50%; max-width: calc(100vw - 600px); }
+.river-trade .score { font-size: 29px; }
+.river-trade .score::after { content: ' pontos'; font: 600 13px var(--font-body); }
+@media (max-width: 580px) { .river-trade .brand { display: block; font-size: 18px; } .river-trade .score { font-size: 22px; } }
+body.capture #manifest { display: none; }
+.marker.site.port {
+  translate: -50% 0;
+  height: 20px; min-width: 0; padding: 0 6px; border: 0; border-left: 4px solid var(--c);
+  border-radius: 3px; background: #173b3e; color: #fff9e9; font: 600 11px/1 var(--font-body);
+}
+@media (max-width: 900px) { .river-trade .hint { display: none; } }
+@media (max-width: 580px) {
+  #manifest { bottom: calc(10px + env(safe-area-inset-bottom)); width: min(230px, calc(100vw - 138px)); padding: 9px 10px 5px; }
+  .manifest-head h2 { font-size: 16px; }
+  #sailing-order { font-size: 12px; margin: 5px 0; }
+  #ports button { min-height: 34px; padding: 3px 0; gap: 7px; }
+  #ports b { font-size: 14px; }
+  #ports small { font-size: 10px; }
+  #ports strong, .manifest-head button { font-size: 11px; }
+  .marker.site.port { font-size: 10px; }
+}
+@media (max-height: 530px) and (min-width: 581px) {
+  #manifest { padding: 8px 12px; }
+  #ports button { padding: 3px 0; }
+  #ports small { display: none; }
+}

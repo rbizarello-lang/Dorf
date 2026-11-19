@@ -1,0 +1,8 @@
+{"zoom":8,"trial":1,"name":"original","tiles":301,"backend":"webgpu","gpu":"GeForce RTX 3060","calls":157,"triangles":1710402,"instances":50536,"p50":33.3,"p95":49.9,"errors":[]}
+{"zoom":8,"trial":2,"name":"entrepostos","tiles":301,"backend":"webgpu","gpu":"GeForce RTX 3060","calls":149,"triangles":1710832,"instances":50536,"p50":33.3,"p95":34,"errors":[]}
+{"zoom":8,"trial":3,"name":"entrepostos","tiles":301,"backend":"webgpu","gpu":"GeForce RTX 3060","calls":150,"triangles":1710972,"instances":50536,"p50":33.2,"p95":33.8,"errors":[]}
+{"zoom":8,"trial":4,"name":"original","tiles":301,"backend":"webgpu","gpu":"GeForce RTX 3060","calls":157,"triangles":1710362,"instances":50536,"p50":49.3,"p95":50.6,"errors":[]}
+{"zoom":28,"trial":1,"name":"original","tiles":301,"backend":"webgpu","gpu":"GeForce RTX 3060","calls":147,"triangles":1286678,"instances":50536,"p50":32.9,"p95":33.6,"errors":[]}
+{"zoom":28,"trial":2,"name":"entrepostos","tiles":301,"backend":"webgpu","gpu":"GeForce RTX 3060","calls":137,"triangles":1286660,"instances":50536,"p50":33.1,"p95":33.7,"errors":[]}
+{"zoom":28,"trial":3,"name":"entrepostos","tiles":301,"backend":"webgpu","gpu":"GeForce RTX 3060","calls":137,"triangles":1286692,"instances":50536,"p50":18,"p95":35.7,"errors":[]}
+{"zoom":28,"trial":4,"name":"original","tiles":301,"backend":"webgpu","gpu":"GeForce RTX 3060","calls":147,"triangles":1286710,"instances":50536,"p50":35.3,"p95":36.6,"errors":[]}
