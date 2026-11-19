@@ -78,6 +78,7 @@ export interface TileBuild {
    */
   wbed: Float32Array;
   decos: Deco[];
+  allDecos?: Deco[];
   /** Pontos de onde sai fumaça de chaminé, de 4 em 4: x, y, z e o tipo de casa (a era muda a altura). */
   chimneys: number[];
 }
@@ -98,6 +99,8 @@ export interface BuildOpts {
    * já existe. Sem isso (pilha), vale a de `waterShape`.
    */
   widths?: readonly number[];
+  /** Expansão do lago por encaixes; as bocas continuam determinadas por widths. */
+  waterGrowth?: number;
   /** Peça inicial: o meio fica livre para o Centro da vila (objeto à parte, no World). */
   center?: boolean;
   /** Marco da era erguido nesta peça (índice da era: uma flâmula por era). */
@@ -667,6 +670,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const shape = waterShape(edges, seed);
   // O moinho especial precisa do rio passando reto, sem lago no meio.
   if (opts.special === 'watermill') shape.lake = null;
+  if (shape.lake && opts.waterGrowth) shape.lake.r = Math.min(0.68, shape.lake.r * (1 + 0.08 * opts.waterGrowth));
   const widths = shape.widths.map((w, i) => (w > 0 ? (opts.widths?.[i] || w) : 0));
   const water = { idx: shape.idx, paths: waterPaths(shape, widths, seed) };
   const road = railPaths(edges, seed, opts.special === 'station');

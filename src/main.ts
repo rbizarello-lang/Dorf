@@ -1,3 +1,5 @@
+import { developmentAt, previewDevelopment } from './core/development';
+import { fitChart } from './ui/chartCamera';
 import * as THREE from 'three/webgpu';
 import { Sfx } from './audio';
 import { DEFAULT_RULES, type PlaceResult, type Rules } from './core/board';
@@ -10,7 +12,7 @@ import { T } from './core/tiles';
 import { DIRS, hexDistance, hexToWorld, hkey, unkey, worldToHex } from './core/hex';
 import type { Quality, TimeOfDay } from './render/world';
 import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
-import { HARBORS, portSupply } from './core/ports';
+import { HARBORS, CHARTS, type ChartId } from './core/ports';
 import { FramePacer } from './render/framePacer';
 import { DynRes } from './render/dynres';
 import { readGpuInfo } from './render/gpu';
@@ -36,7 +38,9 @@ type QualityMode = 'auto' | Quality;
 type MoveRec = number[];
 /** v4: modos, eras, sítios e bônus por tema. Guarda a pontuação para conferir o replay. */
 interface Save {
-  v: 11;
+  v: 12;
+  layout: ChartId;
+  legacyFreight: boolean;
   combinedFreight: boolean;
   seed: number;
   rulesId: string;
@@ -48,7 +52,7 @@ interface Save {
   /** Peças especiais que entraram nesta partida (mudam a sequência da pilha). */
   specials: SpecialKind[];
 }
-const SAVE_VERSION = 11;
+const SAVE_VERSION = 12;
 interface Hot {
   snapshot?: (fn: () => unknown) => void;
   ready?: (fn: (data: unknown) => void) => void;
@@ -57,18 +61,29 @@ interface Hot {
 
 
 const params = new URLSearchParams(location.search);
+const namespace = 'entrepostos.cartas.';
+try {
+  if (!localStorage.getItem(namespace + 'importado')) {
+    for (const key of Object.keys(localStorage)) {
+      if (!key.startsWith('entrepostos.') || key.startsWith(namespace)) continue;
+      const target = namespace + key.slice('entrepostos.'.length);
+      if (localStorage.getItem(target) === null) localStorage.setItem(target, localStorage.getItem(key)!);
+    }
+    localStorage.setItem(namespace + 'importado', '1');
+  }
+} catch { /* A partida também funciona sem persistência. */ }
 const store = {
   get(k: string) {
     try {
-      return localStorage.getItem(`entrepostos.${k}`);
+      return localStorage.getItem(namespace + k);
     } catch {
       return null;
     }
   },
   set(k: string, v: string | null) {
     try {
-      if (v === null) localStorage.removeItem(`entrepostos.${k}`);
-      else localStorage.setItem(`entrepostos.${k}`, v);
+      if (v === null) localStorage.removeItem(namespace + k);
+      else localStorage.setItem(namespace + k, v);
     } catch {
       /* armazenamento indisponível: segue sem salvar */
     }
@@ -97,6 +112,7 @@ const world = await createWorld();
   if (fx !== null) world.fx = fx.split('.').filter((f) => (FX_FLAGS as readonly string[]).includes(f));
 }
 hud.preview.appendChild(world.preview.canvas);
+world.preview.observe(hud.preview);
 
 // Cor da casa e brasão (proposta 15): a cor troca o destaque do tema no HUD e no mundo.
 let house = validHouse(store.get('house'));
@@ -107,17 +123,19 @@ let banner = (() => {
     return validBanner(null);
   }
 })();
-let theme: Theme = dress(themeById(params.get('theme') ?? store.get('theme') ?? 'holanda'), house);
+let theme: Theme = dress(themeById(params.get('theme') ?? store.get('theme') ?? 'riviera'), house);
 let rulesTheme: Theme = theme;
 let game: Game;
 let moves: MoveRec[] = [];
 let rotSteps = 0;
+let guided = false, guideHint = false, keyboardCell = false, overview = true;
 let hover: { q: number; r: number } | null = null;
 let scoutPending = false;
 /** Recorde por modo e por tema (o Exploradores e o Clássico não disputam o mesmo número), com a semente. */
 let best = 0;
 let bestSeed = 0;
-const bestKey = () => `best.${mode.id}.${rulesTheme.id}`;
+const bestKey = () => game.rules.riverTrade ? `best.${mode.id}.${rulesTheme.id}.${game.rules.layout}.${game.rules.combinedFreight ? (game.rules.legacyFreight ? 'madeira-v11' : 'madeira') : 'direto'}` : `best.${mode.id}.${rulesTheme.id}`;
+const chartFrom = (value: unknown): ChartId => typeof value === 'string' && Object.hasOwn(CHARTS, value) ? value as ChartId : 'confluencia';
 function loadBest() {
   best = 0;
   bestSeed = 0;
@@ -174,7 +192,7 @@ const siteReward = (kind: SiteKind) => {
  */
 const synTimers: number[] = [];
 
-function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number, undos = 0, specials?: readonly SpecialKind[], combinedFreight = false): boolean {
+function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number, undos = 0, specials?: readonly SpecialKind[], combinedFreight = false, layout = chartFrom(params.get('mapa') ?? store.get('layout')), legacyFreight = false): boolean {
   // A gravação vale para uma partida só (desfazer refaz a partida pelo replay).
   if (capture.take) capture.stopTake('A gravação terminou aqui: o vídeo não acompanha o desfazer nem uma partida nova.');
   clearTimeout(overTimer);
@@ -182,6 +200,10 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   // Peças especiais: as liberadas entram em toda partida nova, menos no Desafio do dia (igual para todos).
   const rules = rulesFor(rulesTheme);
   rules.combinedFreight = rules.riverTrade && combinedFreight;
+  rules.layout = rules.riverTrade ? layout : 'confluencia';
+  rules.legacyFreight = legacyFreight;
+  guided = false;
+  keyboardCell = false;
   game = new Game(seed, rules, specials ?? forcedSpecials ?? (mode.daily ? [] : progress.unlocked));
   // Partida nova (não um replay do desfazer ou do save): ainda não entrou no progresso.
   if (!replay.length) committed = false;
@@ -209,7 +231,6 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   hud.applyTheme(theme);
   showCrest();
   hud.renderQuests(game.board.quests, theme);
-  frameCamera(true);
   // Partida nova: o batedor mostra para onde fica o sítio mais perto (quando a ajuda fechar).
   scoutPending = !replay.length;
   if (!replay.length && !game.rules.riverTrade)
@@ -219,6 +240,7 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
       `Coloque a peça encostada no mapa: cada borda igual à vizinha vale ${game.rules.matchPoints} pontos. Gire com <kbd>R</kbd> ou o botão direito (no toque, os botões de girar). A partida acaba quando a pilha esvazia.`,
     );
   refreshHud(true);
+  collapseChart(); frameCamera(true);
   persist();
   return true;
 }
@@ -230,14 +252,15 @@ function persist() {
 }
 
 function snapshot(): Save {
-  return { v: SAVE_VERSION, combinedFreight: game.rules.combinedFreight, seed: game.seed, rulesId: rulesTheme.id, mode: mode.id, moves, undone, score: game.board.score, specials: [...game.specials] };
+  return { v: SAVE_VERSION, layout: game.rules.layout, legacyFreight: game.rules.legacyFreight, combinedFreight: game.rules.combinedFreight, seed: game.seed, rulesId: rulesTheme.id, mode: mode.id, moves, undone, score: game.board.score, specials: [...game.specials] };
 }
 
 /** A v10 só tinha entrega direta. As duas versões passam pela mesma conferência de replay. */
 function validSave(raw: unknown): Save | null {
   if (!raw || typeof raw !== 'object') return null;
   const s = raw as Partial<Omit<Save, 'v'>> & { v?: number };
-  if (s.v === 10) return validSave({ ...s, v: SAVE_VERSION, combinedFreight: false });
+  if (s.v === 10 || s.v === 11) return validSave({ ...s, v: SAVE_VERSION, layout: 'confluencia', legacyFreight: true, combinedFreight: s.v === 11 && s.combinedFreight });
+  if (typeof s.layout !== 'string' || !Object.hasOwn(CHARTS, s.layout) || typeof s.legacyFreight !== 'boolean') return null;
   if (typeof s.combinedFreight !== 'boolean' || (s.combinedFreight && s.mode !== 'entrepostos')) return null;
   const okMove = (m: unknown) => Array.isArray(m) && m.length >= 3 && m.length <= 6 && m.every(Number.isInteger) && m[2] >= 0 && m[2] < 6 && m.slice(3).every((p) => p === 0 || p === 1);
   if (s && s.v === SAVE_VERSION && Number.isInteger(s.seed) && s.seed! > 0 && typeof s.rulesId === 'string' && MODES.some((m) => m.id === s.mode) && Number.isInteger(s.undone) && s.undone! >= 0 && Array.isArray(s.moves) && s.moves.every(okMove) && Number.isFinite(s.score) && Array.isArray(s.specials) && s.specials.every((k) => SPECIAL_KINDS.includes(k))) return s as Save;
@@ -287,7 +310,7 @@ function undo() {
   const left = mode.undos - undone;
   if (left <= 0 || !moves.length || hud.modalOpen) return;
   const keep = moves.slice(0, -1);
-  if (!newGame(game.seed, keep, undefined, undone + 1, game.specials, game.rules.combinedFreight)) return;
+  if (!newGame(game.seed, keep, undefined, undone + 1, game.specials, game.rules.combinedFreight, game.rules.layout, game.rules.legacyFreight)) return;
   sfx.undo();
   hud.toast(left - 1 > 0 && left - 1 < 99 ? `Jogada desfeita · restam ${left - 1}` : 'Jogada desfeita');
 }
@@ -311,7 +334,10 @@ function frameCamera(instant: boolean) {
   // Em retrato (celular) a largura é o limite: afasta a câmera proporcionalmente.
   const aspect = Math.min(1.4, Math.max(0.45, window.innerWidth / Math.max(1, window.innerHeight)));
   world.rig.goalDist = THREE.MathUtils.clamp((maxR * (b.ports.length ? 2.95 : 2.1) + 5) * Math.max(1, 1.25 / aspect), 7, 46);
-  if (instant) {
+  overview = true;
+  world.releaseBargeCamera();
+  if (b.ports.length) fitChart(world.rig, world.camera, [b.list[0], ...b.ports]);
+  if (instant || reducedMotion.matches) {
     world.rig.target.copy(world.rig.goal);
     world.rig.dist = world.rig.goalDist;
   }
@@ -319,18 +345,23 @@ function frameCamera(instant: boolean) {
 
 const manifest = document.getElementById('manifest')!;
 const sailingOrder = document.getElementById('sailing-order')!;
+const developmentOrder = document.getElementById('development-order')!;
+world.livingEnabled = params.has('vivas') ? params.get('vivas') === '1' : store.get('living') !== '0';
 const charter = document.querySelector<HTMLButtonElement>('#choose-freight')!;
 const watchFreight = document.querySelector<HTMLButtonElement>('#watch-freight')!;
 watchFreight.addEventListener('click', () => {
-  world.replayFreight(true);
+  overview = false;
+  world.replayFreight(!fixedCamera.checked);
   capture.take?.event({ kind: 'freight' });
 });
 charter.addEventListener('click', () => {
   if (!game.rules.riverTrade || moves.length) return;
-  hud.showModal(`<h2>Escolha o frete da viagem</h2>
-    <p>O acordo vale até o fim desta viagem.</p>
+  hud.showModal(`<h2 id="modal-title">Preparar a viagem</h2>
+    <label for="voyage-map">Carta fluvial</label><select id="voyage-map">${Object.entries(CHARTS).map(([k,n]) => `<option value="${k}" ${k === game.rules.layout ? 'selected' : ''}>${n}</option>`).join('')}</select>
+    <p>Escolha a carta e confirme o frete para esta viagem.</p>
+    <label class="living-option"><input type="checkbox" id="living-option" ${world.livingEnabled ? 'checked' : ''}> Paisagem viva</label><p class="muted">Encaixes iguais desenvolvem a peça e suas vizinhas. Vilas crescem, bosques se adensam, cultivos ganham celeiros e o rio se alarga.</p>
     <button class="mode-card" type="button" data-act="freight-direct"><strong>Entrega direta</strong><span>Receba 4 peças assim que ligar a Feira à vila.</span></button>
-    <button class="mode-card" type="button" data-act="freight-combined"><strong>Madeira para a Feira</strong><span>A Feira espera a Serraria. Quando as duas estiverem ligadas, a barca leva madeira à Feira e você recebe 10 peças por esse frete. A Serraria paga suas 6 peças ao abrir.</span></button>
+    <button class="mode-card" type="button" data-act="freight-combined"><strong>Madeira para a Feira</strong><span>A Serraria paga 6 peças ao abrir. Ligue-a antes da Feira ou no mesmo turno para ganhar mais 10 na Feira. Se a Feira abrir primeiro, ela espera e paga 4.</span></button>
     <div class="row"><button class="secondary" type="button" data-act="close">Voltar à carta</button></div>`);
 });
 const portButtons = HARBORS.map((h, i) => {
@@ -341,21 +372,47 @@ const portButtons = HARBORS.map((h, i) => {
   btn.addEventListener('click', () => {
     const port = game.board.ports[i];
     if (!port) return;
+    overview = false;
+    collapseChart();
     const p = hexToWorld(port.q, port.r);
     world.rig.goal.set(p.x, 0, p.z);
     world.rig.goalDist = 9;
+    if (reducedMotion.matches) { world.rig.target.copy(world.rig.goal); world.rig.dist = 9; }
+    canvas.focus({ preventScroll: true });
   });
   document.getElementById('ports')!.appendChild(btn);
   return btn;
 });
-document.getElementById('chart-fit')!.addEventListener('click', () => frameCamera(false));
+document.getElementById('chart-fit')!.addEventListener('click', () => { collapseChart(); frameCamera(false); });
 
+const smallChart = matchMedia('(max-width: 700px), (max-height: 530px)');
+const chartToggle = document.querySelector<HTMLButtonElement>('#chart-toggle')!;
+const guideBtn = document.querySelector<HTMLButtonElement>('#guide-route')!;
+const fixedCamera = document.querySelector<HTMLInputElement>('#fixed-camera')!;
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+fixedCamera.checked = store.get('fixedCamera') === '1' || (store.get('fixedCamera') === null && reducedMotion.matches);
+fixedCamera.onchange = () => store.set('fixedCamera', fixedCamera.checked ? '1' : '0');
+function setChartOpen(open: boolean) {
+  document.getElementById('chart-body')!.hidden = !open;
+  chartToggle.setAttribute('aria-expanded', String(open));
+}
+function collapseChart() { setChartOpen(!smallChart.matches); }
+collapseChart();
+chartToggle.onclick = () => setChartOpen(chartToggle.getAttribute('aria-expanded') !== 'true');
+guideBtn.onclick = () => {
+  guided = !guided; guideHint = false; showManifest();
+  if (guided) { collapseChart(); frameCamera(false); canvas.focus(); }
+};
 function updateSailingOrder() {
-  if (game.rules.combinedFreight && !game.board.ports[0].delivered) {
-    sailingOrder.textContent = game.board.ports[1].delivered ? 'A madeira está na Serraria. Leve o rio até a Feira.' : 'Ligue a Serraria e a Feira à vila para receber 10 peças pelo frete.';
+  if (guided && game.board.ports[0].connectedAt === undefined) {
+    sailingOrder.textContent = guideHint ? 'Gire com R até unir as bocas azuis. Confirme na casa marcada.' : 'Leve o rio da vila à bandeira Guia. Gire a peça para unir as bocas azuis.';
     return;
   }
-  sailingOrder.textContent = game.placedCount < 2 ? 'Gire as duas primeiras peças e leve o rio da vila até a Feira.' : 'Ligue os três cais à vila por um rio contínuo.';
+  if (game.rules.combinedFreight && !game.board.ports[0].delivered) {
+    sailingOrder.textContent = game.board.ports[1].delivered ? 'A madeira está na Serraria. Leve o rio até a Feira.' : game.rules.legacyFreight ? 'Ligue os dois cais para receber 10 peças pelo frete.' : game.board.ports[0].connectedAt ? 'A Feira espera. Ligue a Serraria para entregar a madeira por 4 peças.' : 'Ligue a Serraria antes da Feira para receber o prêmio de 10 peças.';
+    return;
+  }
+  sailingOrder.textContent = game.rules.layout === 'forquilha' ? 'Abra um tronco comum e bifurque o canal para a Feira e a Serraria.' : game.rules.layout === 'enseada' ? 'A Serraria fica na enseada, no caminho do Estaleiro.' : game.placedCount < 2 ? 'Gire as duas primeiras peças e leve o rio da vila até a Feira.' : 'Ligue os três cais à vila por um rio contínuo.';
 }
 
 function showManifest() {
@@ -363,16 +420,24 @@ function showManifest() {
   manifest.hidden = !ports.length;
   document.body.classList.toggle('river-trade', !!ports.length);
   document.querySelector('.brand')!.textContent = ports.length ? 'Entrepostos' : 'Retalhos';
+  developmentOrder.hidden = !ports.length || !world.livingEnabled;
+  developmentOrder.textContent = world.livingEnabled ? 'Paisagem viva · encaixes iguais desenvolvem os dois lados.' : '';
   if (!ports.length) return;
   charter.hidden = moves.length > 0;
   watchFreight.hidden = !game.rules.combinedFreight || !ports[0].delivered;
   charter.textContent = game.rules.combinedFreight ? 'Mudar frete · Madeira para a Feira' : 'Escolher frete';
+  document.getElementById('chart-name')!.textContent = CHARTS[game.rules.layout];
+  document.getElementById('chart-progress')!.textContent = `${ports.filter((p) => p.delivered).length}/3 cais`;
+  guideBtn.hidden = game.rules.layout !== 'confluencia' || ports[0].connectedAt !== undefined || (moves.length > 1 && !guided);
+  guideBtn.textContent = guided ? 'Pular guia' : 'Guiar primeira entrega';
+  fixedCamera.parentElement!.hidden = watchFreight.hidden;
   updateSailingOrder();
   for (const p of ports) {
     const h = HARBORS[p.id], btn = portButtons[p.id];
     const waits = game.rules.combinedFreight && p.id === 0 && !p.delivered && game.board.onMainRiver(game.board.get(p.q, p.r));
     const cargo = game.rules.combinedFreight && p.id === 0 ? 'Madeira da Serraria' : h.cargo;
-    const status = p.delivered ? 'Entregue' : waits ? 'Em espera' : `+${portSupply(p.id, game.rules.combinedFreight)} peças`;
+    const offer = p.id === 0 && game.rules.combinedFreight && !waits ? (game.rules.legacyFreight || ports[1].delivered ? '10' : '4 ou 10') : String(h.tiles);
+    const status = p.delivered ? '✓ Entregue' : waits ? '⌛ Em espera' : `+${offer} peças`;
     btn.classList.toggle('delivered', p.delivered);
     btn.querySelector('strong')!.textContent = status;
     btn.querySelector('small')!.textContent = cargo;
@@ -383,6 +448,8 @@ function showManifest() {
 function refreshHud(instant = false) {
   showManifest();
   hud.setScore(game.board.score, Math.max(best, game.board.score), instant);
+  if (game.rules.riverTrade) hud.best.title = `${CHARTS[game.rules.layout]} · ${game.rules.combinedFreight ? 'Madeira' : 'Direto'}`;
+  else hud.best.removeAttribute('title');
   hud.setStack(game.stack, game.rules.infinite);
   const b = game.board, es = game.rules.eraScores;
   const nextAt = es[b.era + 1];
@@ -412,7 +479,10 @@ function showInfluence() {
 function updateGhost() {
   if (!game.current || !hover || !game.board.frontier.has(hkey(hover.q, hover.r)) || hud.modalOpen || capture.stage !== 'play') {
     world.clearGhost();
-    if (game.rules.riverTrade) updateSailingOrder();
+    if (game.rules.riverTrade) {
+      updateSailingOrder();
+      developmentOrder.textContent = world.livingEnabled ? 'Paisagem viva · encaixes iguais desenvolvem os dois lados.' : '';
+    }
     hud.confirm.hidden = true;
     capture.take?.event({ kind: 'noghost' });
     return;
@@ -421,17 +491,23 @@ function updateGhost() {
   if (game.rules.riverTrade) {
     const { q, r } = hover;
     const port = game.board.ports.find((p) => p.q === q && p.r === r), edges = game.currentEdges()!;
-    const connected = edges.some((edge, i) => {
-      if (edge !== T.Water) return false;
-      const [dq, dr] = DIRS[i], tile = game.board.get(q + dq, r + dr);
-      return tile?.edges[(i + 3) % 6] === T.Water && game.board.onMainRiver(tile);
-    });
+    const v = game.board.voyageAt(q, r, edges);
     if (port && !edges.includes(T.Water)) sailingOrder.textContent = 'Este cais precisa de uma peça com rio.';
-    else if (!check.valid) sailingOrder.textContent = 'Gire a peça para alinhar as bordas ou tente outra casa.';
-    else if (port?.id === 0 && connected && game.rules.combinedFreight && !game.board.ports[1].delivered) sailingOrder.textContent = 'A Feira recebe a madeira quando a Serraria também estiver ligada.';
-    else if (port && connected) sailingOrder.textContent = `Entrega em ${HARBORS[port.id].name} · +${portSupply(port.id, game.rules.combinedFreight)} peças.`;
-    else if (edges.includes(T.Water)) sailingOrder.textContent = connected ? 'Este trecho prolonga o rio da vila.' : 'Trecho isolado. Uma ligação futura pode uni-lo à vila.';
+    else if (!check.valid) sailingOrder.textContent = 'Gire para alinhar as bordas ou tente outra casa.';
+    else if (v.shipments.length) sailingOrder.textContent = v.shipments.map(({ port: p, tiles }) => `${HARBORS[p.id].name} +${tiles}`).join(' · ') + ' peças de suprimento.';
+    else if (game.rules.combinedFreight && v.connected.some((p) => p.id === 0 && p.connectedAt === undefined)) sailingOrder.textContent = game.rules.legacyFreight ? 'Feira reservada. Falta ligar a Serraria.' : 'Feira primeiro. A madeira renderá 4 peças quando a Serraria abrir.';
+    else if (edges.includes(T.Water)) sailingOrder.textContent = v.joins ? 'Este canal prolonga o rio da vila.' : 'Trecho isolado. Ligue-o à vila para navegar.';
     else updateSailingOrder();
+  }
+  if (world.livingEnabled && game.rules.riverTrade) {
+    const preview = previewDevelopment(game.board, hover.q, hover.r, game.currentEdges()!);
+    const changes = [preview.placed, ...preview.neighbors], terrains = new Set<T>();
+    for (const change of changes) {
+      const edges = game.board.get(change.q,change.r)?.edges ?? game.currentEdges()!;
+      for (let i=0;i<6;i++) if (change.after.levels[i]>change.before.levels[i] && [T.Forest,T.Field,T.Village,T.Water].includes(edges[i])) terrains.add(edges[i]);
+    }
+    const words = [theme.terrainNames[T.Grass], 'bosque mais alto', 'cultivo desenvolvido', 'vila maior', 'rio mais amplo', theme.terrainNames[T.Rail]];
+    developmentOrder.textContent = check.valid && terrains.size ? [...terrains].map((t)=>words[t]).join(' · ') : 'Procure bordas iguais para desenvolver a paisagem.';
   }
   world.setGhost(game.current, game.rot, rotSteps * (Math.PI / 3), hover.q, hover.r, check);
   capture.take?.event({ kind: 'ghost', q: hover.q, r: hover.r, rot: game.rot, angle: rotSteps * (Math.PI / 3) });
@@ -444,6 +520,13 @@ function rotate(dir: 1 | -1) {
   sfx.rotate(dir);
   world.setPreview(game.current, rotSteps * (Math.PI / 3), game.stack);
   updateGhost();
+  announceCell();
+}
+
+function announceCell() {
+  if (!keyboardCell || !hover || !game.current) return;
+  const { q, r } = hover, ok = game.check(q, r)?.valid;
+  hud.say(`Casa ${q}, ${r}. Giro ${game.rot + 1} de 6. ${ok ? 'Pode colocar.' : 'Encaixe inválido.'} ${game.rules.riverTrade ? sailingOrder.textContent + ' ' + developmentOrder.textContent : ''}`);
 }
 
 function screenOf(q: number, r: number, y = 0.4) {
@@ -461,6 +544,8 @@ function place(q: number, r: number) {
   }
   const check = game.check(q, r);
   if (!check?.valid) {
+    if (guided) { guideHint = true; updateSailingOrder(); }
+    if (keyboardCell) announceCell();
     if (check && !check.occupied && check.neighbors > 0) {
       sfx.invalid();
       if (game.board.ports.some((p) => p.q === q && p.r === r) && !game.current.edges.includes(T.Water)) {
@@ -475,6 +560,10 @@ function place(q: number, r: number) {
   const rot = game.rot;
   const res = game.place(q, r)!;
   moves.push([q, r, rot]);
+  if (guided && game.board.ports[0]?.connectedAt !== undefined) {
+    guided = false;
+    hud.toast(game.board.ports[0].delivered ? 'Primeira entrega concluída!' : 'Canal pronto. A Feira aguarda a madeira.', 'good');
+  }
   capture.take?.event({ kind: 'place', q, r, rot });
   world.placeAnimated(res.placed);
   world.updateFrontier(game.board);
@@ -600,7 +689,7 @@ function announce(res: PlaceResult) {
   for (const p of res.deliveries) {
     const h = HARBORS[p.id];
     const cargo = game.rules.combinedFreight && p.id === 0 ? 'Madeira da Serraria' : h.cargo;
-    hud.toast(`${cargo} no cais · ${h.name} · +${portSupply(p.id, game.rules.combinedFreight)} peças`, 'good');
+    hud.toast(`${cargo} no cais · ${h.name} · +${p.reward} peças`, 'good');
     sfx.quest();
   }
   offerTips(res);
@@ -682,6 +771,7 @@ function showHelp(tab = 'basico') {
       'basico',
       'Básico',
       `<p>Monte uma paisagem peça por peça. Cada borda que combina com a vizinha vale ${R.matchPoints} pontos.</p>
+      ${world.livingActive ? '<p>Na Paisagem viva, um, dois e três encaixes do mesmo terreno desenvolvem esse terreno na peça e nas vizinhas. A mata ganha copas e altura, a vila cresce, o cultivo recebe um celeiro e o rio se alarga. No modo Zen você pode construir sem limite de peças.</p>' : ''}
       <div class="legend">${legend}</div>
       <ul>
         <li><b>${theme.terrainNames[4]}</b> e <b>${theme.terrainNames[5]}</b> precisam continuar: só encostam neles mesmos.</li>
@@ -731,7 +821,7 @@ function showHelp(tab = 'basico') {
   if (game.rules.riverTrade) {
     tabs[0][2] = `<p><b>Abasteça os três cais.</b> Gire a peça e prolongue o rio azul a partir da vila no centro. Cada cais precisa de uma peça com água. Se o trecho estiver isolado, a entrega espera a ligação com a vila.</p>
       <p>Comece com 24 peças. A Feira recebe grãos e devolve 4 peças, a Serraria recebe madeira e devolve 6, e o Estaleiro recebe ferragens e devolve 8. Você escolhe a ordem. Ao terminar, cada peça restante vale ${R.leftoverPoints} pontos.</p>
-      <p>Antes da primeira peça, “Escolher frete” permite reservar a Feira para a madeira da Serraria. A Feira paga 10 peças quando ambas estiverem ligadas.</p>
+      <p>Antes da primeira peça, escolha a carta e o contrato. A madeira paga 10 na Feira se a Serraria for ligada antes ou junto, e 4 se a Feira for ligada primeiro. No tabuleiro, use as setas para percorrer a fronteira, R para girar e Enter para colocar. WASD move a câmera.</p>
       <p>Escolha um cais na carta para aproximar a câmera. “Ver mapa” mostra os três. Use <kbd>R</kbd> para girar ou as setas junto à pilha no toque.</p>`;
   }
   const pick = tabs.some(([id]) => id === tab) ? tab : 'basico';
@@ -743,11 +833,21 @@ function showHelp(tab = 'basico') {
 }
 
 /** Maior recorde do tema entre os modos (cada modo guarda o seu). */
+function voyageSummary() {
+  const b = game.board, rows = b.ports.filter((p) => p.delivered).sort((a, c) => a.paidAt! - c.paidAt!);
+  let historical = 0;
+  try { historical = Number(JSON.parse(store.get(`best.entrepostos.${rulesTheme.id}`) ?? 'null')?.score) || 0; } catch { /* Marca antiga ilegível. */ }
+  const developed = b.list.filter((p) => developmentAt(b,p.q,p.r).levels.some((n)=>n>=2)).length;
+  return `${world.livingEnabled ? `<p>${developed} peças alcançaram o segundo estágio de desenvolvimento.</p>` : ''}<ol class="voyage-log">${rows.map((p) => `<li>Turno ${p.paidAt} · ${HARBORS[p.id].name}${p.connectedAt !== p.paidAt ? ` (ligada no turno ${p.connectedAt})` : ''} <b>+${p.reward} peças</b></li>`).join('')}</ol><p>Bônus da pilha restante · ${game.finalSupplyBonus} pontos</p>${historical ? `<small>Marca histórica com contrato desconhecido · ${historical} pontos</small>` : ''}`;
+}
+
 function themeBest(id: string) {
   let top = 0;
   for (const m of MODES) {
-    try {
-      const v = JSON.parse(store.get(`best.${m.id}.${id}`) ?? 'null') as { score?: unknown } | null;
+    const keys = [`best.${m.id}.${id}`];
+    if (m.id === 'entrepostos') for (const layout of Object.keys(CHARTS)) for (const kind of ['direto', 'madeira', 'madeira-v11']) keys.push(`best.entrepostos.${id}.${layout}.${kind}`);
+    for (const key of keys) try {
+      const v = JSON.parse(store.get(key) ?? 'null') as { score?: unknown } | null;
       if (v && Number.isSafeInteger(v.score)) top = Math.max(top, v.score as number);
     } catch {
       // valor corrompido: ignora
@@ -806,10 +906,10 @@ function showGameOver() {
       <div><b>${game.placedCount}</b><span>peças</span></div>
       ${b.ports.length ? `<div><b>${b.ports.filter((p) => p.delivered).length} / 3</b><span>cais abastecidos</span></div>` : `<div><b>${b.questsCompleted}</b><span>missões</span></div>`}
     </div>
-    <p class="muted">Era ${eraName(b.era)}, ${b.sites.filter((x) => x.found).length} de ${b.sites.length} sítios, ${b.perfects} encaixes perfeitos, ${Object.values(b.synergyCount).reduce((a, c) => a + c, 0)} interações.</p>
+    ${b.ports.length ? voyageSummary() : `<p class="muted">Era ${eraName(b.era)}, ${b.sites.filter((x) => x.found).length} de ${b.sites.length} sítios, ${b.perfects} encaixes perfeitos, ${Object.values(b.synergyCount).reduce((a, c) => a + c, 0)} interações.</p>`}
     ${b.blessings.length ? `<p class="muted">Cartas da vila: ${b.blessings.map((id) => blessingName(id, theme)).join(', ')}.</p>` : ''}
-    <p class="muted">Recorde em ${mode.name} · ${rulesTheme.name}: ${best.toLocaleString('pt-BR')} pontos (semente ${bestSeed}).</p>
-    ${special ? '' : specialsLine()}
+    <p class="muted">Recorde em ${mode.name} · ${rulesTheme.name}${b.ports.length ? ` · ${game.rules.combinedFreight ? 'Madeira' : 'Direto'} · ${CHARTS[game.rules.layout]}` : ''}: ${best.toLocaleString('pt-BR')} pontos (semente ${bestSeed}).</p>
+    ${special || b.ports.length ? '' : specialsLine()}
     <div class="row">
       <button class="primary" type="button" data-act="new">Jogar de novo</button>
       ${mode.daily ? '' : `<button class="secondary" type="button" data-act="replay-seed">Repetir a semente</button>`}
@@ -842,7 +942,13 @@ hud.modal.addEventListener('click', (e) => {
     if (!game.rules.riverTrade || moves.length) return;
     const combined = act === 'freight-combined';
     hud.hideModal();
-    if (combined !== game.rules.combinedFreight) newGame(game.seed, [], undefined, undone, game.specials, combined);
+    const layout = chartFrom((document.getElementById('voyage-map') as HTMLSelectElement).value);
+    world.livingEnabled = document.querySelector<HTMLInputElement>('#living-option')!.checked;
+    store.set('living', world.livingEnabled ? '1' : '0');
+    store.set('layout', layout);
+    newGame(game.seed, [], undefined, undone, game.specials, combined, layout);
+    collapseChart();
+    canvas.focus({ preventScroll: true });
     return;
   }
   if (act === 'film') {
@@ -875,7 +981,7 @@ hud.modal.addEventListener('click', (e) => {
     commitProgress();
     const seed = game.seed;
     rulesTheme = theme;
-    newGame(seed, [], undefined, 0, undefined, game.rules.combinedFreight);
+    newGame(seed, [], undefined, 0, game.specials, game.rules.combinedFreight, game.rules.layout, game.rules.legacyFreight);
     hud.toast(`Mesma semente (${seed}) · ${mode.name} · ${theme.name}`);
   } else if (act === 'mode') {
     hud.hideModal();
@@ -922,7 +1028,7 @@ function pickTheme(t: Theme) {
   if (game.over) {
     rulesTheme = t;
     newGame();
-  } else if (!mode.daily && JSON.stringify({ ...rulesFor(t), combinedFreight: game.rules.combinedFreight }) !== JSON.stringify(game.rules)) {
+  } else if (!mode.daily && JSON.stringify({ ...rulesFor(t), layout: game.rules.layout, legacyFreight: game.rules.legacyFreight, combinedFreight: game.rules.combinedFreight }) !== JSON.stringify(game.rules)) {
     hud.toast(`${t.ruleNote ?? 'Regras padrão.'} Vale a partir da próxima partida.`);
   }
 }
@@ -966,6 +1072,10 @@ function applyQuality(mode: QualityMode) {
   world.setQuality(mode === 'auto' ? autoLevel : mode);
   qualityBtn.textContent = qualityLabel[mode];
   updateQualityTitle();
+  if (game?.current) {
+    world.setPreview(game.current, rotSteps * (Math.PI / 3), game.stack);
+    if (hover) updateGhost();
+  }
 }
 
 /** Modo Auto: com o quadro lento, a resolução cede um degrau por vez; no menor degrau, o nível desce. */
@@ -978,6 +1088,8 @@ function adaptQuality(dt: number, now: number) {
     dynres.reset();
     world.setResolutionScale(1);
     world.setQuality(autoLevel);
+    if (game.current) world.setPreview(game.current, rotSteps * (Math.PI / 3), game.stack);
+    if (hover && game.current) updateGhost();
     hud.toast(`Qualidade ajustada para ${qualityLabel[autoLevel]} para manter a fluidez.`);
   }
   if (ev) updateQualityTitle();
@@ -1009,6 +1121,15 @@ function setHover(h: { q: number; r: number } | null) {
   if (!same) updateGhost();
 }
 
+let eventCpu = 0;
+if (params.has('debug')) {
+  const starts = new WeakMap<Event, number>();
+  for (const type of ['pointermove','pointerup','keydown','click','wheel']) {
+    window.addEventListener(type, (event) => starts.set(event, performance.now()), { capture: true, passive: true });
+    window.addEventListener(type, (event) => { const start = starts.get(event); if (start !== undefined) eventCpu += performance.now() - start; }, { passive: true });
+  }
+}
+
 const input = bindInput({
   canvas,
   world,
@@ -1017,7 +1138,23 @@ const input = bindInput({
   store,
   capture,
   hover: () => hover,
-  setHover,
+  setHover: (h) => { keyboardCell = false; setHover(h); },
+  manualCamera: () => { overview = false; world.releaseBargeCamera(); },
+  stepCell: (dir) => {
+    const cells = [...game.board.frontier].sort((a, b) => a - b);
+    if (!cells.length || !game.current) return;
+    const current = hover ? cells.indexOf(hkey(hover.q, hover.r)) : -1;
+    const i = current < 0 ? (dir > 0 ? 0 : cells.length - 1) : (current + dir + cells.length) % cells.length;
+    const [q, r] = unkey(cells[i]);
+    keyboardCell = true; setHover({ q, r }); canvas.focus(); announceCell();
+    const p = screenOf(q, r);
+    if (!p.visible || document.elementFromPoint(p.x, p.y) !== canvas) {
+      const center = hexToWorld(q, r);
+      world.releaseBargeCamera(); overview = false;
+      world.rig.goal.set(center.x, 0, center.z);
+      if (reducedMotion.matches) world.rig.target.copy(world.rig.goal);
+    }
+  },
   open: (q, r) => game.board.frontier.has(hkey(q, r)),
   hasPiece: () => !!game.current,
   gameOver: () => game.over,
@@ -1123,7 +1260,7 @@ soundBtn.addEventListener('click', () => {
 }
 document.addEventListener('visibilitychange', () => sfx.pause(document.hidden));
 
-window.addEventListener('resize', () => world.resize());
+window.addEventListener('resize', () => { world.resize(); collapseChart(); if (overview && game?.board.ports.length) frameCamera(true); });
 
 // ------------------------------------------------------------------ modos especiais
 
@@ -1150,8 +1287,8 @@ function autoPlace(n: number, infinite: boolean) {
   world.placeInstant(placed, game.board);
   const bake = performance.now() - t1;
   hud.renderQuests(game.board.quests, theme);
-  frameCamera(true);
   refreshHud(true);
+  frameCamera(true);
   return { logic, bake, tiles: game.board.list.length };
 }
 
@@ -1243,6 +1380,8 @@ function step(now: number, sampleQuality: boolean) {
   tutorial.tick(hud.modalOpen || capture.stage !== 'play' || capture.take !== null);
   const c0 = performance.now();
   input.keyboardCamera(dt);
+  world.inputMs = performance.now() - c0 + eventCpu;
+  eventCpu = 0;
   if (params.has('demo')) demoStep(dt);
   if (scoutPending && !hud.modalOpen) {
     scoutPending = false;
@@ -1253,9 +1392,14 @@ function step(now: number, sampleQuality: boolean) {
   if (capture.take && !capture.take.frame(realDt, { x: world.rig.target.x, z: world.rig.target.z, dist: world.rig.dist, yaw: world.rig.yaw, tilt: world.rig.tilt })) capture.stopTake('A gravação chegou a 2 minutos.');
   hud.tick(dt);
   const markers = [];
+  if (guided && game.rules.riverTrade) {
+    const p = game.board.ports[0], halfway = !game.board.get(p.q / 2, p.r / 2);
+    const pos = screenOf(halfway ? p.q / 2 : p.q, halfway ? p.r / 2 : p.r, 0.12);
+    markers.push({ id: 915999, ...pos, text: '◇ Guia', color: '#f8c975', kind: 'port' });
+  }
   for (const p of game.board.ports) {
     const h = HARBORS[p.id], s = screenOf(p.q, p.r, 0.42);
-    markers.push({ id: 910000 + p.id, x: THREE.MathUtils.clamp(s.x + 4, 44, window.innerWidth - 44), y: s.y, visible: s.visible, text: `${p.delivered ? '✓' : p.id + 1} · ${h.name}`, color: h.color, kind: 'port' });
+    markers.push({ id: 910000 + p.id, x: s.x + 4, y: s.y, visible: s.visible, text: `${p.delivered ? '✓' : p.connectedAt ? '⌛' : p.id + 1} · ${h.name}`, color: h.color, kind: 'port' });
   }
   for (const q of game.board.quests) {
     if (q.state !== 'active') continue;
@@ -1326,7 +1470,7 @@ function start(data: unknown) {
   if (saved) {
     rulesTheme = themeById(saved.rulesId);
     mode = modeById(saved.mode);
-    resumed = newGame(saved.seed, saved.moves, saved.score, saved.undone, saved.specials, saved.combinedFreight);
+    resumed = newGame(saved.seed, saved.moves, saved.score, saved.undone, saved.specials, saved.combinedFreight, saved.layout, saved.legacyFreight);
     if (resumed && saved.moves.length) hud.toast(`Partida retomada · ${saved.moves.length} peças`);
     else if (!resumed) hud.toast('A partida salva é de uma versão anterior e não pôde ser retomada. Começando outra.');
   }
@@ -1362,7 +1506,9 @@ function start(data: unknown) {
   });
 }
 
-if (params.has('debug')) Object.assign(window, { __projectTile: (q: number, r: number) => screenOf(q, r, 0) });
+if (params.has('debug')) Object.assign(window, {
+  __frameCosts: () => world.stats(),
+  __projectTile: (q: number, r: number) => screenOf(q, r, 0) });
 
 // Ajuda para capturas de tela automatizadas: mostra a peça atual na melhor posição.
 (window as unknown as { __ghostBest: () => void }).__ghostBest = () => {

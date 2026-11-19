@@ -333,14 +333,39 @@ export class Hud {
     setTimeout(() => el.remove(), 1400);
   }
 
+  private returnFocus: HTMLElement | null = null;
+  private inertSiblings: Array<{ el: HTMLElement; inert: boolean }> = [];
   showModal(html: string) {
+    if (this.modal.hidden) {
+      this.returnFocus = document.activeElement as HTMLElement | null;
+      this.inertSiblings = [...document.body.children]
+        .filter((el): el is HTMLElement => el instanceof HTMLElement && el !== this.modal)
+        .map((el) => ({ el, inert: el.inert }));
+      for (const { el } of this.inertSiblings) el.inert = true;
+    }
     this.modalBody.innerHTML = html;
     this.modal.hidden = false;
-    (this.modalBody.querySelector('button') as HTMLButtonElement | null)?.focus();
+    const heading = this.modalBody.querySelector('h2,h3');
+    if (heading) heading.id = 'modal-title';
+    const dialog = this.modal.querySelector<HTMLElement>('[role="dialog"]')!;
+    dialog.tabIndex = -1;
+    const controls = () => [...this.modalBody.querySelectorAll<HTMLElement>('button:not(:disabled),select:not(:disabled),input:not(:disabled),a[href],[tabindex]:not([tabindex="-1"])')].filter((e) => e.getClientRects().length);
+    (controls()[0] ?? dialog).focus();
+    this.modal.onkeydown = (e) => {
+      if (e.key !== 'Tab') return;
+      const items = controls(), first = items[0], last = items[items.length - 1];
+      if (!first || !last) { e.preventDefault(); dialog.focus(); return; }
+      if (e.shiftKey && (document.activeElement === first || !this.modal.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+      if (!e.shiftKey && (document.activeElement === last || !this.modal.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+    };
   }
 
   hideModal() {
+    if (this.modal.hidden) return;
     this.modal.hidden = true;
+    for (const { el, inert } of this.inertSiblings) el.inert = inert;
+    this.inertSiblings = [];
+    (this.returnFocus?.getClientRects().length && this.returnFocus !== document.body ? this.returnFocus : document.getElementById('scene'))?.focus();
   }
 
   get modalOpen() {

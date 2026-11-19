@@ -1,18 +1,28 @@
-# Retalhos · Entrepostos
+# Entrepostos · Cartas fluviais (0.3)
 
-Abra **dist/index.html** no Chrome ou no Edge para jogar. O arquivo contém o jogo, as regras, a interface, os modelos e os materiais procedurais. A edição usa o espaço `entrepostos.` no armazenamento do navegador. Para retomar uma partida, abra o mesmo arquivo no mesmo navegador.
+Abra **dist/index.html** no Chrome ou Edge. O jogo roda em um único arquivo, inclusive sem servidor. Na tela inicial, abra **Escolher frete**, selecione a carta e confirme o contrato. Em telas pequenas, o botão **0/3 cais** abre a carta. As setas percorrem as casas livres, **R** gira e **Enter** coloca. **WASD** move a câmera, **U** desfaz e **Ver mapa** enquadra os três cais.
 
-[Validação, medições e capturas da edição](docs/VALIDACAO.md)
+| Carta | Como jogar |
+|---|---|
+| Confluência | Três braços saem da vila. **Guiar primeira entrega** marca as duas casas até a Feira. Use **Pular guia** para seguir por conta própria. |
+| Rio bifurcado | A Feira e a Serraria ficam além de um trecho comum. Reserve espaço para a bifurcação e decida qual ramal abrir primeiro. |
+| Cais da enseada | A Serraria fica perto e o Estaleiro está além da curva. A Feira fica no outro braço. |
 
-## Madeira para a Feira · edição 0.2
+**Entrega direta** repõe quatro peças quando a Feira abre. Em **Madeira para a Feira**, a Serraria paga seis. Se ela abrir antes da Feira ou no mesmo turno, a Feira paga dez. Se abrir depois, a Feira aguarda a ligação e paga quatro. A prévia informa quais cais a jogada vai abastecer. O placar final registra os turnos de ligação e de pagamento, a reposição e o bônus de estoque. Cada carta e contrato têm seu próprio recorde.
 
-Antes da primeira jogada, abra **Escolher frete** na carta fluvial. Na entrega direta, a Feira recebe grãos e repõe quatro peças assim que você chega. Se aceitar **Madeira para a Feira**, ela guarda o pedido até estar ligada à Serraria pelo rio da vila. Você abre mão da reposição imediata e recebe dez peças quando o frete se completa. A Serraria paga suas seis peças assim que abre, inclusive se for o primeiro cais da viagem.
+A linha sobre a água mostra a rota da carga. **Rever a travessia** acompanha a barca. **Câmera fixa na travessia** conserva o enquadramento e vem selecionada quando o sistema pede movimento reduzido.
 
-A barca de vela verde e flâmula dourada sai da Serraria carregada de toras. **Rever a travessia** aproxima a câmera para acompanhar o percurso. Arraste para assumir a câmera ou use **Ver mapa** para voltar à carta. Reveja a viagem quantas vezes quiser, com a mesma pilha e pontuação. As partidas da edição 0.1 são retomadas como entregas diretas.
+A 0.3 grava suas partidas em `entrepostos.cartas.` no navegador. Na primeira abertura, copia o progresso anterior disponível na mesma origem. Uma viagem de madeira salva pela 0.2 continua com o prêmio antigo. Ao abrir arquivos em pastas diferentes, o navegador pode lhes atribuir armazenamentos separados.
 
-O navegador precisa encontrar o save na mesma origem. Quando as duas edições são abertas de pastas diferentes pelo sistema de arquivos, cada HTML pode ter seu próprio armazenamento. A edição anterior continua acessível na sua pasta.
+[Revisão e medições da edição 0.3](docs/REVISAO_0_3.md) · [Plano de dez pontos](docs/PLANO_REVISAO_FRETES_0_2.md) · [Pesquisa de motores da 0.2](docs/MOTORES_E_FRETE.md)
 
-[Pesquisa dos motores, ferramentas instaladas e verificação da edição 0.2](docs/MOTORES_E_FRETE.md)
+## Paisagem viva e Costa dos Terraços
+
+A edição abre com o tema **Costa dos Terraços**, inspirado na referência visual fornecida, com fachadas claras, telhas de terracota, ciprestes, oliveiras, carvalhos e vinhedos.
+
+**Paisagem viva** vem selecionada na preparação da viagem e também atua no modo **Zen**. Cada terreno pode desenvolver três estágios conforme aumenta seu número de bordas encaixadas com o mesmo terreno. A peça nova e as vizinhas recebem o desenvolvimento. As casas crescem em altura, a mata ganha copas e densidade, o cultivo aumenta e recebe um celeiro, e os canais conectados ficam mais largos. A prévia indica o desenvolvimento esperado. Para construir uma cidade sem limite de peças, abra **Nova → Zen**.
+
+O desenvolvimento é derivado do tabuleiro salvo. Suas recompensas atuais são o crescimento visual e o registro no resumo da viagem. As regras de frete e de pontuação continuam descritas abaixo.
 
 ## A viagem
 
@@ -24,9 +34,9 @@ A vila começa na confluência de três canais. Você tem **24 peças para abrir
 | Serraria | Madeira | 6 peças |
 | Estaleiro | Ferragens | 8 peças |
 
-Gire a primeira peça e prolongue uma das bocas do rio da vila. As duas primeiras peças são retas. Elas permitem fazer a primeira entrega na Feira em duas jogadas. Em uma partida nova, a semente muda a orientação do mapa, das peças e a paisagem que as acompanha.
+Gire a primeira peça e prolongue uma das bocas do rio da vila. As duas primeiras peças são retas. Na Confluência, elas permitem fazer a primeira entrega na Feira em duas jogadas. Em uma partida nova, a semente muda a orientação do mapa, das peças e a paisagem que as acompanha.
 
-Um cais aceita uma peça com rio. Se você construir um trecho isolado, pode ligá-lo à vila por uma jogada posterior. Quando o caminho se completa, o cais exibe a carga e uma embarcação percorre a ligação. O crédito entra no turno da conexão. A terceira entrega encerra a viagem e cada peça restante vale 20 pontos. A pilha também pode acabar com cais por atender.
+Um cais aceita uma peça com rio. Se você construir um trecho isolado, pode ligá-lo à vila por uma jogada posterior. Quando o caminho se completa, o cais exibe a carga e uma embarcação percorre a ligação. O crédito entra quando o caminho e o contrato estiverem completos. A terceira entrega encerra a viagem e cada peça restante vale 20 pontos. A pilha também pode acabar com cais por atender.
 
 **Controles.** Clique para colocar, use R para girar e arraste para mover a câmera. No toque, selecione a casa e confirme com ✓ ou com um segundo toque. A partida permite cinco desfazeres. O menu Nova oferece também Clássico, Zen, Exploradores e Desafio do dia. Os 14 temas, a fotografia e a exportação de vídeo continuam disponíveis.
 
@@ -46,6 +56,10 @@ A sobreposição com Dorfromantik aparece no primeiro turno. O jogador gira um h
 | Som de ambiente | O jogo consulta os 37 hexágonos no raio do foco pelo índice do tabuleiro. | O custo dessa consulta tem o mesmo limite em mapas pequenos e grandes. |
 
 ## Como verificar
+
+- `npm run cartas` joga as três cartas em 100 sementes e compara a previsão com as entregas.
+- `npm run teclado` percorre os mapas por teclado e verifica a retomada de um frete da edição 0.2.
+- `node scripts/medir-cartas.mjs regioes` mede as regiões 0, 4 e 8 nos dois backends. Para comparar edições, use `node scripts/medir-cartas.mjs edicoes "caminho/da/0.2/dist/index.html"` depois de gerar o roteiro com `npm run viagem`. As medições brutas ficam em `.cache/`.
 
 Com Node 22.12 ou superior, execute `npm ci` nesta pasta. Para desenvolvimento, `npm run dev`. Para reconstruir o arquivo jogável, `npm run build`.
 

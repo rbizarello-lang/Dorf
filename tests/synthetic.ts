@@ -140,6 +140,8 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
   trial.board.placeRaw(port.q, port.r, piece, 0);
   trial.board.computeGroups();
   ok(!trial.board.onMainRiver(trial.board.get(port.q, port.r)) && !port.delivered, 'Rio isolado no cais ainda espera a vila');
+  const quote = trial.board.voyageAt(port.q / 2, port.r / 2, edges);
+  ok(quote.shipments.length === 1 && quote.shipments[0].port.id === 0 && quote.shipments[0].tiles === 4 && !port.delivered, 'Prévia da ponte reconhece um cais remoto e preserva a partida');
   const bridge = trial.board.place(port.q / 2, port.r / 2, piece, 0);
   ok(bridge.deliveries.length === 1 && port.delivered, 'Ligar o trecho intermediário entrega a carga');
   const farther = trial.board.place(port.q * 1.5, port.r * 1.5, piece, 0);
@@ -162,7 +164,7 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
   ok(finished === 36 && firstSupply === 36, `${finished}/36 viagens chegaram aos três cais; ${firstSupply}/36 abasteceram a Feira na segunda peça`);
   let charters = 0;
   for (let seed = 1; seed <= 36; seed++) {
-    const direct = sail(seed), freight = new Game(seed, { ...direct.game.rules, combinedFreight: true });
+    const direct = sail(seed), freight = new Game(seed, { ...direct.game.rules, combinedFreight: true, legacyFreight: true });
     let held = false, released = false;
     for (const [i, [q, r, rot]] of direct.moves.entries()) {
       freight.rot = rot;
@@ -185,7 +187,7 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
     if (simultaneous) g.board.placeRaw(fair.q, fair.r, piece, 0);
     const first = g.board.place(dx, dr, piece, 0);
     const next = simultaneous ? first : g.board.place(fair.q, fair.r, piece, 0);
-    ok(sawmill.delivered && fair.delivered && first.deliveries.length === (simultaneous ? 2 : 1)
+    ok(fair.reward === 10 && sawmill.reward === 6 && sawmill.delivered && fair.delivered && first.deliveries.length === (simultaneous ? 2 : 1)
       && next.deliveries.some((p) => p.id === 0), simultaneous ? 'Ponte única libera os dois cais' : 'Serraria aberta antes da Feira também cumpre o frete');
     ok(g.board.place(dx * 3, dr * 3, piece, 0).deliveries.length === 0, 'Frete quitado uma única vez');
   }

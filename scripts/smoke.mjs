@@ -6,6 +6,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { launch } from './browser.mjs';
 
 const DIST = path.resolve('dist');
@@ -15,7 +16,8 @@ const TIMEOUT = Number(process.env.SMOKE_TIMEOUT ?? 180000);
 const IGNORE = /fonts\.g|ERR_|net::|GL Driver|vertex count of 0/;
 
 // Servidor estático mínimo: o build é um arquivo só, mas o navegador ainda pede o favicon e afins.
-const server = http.createServer((req, res) => {
+const fileUrl = process.env.QA_HTML ? pathToFileURL(path.resolve(process.env.QA_HTML)).href : null;
+const server = fileUrl ? null : http.createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x');
   const file = path.join(DIST, url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname));
   if (!file.startsWith(DIST) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
@@ -25,8 +27,8 @@ const server = http.createServer((req, res) => {
   res.writeHead(200, { 'content-type': file.endsWith('.html') ? 'text/html; charset=utf-8' : 'application/octet-stream' });
   fs.createReadStream(file).pipe(res);
 });
-await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const base = `http://127.0.0.1:${server.address().port}/`;
+if (server) await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const base = fileUrl ?? `http://127.0.0.1:${server.address().port}/`;
 
 const cases = [
   { name: 'webgpu', q: 'theme=vale&seed=3&auto=12&quality=low', backend: 'webgpu' },
@@ -65,5 +67,5 @@ for (const c of cases) {
   await page.close();
 }
 await browser.close();
-server.close();
+server?.close();
 process.exit(failed ? 1 : 0);

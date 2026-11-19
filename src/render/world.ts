@@ -1,3 +1,6 @@
+import { LivingLandscape } from './developmentView';
+import { developBuild } from './developmentBuild';
+import { developmentAt, previewDevelopment, type DevelopmentValues } from '../core/development';
 import * as THREE from 'three/webgpu';
 import { HarborView } from './harbors';
 import { mrt, vec3, vec4 } from 'three/tsl';
@@ -22,7 +25,7 @@ import { SkyEnv } from './sky';
 import { FX, Fireflies, Sprites, Weather } from './fx';
 import { LiveTile } from './liveTile';
 import { PreviewView } from './preview';
-import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type TileBuild } from './tileBuilder';
+import { TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type Deco, type TileBuild } from './tileBuilder';
 import { NIGHT_LIGHT } from './nightLight';
 
 export type { Quality };
@@ -32,7 +35,16 @@ const CHUNK = 8;
 /** O alto do céu um pouco mais azul que a cor "do céu" do tema (que é quase branca). */
 const ZENITH_TINT = new THREE.Color(0.86, 0.93, 1.08);
 // Ultra e Cinema passam de 1: mais árvores, capim e plantações de perto (alvo: GPUs acima da atual).
-const DETAIL: Record<Quality, number> = { cinema: 1.6, ultra: 1.35, high: 1, medium: 0.65, low: 0.4 };
+const BAND: Record<Quality, number> = { low: 0, medium: 1, high: 2, ultra: 3, cinema: 4 };
+const regionArg = new URLSearchParams(location.search).get('regiao');
+const regionSize = regionArg === '4' || regionArg === '8' ? Number(regionArg) : 0;
+function dense(key: string) { return key.startsWith('tree:') || key.startsWith('crop:') || key === 'grass' || key === 'flower'; }
+function vegetationBand(d: Deco, seed: number) {
+  if (!dense(d.key) || d.anim) return 0;
+  const f = (Math.abs(Math.sin(d.x * 12.9898 + d.z * 78.233 + seed % 65521) * 43758.5453) % 1) * 1.6;
+  return f < 0.4 ? 0 : f < 0.65 ? 1 : f < 1 ? 2 : f < 1.35 ? 3 : 4;
+}
+const instanceSphere = new THREE.Sphere();
 /** Mapa de sombra por nível. No Ultra e no Cinema, cada uma das cascatas tem esse tamanho. */
 const SHADOW_MAP: Record<Quality, number> = { cinema: 4096, ultra: 4096, high: 2048, medium: 1024, low: 1024 };
 /**
@@ -85,11 +97,15 @@ class Pool {
   mesh: THREE.InstancedMesh;
   count = 0;
   private flushed = 0;
+  private ends = [0, 0, 0, 0, 0];
+  private bounds = new THREE.Sphere();
+  private band = 4;
   constructor(
     private geo: THREE.BufferGeometry,
     private mat: THREE.Material,
     private parent: THREE.Object3D,
     private shadows: boolean,
+    private regional = false,
     private cap = 128,
   ) {
     this.mesh = this.make(cap);
@@ -97,15 +113,18 @@ class Pool {
 
   private make(cap: number, colors?: Float32Array) {
     const m = new THREE.InstancedMesh(instGeometry(this.geo, cap, colors), this.mat, cap);
-    m.count = this.count;
+    m.count = this.ends[this.band];
     m.castShadow = this.shadows;
     m.receiveShadow = true;
-    m.frustumCulled = false;
+    m.frustumCulled = this.regional;
+    if (this.regional) m.boundingSphere = this.bounds;
     this.parent.add(m);
     return m;
   }
 
-  add(m: THREE.Matrix4, c: THREE.Color) {
+  setBand(band: number) { this.band = band; this.mesh.count = this.ends[band]; }
+
+  add(m: THREE.Matrix4, c: THREE.Color, band: number) {
     if (this.count >= this.cap) {
       const old = this.mesh;
       this.flushed = 0;
@@ -116,10 +135,28 @@ class Pool {
       old.geometry.dispose();
       old.dispose();
     }
-    this.mesh.setMatrixAt(this.count, m);
-    setInstColor(this.mesh, this.count, c);
+    // Cada faixa ocupa um intervalo contíguo. Abrir espaço desloca no máximo uma instância por faixa.
+    const matrices = this.mesh.instanceMatrix, colors = this.mesh.geometry.getAttribute('iColor') as THREE.BufferAttribute;
+    for (let i = 4; i > band; i--) {
+      const from = this.ends[i - 1], to = this.ends[i];
+      if (from === to) continue;
+      matrices.array.copyWithin(to * 16, from * 16, from * 16 + 16);
+      colors.array.copyWithin(to * 3, from * 3, from * 3 + 3);
+      if (to < this.flushed) { matrices.addUpdateRange(to * 16, 16); colors.addUpdateRange(to * 3, 3); }
+    }
+    const slot = this.ends[band];
+    this.mesh.setMatrixAt(slot, m);
+    setInstColor(this.mesh, slot, c);
+    if (slot < this.flushed) { matrices.addUpdateRange(slot * 16, 16); colors.addUpdateRange(slot * 3, 3); }
+    if (this.regional) {
+      if (!this.geo.boundingSphere) this.geo.computeBoundingSphere();
+      instanceSphere.copy(this.geo.boundingSphere!).applyMatrix4(m);
+      instanceSphere.radius += 0.4;
+      if (!this.count) this.bounds.copy(instanceSphere); else this.bounds.union(instanceSphere);
+    }
+    for (let i = band; i < 5; i++) this.ends[i]++;
     this.count++;
-    this.mesh.count = this.count;
+    this.mesh.count = this.ends[this.band];
   }
 
   /** Troca a forma de todas as instâncias (casas na virada de era): mesma posição e mesma cor. */
@@ -442,6 +479,13 @@ export class World {
   private chunks = new Map<number, Chunk>();
   private pools = new Map<string, Pool>();
   private board: Board | null = null;
+  livingEnabled = true;
+  private living: LivingLandscape;
+  private smokeSlots = new Map<number, number[]>();
+  private freeSmokeSlots: number[] = [];
+  private visualSignatures = new WeakMap<TileBuild, string>();
+  private pendingLandscape = new Set<number>();
+  get livingActive() { return this.livingEnabled && !!this.board && (this.board.rules.riverTrade || this.board.rules.infinite); }
   private chimneys: number[] = [];
   private sun = new THREE.DirectionalLight();
   /** Sombras em cascata do sol (Ultra e Cinema): nítidas perto da câmera, cobrindo até a névoa. */
@@ -528,11 +572,14 @@ export class World {
     preview: PreviewView,
   ) {
     this.preview = preview;
+    this.living = new LivingLandscape(this.lib, this.staticRoot, vegetationBand);
     // Sem tone mapping do renderizador: o pós-processamento aplica um ombro suave (post.ts).
     this.renderer.toneMapping = THREE.NoToneMapping;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.info.autoReset = false;
+    this.scene.onBeforeRender = () => { this.sceneStart = performance.now(); };
+    this.scene.onAfterRender = () => { this.sceneSubmitMs += performance.now() - this.sceneStart; };
 
     this.scene.add(this.staticRoot, this.harbors);
     // Névoa por altura com bruma e névoa rasteira (atmosphere.ts) no lugar do THREE.Fog.
@@ -710,7 +757,7 @@ export class World {
   }
 
   setQuality(q: Quality) {
-    const detailChanged = DETAIL[q] !== DETAIL[this.quality];
+    const detailChanged = q !== this.quality;
     const postChanged = q !== this.quality || !this.post;
     this.quality = q;
     const shadows = q !== 'low';
@@ -743,9 +790,11 @@ export class World {
         this.voidMat.needsUpdate = true;
       }
     }
-    if (detailChanged && this.board && this.theme) {
+    if (detailChanged) {
+      this.living.setBand(BAND[q]);
+      this.preview.invalidateDetail();
       this.dropGhost();
-      this.rebuild(this.board);
+      for (const pool of this.pools.values()) pool.setBand(BAND[q]);
     }
     this.resize();
   }
@@ -836,13 +885,84 @@ export class World {
 
   // ---------------------------------------------------------------- mapa
 
-  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[] }) {
-    return buildTile(def.edges, def.seed, this.theme, { detail: DETAIL[this.quality], synergies, houses: this.lib.houseMeta, flow, special: def.special, ...extra });
+  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; development?: DevelopmentValues; waterGrowth?: number }) {
+    const tile: TileBuild = buildTile(def.edges, def.seed, this.theme, { detail: 1.6, synergies, houses: this.lib.houseMeta, flow, special: def.special, ...extra });
+    if (extra?.development) {
+      developBuild(tile, def.edges, extra.development);
+      this.visualSignatures.set(tile, this.landscapeSignature(extra.development, extra.widths!));
+    }
+    tile.allDecos = tile.decos;
+    tile.decos = tile.decos.filter((d) => vegetationBand(d, def.seed) <= BAND[this.quality]);
+    return tile;
   }
 
   /** Peça do mapa já colocada: a inicial reserva o Centro, e a do marco o ergue. */
   private buildPlaced(p: Placed) {
-    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths: this.settleWidths(p) });
+    return this.build(p.def, synBase(p.synergies, p.rot), this.settleFlow(p), { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, ...this.developmentOptions(p.q, p.r, p.def, p.rot, this.settleWidths(p)) });
+  }
+
+  private developmentOptions(q: number, r: number, def: TileDef, rot: number, widths: number[]) {
+    if (!this.livingActive || !this.board) return { widths };
+    const edges = rotateEdges(def.edges, rot);
+    const proposed = this.board.get(q,r) ? undefined : previewDevelopment(this.board,q,r,edges);
+    const levels = proposed?.placed.after.levels ?? developmentAt(this.board,q,r,edges).levels;
+    const expanded = widths.map((width, side) => {
+      const worldSide = (side + rot) % 6;
+      if (!width) return 0;
+      const [dq, dr] = DIRS[worldSide], neighbor = this.board!.get(q+dq,r+dr);
+      if (!neighbor || neighbor.edges[opposite(worldSide)] !== T.Water) return width;
+      const state = proposed?.neighbors.find((p)=>p.q===q+dq && p.r===r+dr)?.after ?? developmentAt(this.board!,q+dq,r+dr);
+      return width * (1 + 0.12 * Math.min(levels[worldSide],state.levels[opposite(worldSide)]));
+    });
+    return { widths: expanded, development: flowBase(levels, rot) as DevelopmentValues, waterGrowth: levels[edges.indexOf(T.Water)] ?? 0 };
+  }
+
+  private landscapeSignature(levels: DevelopmentValues | undefined, widths: number[]) {
+    return `${levels?.join(',')}|${widths.join(',')}`;
+  }
+
+  // A boca do rio no segundo anel pode mudar quando o primeiro anel ganha um encaixe.
+  private markLandscape(p: Placed) {
+    this.pendingLandscape.add(p.key);
+    for (const [dq,dr] of DIRS) {
+      this.pendingLandscape.add(hkey(p.q+dq,p.r+dr));
+      for (const [eq,er] of DIRS) this.pendingLandscape.add(hkey(p.q+dq+eq,p.r+dr+er));
+    }
+  }
+
+  private syncLiving() {
+    if (!this.livingActive || !this.board) return;
+    this.living.sync(this.pendingLandscape, (p) => {
+      const d = this.developmentOptions(p.q,p.r,p.def,p.rot,this.settleWidths(p));
+      return this.landscapeSignature(d.development, d.widths);
+    }, (p) => {
+      const b = this.buildPlaced(p), m = tileMatrix(p.q,p.r,p.rot);
+      groundMap.add(b,m,this.waterColor);
+      const {x,z}=hexToWorld(p.q,p.r);
+      this.halo(x,z,0.55);
+      this.rememberSmoke(p,b,m);
+      return b;
+    });
+    this.pendingLandscape.clear();
+  }
+
+  private rememberSmoke(p: Placed, b: TileBuild, m: THREE.Matrix4) {
+    const slots = this.smokeSlots.get(p.key) ?? [];
+    this.smokeSlots.set(p.key, slots);
+    while (slots.length > b.chimneys.length / 4) {
+      const offset = slots.pop()!;
+      this.chimneys[offset] = Infinity;
+      this.freeSmokeSlots.push(offset);
+    }
+    const v = new THREE.Vector3();
+    for (let i=0;i<b.chimneys.length;i+=4) {
+      v.set(b.chimneys[i],b.chimneys[i+1],b.chimneys[i+2]).applyMatrix4(m);
+      const index = i / 4;
+      let offset = slots[index] ?? (slots[index] = this.freeSmokeSlots.pop() ?? this.chimneys.length);
+      this.chimneys[offset++] = v.x; this.chimneys[offset++] = v.y;
+      this.chimneys[offset++] = v.z; this.chimneys[offset++] = b.chimneys[i+3];
+    }
+
   }
 
   /**
@@ -863,7 +983,7 @@ export class World {
 
   /** Registra a correnteza de uma peça colocada e devolve a versão na orientação de origem. */
   private settleFlow(p: Placed) {
-    const wf = this.flowAt(p.q, p.r, p.edges);
+    const wf = this.flows.get(p.key) ?? this.flowAt(p.q, p.r, p.edges);
     this.flows.set(p.key, wf);
     return flowBase(wf, p.rot);
   }
@@ -889,13 +1009,14 @@ export class World {
 
   /** Registra a largura da água de uma peça colocada e devolve a versão na orientação de origem. */
   private settleWidths(p: Placed) {
-    const w = this.widthsAt(p.q, p.r, p.def, p.rot);
+    const w = this.widths.get(p.key) ?? this.widthsAt(p.q, p.r, p.def, p.rot);
     this.widths.set(p.key, w);
     return flowBase(w, p.rot);
   }
 
   rebuild(board: Board) {
     this.harbors.reset();
+    this.living.reset(); this.smokeSlots.clear(); this.freeSmokeSlots = []; this.pendingLandscape.clear(); this.living.setBand(BAND[this.quality]);
     this.followedBarge = undefined;
     this.board = board;
     for (const c of this.chunks.values()) c.dispose(this.staticRoot);
@@ -913,6 +1034,7 @@ export class World {
     this.lib.setEra(board.era);
     for (const p of board.list) this.bake(p, this.buildPlaced(p), false);
     for (const pool of this.pools.values()) pool.flush();
+    this.syncLiving();
     this.updateFrontier(board);
     this.life.sync(board);
     this.fireflies.sync(board);
@@ -989,6 +1111,7 @@ export class World {
         n++;
       }
     }
+    if (this.livingActive) this.living.retarget();
   }
 
   private stepCenter(dt: number) {
@@ -1114,16 +1237,19 @@ export class World {
     return c;
   }
 
-  private pool(key: string) {
-    let p = this.pools.get(key);
+  private pool(key: string, q: number, r: number) {
+    const regional = !!regionSize && dense(key.replace(/~$/, ''));
+    const id = regional ? `${Math.floor(q / regionSize)},${Math.floor(r / regionSize)}|${key}` : key;
+    let p = this.pools.get(id);
     if (!p) {
       // Chave com "~" = metade "fina" de plantas e capim, escondida de longe (nível de detalhe).
       const fine = key.endsWith('~');
       const base = fine ? key.slice(0, -1) : key;
       const geo = this.lib.geo(base);
       if (!geo) return null;
-      p = new Pool(geo, fine ? this.lib.fineMaterial(base) : this.lib.material(base), this.staticRoot, this.lib.castsShadow(base));
-      this.pools.set(key, p);
+      p = new Pool(geo, fine ? this.lib.fineMaterial(base) : this.lib.material(base), this.staticRoot, this.lib.castsShadow(base), regional);
+      p.setBand(BAND[this.quality]);
+      this.pools.set(id, p);
     }
     return p;
   }
@@ -1135,9 +1261,13 @@ export class World {
 
   private bake(p: Placed, b: TileBuild, flush = true) {
     const m = tileMatrix(p.q, p.r, p.rot);
-    this.chunkFor(p.q, p.r).append(b, m);
+    if (this.livingActive) {
+      this.living.add(p, b, this.visualSignatures.get(b)!);
+      this.markLandscape(p);
+    }
+    else this.chunkFor(p.q, p.r).append(b, m);
     groundMap.add(b, m, this.waterColor);
-    for (const d of b.decos) {
+    for (const d of b.allDecos ?? b.decos) {
       if (d.transient) continue;
       decoMatrix(d, tmpM);
       tmpM.premultiply(m);
@@ -1152,14 +1282,18 @@ export class World {
       else if (d.anim === 'chop' || d.anim === 'tend' || d.anim === 'carry') this.life.addWorker(d.key, tmpM, d.color, d.anim);
       else if (d.anim === 'swim') this.life.addFish(tmpM, d.color, d.orbit ?? 0);
       else if (d.anim === 'bob') this.life.addBobber(tmpM, d.color);
-      else this.pool(this.isLod(d.key) && this.lodFlip++ % 2 ? `${d.key}~` : d.key)?.add(tmpM, d.color);
+      else if (!this.livingActive) this.pool(this.isLod(d.key) && this.lodFlip++ % 2 ? `${d.key}~` : d.key, p.q, p.r)?.add(tmpM, d.color, vegetationBand(d, p.def.seed));
     }
     const v = new THREE.Vector3();
-    for (let i = 0; i < b.chimneys.length; i += 4) {
+    if (!this.livingActive) for (let i = 0; i < b.chimneys.length; i += 4) {
       v.set(b.chimneys[i], b.chimneys[i + 1], b.chimneys[i + 2]).applyMatrix4(m);
       this.chimneys.push(v.x, v.y, v.z, b.chimneys[i + 3]);
     }
-    if (flush) for (const pool of this.pools.values()) pool.flush();
+    if (this.livingActive) this.rememberSmoke(p,b,m);
+    if (flush) {
+      for (const pool of this.pools.values()) pool.flush();
+      this.syncLiving();
+    }
   }
 
   updateFrontier(board: Board) {
@@ -1230,8 +1364,9 @@ export class World {
   placeAnimated(p: Placed) {
     const syn = synBase(p.synergies, p.rot);
     const flow = this.settleFlow(p);
-    const widths = this.settleWidths(p);
-    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}`;
+    const development = this.developmentOptions(p.q,p.r,p.def,p.rot,this.settleWidths(p));
+    const widths = development.widths;
+    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${development.development?.join(',') ?? ''}`;
     let live: LiveTile;
     let y0 = 1.2;
     if (this.ghost && this.ghost.def === p.def && this.ghost.sig === sig) {
@@ -1240,7 +1375,7 @@ export class World {
       this.ghost = null;
       this.ghostKey = '';
     } else {
-      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths }), sig, this.lib, this.quality !== 'low');
+      live = new LiveTile(p.def, this.build(p.def, syn, flow, { eraMark: p.eraMark, site: p.site, wonder: p.wonder, ...development }), sig, this.lib, this.quality !== 'low');
       this.scene.add(live.group);
       this.dropGhost();
     }
@@ -1256,6 +1391,7 @@ export class World {
   placeInstant(list: Placed[], board: Board) {
     for (const p of list) this.bake(p, this.buildPlaced(p), false);
     for (const pool of this.pools.values()) pool.flush();
+    this.syncLiving();
     this.updateFrontier(board);
     this.life.sync(board);
     this.fireflies.sync(board);
@@ -1267,17 +1403,18 @@ export class World {
   setGhost(def: TileDef, rot: number, angle: number, q: number, r: number, check: Check) {
     const syn = check.valid ? synBase(check.synergies, rot) : [];
     const flow = flowBase(this.flowAt(q, r, rotateEdges(def.edges, rot)), rot);
-    const widths = flowBase(this.widthsAt(q, r, def, rot), rot);
+    const development = this.developmentOptions(q,r,def,rot,flowBase(this.widthsAt(q,r,def,rot),rot));
+    const widths = development.widths;
     // O fantasma já mostra o marco da era que a peça ergueria.
     // A peça especial não ergue marco nem começa a maravilha (Board.place): o fantasma também não.
     const mark = check.valid && !def.special ? (check.eraMark ?? undefined) : undefined;
     const site = check.valid ? check.site?.kind : undefined;
     const wonder = check.valid && check.wonder && !def.special ? true : undefined;
-    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}`;
+    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}|${development.development?.join(',') ?? ''}`;
     const key = `${def.seed}:${this.theme.id}:${sig}`;
     if (!this.ghost || this.ghostKey !== key) {
       const old = this.ghost;
-      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site, wonder, widths }), sig, this.lib, this.quality !== 'low');
+      this.ghost = new LiveTile(def, this.build(def, syn, flow, { eraMark: mark, site, wonder, ...development }), sig, this.lib, this.quality !== 'low');
       this.ghostKey = key;
       this.scene.add(this.ghost.group);
       if (old && old.def === def) {
@@ -1451,19 +1588,25 @@ export class World {
   poolReport() {
     return [...this.pools.entries()]
       .map(([k, p]) => {
-        const base = k.endsWith('~') ? k.slice(0, -1) : k;
+        const base = k.replace(/^.*\|/, '').replace(/~$/, '');
         return { k, n: p.count, tris: (p.count * (this.lib.geo(base)?.attributes.position.count ?? 0)) / 3, shadow: p.mesh.castShadow };
       })
       .sort((a, b) => b.tris - a.tris);
   }
 
+  inputMs = 0;
+  private worldMs = 0;
+  private renderMs = 0;
+  private sceneSubmitMs = 0;
+  private sceneStart = 0;
   stats() {
     const info = this.renderer.info;
     let tris = 0;
     for (const c of this.chunks.values()) tris += c.triangles();
-    let inst = 0;
-    for (const p of this.pools.values()) inst += p.count;
-    return { calls: info.render.drawCalls, triangles: info.render.triangles, chunks: this.chunks.size, instances: inst, groundTris: tris, life: this.life.counts(), backend: this.backend };
+    const development = this.living.stats();
+    let inst = development.instances;
+    for (const p of this.pools.values()) inst += p.mesh.count;
+    return { development, barges: this.harbors.activeCount, regionSize, inputMs: this.inputMs, worldMs: this.worldMs, renderMs: this.renderMs, sceneMs: this.sceneSubmitMs, postMs: Math.max(0, this.renderMs - this.sceneSubmitMs), preview: { ...this.preview.stats }, calls: info.render.drawCalls, triangles: info.render.triangles, chunks: this.chunks.size, instances: inst, groundTris: tris, life: this.life.counts(), backend: this.backend };
   }
 
   setPreview(def: TileDef | null, angle: number, stack: number) {
@@ -1532,6 +1675,8 @@ export class World {
   releaseBargeCamera() { this.followedBarge = undefined; }
 
   tick(realDt: number) {
+    const begin = performance.now();
+    this.sceneSubmitMs = 0;
     this.renderer.info.reset();
     // A câmera, o fantasma e a troca de hora seguem o tempo real; o resto, o tempo do mundo.
     const dt = realDt * this.timeScale;
@@ -1728,9 +1873,12 @@ export class World {
     // Grão do Cinema: um padrão novo a cada quadro (passageiro, não precisa de semente).
     P.grainSeed.value = Math.floor(Math.random() * 3e6);
 
+    const submit = performance.now();
+    this.worldMs = submit - begin;
     if (this.post) this.post.pipeline.render();
     else this.renderer.render(this.scene, this.camera);
 
+    this.renderMs = performance.now() - submit;
     this.preview.render(realDt);
   }
 }

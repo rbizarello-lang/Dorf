@@ -61,3 +61,39 @@ body.capture #manifest { display: none; }
   #ports button { padding: 3px 0; }
   #ports small { display: none; }
 }
+
+#manifest { max-height: calc(100dvh - 140px); overflow: auto; }
+#guide-route, .fixed-camera { display: flex; align-items: center; gap: 6px; padding: 5px; font: inherit; font-size: 13px; }
+#guide-route { border: 0; background: transparent; color: #ffe2a1; text-decoration: underline; }
+#voyage-map { padding: 8px; font: inherit; margin-left: 8px; }
+#manifest [hidden] { display: none; }
+#scene:focus-visible { outline: 3px solid #ebbd67; outline-offset: -4px; }
+@media (max-width: 700px), (max-height: 530px) {
+  #manifest { width: min(290px, calc(100vw - 110px)); max-height: calc(100dvh - 120px); }
+  .manifest-head h2 { font-size: 16px; }
+  #manifest button, .fixed-camera, .stack-actions button { min-height: 44px; min-width: 44px; }
+  .river-trade .tools .icon-btn { min-height: 44px; min-width: 44px; }
+  #manifest .manifest-head button { font-size: 12px; }
+  .marker.site.port { font-size: 12px; }
+  #manifest:has(#chart-body[hidden]) #sailing-order { margin: 0 0 4px; }
+}
+@media (max-height: 530px) {
+  #manifest { width: min(254px, calc(100vw - 158px)); max-height: calc(100dvh - 78px); }
+  #manifest:has(#chart-body[hidden]) #development-order { display: none; }
+  .river-trade .tools { max-width: 65vw; }
+}
+
+.voyage-log { padding-left: 1.5em; }
+.voyage-log li { padding: 3px 0; }
+.voyage-log b { color: #29584e; }
+#chart-toggle[aria-expanded="false"] { color: #ffe2a1; }
+@media (max-width: 580px) {
+  #manifest { width: min(265px, calc(100vw - 158px)); }
+  .river-trade .stack { width: 136px; }
+  .river-trade .stack-actions { gap: 2px; }
+  .manifest-head { flex-wrap: wrap; }
+  .manifest-head h2 { flex: 1 1 65px; }
+}
+
+#development-order { font-size: 12px; line-height: 1.35; color: #e6d5aa; margin: 5px 0; }
+.living-option { display: flex; align-items: center; gap: 8px; min-height: 44px; }

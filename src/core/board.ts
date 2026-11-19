@@ -3,13 +3,15 @@ import { DIRS, hexDistance, hkey, opposite } from './hex';
 import { LOOKOUT_MOVES, SITE_REWARD, type Site, type SiteKind } from './sites';
 import { SPECIALS, type SpecialKind } from './specials';
 import { INFLUENCE, INFLUENCE_CAP, SYN_KINDS, type SynHit, type SynKind, synergyOf } from './synergy';
-import { portSupply, type Port } from './ports';
+import { HARBORS, type ChartId, type Port } from './ports';
 import { T, isStrict, rotateEdges, type QuestKind, type TileDef } from './tiles';
 
 export interface Rules {
   startTiles: number;
   riverTrade: boolean;
   combinedFreight: boolean;
+  layout: ChartId;
+  legacyFreight: boolean;
   matchPoints: number;
   perfectBonus: number;
   /** Bônus ao cercar uma peça com 6 vizinhos, todos encaixados. */
@@ -57,6 +59,8 @@ export const DEFAULT_RULES: Rules = {
   startTiles: 50,
   riverTrade: false,
   combinedFreight: false,
+  layout: 'confluencia',
+  legacyFreight: false,
   matchPoints: 10,
   perfectBonus: 20,
   closedBonus: 30,
@@ -293,9 +297,40 @@ export class Board {
     return p;
   }
 
+  /** Simula o canal com a peça candidata, inclusive quando ela une braços distantes.
+   * Não altera o tabuleiro, o índice de grupos nem o gerador da partida. */
+  voyageAt(q: number, r: number, edges: readonly T[]) {
+    const connected: Port[] = [], shipments: { port: Port; tiles: number }[] = [];
+    if (!this.ports.length || !edges.includes(T.Water)) return { connected, shipments, joins: false };
+    const visited = new Set<number>([hkey(0, 0)]);
+    const queue = [[0, 0]];
+    for (let i = 0; i < queue.length; i++) {
+      const [x, y] = queue[i], sides = x === q && y === r ? edges : this.get(x, y)!.edges;
+      for (let side = 0; side < 6; side++) {
+        if (sides[side] !== T.Water) continue;
+        const nx = x + DIRS[side][0], ny = y + DIRS[side][1], key = hkey(nx, ny);
+        if (visited.has(key)) continue;
+        const other = nx === q && ny === r ? edges : this.get(nx, ny)?.edges;
+        if (other?.[opposite(side)] !== T.Water) continue;
+        visited.add(key);
+        queue.push([nx, ny]);
+      }
+    }
+    for (const p of this.ports) if (visited.has(hkey(p.q, p.r))) connected.push(p);
+    for (const p of connected) {
+      if (p.delivered) continue;
+      const timber = p.id === 0 && this.rules.combinedFreight;
+      if (timber && !connected.some((dock) => dock.id === 1)) continue;
+      const preferred = this.rules.legacyFreight || p.connectedAt === undefined || this.ports[1].delivered;
+      shipments.push({ port: p, tiles: timber && preferred ? 10 : HARBORS[p.id].tiles });
+    }
+    return { connected, shipments, joins: visited.has(hkey(q, r)) };
+  }
+
   place(q: number, r: number, def: TileDef, rot: number): PlaceResult {
     const edges = rotateEdges(def.edges, rot);
     const c = this.check(q, r, edges);
+    const voyage = this.voyageAt(q, r, edges);
     const placed = this.placeRaw(q, r, def, rot);
     const R = this.rules;
     let points = c.matches * R.matchPoints;
@@ -369,13 +404,13 @@ export class Board {
     }
 
     this.computeGroups();
-    const arrivals = this.ports.filter((p) => !p.delivered && this.onMainRiver(this.get(p.q, p.r)));
-    // Um canal pode ligar os dois cais na mesma jogada, em qualquer ordem.
-    const deliveries = R.combinedFreight && !this.ports[1]?.delivered && !arrivals.some((p) => p.id === 1)
-      ? arrivals.filter((p) => p.id !== 0) : arrivals;
-    for (const p of deliveries) {
-      p.delivered = true;
-      tilesGained += portSupply(p.id, R.combinedFreight);
+    const deliveries = voyage.shipments.map((s) => s.port);
+    for (const p of voyage.connected) p.connectedAt ??= placed.index;
+    for (const { port, tiles } of voyage.shipments) {
+      port.delivered = true;
+      port.paidAt = placed.index;
+      port.reward = tiles;
+      tilesGained += tiles;
     }
 
     const questsDone: Quest[] = [];

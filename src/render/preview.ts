@@ -30,6 +30,17 @@ export class PreviewView {
   private time = 0;
   private w = 0;
   private h = 0;
+  private resizePending = true;
+  private idle = 0;
+  private dirty = true;
+  private dpr = 0;
+  readonly stats = { draws: 0, calls: 0, triangles: 0, cpu: 0 };
+  observe(element: HTMLElement) {
+    new ResizeObserver(([entry]) => {
+      this.w = entry.contentRect.width; this.h = entry.contentRect.height;
+      this.resizePending = true;
+    }).observe(element);
+  }
 
   static async create(forceWebGL: boolean, lib: Lib) {
     const canvas = document.createElement('canvas');
@@ -70,6 +81,8 @@ export class PreviewView {
     this.def = null;
   }
 
+  invalidateDetail() { this.def = null; }
+
   /** Troca a peça mostrada (com uma pequena queda) e ajusta a altura da pilha. */
   set(def: TileDef | null, build: () => TileBuild, angle: number, stack: number) {
     if (def !== this.def) {
@@ -82,6 +95,7 @@ export class PreviewView {
         this.drop = 0.6;
       }
     }
+    this.dirty = true;
     this.angle = angle;
     const n = Math.min(40, Math.max(0, stack - 1));
     for (let i = 0; i < n; i++) this.pillar.setMatrixAt(i, tmpM.makeTranslation(0, -TILE_T - 0.035 - i * 0.075, 0));
@@ -90,19 +104,22 @@ export class PreviewView {
   }
 
   render(dt: number) {
-    const rect = this.canvas.parentElement?.getBoundingClientRect();
-    if (!rect || rect.width < 4 || !this.tile) return;
+    const start = performance.now();
+    this.stats.calls = this.stats.triangles = this.stats.cpu = 0;
+    if (this.w < 4 || this.h < 4 || !this.tile) return;
     this.time += dt;
+    this.idle += dt;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    if (rect.width !== this.w || rect.height !== this.h) {
-      this.w = rect.width;
-      this.h = rect.height;
+    if (this.resizePending || dpr !== this.dpr) {
+      this.resizePending = false; this.dirty = true; this.dpr = dpr;
       this.renderer.setPixelRatio(dpr);
-      this.renderer.setSize(rect.width, rect.height, false);
-      this.cam.aspect = rect.width / rect.height;
+      this.renderer.setSize(this.w, this.h, false);
+      this.cam.aspect = this.w / this.h;
       this.cam.updateProjectionMatrix();
     }
     const tile = this.tile;
+    if (!this.dirty && this.drop === 0 && Math.abs(tile.inner.rotation.y + this.angle) < 0.002 && this.idle < 1 / 12) return;
+    dt = this.idle; this.idle = 0; this.dirty = false;
     this.drop = Math.max(0, this.drop - dt * 2.4);
     tile.group.position.y = this.drop * this.drop * 2.5 + Math.sin(this.time * 1.6) * 0.02;
     tile.inner.rotation.y += (-this.angle - tile.inner.rotation.y) * (1 - Math.exp(-dt * 16));
@@ -114,7 +131,10 @@ export class PreviewView {
     U.clouds.value = 0;
     U.lamps.value = 0;
     U.bounce.value.setRGB(0, 0, 0);
+    this.renderer.info.reset();
     this.renderer.render(this.scene, this.cam);
+    this.stats.draws++; this.stats.calls = this.renderer.info.render.drawCalls;
+    this.stats.triangles = this.renderer.info.render.triangles; this.stats.cpu = performance.now() - start;
     U.night.value = night;
     U.clouds.value = clouds;
     U.lamps.value = lamps;

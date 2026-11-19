@@ -109,7 +109,8 @@ function sailcloth(outline: THREE.Shape, color: string) {
 export class HarborView extends THREE.Group {
   private material = new THREE.MeshBasicNodeMaterial({ vertexColors: true });
   private docks = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
-  private barges: { mesh: THREE.Mesh; track: ReturnType<typeof sailingTrack>; distance: number; next: number }[] = [];
+  private routeMaterial = new THREE.LineBasicNodeMaterial({ color: '#fff2a1', transparent: true, opacity: 0.87, depthWrite: false });
+  private barges: { mesh: THREE.Mesh; route: THREE.Line; track: ReturnType<typeof sailingTrack>; distance: number; next: number }[] = [];
   private state = '';
   private timberBarge: THREE.Mesh | undefined;
 
@@ -121,15 +122,18 @@ export class HarborView extends THREE.Group {
 
   reset() {
     for (const b of this.barges) {
-      this.remove(b.mesh);
+      this.remove(b.mesh, b.route);
+      b.route.geometry.dispose();
       b.mesh.geometry.dispose();
     }
     this.barges.length = 0;
     this.timberBarge = undefined;
   }
 
+  get activeCount() { return this.barges.length; }
+
   sync(ports: readonly Port[]) {
-    const state = ports.map((p) => [p.q, p.r, +p.delivered].join(',')).join('|');
+    const state = ports.map((p) => [p.q, p.r, +p.delivered, p.connectedAt ?? 0].join(',')).join('|');
     if (this.state === state) return;
     this.state = state;
     this.docks.visible = ports.length > 0;
@@ -144,6 +148,10 @@ export class HarborView extends THREE.Group {
       local.push(timber(0.49, 0.65, 0.13, 0.038, 0.16, 0.026, '#fff2c8'));
       if (p.delivered) {
         for (let i = 0; i <= p.id; i++) local.push(timber(0.16 + i * 0.1, 0.19, -0.02, 0.095, 0.14, 0.12, color));
+      } else if (p.connectedAt !== undefined) {
+        // Duas tábuas cruzadas e uma carga reservada também leem em silhueta.
+        for (const angle of [-0.65, 0.65]) local.push(paint(new THREE.BoxGeometry(0.04, 0.32, 0.04).rotateZ(angle).translate(0.55, 0.86, 0.13), '#fff2cb'));
+        local.push(timber(0.24, 0.23, 0, 0.24, 0.23, 0.18, '#e6ba79'));
       } else {
         // Rumo cartográfico sob o tabuleiro. As peças cobrem a tinta à medida que o rio avança.
         const length = Math.hypot(x, z);
@@ -170,7 +178,8 @@ export class HarborView extends THREE.Group {
       const old = this.barges.findIndex((b) => b.mesh === this.timberBarge);
       if (old >= 0) {
         const [b] = this.barges.splice(old, 1);
-        this.remove(b.mesh);
+        this.remove(b.mesh, b.route);
+      b.route.geometry.dispose();
         b.mesh.geometry.dispose();
       }
     }
@@ -194,7 +203,10 @@ export class HarborView extends THREE.Group {
     mesh.position.set(path[0].x, 0.09, path[0].z);
     this.add(mesh);
     mesh.rotation.y = Math.atan2(path[1].x - path[0].x, path[1].z - path[0].z);
-    this.barges.push({ mesh, track: sailingTrack(path), distance: 0, next: 1 });
+    const track = sailingTrack(path);
+    const route = new THREE.Line(new THREE.BufferGeometry().setFromPoints(track.map(({ point }) => new THREE.Vector3(point.x, 0.075, point.y))), this.routeMaterial);
+    this.add(route);
+    this.barges.push({ mesh, route, track, distance: 0, next: 1 });
     if (timberFreight) this.timberBarge = mesh;
     return mesh;
   }
@@ -205,7 +217,8 @@ export class HarborView extends THREE.Group {
       b.distance += dt * 3.1;
       while (b.next < b.track.length && b.track[b.next].length <= b.distance) b.next++;
       if (b.next >= b.track.length) {
-        this.remove(b.mesh);
+        this.remove(b.mesh, b.route);
+      b.route.geometry.dispose();
         b.mesh.geometry.dispose();
         if (b.mesh === this.timberBarge) this.timberBarge = undefined;
         this.barges.splice(i, 1);

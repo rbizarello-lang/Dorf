@@ -21,6 +21,8 @@ export interface InputHost {
   setHover(h: Hex | null): void;
   /** O espaço está na fronteira (dá para pôr peça ali). */
   open(q: number, r: number): boolean;
+  manualCamera(): void;
+  stepCell(dir: number): void;
   hasPiece(): boolean;
   gameOver(): boolean;
   place(q: number, r: number): void;
@@ -35,7 +37,7 @@ export interface InputHost {
 }
 
 export interface Input {
-  /** Câmera pelas teclas seguradas (WASD, setas, Q/E, PgUp/PgDn), a cada quadro. */
+  /** Câmera pelas teclas seguradas (WASD, Q/E, PgUp/PgDn), a cada quadro. */
   keyboardCamera(dt: number): void;
   tiltBy(d: number): void;
 }
@@ -80,6 +82,7 @@ export function bindInput(h: InputHost): Input {
   canvas.addEventListener('pointermove', (e) => {
     if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pinch && pointers.size === 2) {
+      h.manualCamera();
       const [a, b] = [...pointers.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
@@ -104,6 +107,7 @@ export function bindInput(h: InputHost): Input {
     if (drag) {
       if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > (drag.touch ? 10 : 5)) drag.moved = true;
       if (drag.moved) {
+        h.manualCamera();
         if (drag.button === 2 || (drag.button === 0 && e.shiftKey)) {
           // Na horizontal gira; na vertical inclina (arrastar para cima abaixa a câmera rumo ao horizonte, como nos mapas).
           world.rig.rotate(-(e.movementX || 0) * 0.006);
@@ -161,6 +165,7 @@ export function bindInput(h: InputHost): Input {
     (e) => {
       e.preventDefault();
       if (capture.stage === 'export') return;
+      h.manualCamera();
       world.rig.zoom(Math.exp(e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)));
     },
     { passive: false },
@@ -169,7 +174,7 @@ export function bindInput(h: InputHost): Input {
   const held = new Set<string>();
   window.addEventListener('keydown', (e) => {
     // Atalhos do navegador (Ctrl/Cmd+R, Cmd+D...) ficam com o navegador.
-    if (e.target instanceof HTMLInputElement || e.ctrlKey || e.metaKey || e.altKey) return;
+    if ((e.key !== 'Escape' && e.target instanceof Element && e.target.closest('input,select,textarea,[contenteditable="true"]')) || e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
     if (capture.stage === 'export') {
       if (k === 'escape') capture.cancelExport();
@@ -199,6 +204,12 @@ export function bindInput(h: InputHost): Input {
       if (k === '1' || k === '2') h.choose(Number(k) - 1);
       return;
     }
+    // Atalhos globais só atuam quando o foco não está num controle da interface.
+    // Enter e setas continuam com seu comportamento nativo em botões e links.
+    if (e.target instanceof Element && e.target.closest('button,a,[role="button"],[role="menuitem"]')) return;
+    if (k.startsWith('arrow')) { e.preventDefault(); h.stepCell(k === 'arrowleft' || k === 'arrowup' ? -1 : 1); return; }
+    if (k === 'enter') { const cell = h.hover(); if (cell) { e.preventDefault(); h.place(cell.q, cell.r); } return; }
+    if (['w','a','s','d','q','e','+','=','-','pageup','pagedown'].includes(k)) h.manualCamera();
     sfx.unlock();
     if (k === 'r' || k === ' ') {
       e.preventDefault();
@@ -230,6 +241,7 @@ export function bindInput(h: InputHost): Input {
   window.addEventListener('blur', () => held.clear());
 
   function keyboardCamera(dt: number) {
+    if (hud.modalOpen) { held.clear(); return; }
     let dx = 0, dy = 0;
     if (held.has('a') || held.has('arrowleft')) dx -= 1;
     if (held.has('d') || held.has('arrowright')) dx += 1;

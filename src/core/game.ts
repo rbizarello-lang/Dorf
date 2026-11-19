@@ -23,6 +23,7 @@ export class Game {
   rot = 0;
   placedCount = 0;
   discarded = 0;
+  finalSupplyBonus = 0;
   private drawn = 0;
   /**
    * Escolhas de era ainda por fazer, a mais antiga primeiro. Não travam a partida: a carta
@@ -48,7 +49,7 @@ export class Game {
       quest: null,
     };
     if (rules.riverTrade) {
-      const map = chart(seed);
+      const map = chart(seed, rules.layout);
       starter.edges = map.edges;
       this.board.ports = map.ports;
     }
@@ -85,7 +86,7 @@ export class Game {
     const kind = this.slots.get(index);
     if (kind) return { def: specialTile(rng, kind), roll: 1 };
     if (this.rules.riverTrade) {
-      const route = channelTile(rng, index);
+      const route = channelTile(rng, index, this.rules.layout);
       if (route) return { def: route, roll: 1 };
     }
     const roll = rng();
@@ -135,7 +136,7 @@ export class Game {
       const bonus = Math.max(0, this.stack) * this.rules.leftoverPoints;
       this.board.score += bonus;
       res.points += bonus;
-      res.leftoverBonus = bonus;
+      res.leftoverBonus = this.finalSupplyBonus = bonus;
       this.stack = 0;
     }
     this.advance();

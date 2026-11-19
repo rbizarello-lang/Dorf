@@ -27,7 +27,7 @@ export const MODES: readonly Mode[] = [
   {
     id: 'zen',
     name: 'Zen',
-    tagline: 'Peças sem fim e sem pressa. A pontuação e as eras continuam, por gosto.',
+    tagline: 'Paisagem viva sem limite de peças. Desenvolva aldeias, matas e cultivos pelos encaixes.',
     rules: { infinite: true },
     undos: 99,
   },
