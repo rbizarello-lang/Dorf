@@ -74,7 +74,7 @@ const params = new URLSearchParams(location.search);
 // A prévia publicada não recebe parâmetros de URL, só o #hash: `#bench`, `#bench=relevo`, `#gpu` e `#debug` valem como o `?` deles.
 // Só nomes e valores conhecidos (invariante 12); a query, quando existe, vence o hash.
 {
-  const HASH_FLAGS: Record<string, readonly string[] | undefined> = { bench: ['', 'tudo', 'classico', 'relevo'], gpu: [''], debug: [''] };
+  const HASH_FLAGS: Record<string, readonly string[] | undefined> = { bench: ['', 'tudo', 'classico', 'relevo'], gpu: [''], debug: [''], encostas: ['0', '1'] };
   for (const part of location.hash.slice(1).split('&')) {
     const [k, v = ''] = part.split('=');
     if (Object.hasOwn(HASH_FLAGS, k) && HASH_FLAGS[k]!.includes(v) && !params.has(k)) params.set(k, v);
@@ -122,6 +122,8 @@ const world = await createWorld();
   // `?fantasma=0`: o fantasma e a queda voltam ao desenho de antes do pouso e os barcos e trens ao hexágono (comparar capturas).
   world.ghostTrue = params.get('fantasma') !== '0';
 }
+// `?encostas=0` (ou `#encostas=0`) desliga as Encostas (relevo de toda peça, em todos os modos) e volta ao desenho de antes (comparar capturas).
+world.hillsOn = params.get('encostas') !== '0';
 // `?levels=0` desliga o relevo (platôs): o tabuleiro sai plano, como antes (comparar capturas).
 world.levelsEnabled = params.get('levels') !== '0';
 {
@@ -324,10 +326,10 @@ const forcedSpecials: SpecialKind[] | null = params.has('specials') ? (params.ge
 const rulesFor = (t: Theme, seed: number, m: Mode = mode): Rules => ({ ...DEFAULT_RULES, ...(m.daily ? {} : t.rules), ...modeRules(m, seed) });
 /** Nome do modo no HUD; no desafio do dia, com a regra do dia. */
 const modeLabel = () => (mode.daily ? `${mode.name} · ${dailyRule(game.seed).name}` : mode.name);
-// A prévia publicada (`VITE_PREVIEW=relevo npm run build`) não recebe parâmetros de URL: abre no Relevo enquanto a pessoa não escolheu outro modo.
-// O que chega é o #hash: `#mode=terra` abre no modo Terra contínua (o id é conferido contra a lista de modos; outro valor é ignorado).
+// A prévia publicada (`VITE_PREVIEW=relevo npm run build`) não recebe parâmetros de URL: abre no Clássico (as Encostas valem em todos os modos).
+// O que chega é o #hash: `#mode=relevo` e `#mode=terra` abrem os outros modos (o id é conferido contra a lista de modos; outro valor é ignorado).
 const hashMode = MODES.find((m) => m.id === /^#mode=([a-z]{1,16})$/.exec(location.hash)?.[1]);
-let mode: Mode = modeById(params.get('mode') ?? hashMode?.id ?? store.get('mode') ?? (import.meta.env.VITE_PREVIEW === 'relevo' || import.meta.env.VITE_PREVIEW === 'terra' ? import.meta.env.VITE_PREVIEW : null));
+let mode: Mode = modeById(params.get('mode') ?? hashMode?.id ?? store.get('mode'));
 let undone = 0;
 const ERA_NAMES = ['Aldeia', 'Vila', 'Burgo', 'Cidade'];
 const eraName = (i: number) => (theme.eras ?? ERA_NAMES)[i] ?? ERA_NAMES[ERA_NAMES.length - 1];

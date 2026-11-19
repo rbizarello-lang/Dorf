@@ -98,6 +98,9 @@ interface Spinner {
   axis: THREE.Vector3;
   speed: number;
   phase: number;
+  /** Onde o eixo pousa no chão (a base do moinho): a encosta sob ele dá a altura. */
+  sx: number;
+  sz: number;
 }
 
 interface Animal {
@@ -237,6 +240,8 @@ const smooth01 = (a: number, b: number, x: number) => {
 export class Life {
   /** Nível de altura da casa (relevo, R2); o World põe o dele. Sem relevo, 0. */
   levelOf: (q: number, r: number) => number = () => 0;
+  /** Encostas: quanto o chão sobe no ponto (x, z) do mundo; o World põe a dele. Quem se move (pás, bichos, aldeões, trilhos) soma isto na hora. */
+  groundRise: (x: number, z: number) => number = () => 0;
   /** Encaixe fluido: o deslocamento do desenho das peças (o World põe o dele); barcos e trens andam pela água e pelo trilho deslocados. */
   warp: Warp | null = null;
 
@@ -245,6 +250,10 @@ export class Life {
    * (a mesma curva do `tileBuilder`: `RAMP_ROAD` da borda para dentro). Contínua entre as peças.
    */
   private roadLift(x: number, z: number): number {
+    return this.roadLiftBase(x, z) + this.groundRise(x, z);
+  }
+
+  private roadLiftBase(x: number, z: number): number {
     // No fluido o ponto já vem deslocado; a casa é a da grade sem deslocamento.
     if (this.warp) [x, z] = this.warp.inverse(x, z);
     const [q, r] = worldToHex(x, z);
@@ -358,10 +367,10 @@ export class Life {
     return p;
   }
 
-  addSpinner(key: string, world: THREE.Matrix4, axis: 'x' | 'z') {
+  addSpinner(key: string, world: THREE.Matrix4, axis: 'x' | 'z', sx = world.elements[12], sz = world.elements[14]) {
     if (key !== 'sails' && key !== 'wheel' && key !== 'rotor') return;
     if (!this.pool(key)) return;
-    this.spinners.push({ pool: key, base: world.clone(), axis: axis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1), speed: key === 'sails' ? 0.9 + Math.random() * 0.4 : key === 'rotor' ? 2.2 + Math.random() * 0.6 : 1.4, phase: Math.random() * 6 });
+    this.spinners.push({ pool: key, base: world.clone(), axis: axis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1), speed: key === 'sails' ? 0.9 + Math.random() * 0.4 : key === 'rotor' ? 2.2 + Math.random() * 0.6 : 1.4, phase: Math.random() * 6, sx, sz });
   }
 
   addAnimal(key: string, world: THREE.Matrix4, color: THREE.Color, when?: DayPhase) {
@@ -484,6 +493,7 @@ export class Life {
       q4.setFromAxisAngle(s.axis, this.time * s.speed + s.phase);
       m4.makeRotationFromQuaternion(q4);
       m4b.copy(s.base).multiply(m4);
+      m4b.elements[13] += this.groundRise(s.sx, s.sz);
       p.set(i, m4b);
     }
     for (const [k, c] of Object.entries(counts)) this.pools.get(k)!.commit(c + 1);
@@ -515,7 +525,7 @@ export class Life {
         // Fora da hora o bicho já saiu de cena: não ocupa instância.
         if (a.vis < 0.02) continue;
         q4.setFromAxisAngle(UP, -a.heading);
-        m4.compose(v3.set(a.x, a.y + bob, a.z), q4, s3.setScalar(a.s * a.vis));
+        m4.compose(v3.set(a.x, a.y + bob + this.groundRise(a.x, a.z), a.z), q4, s3.setScalar(a.s * a.vis));
         if (graze) m4.multiply(m4b.makeRotationZ(graze));
         ap.set(i, m4, a.color);
         used.set(a.key, i + 1);
@@ -641,6 +651,7 @@ export class Life {
         if (back) m4.multiply(m4b.makeRotationY(Math.PI));
       }
       if (s < 1) m4.multiply(m4b.makeScale(s, s, s));
+      m4.elements[13] += this.groundRise(m4.elements[12], m4.elements[14]);
       p.set(n[w.key]++, m4, w.color);
     }
     const sack = pools['folk:sack'];
