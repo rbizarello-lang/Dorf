@@ -120,6 +120,11 @@ export const U = {
    * no lugar dos pesos por vértice, então as manchas de prado, mata, lavoura e vila atravessam as emendas com contorno orgânico.
    */
   land: uniform(0),
+  /** Encostas fora do encaixe fluido: o chão lê a normal suave do mapa de alturas (no fluido isso já vale por `land`). */
+  hillN: uniform(0),
+  /** Encostas ligadas (1) e a cor de parede do tema: nas vilas o chão tinge de parede a subida entre dois patamares (faixas de 0,075 de altura). */
+  terrace: uniform(0),
+  wall: uniform(new THREE.Color('#d8c9a8')),
   /** Cor de cada terreno do tema [prado, mata, plantação, vila]: a cor do campo de terreno, para somar só a diferença à cor do vértice. */
   landCol: [uniform(new THREE.Color()), uniform(new THREE.Color()), uniform(new THREE.Color()), uniform(new THREE.Color())],
   /** Modo Relevo: 1 mostra a rocha das encostas íngremes no chão (0 nos outros modos e na pilha) e a cor dela (a rocha do tema). */
@@ -695,6 +700,18 @@ export function makeGroundMaterial(land = false) {
     sp = mix(sp0, lField.mul(min(sum0, 1)), lK);
     landShift = landMix(lField).sub(landMix(sp0)).mul(smoothstep(0.35, 0.9, sum0)).mul(lK);
   }
+  if (!land) {
+    // Encostas no Clássico e nos outros modos: normal suave do mapa de alturas, só no topo, sem inclinação forte (os paredões dos platôs ficam com a normal do triângulo).
+    const uv = (q: N2) => q.div(GROUND_EXTENT * 2).add(0.5);
+    const have = step(0.5, texture(groundMap.coverTexture, uv(p)).level(float(0)).r);
+    const hAt = (q: N2) => texture(groundMap.reliefTexture, uv(q)).level(float(0)).r;
+    const hdx = hAt(p.add(vec2(RELIEF_E, 0))).sub(hAt(p.sub(vec2(RELIEF_E, 0))));
+    const hdz = hAt(p.add(vec2(0, RELIEF_E))).sub(hAt(p.sub(vec2(0, RELIEF_E))));
+    const nS = vec3(hdx.negate(), RELIEF_E * 2, hdz.negate()).normalize();
+    const grad = hdx.mul(hdx).add(hdz.mul(hdz)).sqrt().div(RELIEF_E * 2);
+    const sumN = sp0.x.add(sp0.y).add(sp0.z).add(sp0.w);
+    nG = mix(normalWorld, nS, U.hillN.mul(have).mul(smoothstep(0.35, 0.7, normalWorld.y)).mul(smoothstep(0.0, 0.12, sumN)).mul(float(1).sub(smoothstep(0.6, 1.0, grad)))).normalize();
+  }
   const blot = texture(noiseTex, p.div(2.6)).g;
   const blot2 = texture(noiseTex, p.div(1.1).add(vec2(0.31, 0.77))).r;
   const fine = texture(noiseTex, p.mul(0.85)).b;
@@ -773,7 +790,13 @@ export function makeGroundMaterial(land = false) {
   const rockK = smoothstep(0.28, 0.45, lean.add(grain.sub(0.5).mul(0.08))).mul(smoothstep(0.35, 0.55, nG.y)).mul(U.rock);
   // A rocha leva um tanto da cor do vértice (o pé da encosta é terra escura): nada de cinza chapado ao lado do verde.
   const rockCol = mix(U.rockColor, vertexColor().rgb.mul(1.15), 0.4).mul(rockTone);
-  m.colorNode = mix(mix(ground, rockCol, rockK), vec3(1), U.silhouette);
+  // Muro de arrimo das vilas: a altura do ponto (não o vértice) decide a faixa, então o degrau fica nítido em qualquer malha. Plano do patamar = calçamento.
+  const yb = positionWorld.y.div(0.075);
+  const yph = yb.sub(floor(yb));
+  const wallM = smoothstep(0.1, 0.3, yph).mul(float(1).sub(smoothstep(0.62, 0.82, yph))).mul(sp.w.min(1)).mul(U.terrace).mul(smoothstep(0.6, 0.9, normalWorld.y));
+  const capM = float(1).sub(smoothstep(0.0, 0.1, yph.min(float(1).sub(yph)))).mul(sp.w.min(1)).mul(U.terrace).mul(smoothstep(0.6, 0.9, normalWorld.y));
+  const terraced = mix(mix(ground, U.wall.mul(0.92), wallM.mul(0.6)), ground.mul(1.14), capM.mul(0.5));
+  m.colorNode = mix(mix(terraced, rockCol, rockK), vec3(1), U.silhouette);
   // Micro-relevo: três escalas do mapa de declive (a mesma textura da água) inclinam a normal, então a luz rasante lê tufos de
   // capim, folhiço, torrões e pedregulhos; as escalas finas somem com a distância (cintilariam). Nos campos, sulcos na direção do pincel.
   const wField = sp.z, wVill = sp.w;

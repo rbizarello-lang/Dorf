@@ -1433,7 +1433,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         v = { p: [x, groundY(x, z) + liftAt(x, z) + rise, z], ...topColor(i, a, b, x, z) };
         // Muro de arrimo: na subida entre dois patamares o chão da vila toma a cor de parede do tema. Rocha só na encosta forte de mata.
         if (hill && rise > 0.04) {
-          if (edges[i] === T.Village) v.c.lerp(wallC, 0.7 * hillRiser(opts.hill!, x, z));
+          const riser = hillRiser(opts.hill!, x, z);
+          // O plano do patamar mantém o calçamento; a face da subida é o muro de arrimo (cor da parede do tema) na vila, terra do tema no resto.
+          if (edges[i] === T.Village) v.c.lerp(wallC, 0.25 * riser);
+          else if (edges[i] !== T.Forest) v.c.lerp(tc(theme.side), 0.3 * riser);
           else if (edges[i] === T.Forest && rise > 0.3) v.c.lerp(tc(theme.rock), Math.min(0.1, (rise - 0.3) * 0.5));
         }
         vs.set(k, v);

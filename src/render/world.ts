@@ -1002,6 +1002,7 @@ export class World {
     }
     U.fieldSnow.value = theme.fieldSnow ?? 1;
     U.rockColor.value.set(theme.relief?.rock ?? theme.rock);
+    U.wall.value.set(theme.houses[0]?.walls[0] ?? theme.rock);
     for (let k = 0; k < 4; k++) U.landCol[k].value.set(theme.ground[k]);
     this.eggClear();
     this.setSurround(theme);
@@ -1638,6 +1639,8 @@ export class World {
 
   rebuild(board: Board) {
     this.board = board;
+    U.hillN.value = this.hillsOn && !this.warp ? 1 : 0;
+    U.terrace.value = this.hillsOn ? 1 : 0;
     this.applySeason();
     for (const c of this.chunks.values()) c.dispose(this.staticRoot);
     this.chunks.clear();

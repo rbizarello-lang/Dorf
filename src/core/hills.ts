@@ -36,7 +36,7 @@ export const MASS: readonly number[] = [0.16, 0.3, 0.22, 0.26, 0, 0];
 /** Quanto o ombro de uma borda sobe a cada encaixe igual (até 3). */
 export const RISE: readonly number[] = [0.085, 0.1, 0.09, 0.09, 0, 0];
 /** Altura da faixa da bancada. */
-export const BAND = 0.16;
+export const BAND = 0.075;
 /** Relevo por peça (Relevo e Terra): quanto cada nível lógico de altura da borda ergue o ombro e a divisa (só aparência). */
 export const LOGIC_RISE = 0.05;
 
@@ -140,7 +140,8 @@ export function hillHeight(profile: HillProfile, x: number, z: number) {
   // A pequena bancada acompanha a curva de nível. Esta curva é contínua e monótona.
   const raw = sum / weights;
   const band = Math.floor(raw / BAND), phase = raw / BAND - band;
-  const inner = BAND * (band + 0.38 * phase + 0.62 * ease(0.18, 0.82, phase));
+  // Patamar plano e degrau curto: a faixa sobe quase toda numa subida estreita (o muro de arrimo), o resto é plano.
+  const inner = BAND * (band + 0.04 * phase + 0.96 * ease(0.38, 0.62, phase));
   const radius = Math.max(0, projection / INR);
   const [nx, nz] = NORMAL[edge];
   // No miolo, a largura acompanha o setor triangular. Na divisa, ela fica fixa no espaço para que se possa cruzar o ombro sem
@@ -170,8 +171,8 @@ export function hillRiser(profile: HillProfile, x: number, z: number) {
   const raw = sum / weights;
   if (raw < BAND * 0.5) return 0;
   const phase = raw / BAND - Math.floor(raw / BAND);
-  const e = ease(0.18, 0.82, phase);
-  return 4 * e * (1 - e) * (1 - ease(0.7, 0.95, Math.max(0, projection) / INR));
+  const e = ease(0.38, 0.62, phase);
+  return Math.min(1, 5 * e * (1 - e)) * (1 - ease(0.7, 0.95, Math.max(0, projection) / INR));
 }
 
 /** Identifica o perfil: duas peças com a mesma assinatura têm o mesmo chão (o mundo só refaz a peça quando ela muda). */

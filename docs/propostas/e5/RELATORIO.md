@@ -69,3 +69,27 @@ Metas de custo atendidas. Parte da queda vem da decoração que agora foge da en
 
 ## Pendências
 Patamares legíveis (bancada e muro maiores na vila, ou degrau em geometria), baías das casas vazias e uma captura da corredeira.
+
+# E5c: facetas, cor da encosta e patamares
+
+Pranchas: `prancha-e5c-vilas.jpg` (base × E5c, 5 temas), `prancha-e5c-costa.jpg` (Terra e Relevo longe), `prancha-e5c-rio-astra.jpg` (Astra, rio e vila, queda de rio). Capturas em `quality=medium`, WebGL2.
+
+## O que mudou
+1. **Normal suave:** o chão lê a normal do mapa de alturas também fora do fluido (`U.hillN`, só no topo e sem inclinação forte, para não borrar os paredões dos platôs). No fluido já valia. Não vale na Média e na Baixa (chão enxuto).
+2. **Cor da encosta:** sem rocha em vila, cultivo e prado; o plano do patamar mantém o calçamento do tema; terra do tema na subida de cultivo e prado.
+3. **Patamares:** bancada baixa (0,075) com degrau curto (patamar plano, subida estreita) em `hillHeight`, e no material o muro de arrimo é a faixa de altura do PIXEL (cor de parede do tema, capa um pouco mais clara), então fica nítido em qualquer malha (`U.terrace`, `U.wall`).
+4. Corredeira e crista capturadas (abaixo).
+
+## Custo (stress 300:high, contra `f3-terra-fantasma`)
+Clássico 1.476 mil → 1.445 mil triângulos (−2%), montagem 1.234 → 1.733 ms (+40% nesta rodada, 1.511 ms na anterior: a máquina varia mais de 15% entre rodadas); Relevo 1.466 mil → 1.509 mil (+2,9%), montagem −21%; Terra 1.520 mil → 1.509 mil (−0,7%), montagem −29%. Triângulos dentro da meta nos três modos; a montagem do Clássico passa de +25% em parte das rodadas.
+
+## Verificação
+`npm run check` verde; smoke: `webgl`, `relevo-webgl`, `terra-hash-webgl` ok (WebGPU falha por ambiente); prévia regenerada, abre no Clássico, `#mode=relevo` e `#mode=terra` sem erro.
+
+## Critérios, com franqueza
+- **(i) costa longe:** fecha em parte, como na E5b: a costa é redonda e contínua, mas ainda há casas vazias internas que leem como baías de contorno hexagonal (centro-direita da Terra). NÃO tratei o item 4 (contorno das casas vazias pelo `seaMap`).
+- **(ii) vila em encosta suave com patamares e muros:** fecha em parte. Há patamares legíveis como faixas de muro na cor de parede nos 5 temas, mas são só COR sobre a malha (contornos de nível), não degrau de geometria com muro vertical e capa; isso não foi feito. Holanda e Oriental ainda têm o chão de vila cinza-acastanhado do tema.
+- **(iii) vista comparável à do Astra:** fecha em parte. A vista do rio com vila na margem (Holanda e Oriental) é parecida em espírito, sem a crista alta de muro do Astra.
+- **(iv) nenhuma encosta lê como pedra facetada:** fecha no Clássico e no Relevo/Terra em Alta e acima; não conferi a Média/Baixa com chão enxuto, que seguem facetadas.
+- **(v) patamares leem a 1200×720 de perto:** fecha como faixas de cor, não como degraus.
+- **Corredeira:** NÃO confirmada. Na captura do Relevo (seed 7, `step=water.0`) aparece a queda de boca aberta que já existia e a névoa, mas não identifiquei o degrau de pedra e a espuma da corredeira nova.
