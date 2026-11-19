@@ -232,58 +232,35 @@ class Buf {
 
   /**
    * Encostas: a partir do vértice `start`, cada triângulo (estrada, parcela, praça) passa a seguir a malha do chão. Um polígono
-   * grande atravessaria o topo convexo (a terra do vinhedo sumiria entre as fileiras), então o que não acompanha a malha é
-   * cortado nas três famílias de retas dos nós e cada pedaço sobe pela altura do chão naquele ponto.
+   * grande atravessaria o topo convexo (a terra do vinhedo sumiria entre as fileiras), então o triângulo é dividido em quatro,
+   * recursivamente, onde o chão se afasta do plano dele (no meio das arestas e no centro) mais que `DRAPE_TOL`, e cada vértice
+   * sobe pela altura do chão naquele ponto. Onde o chão é quase plano o triângulo fica inteiro (poucos triângulos a mais).
    */
   drape(start: number, hill: HillSurface) {
     const pos = this.pos.splice(start), col = this.col.splice(start), spl = this.spl.splice((start / 3) * 4);
-    const div = hill.divisions;
-    const grid = (v: number[], axis: number) => {
-      const u = v[0] - v[2] / (2 * INR), w = v[2] / INR;
-      return (axis === 0 ? u : axis === 1 ? w : u + w) * div;
+    const mid = (a: number[], b: number[]) => a.map((v, k) => (v + b[k]) / 2);
+    const emit = (t: number[][], depth: number) => {
+      const rise = t.map((p) => hill.at(p[0], p[2]));
+      // O quanto o chão passa ACIMA do plano do triângulo (no meio das arestas e no centro): o decalque sobe esse tanto para não afundar.
+      let dev = 0;
+      for (let k = 0; k < 3; k++) {
+        const j = (k + 1) % 3;
+        dev = Math.max(dev, hill.at((t[k][0] + t[j][0]) / 2, (t[k][2] + t[j][2]) / 2) - (rise[k] + rise[j]) / 2);
+      }
+      dev = Math.max(dev, hill.at((t[0][0] + t[1][0] + t[2][0]) / 3, (t[0][2] + t[1][2] + t[2][2]) / 3) - (rise[0] + rise[1] + rise[2]) / 3);
+      if (dev < DRAPE_TOL || depth >= DRAPE_DEPTH) {
+        for (let k = 0; k < 3; k++) this.put(t[k], rise[k] + Math.max(0, dev));
+        return;
+      }
+      const m01 = mid(t[0], t[1]), m12 = mid(t[1], t[2]), m20 = mid(t[2], t[0]);
+      emit([t[0], m01, m20], depth + 1);
+      emit([m01, t[1], m12], depth + 1);
+      emit([m20, m12, t[2]], depth + 1);
+      emit([m01, m12, m20], depth + 1);
     };
     // [x, y, z, r, g, b, s0..s3]
     for (let i = 0; i < pos.length; i += 9) {
-      const tri: number[][] = [i, i + 3, i + 6].map((k) => [...pos.slice(k, k + 3), ...col.slice(k, k + 3), ...spl.slice(((k / 3) | 0) * 4, ((k / 3) | 0) * 4 + 4)]);
-      const rise = tri.map((p) => hill.at(p[0], p[2]));
-      const follows = tri.every((p, k) => {
-        const j = (k + 1) % 3, q = tri[j];
-        return Math.abs(hill.at((p[0] + q[0]) * 0.5, (p[2] + q[2]) * 0.5) - (rise[k] + rise[j]) * 0.5) < 0.001;
-      }) && Math.abs(hill.at((tri[0][0] + tri[1][0] + tri[2][0]) / 3, (tri[0][2] + tri[1][2] + tri[2][2]) / 3) - (rise[0] + rise[1] + rise[2]) / 3) < 0.001;
-      if (follows) {
-        for (const [k, p] of tri.entries()) this.put(p, rise[k]);
-        continue;
-      }
-      let polygons = [tri];
-      for (let axis = 0; axis < 3; axis++) {
-        const coords = tri.map((p) => grid(p, axis));
-        const low = Math.floor(Math.min(...coords) + 1e-7) + 1, high = Math.ceil(Math.max(...coords) - 1e-7);
-        for (let line = low; line < high; line++) {
-          const pieces: number[][][] = [];
-          for (const poly of polygons) {
-            const dist = poly.map((p) => grid(p, axis) - line);
-            if (Math.min(...dist) > -1e-7 || Math.max(...dist) < 1e-7) {
-              pieces.push(poly);
-              continue;
-            }
-            const left: number[][] = [], right: number[][] = [];
-            for (let k = 0; k < poly.length; k++) {
-              const j = (k + 1) % poly.length, a = poly[k], b = poly[j], da = dist[k], db = dist[j];
-              if (da <= 1e-7) left.push(a);
-              if (da >= -1e-7) right.push(a);
-              if (da * db < 0 && Math.abs(da) > 1e-7 && Math.abs(db) > 1e-7) {
-                const t = da / (da - db), hit = a.map((value, n) => value + t * (b[n] - value));
-                left.push(hit);
-                right.push(hit);
-              }
-            }
-            if (left.length >= 3) pieces.push(left);
-            if (right.length >= 3) pieces.push(right);
-          }
-          polygons = pieces;
-        }
-      }
-      for (const poly of polygons) for (let k = 1; k < poly.length - 1; k++) for (const p of [poly[0], poly[k], poly[k + 1]]) this.put(p, hill.at(p[0], p[2]));
+      emit([i, i + 3, i + 6].map((k) => [...pos.slice(k, k + 3), ...col.slice(k, k + 3), ...spl.slice(((k / 3) | 0) * 4, ((k / 3) | 0) * 4 + 4)]), 0);
     }
   }
 
@@ -294,6 +271,9 @@ class Buf {
   }
 }
 
+/** Encostas: desvio máximo (altura) entre o decalque e o chão antes de dividir o triângulo, e a profundidade máxima da divisão. */
+const DRAPE_TOL = 0.01;
+const DRAPE_DEPTH = 1;
 const UP: V3 = [0, 1, 0];
 const WHITE = new THREE.Color(1, 1, 1);
 /** Terraços (Theme.terraces): altura de cada patamar, altura do beiral sobre ele e o tamanho de cada patamar de cima em relação à parcela (2 e 3 patamares). */
@@ -1248,7 +1228,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // usam uma malha mais fina para o leito e as margens inclinadas.
   // --- Encostas: a superfície da peça (`opts.hill`) por cima da lâmina. Rio e trilho seguem no fundo do vale (altura 0).
   const hillOn = !!opts.hill && !hillFlat(opts.hill);
-  const N = hasWater || hasRamp || (hillOn && road.paths.length) ? 12 : hillOn ? 6 : terr ? 8 : 4;
+  // Malha da encosta: 6 divisões onde há divisa ou patamar (as duas peças de uma emenda leem a mesma malha); a peça solta e baixa fica em 4.
+  const fineHill = hillOn && (opts.hill!.stage > 0 || opts.hill!.rims.some((v) => v > 0) || Math.max(...opts.hill!.shoulders) > 0.3);
+  const N = hasWater || hasRamp || (hillOn && road.paths.length) ? 12 : fineHill ? 6 : hillOn ? 4 : terr ? 8 : 4;
   /** O meio da peça fica plano onde há objeto no centro (Centro da vila, canteiro da maravilha, peça especial, marco de era). */
   const flatCore = !!(opts.center || opts.wonder || opts.special || opts.eraMark || opts.site || opts.spring);
   const hand = hillOn ? opts.hand ?? opts.hill : undefined;
@@ -1428,7 +1410,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         const rise = hill?.node(i, a, b) ?? 0;
         v = { p: [x, groundY(x, z) + liftAt(x, z) + rise, z], ...topColor(i, a, b, x, z) };
         // A encosta puxa um fio da cor da rocha do tema: o relevo lê melhor de longe.
-        if (rise > 0) v.c.lerp(tc(theme.rock), Math.min(0.24, rise * 0.4));
+        if (rise > 0) v.c.lerp(tc(theme.rock), Math.min(0.14, rise * 0.25));
         vs.set(k, v);
       }
       return v;
