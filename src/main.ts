@@ -2563,6 +2563,7 @@ function start(data: unknown) {
 };
 
 // Coloca a peça atual na melhor posição, com animação (capturas da queda e da onda).
+(window as unknown as { __hills: () => { rebakes: number; ms: number } }).__hills = () => ({ rebakes: world.hillRebakes, ms: world.hillMs });
 (window as unknown as { __placeBest: () => boolean }).__placeBest = () => {
   const m = game.bestMove();
   if (!m) return false;
