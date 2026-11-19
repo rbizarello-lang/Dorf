@@ -1,7 +1,7 @@
 import { buildRidge } from './ridgeView';
+import { boardHill, handHill, hillSignature, type HillProfile } from '../core/hills';
 import { RIDGE_LOTS, ridgeStage } from '../core/ridge';
 import { LivingLandscape } from './developmentView';
-import { developBuild } from './developmentBuild';
 import { developmentAt, previewDevelopment, type DevelopmentValues } from '../core/development';
 import * as THREE from 'three/webgpu';
 import { HarborView } from './harbors';
@@ -9,7 +9,7 @@ import { mrt, vec3, vec4 } from 'three/tsl';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Board, Check, PlaceResult, Placed } from '../core/board';
-import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey } from '../core/hex';
+import { DIRS, edgeMid, hexToWorld, hkey, opposite, unkey, worldToHex } from '../core/hex';
 import type { SiteKind } from '../core/sites';
 import type { SynHit, SynKind } from '../core/synergy';
 import { T, rotateEdges, type TileDef } from '../core/tiles';
@@ -488,6 +488,8 @@ export class World {
   private visualSignatures = new WeakMap<TileBuild, string>();
   private pendingLandscape = new Set<number>();
   get livingActive() { return this.livingEnabled && !!this.board && (this.board.rules.riverTrade || this.board.rules.infinite); }
+  get hillsActive() { return this.livingActive && this.board?.rules.layout === 'crista'; }
+  private hillGhostCell?: {q: number; r: number; rot: number};
   private chimneys: number[] = [];
   private sun = new THREE.DirectionalLight();
   /** Sombras em cascata do sol (Ultra e Cinema): nítidas perto da câmera, cobrindo até a névoa. */
@@ -887,11 +889,10 @@ export class World {
 
   // ---------------------------------------------------------------- mapa
 
-  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { ridgeLot?: number; center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; development?: DevelopmentValues; waterGrowth?: number }) {
+  private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { ridgeLot?: number; center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; development?: DevelopmentValues; waterGrowth?: number; hill?: HillProfile }) {
     const tile: TileBuild = buildTile(def.edges, def.seed, this.theme, { detail: 1.6, synergies, houses: this.lib.houseMeta, flow, special: def.special, ...extra });
     if (extra?.development) {
-      developBuild(tile, def.edges, extra.development);
-      this.visualSignatures.set(tile, this.landscapeSignature(extra.development, extra.widths!));
+      this.visualSignatures.set(tile, this.landscapeSignature(extra.development, extra.widths!,extra.hill));
     }
     if (extra?.ridgeLot !== undefined && extra.ridgeLot >= 0) buildRidge(tile,this.theme,extra.ridgeLot,ridgeStage(extra.development ?? [],def.edges));
     tile.allDecos = tile.decos;
@@ -918,11 +919,11 @@ export class World {
       const state = proposed?.neighbors.find((p)=>p.q===q+dq && p.r===r+dr)?.after ?? developmentAt(this.board!,q+dq,r+dr);
       return width * (1 + 0.12 * Math.min(levels[worldSide],state.levels[opposite(worldSide)]));
     });
-    return { widths: expanded, development: flowBase(levels, rot) as DevelopmentValues, waterGrowth: levels[edges.indexOf(T.Water)] ?? 0 };
+    return { widths: expanded, development: flowBase(levels, rot) as DevelopmentValues, waterGrowth: levels[edges.indexOf(T.Water)] ?? 0, hill: this.hillsActive ? boardHill(this.board,q,r,def,rot) : undefined };
   }
 
-  private landscapeSignature(levels: DevelopmentValues | undefined, widths: number[]) {
-    return `${levels?.join(',')}|${widths.join(',')}`;
+  private landscapeSignature(levels: DevelopmentValues | undefined, widths: number[], hill?: HillProfile) {
+    return `${levels?.join(',')}|${widths.join(',')}|${hillSignature(hill)}`;
   }
 
   // A boca do rio no segundo anel pode mudar quando o primeiro anel ganha um encaixe.
@@ -938,7 +939,7 @@ export class World {
     if (!this.livingActive || !this.board) return;
     this.living.sync(this.pendingLandscape, (p) => {
       const d = this.developmentOptions(p.q,p.r,p.def,p.rot,this.settleWidths(p));
-      return this.landscapeSignature(d.development, d.widths);
+      return this.landscapeSignature(d.development, d.widths,d.hill);
     }, (p) => {
       const b = this.buildPlaced(p), m = tileMatrix(p.q,p.r,p.rot);
       groundMap.add(b,m,this.waterColor);
@@ -1032,6 +1033,7 @@ export class World {
     this.chimneys = [];
     this.sprites.clear();
     this.life.reset(this.theme);
+    this.life.groundRise = this.hillsActive ? (x,z) => this.riseAt(x,z) : undefined;
     this.flows.clear();
     this.widths.clear();
     groundMap.clear();
@@ -1281,7 +1283,12 @@ export class World {
         const h = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
         groundMap.lantern(x, z, 0.28 + 0.2 * h);
       }
-      if (d.anim === 'spin-z' || d.anim === 'spin-x') this.life.addSpinner(d.key, tmpM, d.anim === 'spin-x' ? 'x' : 'z');
+      // A posição vertical de quem se move será relida na malha viva quando o vizinho assentar.
+      if (d.anim && d.anim !== 'swim' && d.anim !== 'bob' && b.hill) tmpM.elements[13] -= b.hill.at(d.support?.[0] ?? d.x,d.support?.[1] ?? d.z);
+      if (d.anim === 'spin-z' || d.anim === 'spin-x') {
+        const base = d.support && new THREE.Vector3(d.support[0],0,d.support[1]).applyMatrix4(m);
+        this.life.addSpinner(d.key, tmpM, d.anim === 'spin-x' ? 'x' : 'z',base?.x,base?.z);
+      }
       else if (d.anim === 'wander') this.life.addAnimal(tmpM, d.color);
       else if (d.anim === 'chop' || d.anim === 'tend' || d.anim === 'carry') this.life.addWorker(d.key, tmpM, d.color, d.anim);
       else if (d.anim === 'swim') this.life.addFish(tmpM, d.color, d.orbit ?? 0);
@@ -1370,7 +1377,7 @@ export class World {
     const flow = this.settleFlow(p);
     const development = this.developmentOptions(p.q,p.r,p.def,p.rot,this.settleWidths(p));
     const widths = development.widths;
-    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${development.development?.join(',') ?? ''}`;
+    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${p.eraMark ?? ''}|${p.site ?? ''}|${p.wonder ? 'w' : ''}|${development.development?.join(',') ?? ''}|${hillSignature(development.hill)}`;
     let live: LiveTile;
     let y0 = 1.2;
     if (this.ghost && this.ghost.def === p.def && this.ghost.sig === sig) {
@@ -1405,6 +1412,7 @@ export class World {
   // ---------------------------------------------------------------- fantasma
 
   setGhost(def: TileDef, rot: number, angle: number, q: number, r: number, check: Check) {
+    this.hillGhostCell = {q,r,rot};
     const syn = check.valid ? synBase(check.synergies, rot) : [];
     const flow = flowBase(this.flowAt(q, r, rotateEdges(def.edges, rot)), rot);
     const development = this.developmentOptions(q,r,def,rot,flowBase(this.widthsAt(q,r,def,rot),rot));
@@ -1414,7 +1422,7 @@ export class World {
     const mark = check.valid && !def.special ? (check.eraMark ?? undefined) : undefined;
     const site = check.valid ? check.site?.kind : undefined;
     const wonder = check.valid && check.wonder && !def.special ? true : undefined;
-    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}|${development.development?.join(',') ?? ''}`;
+    const sig = `${synSig(syn)}|${flow.join('')}|${widths.join(',')}|${mark ?? ''}|${site ?? ''}|${wonder ? 'w' : ''}|${development.development?.join(',') ?? ''}|${hillSignature(development.hill)}`;
     const key = `${def.seed}:${this.theme.id}:${sig}`;
     if (!this.ghost || this.ghostKey !== key) {
       const old = this.ghost;
@@ -1447,7 +1455,8 @@ export class World {
       m.visible = s === 1 || s === 3 || s === 4;
       if (!m.visible) continue;
       const [mx, mz] = edgeMid(i);
-      this.markerLocal[i].set(mx * 0.93, 0.03, mz * 0.93);
+      const [lx,lz] = edgeMid((i+6-rot)%6);
+      this.markerLocal[i].set(mx * 0.93, 0.03+(this.ghost.build.hill?.at(lx*.93,lz*.93) ?? 0), mz * 0.93);
       m.rotation.y = -(Math.PI / 6 + (Math.PI / 3) * i) + Math.PI / 2;
       (m.material as THREE.MeshBasicNodeMaterial).color.set(s === 1 ? '#ffffff' : s === 4 ? '#ffc83d' : '#ff4a3d');
     }
@@ -1614,7 +1623,32 @@ export class World {
   }
 
   setPreview(def: TileDef | null, angle: number, stack: number) {
-    this.preview.set(def, () => this.build(def!, []), angle, stack);
+    this.preview.set(def, () => this.build(def!, [], undefined, { hill: this.hillsActive ? handHill(def!) : undefined }), angle, stack);
+  }
+
+  private riseAt(x: number,z: number) {
+    const [q,r] = worldToHex(x,z), p = this.board?.get(q,r);
+    const hill = p && this.living.getBuild(p.key)?.hill;
+    if (!p || !hill) return 0;
+    const origin = hexToWorld(q,r), a = p.rot*Math.PI/3;
+    const dx = x-origin.x, dz = z-origin.z;
+    return hill.at(dx*Math.cos(a)+dz*Math.sin(a),-dx*Math.sin(a)+dz*Math.cos(a));
+  }
+
+  projectBank(q: number,r: number,side: number) {
+    const origin=hexToWorld(q,r),[dx,dz]=edgeMid(side);
+    const x=origin.x+.64*dx, z=origin.z+.64*dz;
+    return this.project(x,this.riseAt(x,z)+.035,z);
+  }
+
+  hillSnapshot() {
+    const offered = this.preview.shown, ghost = this.ghost;
+    const tiles = (this.board?.list ?? []).flatMap(p=>{
+      const hill = this.living.getBuild(p.key)?.hill;
+      return hill ? [{q:p.q,r:p.r,rot:p.rot,...hill.snapshot(p.def.seed)}] : [];
+    });
+    return { offered: offered?.build.hill?.snapshot(offered.def.seed) ?? null,
+      ghost: ghost?.group.visible && ghost.build.hill ? {...this.hillGhostCell,...ghost.build.hill.snapshot(ghost.def.seed)} : null, tiles };
   }
 
   /** Depuração visual: todos os kits do tema lado a lado (?gallery). */

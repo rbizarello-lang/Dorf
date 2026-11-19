@@ -30,7 +30,7 @@ async function open(query, viewport = desktop, touch = false) {
     hasTouch: touch,
   });
   await page.addInitScript(() => {
-    localStorage.setItem('entrepostos.crista.photoSize', 'screen');
+    localStorage.setItem('entrepostos.encostas.photoSize', 'screen');
   });
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
@@ -51,7 +51,7 @@ async function settle(page, tiles) {
 }
 
 async function readSave(page) {
-  return page.evaluate(() => JSON.parse(localStorage.getItem('entrepostos.crista.save')));
+  return page.evaluate(() => JSON.parse(localStorage.getItem('entrepostos.encostas.save')));
 }
 
 async function project(page, [q, r]) {

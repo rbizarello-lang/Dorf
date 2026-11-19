@@ -1,0 +1,33 @@
+{
+  "htmlHash": "a6cf8c4d8f9cec3db14926f12406c41fc2cd54ff7db6d719b810164ce041448b",
+  "browser": "157.0.8103.52",
+  "route": {
+    "seed": 42,
+    "stress": 60,
+    "map": "crista"
+  },
+  "cases": {
+    "carga": {
+      "load": {
+        "logic": 10.300000000046566,
+        "bake": 287.5999999999767,
+        "tiles": 64
+      },
+      "stable": {
+        "count": 120,
+        "rAFms": {
+          "p50": 16.7,
+          "p95": 16.8,
+          "max": 16.8
+        },
+        "calls": 345,
+        "triangles": 505809,
+        "tiles": 64,
+        "gpu": "GeForce RTX 3060",
+        "backend": "webgpu"
+      }
+    }
+  },
+  "errors": [],
+  "passed": true
+}

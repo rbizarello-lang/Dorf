@@ -17,7 +17,7 @@ try {
     await page.goto(pathToFileURL(resolve('dist/index.html')).href + '?' + query, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => window.__stats?.tiles > 0, null, { timeout: 120000 });
   };
-  const save = () => page.evaluate(() => JSON.parse(localStorage.getItem('entrepostos.crista.save')));
+  const save = () => page.evaluate(() => JSON.parse(localStorage.getItem('entrepostos.encostas.save')));
   await open('debug&theme=riviera&mapa=confluencia&seed=42&quality=medium');
   await page.locator('#btn-help').click();
   assert(await page.getByRole('dialog').isVisible());
@@ -29,7 +29,7 @@ try {
   assert(await page.evaluate(() => window.__placeBest()));
   await page.waitForFunction(() => window.__stats?.tiles === 2);
   assert.equal((await save()).moves.length, 1);
-  await page.evaluate(() => localStorage.setItem('entrepostos.crista.photoSize', 'screen'));
+  await page.evaluate(() => localStorage.setItem('entrepostos.encostas.photoSize', 'screen'));
   await open('debug&theme=riviera&quality=medium');
   await page.keyboard.press('p');
   await page.getByRole('button', { name: 'Salvar foto' }).waitFor();

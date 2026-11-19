@@ -1,12 +1,16 @@
 import * as THREE from 'three/webgpu';
 import { corner, edgeMid, INR } from '../core/hex';
+import { handHill, hillHeight, type HillProfile } from '../core/hills';
+import { HillSurface } from './hillSurface';
+import { developBuild } from './developmentBuild';
+import type { DevelopmentValues } from '../core/development';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
 import type { SynKind } from '../core/synergy';
 import type { SiteKind } from '../core/sites';
 import type { SpecialKind } from '../core/specials';
 import { isStrict, T } from '../core/tiles';
 import type { CropKind, Theme } from '../themes/types';
-import { CROP_LAYOUT, type HouseMeta } from './lib';
+import { BODY, CROP_LAYOUT, type HouseMeta } from './lib';
 
 // Gera a peça na orientação de origem (rotação 0), em coordenadas locais.
 // O mesmo resultado serve para o fantasma, a animação de queda e o "cozimento"
@@ -58,6 +62,8 @@ export interface Deco {
   sz: number;
   color: THREE.Color;
   anim?: Anim;
+  /** Eixo de moinho: as pás acompanham a fundação do edifício. */
+  support?: readonly [number, number];
   /** Peixe: raio do círculo que ele nada (negativo = sentido horário). O centro fica à esquerda (ou à direita) da direção da peça. */
   orbit?: number;
   /** Só existe na peça viva (andaime de obra): o World não o grava nos blocos. */
@@ -65,6 +71,7 @@ export interface Deco {
 }
 
 export interface TileBuild {
+  hill?: HillSurface;
   pos: Float32Array;
   col: Float32Array;
   /** Por vértice do chão: pesos de detalhe [prado, floresta, plantação, vila] (0 nas laterais). */
@@ -84,6 +91,8 @@ export interface TileBuild {
 }
 
 export interface BuildOpts {
+  hill?: HillProfile;
+  development?: DevelopmentValues;
   /** 1 = densidade total de plantas e capim; menor em qualidade baixa. */
   detail: number;
   /** Interações nas bordas (setor na orientação de origem). */
@@ -153,6 +162,58 @@ class Buf {
   quad(a: V3, b: V3, c: V3, d: V3, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, cd: THREE.Color, n: V3, sp: Splat = NO_SPLAT) {
     this.tri(a, b, c, ca, cb, cc, n, sp);
     this.tri(a, c, d, ca, cc, cd, n, sp);
+  }
+
+  /** Cada parcela e trilha acompanha os triângulos do chão. Um polígono grande
+   * atravessaria o topo convexo, fazendo a terra do vinhedo sumir entre as fileiras. */
+  drape(start: number,hill: HillSurface) {
+    const pos=this.pos.splice(start), col=this.col.splice(start), spl=this.spl.splice(start/3*4);
+    const grid = (v: number[],axis: number) => {
+      const u = v[0]-v[2]/(2*INR), w = v[2]/INR;
+      return (axis===0 ? u : axis===1 ? w : u+w)*hill.divisions;
+    };
+    for (let i=0; i<pos.length; i+=9) {
+      const tri = [i,i+3,i+6].map(k=>[...pos.slice(k,k+3),...col.slice(k,k+3),...spl.slice(k/3*4,k/3*4+4)]);
+      const rise=tri.map(p=>hill.at(p[0],p[2]));
+      const follows = tri.every((p,k)=>{
+        const j=(k+1)%3, q=tri[j];
+        return Math.abs(hill.at((p[0]+q[0])*.5,(p[2]+q[2])*.5)-(rise[k]+rise[j])*.5)<.001;
+      }) && Math.abs(hill.at((tri[0][0]+tri[1][0]+tri[2][0])/3,(tri[0][2]+tri[1][2]+tri[2][2])/3)-(rise[0]+rise[1]+rise[2])/3)<.001;
+      if (follows) {
+        for (const [k,p] of tri.entries()) {
+          this.pos.push(p[0],p[1]+rise[k],p[2]); this.col.push(p[3],p[4],p[5]); this.spl.push(p[6],p[7],p[8],p[9]);
+        }
+        continue;
+      }
+      let polygons=[tri];
+      for (let axis=0; axis<3; axis++) {
+        const coords=tri.map(p=>grid(p,axis));
+        const low=Math.floor(Math.min(...coords)+1e-7)+1, high=Math.ceil(Math.max(...coords)-1e-7);
+        for (let line=low; line<high; line++) {
+          const pieces: number[][][]=[];
+          for (const poly of polygons) {
+            const dist=poly.map(p=>grid(p,axis)-line);
+            if (Math.min(...dist)>-1e-7 || Math.max(...dist)<1e-7) { pieces.push(poly); continue; }
+            const left: number[][]=[], right: number[][]=[];
+            for (let k=0; k<poly.length; k++) {
+              const j=(k+1)%poly.length, a=poly[k], b=poly[j], da=dist[k], db=dist[j];
+              if (da<=1e-7) left.push(a);
+              if (da>=-1e-7) right.push(a);
+              if (da*db<0 && Math.abs(da)>1e-7 && Math.abs(db)>1e-7) {
+                const t=da/(da-db), hit=a.map((value,n)=>value+t*(b[n]-value));
+                left.push(hit); right.push(hit);
+              }
+            }
+            if (left.length>=3) pieces.push(left);
+            if (right.length>=3) pieces.push(right);
+          }
+          polygons=pieces;
+        }
+      }
+      for (const poly of polygons) for (let k=1;k<poly.length-1;k++) for (const p of [poly[0],poly[k],poly[k+1]]) {
+        this.pos.push(p[0],p[1]+hill.at(p[0],p[2]),p[2]); this.col.push(p[3],p[4],p[5]); this.spl.push(p[6],p[7],p[8],p[9]);
+      }
+    }
   }
 }
 
@@ -688,7 +749,35 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
 
   // --- Topo: 6 setores subdivididos, com cores misturadas nas divisas. Peças com rio
   // usam uma malha mais fina para o leito e as margens inclinadas.
-  const N = hasWater ? 12 : 4;
+  const N = hasWater ? 12 : opts.hill ? 6 : 4;
+  const hill = opts.hill && new HillSurface(opts.hill, N, (x,z,side,boundary) => {
+    const h = hillHeight(opts.hill!,x,z);
+    if (h <= 0) return 0;
+    // Na borda seca as duas peças leem a mesma curva. O leito e a estrada em curva
+    // ganham um corredor baixo na malha interior; a água conserva o nível da confluência.
+    if (boundary && !isStrict(edges[side])) return h;
+    // Um dique estreito não sustenta um espigão. A altura disponível depende da
+    // distância livre à margem e cresce com declive limitado, mesmo no último estágio.
+    const rate = (clearance: number, grade: number) => {
+      const d = Math.max(0,clearance);
+      return grade*d*d/(d+.045);
+    };
+    const bankHeight = field ? rate(field.e(x,z)-BANK_W,.76) : Infinity;
+    const roadHeight = road.paths.length ? rate(distToPaths(x,z,road.paths)-.025,.80) : Infinity;
+    const [mx,mz]=edgeMid(side);
+    const toEdge = Math.max(0,INR-(x*mx+z*mz)/INR);
+    // Uma crista que vem do vizinho já tem cota fixada na divisa. Dissipa-se pelo
+    // lado de cá e jamais atravessa o leito ou a pista.
+    const shared = Math.max(0,opts.hill!.rims[side]-toEdge) * Math.max(0,1-toEdge/.28);
+    const cap = Math.min(bankHeight,roadHeight);
+    const limit = Math.max(shared,cap);
+    // A transição suave ainda deixa a margem ganhar altura entre dois estágios.
+    const top = cap === 0 ? 0 : h <= .45*limit ? h : limit-.55*limit/(1+(h/limit-.45)/.55);
+    const seam = !isStrict(edges[side]) && opts.hill!.rims[side]>0
+      ? (1-smooth(0,.19,toEdge))*smooth(0,.07,cap) : 0;
+    const podium = opts.wonder ? smooth(.43,.65,Math.hypot(x,z)) : 1;
+    return (top + (h-top)*seam) * podium;
+  });
   const center = new THREE.Color(0, 0, 0);
   for (const c of groundCols) center.add(c);
   center.multiplyScalar(1 / 6);
@@ -732,7 +821,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       let v = vs.get(k);
       if (!v) {
         const x = (a / N) * A[0] + (b / N) * B[0], z = (a / N) * A[1] + (b / N) * B[1];
-        v = { p: [x, groundY(x, z), z], ...topColor(i, a, b, x, z) };
+        const lift = hill?.node(i,a,b) ?? 0;
+        v = { p: [x, groundY(x, z) + lift, z], ...topColor(i, a, b, x, z) };
+        if (lift > 0) v.c.lerp(tc(theme.rock), Math.min(.24,lift*.40));
         vs.set(k, v);
       }
       return v;
@@ -772,6 +863,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     }
   }
 
+  const overlayStart = g.pos.length;
+  const chimneyHomes: V2[] = [];
   // --- Lugares reservados para construções especiais (a decoração desvia deles).
   const reserved: [number, number, number][] = [];
   const taken: V2[] = [];
@@ -905,9 +998,11 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         // Cubo das pás: à frente do capuz, na direção +z local do moinho.
         const fx = Math.sin(face) * 0.078 * sc, fz = Math.cos(face) * 0.078 * sc;
         D('sails', x + fx, 0.255 * sc, z + fz, face, sc, WHITE, 'spin-z');
+        decos[decos.length-1].support = [x,z];
       } else if (theme.mill === 'windpump') {
         const fx = Math.sin(face) * 0.022 * sc, fz = Math.cos(face) * 0.022 * sc;
         D('rotor', x + fx, groundY(x, z) + 0.318 * sc, z + fz, face, sc, WHITE, 'spin-z');
+        decos[decos.length-1].support = [x,z];
       }
     }
   }
@@ -966,7 +1061,10 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       disc(g, x, z, R, 0.006, shade(tc(theme.rock), 1.18), 18, [0, 0, 0, 1]);
       D('landmark', x, 0.006, z, ry, sc, WHITE);
       scaffold(x, z, ry, (wide ? 0.42 : 0.3) * sc, (wide ? 0.3 : 0.42) * sc);
-      if (theme.landmark === 'windmill') D('sails', x + Math.sin(ry) * 0.078 * sc, 0.006 + 0.255 * sc, z + Math.cos(ry) * 0.078 * sc, ry, sc, WHITE, 'spin-z');
+      if (theme.landmark === 'windmill') {
+        D('sails', x + Math.sin(ry) * 0.078 * sc, 0.006 + 0.255 * sc, z + Math.cos(ry) * 0.078 * sc, ry, sc, WHITE, 'spin-z');
+        decos[decos.length-1].support = [x,z];
+      }
       // Flâmulas na cor de destaque do tema, espalhadas em volta do tablado.
       const flag = tc(theme.ui.accent);
       for (let k = 0; k < opts.eraMark; k++) {
@@ -1196,6 +1294,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // Cor do telhado por peça (uma por tipo de casa), com uma ou outra exceção: de longe a vila lê
   // como um bloco de cor, não como confete de telhados vermelhos, azuis e amarelos misturados.
   const tileRoof = new Map<number, string>();
+  // O assento da casa é escolhido na forma da peça ainda na mão, e assim continua
+  // no mesmo lugar quando um encaixe futuro desenvolve o patamar.
+  const originalHill = hill ? handHill({edges:[...edges],seed,quest:null}) : undefined;
   const addHouse = (x: number, z: number, baseAng: number, sector = -1) => {
     const i = weighted(rng, houseKinds);
     const kind = theme.houses[i];
@@ -1204,6 +1305,26 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const s = randRange(rng, 1.5, 1.8) * (kind.body === 'long' ? 0.9 : 1);
     const sy = randRange(rng, 0.92, 1.12);
     const ry = baseAng + (rng() < 0.5 ? 0 : Math.PI / 2) + (rng() - 0.5) * 0.12;
+    if (originalHill && sector >= 0) {
+      const ox=x, oz=z, body=BODY[kind.body], c=Math.cos(ry), sn=Math.sin(ry);
+      const fit = (px: number,pz: number) => {
+        let hi=0,lo=Infinity;
+        for (const [a,b] of [[-1,-1],[-1,1],[1,1],[1,-1],[0,0]]) {
+          const u=a*body.w*s*.53, v=b*body.d*s*.53;
+          const h=hillHeight(originalHill,px+u*c+v*sn,pz-u*sn+v*c);
+          hi=Math.max(hi,h);lo=Math.min(lo,h);
+        }
+        return hi-lo+.13*Math.hypot(px-ox,pz-oz);
+      };
+      let score=fit(x,z);
+      if (score>.045) for (const radius of [.10,.20,.30]) for (let j=0;j<8;j++) {
+        const angle=j*Math.PI/4, px=ox+radius*Math.cos(angle), pz=oz+radius*Math.sin(angle);
+        if (Math.hypot(px,pz)>.75 || (Math.floor(Math.atan2(pz,px)*3/Math.PI)+6)%6!==sector) continue;
+        if (!free(px,pz,.27) || clear(px,pz)<.16) continue;
+        const next=fit(px,pz);
+        if (next<score) { x=px; z=pz; score=next; }
+      }
+    }
     D(`wall:${i}`, x, 0, z, ry, [s, s * sy, s], vary(rng, tc(pick(rng, kind.walls)), 0.04));
     let roof = tileRoof.get(i);
     if (roof === undefined) tileRoof.set(i, (roof = pick(rng, kind.roofs)));
@@ -1213,6 +1334,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const [cx, cy, cz] = meta.chimney;
       const c = Math.cos(ry), sn = Math.sin(ry);
       chimneys.push(x + (cx * c + cz * sn) * s, cy * s * sy, z + (-cx * sn + cz * c) * s, i);
+      if (hill) chimneyHomes.push([x,z]);
     }
     taken.push([x, z]);
     houses.push({ x, z, s, sector });
@@ -1397,7 +1519,49 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     D('folk:sack', wx, 0, wz, yawTo(-home.x, -home.z), 1, shirt(6), 'carry');
   }
 
-  return {
+  // Caminhos, terrenos de cultivo e sua bordadura são pintados sobre a malha.
+  if (hill) g.drape(overlayStart,hill);
+  // Uma casa tem piso horizontal. O embasamento de pedra fecha o vão a jusante.
+  const pads = new Map<string,number>();
+  if (hill) for (const d of decos) {
+    if (!d.key.startsWith('wall:')) continue;
+    const body = BODY[theme.houses[Number(d.key.slice(5))].body];
+    const pad: V3[] = [];
+    const cs = Math.cos(d.ry), sn = Math.sin(d.ry);
+    for (const [a,b] of [[-1,-1],[1,-1],[1,1],[-1,1]]) {
+      const u = a*body.w*d.sx*.52, v = b*body.d*d.sz*.52;
+      const x = d.x+u*cs+v*sn, z = d.z-u*sn+v*cs;
+      pad.push([x,hill.at(x,z),z]);
+    }
+    const high = Math.max(...pad.map(p=>p[1])), low=Math.min(...pad.map(p=>p[1]));
+    if (high-low < .018) continue;
+    const seat = hill.at(d.x,d.z);
+    const floor = Math.min(seat+.045,Math.max(seat,high-Math.min(.055,.47*(high-low))));
+    pads.set(d.x+','+d.z,floor);
+    const top: V3[] = pad.map(([x,,z])=>[x,floor,z]);
+    const stone = tc(theme.rock).clone().lerp(d.color,.32);
+    g.quad(top[0],top[1],top[2],top[3],stone,stone,stone,stone,UP);
+    const skirt: V3[] = pad.map(([x,y,z])=>{
+      const dx=x-d.x, dz=z-d.z, len=Math.hypot(dx,dz);
+      const extension=Math.min(.13,Math.max(0,(floor-y-.025)*.80));
+      let xx=x+dx*extension/len, zz=z+dz*extension/len;
+      const side=(Math.floor(Math.atan2(zz,xx)*3/Math.PI)+6)%6;
+      const [nx,nz]=edgeMid(side);
+      const out=(xx*nx+zz*nz)/(INR*INR);
+      if (out>.985) { xx*=.985/out; zz*=.985/out; }
+      return [xx,Math.min(floor-.025,hill.at(xx,zz)-.012),zz];
+    });
+    const earth = tc(theme.ground[T.Village]).clone().lerp(tc(theme.rock),.26);
+    for (let i=0; i<4; i++) {
+      const j=(i+1)%4, a=pad[i], b=pad[j];
+      const n: V3=[(a[0]+b[0])*.5-d.x,0,(a[2]+b[2])*.5-d.z];
+      const lipA: V3=[a[0],floor-.026,a[2]], lipB: V3=[b[0],floor-.026,b[2]];
+      g.quad(lipA,lipB,top[j],top[i],stone,stone,stone,stone,n);
+      g.quad(skirt[i],skirt[j],lipB,lipA,earth,earth,earth,earth,n);
+    }
+  }
+  const result: TileBuild = {
+    hill,
     pos: new Float32Array(g.pos),
     col: new Float32Array(g.col),
     splat: new Float32Array(g.spl),
@@ -1407,6 +1571,15 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     decos,
     chimneys,
   };
+  if (opts.development) developBuild(result,edges,opts.development);
+  if (hill) {
+    for (const d of result.decos) {
+      const x = d.support?.[0] ?? d.x, z = d.support?.[1] ?? d.z;
+      d.y += d.key.startsWith('wall:') || d.key.startsWith('roof:') ? pads.get(x+','+z) ?? hill.at(x,z) : hill.at(x,z);
+    }
+    for (const [i,[x,z]] of chimneyHomes.entries()) result.chimneys[i*4+1] += pads.get(x+','+z) ?? hill.at(x,z);
+  }
+  return result;
 }
 
 const _m = new THREE.Matrix4();

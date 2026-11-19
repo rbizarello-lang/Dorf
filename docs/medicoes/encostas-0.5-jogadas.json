@@ -1,0 +1,136 @@
+{
+  "htmlHash": "df2c5ebe0eaae566c536e872f6a2c06f15c83657bc49b6ebe0fc838c36ac60ac",
+  "browser": "157.0.8103.52",
+  "route": [
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      -1,
+      1,
+      1
+    ],
+    [
+      -1,
+      0,
+      5
+    ]
+  ],
+  "cases": {
+    "webgpu": {
+      "offered": {
+        "nodes": 546,
+        "hash": "725616a0532e666393d4be99bb4be54b8a22241ba17924d7f0b155a25bfe264b",
+        "peak": 0.15902315080165863,
+        "seed": 1087172121,
+        "stage": 0
+      },
+      "preview": {
+        "nodes": 546,
+        "hash": "0f3b7fad728bb39781754168a8fb24c0a6ff36881e789a72d4eaa7d3d2b00eb5",
+        "peak": 0.18175411224365234,
+        "seed": 1087172121,
+        "stage": 2
+      },
+      "firstPlacement": {
+        "count": 120,
+        "rAFms": {
+          "p50": 16.7,
+          "p95": 16.8,
+          "max": 633.3
+        },
+        "calls": 72,
+        "triangles": 33882,
+        "tiles": 5,
+        "gpu": "GeForce RTX 3060",
+        "backend": "webgpu"
+      },
+      "settledBefore": {
+        "count": 90,
+        "rAFms": {
+          "p50": 16.7,
+          "p95": 16.8,
+          "max": 16.8
+        },
+        "calls": 90,
+        "triangles": 41960,
+        "tiles": 6,
+        "gpu": "GeForce RTX 3060",
+        "backend": "webgpu"
+      },
+      "growthPreview": "Colina · patamar 1 · Vinhedo · patamar 1",
+      "growth": {
+        "from": {
+          "nodes": 546,
+          "hash": "2b6921873a902afcc3d059f01c607f6249eb91421a2a53c1f2a291b46ab9c322",
+          "peak": 0.1825135350227356,
+          "seed": 1577248075,
+          "stage": 0
+        },
+        "to": {
+          "nodes": 546,
+          "hash": "da11cacc399c3faf6177d66cf2d1c60f7ee26703ef6d7d725a048d9f2bc4cccd",
+          "peak": 0.29387369751930237,
+          "seed": 1577248075,
+          "stage": 1
+        }
+      },
+      "settledAfter": {
+        "count": 90,
+        "rAFms": {
+          "p50": 16.7,
+          "p95": 16.8,
+          "max": 16.8
+        },
+        "calls": 95,
+        "triangles": 50249,
+        "tiles": 7,
+        "gpu": "GeForce RTX 3060",
+        "backend": "webgpu"
+      },
+      "replayed": true,
+      "undone": true,
+      "keptPreviousStorage": true
+    },
+    "webgl2-toque": {
+      "offered": {
+        "nodes": 546,
+        "hash": "725616a0532e666393d4be99bb4be54b8a22241ba17924d7f0b155a25bfe264b",
+        "peak": 0.15902315080165863,
+        "seed": 1087172121,
+        "stage": 0
+      },
+      "preview": {
+        "nodes": 546,
+        "hash": "0f3b7fad728bb39781754168a8fb24c0a6ff36881e789a72d4eaa7d3d2b00eb5",
+        "peak": 0.18175411224365234,
+        "seed": 1087172121,
+        "stage": 2
+      },
+      "growthPreview": "Colina · patamar 1 · Vinhedo · patamar 1",
+      "growth": {
+        "from": {
+          "nodes": 546,
+          "hash": "2b6921873a902afcc3d059f01c607f6249eb91421a2a53c1f2a291b46ab9c322",
+          "peak": 0.1825135350227356,
+          "seed": 1577248075,
+          "stage": 0
+        },
+        "to": {
+          "nodes": 546,
+          "hash": "da11cacc399c3faf6177d66cf2d1c60f7ee26703ef6d7d725a048d9f2bc4cccd",
+          "peak": 0.29387369751930237,
+          "seed": 1577248075,
+          "stage": 1
+        }
+      },
+      "replayed": true,
+      "undone": true,
+      "keptPreviousStorage": true
+    }
+  },
+  "errors": [],
+  "passed": true
+}

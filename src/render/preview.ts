@@ -82,6 +82,7 @@ export class PreviewView {
   }
 
   invalidateDetail() { this.def = null; }
+  get shown() { return this.tile; }
 
   /** Troca a peça mostrada (com uma pequena queda) e ajusta a altura da pilha. */
   set(def: TileDef | null, build: () => TileBuild, angle: number, stack: number) {

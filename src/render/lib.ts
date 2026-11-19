@@ -163,7 +163,7 @@ export interface HouseMeta {
   chimney: [number, number, number] | null;
 }
 
-const BODY: Record<BodyStyle, { w: number; h: number; d: number }> = {
+export const BODY: Record<BodyStyle, { w: number; h: number; d: number }> = {
   cottage: { w: 0.14, h: 0.11, d: 0.12 },
   long: { w: 0.24, h: 0.085, d: 0.11 },
   cube: { w: 0.12, h: 0.1, d: 0.12 },

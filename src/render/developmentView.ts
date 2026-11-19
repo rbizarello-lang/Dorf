@@ -117,6 +117,10 @@ export class LivingLandscape {
     return { calls, instances, triangles, tiles };
   }
 
+  getBuild(key: number) {
+    return this.tiles.get(key)?.build;
+  }
+
   reset() {
     for (const region of this.regions.values()) this.clearRegion(region);
     this.dirtyRegions.clear();

@@ -1,10 +1,18 @@
-# Entrepostos · Aldeia na Crista (0.4)
+# Entrepostos · Encostas (0.5)
 
 Abra [o jogo](dist/index.html) no Chrome ou Edge. O jogo roda em um único arquivo, inclusive sem servidor. A primeira partida abre na **Aldeia na crista**, no tema Costa dos Terraços.
 
-1. Abra **Guiar encaixe na crista** na carta fluvial. Em telas pequenas, o botão **0/3 cais** abre a carta.
-2. Aponte o primeiro canal para o hexágono marcado, mantendo a orientação inicial. Leia a prévia com o avanço de Campanário e Belvedere. Use as setas para percorrer as casas livres pelo teclado.
-3. Clique ou pressione **Enter** para colocar. Cada um dos dois patamares ganha uma casa. Pressione **U** para desfazer e ver a aldeia voltar ao estágio anterior. **R** gira a peça, **WASD** move a câmera e **Ver mapa** enquadra os cais.
+A peça na mão já mostra onde o terreno é mais baixo ou mais alto. Aponte para uma casa livre e gire a peça. As margens se acomodam ao canal, e um bom encaixe de terra pode prolongar o patamar nas duas peças.
+
+### Três jogadas para ver o vinhedo subir
+
+Abra a [viagem com a semente 42](dist/index.html?mode=entrepostos&mapa=crista&theme=riviera&seed=42), também usada na primeira partida da edição. Para repetir a sequência já iniciada conservando sua partida atual, abra o link em uma janela anônima do navegador.
+
+1. Selecione **Guiar encaixe na crista**. No celular, abra a carta pelo botão **0/3 cais**. Coloque o canal no hexágono marcado, com a orientação inicial. A prévia já mostra a margem elevada que vai acompanhar a aldeia.
+2. Na margem oposta da confluência, escolha o espaço que encosta na confluência, no **Baluarte** e no **Campanário**. Gire a segunda peça **uma vez à direita** e coloque. Observe o cultivo novo à beira do rio.
+3. Escolha o único espaço livre que toca **essa segunda peça e a confluência**. Gire a terceira peça **uma vez à esquerda** e confira a prévia **Vinhedo · patamar 1**. Ao confirmar, o vinhedo já plantado ganha altura e a encosta atravessa a divisa. **U** ou **Desfazer** recupera a implantação anterior.
+
+No teclado, **R** gira à direita, **Shift+R** gira à esquerda e **Enter** coloca. No celular, toque na casa, use as setas de giro e confirme. [Prévia da terceira peça](docs/screens/0.5-encostas-previa-vinhedo.png) · [Antes](docs/screens/0.5-encostas-antes.png) · [Depois](docs/screens/0.5-encostas-depois.png)
 
 Use **Escolher frete** para mudar de carta ou contrato.
 
@@ -19,9 +27,9 @@ Use **Escolher frete** para mudar de carta ou contrato.
 
 A linha sobre a água mostra a rota da carga. **Rever a travessia** acompanha a barca. **Câmera fixa na travessia** conserva o enquadramento e vem selecionada quando o sistema pede movimento reduzido.
 
-A Crista guarda seus próprios saves, preferências e recordes sob o prefixo `entrepostos.crista.` no navegador. A Confluências 0.3 guarda os seus em `entrepostos.cartas.`.
+Encostas guarda a partida, as preferências e os recordes sob o prefixo `entrepostos.encostas.`. A edição Crista 0.4 usa `entrepostos.crista.` e a Confluências 0.3 usa `entrepostos.cartas.`.
 
-[Revisão da edição 0.4](docs/REVISAO_0_4.md) · [Verificação jogável da Crista](docs/QA_CRISTA.md) · [Medição da primeira troca de qualidade](docs/QUALIDADE_0_4.md) · [Revisão e medições da edição 0.3](docs/REVISAO_0_3.md)
+[Relevo das peças e verificação da edição 0.5](docs/ENCOSTAS.md) · [Revisão da edição 0.4](docs/REVISAO_0_4.md) · [Verificação jogável da Crista](docs/QA_CRISTA.md) · [Medição da primeira troca de qualidade](docs/QUALIDADE_0_4.md) · [Revisão e medições da edição 0.3](docs/REVISAO_0_3.md)
 
 ## Paisagem viva e Costa dos Terraços
 

@@ -40,10 +40,14 @@
 .river-trade .score::after { content: ' pontos'; font: 600 13px var(--font-body); }
 @media (max-width: 580px) { .river-trade .brand { display: block; font-size: 18px; } .river-trade .score { font-size: 22px; } }
 body.capture #manifest { display: none; }
-.marker.site.port {
+.marker.site.port, .marker.site.bank {
   translate: -50% 0;
   height: 20px; min-width: 0; padding: 0 6px; border: 0; border-left: 4px solid var(--c);
   border-radius: 3px; background: #173b3e; color: #fff9e9; font: 600 11px/1 var(--font-body);
+}
+.marker.site.bank::after {
+  content: ''; position: absolute; top: 100%; left: calc(50% - 3px);
+  border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid #173b3e;
 }
 @media (max-width: 900px) { .river-trade .hint { display: none; } }
 @media (max-width: 580px) {

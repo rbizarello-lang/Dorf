@@ -17,7 +17,7 @@ try {
       const p=await browser.newPage({viewport:{width:1280,height:800},reducedMotion:'reduce'});
       p.on('pageerror',e=>errors.push(e.message));
       p.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
-      await p.addInitScript(s=>localStorage.setItem('entrepostos.crista.save',JSON.stringify(s)),save);
+      await p.addInitScript(s=>localStorage.setItem('entrepostos.encostas.save',JSON.stringify(s)),save);
       await p.goto(pathToFileURL(resolve('dist/index.html')).href+`?seed=42&theme=${theme}&time=${time}&quality=high&debug&vivas=1${backend==='webgl2'?'&webgl':''}`,{waitUntil:'domcontentloaded'});
       await p.waitForFunction(()=>window.__stats?.tiles===9,null,{timeout:120000});
       await p.keyboard.press('f');

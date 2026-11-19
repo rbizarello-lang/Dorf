@@ -21,7 +21,7 @@ try {
       await p.addInitScript(s => {
         const raw = JSON.stringify(s);
         localStorage.setItem('entrepostos.save', raw);
-        localStorage.setItem('entrepostos.crista.save', raw);
+        localStorage.setItem('entrepostos.encostas.save', raw);
       }, {v:11,seed,rulesId:'holanda',mode:'entrepostos',undone:0,score:old.board.score,specials:[],combinedFreight:true,moves:[first]});
     }
     await p.goto(url+`?debug&seed=42&theme=${theme}&time=${time}&quality=high`,{waitUntil:'domcontentloaded'});
@@ -34,7 +34,7 @@ try {
       }
       throw Error('Sem acesso por Tab: '+selector);
     }
-    const save=()=>p.evaluate(()=>JSON.parse(localStorage.getItem('entrepostos.crista.save')));
+    const save=()=>p.evaluate(()=>JSON.parse(localStorage.getItem('entrepostos.encostas.save')));
     if(!legacy) {
       await tabTo('#choose-freight');await key('Enter');
       const dialog=p.getByRole('dialog',{name:'Preparar a viagem'});

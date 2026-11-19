@@ -87,6 +87,8 @@ interface Spinner {
   axis: THREE.Vector3;
   speed: number;
   phase: number;
+  supportX: number;
+  supportZ: number;
 }
 
 interface Animal {
@@ -188,6 +190,7 @@ interface Flock {
 }
 
 export class Life {
+  groundRise?: (x: number, z: number) => number;
   private root = new THREE.Group();
   private pools = new Map<string, AnimPool>();
   private spinners: Spinner[] = [];
@@ -251,10 +254,10 @@ export class Life {
     return p;
   }
 
-  addSpinner(key: string, world: THREE.Matrix4, axis: 'x' | 'z') {
+  addSpinner(key: string, world: THREE.Matrix4, axis: 'x' | 'z', supportX = world.elements[12], supportZ = world.elements[14]) {
     if (key !== 'sails' && key !== 'wheel' && key !== 'rotor') return;
     if (!this.pool(key)) return;
-    this.spinners.push({ pool: key, base: world.clone(), axis: axis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1), speed: key === 'sails' ? 0.9 + Math.random() * 0.4 : key === 'rotor' ? 2.2 + Math.random() * 0.6 : 1.4, phase: Math.random() * 6 });
+    this.spinners.push({ pool: key, base: world.clone(), axis: axis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1), speed: key === 'sails' ? 0.9 + Math.random() * 0.4 : key === 'rotor' ? 2.2 + Math.random() * 0.6 : 1.4, phase: Math.random() * 6, supportX, supportZ });
   }
 
   addAnimal(world: THREE.Matrix4, color: THREE.Color) {
@@ -370,6 +373,7 @@ export class Life {
       q4.setFromAxisAngle(s.axis, this.time * s.speed + s.phase);
       m4.makeRotationFromQuaternion(q4);
       m4b.copy(s.base).multiply(m4);
+      if (this.groundRise) m4b.elements[13] += this.groundRise(s.supportX,s.supportZ);
       p.set(i, m4b);
     }
     for (const [k, c] of Object.entries(counts)) this.pools.get(k)!.commit(c + 1);
@@ -393,7 +397,7 @@ export class Life {
         const bob = a.speed > 0.005 ? Math.abs(Math.sin(this.time * 9 + a.phase)) * 0.004 : 0;
         const graze = a.pause > 0 ? Math.sin(this.time * 1.3 + a.phase) * 0.12 - 0.08 : 0;
         q4.setFromAxisAngle(UP, -a.heading);
-        m4.compose(v3.set(a.x, a.y + bob, a.z), q4, s3.setScalar(a.s));
+        m4.compose(v3.set(a.x, a.y + bob + (this.groundRise?.(a.x,a.z) ?? 0), a.z), q4, s3.setScalar(a.s));
         if (graze) m4.multiply(m4b.makeRotationZ(graze));
         ap.set(i, m4, a.color);
       });
@@ -517,6 +521,7 @@ export class Life {
         if (back) m4.multiply(m4b.makeRotationY(Math.PI));
       }
       if (s < 1) m4.multiply(m4b.makeScale(s, s, s));
+      if (this.groundRise) m4.elements[13] += this.groundRise(m4.elements[12],m4.elements[14]);
       p.set(n[w.key]++, m4, w.color);
     }
     const sack = pools['folk:sack'];
@@ -529,7 +534,7 @@ export class Life {
         const ox = -Math.sin(m.heading) * side, oz = Math.cos(m.heading) * side;
         const bob = m.wait > 0 ? 0 : Math.abs(Math.sin(t * 9 + m.speed * 50)) * 0.003;
         q4.setFromAxisAngle(UP, -m.heading);
-        m4.compose(v3.set(m.x + ox, roadY + bob, m.z + oz), q4, s3.setScalar(s));
+        m4.compose(v3.set(m.x + ox, roadY + bob + (this.groundRise?.(m.x+ox,m.z+oz) ?? 0), m.z + oz), q4, s3.setScalar(s));
         sack.set(n['folk:sack']++, m4, m.shirt);
       }
     }
@@ -742,14 +747,14 @@ export class Life {
       }
       const bounce = th.vehicle === 'caravan' ? Math.abs(Math.sin(this.time * 7)) * 0.004 : 0;
       q4.setFromAxisAngle(UP, -m.heading);
-      m4.compose(v3.set(m.x, roadY + bounce, m.z), q4, s3.setScalar(1));
+      m4.compose(v3.set(m.x, roadY + bounce + (this.groundRise?.(m.x,m.z) ?? 0), m.z), q4, s3.setScalar(1));
       head?.set(hi++, m4, this.beast);
       for (let k = 1; k <= cars; k++) {
         const p = trailAt(m.trail, spacing * k);
         if (!p) break;
         q4.setFromAxisAngle(UP, -p.heading);
         const b2 = th.vehicle === 'caravan' ? Math.abs(Math.sin(this.time * 7 + k)) * 0.004 : 0;
-        m4.compose(v3.set(p.x, roadY + b2, p.z), q4, s3.setScalar(1));
+        m4.compose(v3.set(p.x, roadY + b2 + (this.groundRise?.(p.x,p.z) ?? 0), p.z), q4, s3.setScalar(1));
         car?.set(ci++, m4, this.beast);
         if (cargo && lift) {
           // Maior que o desenho do kit: de longe a carga precisa ler em cima do vagão.

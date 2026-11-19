@@ -1,0 +1,66 @@
+{
+  "htmlHash": "a6cf8c4d8f9cec3db14926f12406c41fc2cd54ff7db6d719b810164ce041448b",
+  "browser": "157.0.8103.52",
+  "route": [
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      -1,
+      1,
+      1
+    ],
+    [
+      -1,
+      0,
+      5
+    ]
+  ],
+  "cases": {
+    "referencia": {
+      "firstPlacement": {
+        "count": 120,
+        "rAFms": {
+          "p50": 66.6,
+          "p95": 116.8,
+          "max": 999.9
+        },
+        "calls": 74,
+        "triangles": 33406,
+        "tiles": 5,
+        "gpu": "GeForce RTX 3060",
+        "backend": "webgpu"
+      },
+      "settledBefore": {
+        "count": 90,
+        "rAFms": {
+          "p50": 16.7,
+          "p95": 116.7,
+          "max": 1483.3
+        },
+        "calls": 92,
+        "triangles": 40302,
+        "tiles": 6,
+        "gpu": "GeForce RTX 3060",
+        "backend": "webgpu"
+      },
+      "settledAfter": {
+        "count": 90,
+        "rAFms": {
+          "p50": 16.7,
+          "p95": 16.8,
+          "max": 733.4
+        },
+        "calls": 95,
+        "triangles": 47926,
+        "tiles": 7,
+        "gpu": "GeForce RTX 3060",
+        "backend": "webgpu"
+      }
+    }
+  },
+  "errors": [],
+  "passed": true
+}

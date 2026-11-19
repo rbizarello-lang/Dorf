@@ -1,4 +1,5 @@
 import { RIDGE_LOTS, ridgeStage, ridgeSnapshot } from './core/ridge';
+import { handHill, boardHill } from './core/hills';
 import { developmentAt, previewDevelopment, type DevelopmentChange } from './core/development';
 import { fitChart } from './ui/chartCamera';
 import * as THREE from 'three/webgpu';
@@ -62,7 +63,7 @@ interface Hot {
 
 
 const params = new URLSearchParams(location.search);
-const namespace = 'entrepostos.crista.';
+const namespace = 'entrepostos.encostas.';
 const store = {
   get(k: string) {
     try {
@@ -184,6 +185,7 @@ const siteReward = (kind: SiteKind) => {
 const synTimers: number[] = [];
 
 function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() * 1e9), replay: MoveRec[] = [], expectScore?: number, undos = 0, specials?: readonly SpecialKind[], combinedFreight = false, layout = chartFrom(params.get('mapa') ?? store.get('layout')), legacyFreight = false): boolean {
+  revealedBanks = [];
   // A gravação vale para uma partida só (desfazer refaz a partida pelo replay).
   if (capture.take) capture.stopTake('A gravação terminou aqui: o vídeo não acompanha o desfazer nem uma partida nova.');
   clearTimeout(overTimer);
@@ -352,10 +354,28 @@ function ridgeChanges(changes: DevelopmentChange[]) {
   });
 }
 
-let ridgeMarkers: ReturnType<typeof ridgeChanges> = [];
+type GrowthMarker = { id: number; q: number; r: number; text: string; side?: number };
+let ridgeMarkers: GrowthMarker[] = [];
+let revealedBanks: GrowthMarker[] = [];
+let bankTime = 0;
+function bankChanges(changes: DevelopmentChange[],q: number,r: number): GrowthMarker[] {
+  return changes.flatMap(change=>{
+    const tile = game.board.get(change.q,change.r)!;
+    if (!boardHill(game.board,tile.q,tile.r,tile.def,tile.rot)) return [];
+    const side = DIRS.findIndex(([dq,dr])=>tile.q+dq===q && tile.r+dr===r);
+    const t=tile.edges[side];
+    if (side < 0 || t === T.Water || t === T.Rail || change.after.levels[side] <= change.before.levels[side]) return [];
+    return [{id:1000000000+tile.key,q:tile.q,r:tile.r,side,text:`${theme.terrainNames[t]} · patamar ${change.after.levels[side]}`}];
+  });
+}
 const manifest = document.getElementById('manifest')!;
 const sailingOrder = document.getElementById('sailing-order')!;
 const developmentOrder = document.getElementById('development-order')!;
+function landscapeHint() {
+  if (!world.livingEnabled) return '';
+  if (world.hillsActive && game.current) return `Peça da vez · ${handHill(game.current).landform}. Una terrenos iguais para prolongar o relevo.`;
+  return 'Paisagem viva · encaixes iguais desenvolvem os dois lados.';
+}
 world.livingEnabled = params.has('vivas') ? params.get('vivas') === '1' : store.get('living') !== '0';
 const charter = document.querySelector<HTMLButtonElement>('#choose-freight')!;
 const watchFreight = document.querySelector<HTMLButtonElement>('#watch-freight')!;
@@ -440,7 +460,7 @@ function showManifest() {
   document.body.classList.toggle('river-trade', !!ports.length);
   document.querySelector('.brand')!.textContent = ports.length ? 'Entrepostos' : 'Retalhos';
   developmentOrder.hidden = !ports.length || !world.livingEnabled;
-  developmentOrder.textContent = world.livingEnabled ? 'Paisagem viva · encaixes iguais desenvolvem os dois lados.' : '';
+  developmentOrder.textContent = landscapeHint();
   if (!ports.length) return;
   charter.hidden = moves.length > 0;
   watchFreight.hidden = !game.rules.combinedFreight || !ports[0].delivered;
@@ -475,7 +495,7 @@ function refreshHud(instant = false) {
   hud.setEra(es.length > 1 ? `Era ${['I', 'II', 'III', 'IV', 'V', 'VI'][b.era] ?? b.era + 1} · ${eraName(b.era)} · ${mode.name}` : mode.name, nextAt === undefined ? null : Math.min(1, (b.score - es[b.era]) / (nextAt - es[b.era])));
   hud.setUndo(Math.min(mode.undos - undone, moves.length ? 99 : 0));
   // Com 1 peça na pilha, a "próxima" só entraria se a jogada render peças: não mostra.
-  hud.renderNext(game.stack <= 1 && !game.rules.infinite ? null : game.next, theme, game.board.lookout > 0 ? game.upcoming(3) : []);
+  hud.renderNext(game.stack <= 1 && !game.rules.infinite ? null : game.next, theme, game.board.lookout > 0 ? game.upcoming(3) : [],world.hillsActive);
   world.setPreview(game.current, rotSteps * (Math.PI / 3), game.stack);
   showInfluence();
   updateGhost();
@@ -501,7 +521,7 @@ function updateGhost() {
     world.clearGhost();
     if (game.rules.riverTrade) {
       updateSailingOrder();
-      developmentOrder.textContent = world.livingEnabled ? 'Paisagem viva · encaixes iguais desenvolvem os dois lados.' : '';
+      developmentOrder.textContent = landscapeHint();
     }
     hud.confirm.hidden = true;
     capture.take?.event({ kind: 'noghost' });
@@ -530,6 +550,15 @@ function updateGhost() {
     ridgeMarkers = check.valid ? ridgeChanges(preview.neighbors) : [];
     const ridge = ridgeMarkers.map(p=>p.text).join(' · ');
     developmentOrder.textContent = ridge ? 'Novo casario · ' + ridge : check.valid && terrains.size ? [...terrains].map((t)=>words[t]).join(' · ') : 'Procure bordas iguais para desenvolver a paisagem.';
+    if (world.hillsActive && check.valid) {
+      const hill = boardHill(game.board,hover.q,hover.r,game.current,game.rot);
+      if (hill) {
+        const stage = hill.stage ? ` · patamar ${hill.stage}` : ' · relevo inicial';
+        const adjacent = bankChanges(preview.neighbors,hover.q,hover.r);
+        ridgeMarkers.push(...adjacent);
+        developmentOrder.textContent = hill.landform+stage + (ridge ? ' · '+ridge : adjacent.length ? ' · '+adjacent.map(p=>p.text).join(' · ') : '');
+      }
+    }
   }
   world.setGhost(game.current, game.rot, rotSteps * (Math.PI / 3), hover.q, hover.r, check);
   capture.take?.event({ kind: 'ghost', q: hover.q, r: hover.r, rot: game.rot, angle: rotSteps * (Math.PI / 3) });
@@ -580,8 +609,10 @@ function place(q: number, r: number) {
     return;
   }
   const rot = game.rot;
-  const ridge = game.rules.layout === 'crista' && world.livingEnabled
-    ? ridgeChanges(previewDevelopment(game.board,q,r,game.currentEdges()!).neighbors).map(p=>p.text).join(' · ') : '';
+  const nearby = world.hillsActive ? previewDevelopment(game.board,q,r,game.currentEdges()!).neighbors : [];
+  const ridge = ridgeChanges(nearby).map(p=>p.text).join(' · ');
+  revealedBanks = bankChanges(nearby,q,r);
+  bankTime = 2.6;
   const res = game.place(q, r)!;
   moves.push([q, r, rot]);
   if (guided && game.board.ports[0]?.connectedAt !== undefined) {
@@ -1417,8 +1448,11 @@ function step(now: number, sampleQuality: boolean) {
   if (capture.take && !capture.take.frame(realDt, { x: world.rig.target.x, z: world.rig.target.z, dist: world.rig.dist, yaw: world.rig.yaw, tilt: world.rig.tilt })) capture.stopTake('A gravação chegou a 2 minutos.');
   hud.tick(dt);
   const markers = [];
-  for (const p of ridgeMarkers) {
-    markers.push({ id:p.id,...screenOf(p.q,p.r,1.35),text:p.text,color:'#f3cb81',kind:'port' });
+  bankTime = Math.max(0,bankTime-dt);
+  const banks = ridgeMarkers.length || bankTime === 0 ? ridgeMarkers : revealedBanks;
+  for (const p of banks) {
+    const position=p.side===undefined ? screenOf(p.q,p.r,1.35) : world.projectBank(p.q,p.r,p.side);
+    markers.push({ id:p.id,...position,text:p.text,color:'#f3cb81',kind:p.side===undefined ? 'port' : 'bank' });
   }
   if (guided && game.rules.riverTrade) {
     const p = game.board.ports[0], halfway = !game.board.get(p.q / 2, p.r / 2);
@@ -1508,6 +1542,7 @@ function start(data: unknown) {
     newGame(wantSeed > 0 ? wantSeed : (!special && mode.id === 'entrepostos' && chartFrom(params.get('mapa') ?? store.get('layout')) === 'crista' ? 42 : undefined));
   }
   Object.assign(window, { __crista: () => ridgeSnapshot(game.board,world.livingEnabled) });
+  if (params.has('debug')) Object.assign(window,{ __encostas: () => world.hillSnapshot() });
   if (params.has('stress')) {
     const r = autoPlace(Number(params.get('stress')) || 1000, true);
     hud.stats.hidden = false;

@@ -43,17 +43,17 @@ try {
     assert(pos.visible, 'A jogada do roteiro precisa estar na tela');
     await desktop.mouse.click(pos.x,pos.y);
   }
-  const saved = () => desktop.evaluate(() => JSON.parse(localStorage.getItem('entrepostos.crista.save')));
+  const saved = () => desktop.evaluate(() => JSON.parse(localStorage.getItem('entrepostos.encostas.save')));
   await play(moves[0]);
   await play(moves[1]);
   assert.equal((await saved()).moves.length, 2);
   assert.equal(await desktop.locator('#ports .delivered').count(), combined ? 0 : 1);
   if (combined) assert.match(await desktop.locator('#ports').innerText(), /Em espera/);
   else await desktop.evaluate(() => {
-    const s = JSON.parse(localStorage.getItem('entrepostos.crista.save'));
+    const s = JSON.parse(localStorage.getItem('entrepostos.encostas.save'));
     s.v = 10;
     delete s.combinedFreight;
-    localStorage.setItem('entrepostos.crista.save', JSON.stringify(s));
+    localStorage.setItem('entrepostos.encostas.save', JSON.stringify(s));
   });
   await desktop.reload({waitUntil:'domcontentloaded'});
   await desktop.waitForFunction(() => window.__stats?.tiles === 3);

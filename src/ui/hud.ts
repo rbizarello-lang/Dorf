@@ -1,4 +1,5 @@
 import type { Quest } from '../core/board';
+import { handHill, hillHeight } from '../core/hills';
 import type { TimeOfDay } from '../render/world';
 import { corner } from '../core/hex';
 import type { TileDef } from '../core/tiles';
@@ -225,25 +226,54 @@ export class Hud {
     $('undo-n').textContent = left >= 99 ? '' : String(left);
   }
 
-  private hexSvg(def: TileDef, theme: Theme) {
+  private hexSvg(def: TileDef, theme: Theme, hills = false) {
     let out = '';
     for (let i = 0; i < 6; i++) {
       const [ax, az] = corner(i);
       const [bx, bz] = corner((i + 1) % 6);
       out += `<polygon points="0,0 ${ax.toFixed(3)},${az.toFixed(3)} ${bx.toFixed(3)},${bz.toFixed(3)}" fill="${theme.terrainColors[def.edges[i]]}" stroke="${theme.ui.panel}" stroke-width="0.05" stroke-linejoin="round"/>`;
     }
+    if (hills) {
+      const profile = handHill(def);
+      // Curvas de nível da próxima peça; deixam as cores e bocas de conexão à vista.
+      const vertex = (x: number,z: number) => [x,z,hillHeight(profile,x,z)];
+      let path = '';
+      const segment = (points: number[][], level: number) => {
+        const hits: string[] = [];
+        for (let i=0; i<3; i++) {
+          const a=points[i], b=points[(i+1)%3];
+          if ((a[2] < level) === (b[2] < level)) continue;
+          const t=(level-a[2])/(b[2]-a[2]);
+          hits.push((a[0]+t*(b[0]-a[0])).toFixed(3)+','+(a[1]+t*(b[1]-a[1])).toFixed(3));
+        }
+        if (hits.length === 2) path += 'M'+hits[0]+'L'+hits[1];
+      };
+      for (let i=0; i<6; i++) {
+        const [ax,az]=corner(i), [bx,bz]=corner((i+1)%6);
+        const at = (a: number,b: number) => vertex((a*ax+b*bx)/3,(a*az+b*bz)/3);
+        for (let a=0; a<3; a++) for (let b=0; a+b<3; b++) {
+          const p=at(a,b), q=at(a+1,b), r=at(a,b+1);
+          for (const h of [.13,.27]) {
+            segment([p,q,r],h);
+            if (a+b<2) segment([q,r,at(a+1,b+1)],h);
+          }
+        }
+      }
+      out += `<path d="${path}" fill="none" stroke="${theme.ui.ink}" stroke-width=".04" opacity=".78"/>`;
+    }
     if (def.quest) out += `<circle r="0.28" fill="${theme.ui.panel}"/><text y="0.12" text-anchor="middle" font-size="0.36" font-weight="800" fill="${theme.ui.ink}">!</text>`;
     return out;
   }
 
   /** A próxima peça e, com o mirante, as seguintes (menores). */
-  renderNext(def: TileDef | null, theme: Theme, upcoming: TileDef[] = []) {
+  renderNext(def: TileDef | null, theme: Theme, upcoming: TileDef[] = [], hills = false) {
     const svg = $('next');
     svg.parentElement!.hidden = !def;
-    svg.innerHTML = def ? this.hexSvg(def, theme) : '';
+    svg.innerHTML = def ? this.hexSvg(def, theme,hills) : '';
+    svg.parentElement!.title = def && hills ? 'Próxima peça · '+handHill(def).landform : '';
     const up = $('upcoming');
     up.hidden = !def || !upcoming.length;
-    up.innerHTML = upcoming.map((d) => `<svg viewBox="-1.1 -1.1 2.2 2.2" aria-hidden="true">${this.hexSvg(d, theme)}</svg>`).join('');
+    up.innerHTML = upcoming.map((d) => `<svg viewBox="-1.1 -1.1 2.2 2.2" aria-hidden="true">${this.hexSvg(d, theme,hills)}</svg>`).join('');
   }
 
   renderQuests(quests: Quest[], theme: Theme) {
@@ -298,7 +328,8 @@ export class Hud {
       // O pé do mastro (ou a ponta da etiqueta do sítio) fica no ponto da peça.
       // No celular o estandarte encolhe em volta do pé do mastro, para tapar menos peças.
       if (!previous || previous.last.x !== m.x || previous.last.y !== m.y || previous.narrow !== narrow) {
-        el.style.transform = m.kind ? `translate(${(m.x - 4).toFixed(1)}px, ${(m.y - 44).toFixed(1)}px)` : `translate(${(m.x - 1).toFixed(1)}px, ${(m.y - 64).toFixed(1)}px)${narrow ? ' scale(0.7)' : ''}`;
+        const rise = m.kind === 'bank' ? 30 : 44;
+        el.style.transform = m.kind ? `translate(${(m.x - 4).toFixed(1)}px, ${(m.y - rise).toFixed(1)}px)` : `translate(${(m.x - 1).toFixed(1)}px, ${(m.y - 64).toFixed(1)}px)${narrow ? ' scale(0.7)' : ''}`;
       }
       if (previous) {
         previous.last = m;
