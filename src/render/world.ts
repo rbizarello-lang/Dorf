@@ -2951,7 +2951,7 @@ export class World {
     }
     this.nbMarks.visible = this.nbMarks.count > 0 && this.showSlots;
     this.nbT += dt;
-    this.nbMat.opacity = 0.26 + 0.1 * Math.sin(this.nbT * 2.2);
+    this.nbMat.opacity = 0.15 + 0.06 * Math.sin(this.nbT * 2.2);
   }
 
   clearGhost() {
