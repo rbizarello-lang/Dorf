@@ -1,7 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { INR, hexToWorld, unkey, worldToHex } from '../core/hex';
-import { bayBlend, bayWaterDistance } from './bay';
-import { FLUID_AMP } from './fluid';
+import { INR, hexToWorld } from '../core/hex';
 import { GROUND_EXTENT } from './groundMap';
 
 // Distância de cada ponto do chão até a peça mais próxima, para o mar e a areia em volta do
@@ -27,9 +25,6 @@ function hexDist(ax: number, az: number): number {
 
 export class SeaMap {
   readonly data = new Uint8Array(SEA_SIZE * SEA_SIZE).fill(255);
-  /** A textura recebe a curva das baías. `data` conserva as distâncias brutas para `unpreview`. */
-  private pixels = this.data.slice();
-  private bayPixels: { i: number; max: number; blend: number }[] = [];
   readonly texture: THREE.DataTexture;
   private dirty = false;
   /**
@@ -43,7 +38,7 @@ export class SeaMap {
   private previews: { u0: number; v0: number; w: number; h: number; data: Uint8Array }[] = [];
 
   constructor() {
-    const t = new THREE.DataTexture(this.pixels, SEA_SIZE, SEA_SIZE, THREE.RedFormat, THREE.UnsignedByteType);
+    const t = new THREE.DataTexture(this.data, SEA_SIZE, SEA_SIZE, THREE.RedFormat, THREE.UnsignedByteType);
     t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
     t.magFilter = t.minFilter = THREE.LinearFilter;
     t.generateMipmaps = false;
@@ -55,30 +50,6 @@ export class SeaMap {
   clear() {
     this.data.fill(255);
     this.previews.length = 0;
-    this.bayPixels.length = 0;
-    this.dirty = true;
-  }
-
-  /** Recalcula só os texels das casas afetadas pela curva, no mesmo espaço que a saia. */
-  setBays(bays: ReadonlyMap<number, number>, unwarp: (x: number, z: number) => readonly [number, number]) {
-    this.bayPixels.length = 0;
-    for (const [key, mouth] of bays) {
-      const [q, r] = unkey(key);
-      const { x, z } = hexToWorld(q, r);
-      const reach = 1 + FLUID_AMP;
-      const u0 = Math.max(0, Math.floor((x - reach + GROUND_EXTENT) / TEXEL)), u1 = Math.min(SEA_SIZE - 1, Math.ceil((x + reach + GROUND_EXTENT) / TEXEL));
-      const v0 = Math.max(0, Math.floor((z - reach + GROUND_EXTENT) / TEXEL)), v1 = Math.min(SEA_SIZE - 1, Math.ceil((z + reach + GROUND_EXTENT) / TEXEL));
-      for (let v = v0; v <= v1; v++) for (let u = u0; u <= u1; u++) {
-        const [wx, wz] = unwarp((u + 0.5) * TEXEL - GROUND_EXTENT, (v + 0.5) * TEXEL - GROUND_EXTENT);
-        const [cq, cr] = worldToHex(wx, wz);
-        if (cq !== q || cr !== r) continue;
-        const dx = wx - x, dz = wz - z;
-        const blend = bayBlend(mouth, dx, dz);
-        // A espuma do mar aberto é larga demais para a escala da baía. A faixa estreita acompanha as margens, com água visível no meio.
-        const distance = bayWaterDistance(mouth, dx, dz) * 1.55;
-        if (blend) this.bayPixels.push({ i: v * SEA_SIZE + u, max: distance * 255 / SEA_DMAX, blend });
-      }
-    }
     this.dirty = true;
   }
 
@@ -144,11 +115,6 @@ export class SeaMap {
   flush() {
     if (!this.dirty) return;
     this.dirty = false;
-    this.pixels.set(this.data);
-    // A curva só aproxima da orla: um fantasma ou uma peça em queda ainda pode cobrir a casa e zerar a distância.
-    for (const { i, max, blend } of this.bayPixels) {
-      if (this.pixels[i] > max) this.pixels[i] = Math.round(this.pixels[i] + (max - this.pixels[i]) * blend);
-    }
     this.texture.needsUpdate = true;
   }
 }

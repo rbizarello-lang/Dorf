@@ -24,7 +24,6 @@ import { CLOUD_TOP, U, makeVoidMaterial, slotAlpha, slotBlob, softShadowFilter }
 import { A, fogNode } from './atmosphere';
 import { CL, makeCloudMesh } from './clouds';
 import { seaMap } from './seaMap';
-import { bayMouth } from './bay';
 import { riverMap } from './riverMap';
 import { makeAuroraDome } from './aurora';
 import { GROUND_EXTENT, GROUND_SIZE, groundMap } from './groundMap';
@@ -1554,7 +1553,7 @@ export class World {
    * Encostas da peça `def`: com `at`, o perfil dela naquela casa e giro (com as vizinhas assentadas); sem `at` (a pilha), o perfil
    * "na mão". `hand` fixa onde as casas assentam. Sem `hillsOn`, nada (o chão de antes).
    */
-  private hillFor(def: TileDef, at?: { q: number; r: number; rot: number }, board: Board | null = this.board): Pick<BuildOpts, 'hill' | 'hand' | 'skirt' | 'bay' | 'rapids'> {
+  private hillFor(def: TileDef, at?: { q: number; r: number; rot: number }, board: Board | null = this.board): Pick<BuildOpts, 'hill' | 'hand' | 'skirt' | 'rapids'> {
     if (!this.hillsOn || !board) return {};
     const hand = handHill(def, logicLevels(board, def));
     const hill = at ? boardHill(board, at.q, at.r, def, at.rot, this.reliefMax && !this.pieceRelief ? (q, r) => this.levelOf(q, r, board) : undefined) : hand;
@@ -1564,7 +1563,6 @@ export class World {
     // mais velha: só os dois níveis decidem, nunca a ordem das jogadas (a peça baixa não desenha nada ali, e a mais velha é refeita
     // quando a vizinha chega, porque `rapids` está na assinatura dela). Uma corredeira completa por borda.
     const skirt = [true, true, true, true, true, true];
-    const bay = new Array<number | undefined>(6);
     const rapids = [0, 0, 0, 0, 0, 0];
     if (at) {
       const here = board.get(at.q, at.r);
@@ -1572,44 +1570,12 @@ export class World {
       const own = mine ? Math.min(...mine) : 0;
       for (let i = 0; i < 6; i++) {
         const w = (i + at.rot) % 6;
-        const q = at.q + DIRS[w][0], r = at.r + DIRS[w][1];
-        const nb = board.get(q, r);
+        const nb = board.get(at.q + DIRS[w][0], at.r + DIRS[w][1]);
         skirt[i] = !nb;
-        const mouth = this.bays.get(hkey(q, r));
-        if (!nb && mouth !== undefined) bay[i] = mouth < 0 ? -1 : (mouth + 6 - at.rot) % 6;
         if (nb && def.edges[i] === T.Water && nb.edges[opposite(w)] === T.Water) rapids[i] = Math.max(0, own - this.levelOf(nb.q, nb.r, board));
       }
     }
-    return { hill, hand, skirt, bay, rapids };
-  }
-
-  /** Contorno das casas cercadas ou com uma única boca. Só o desenho consulta estas chaves. */
-  private readonly bays = new Map<number, number>();
-
-  private updateBays(cells: Iterable<number>, occupied: (q: number, r: number) => boolean, rebake?: Set<Placed>) {
-    if (!this.flatDraw || !this.unwarp || !this.board) return;
-    let changed = false;
-    for (const key of cells) {
-      const [q, r] = unkey(key);
-      const mouth = bayMouth(q, r, occupied);
-      if (mouth === this.bays.get(key)) continue;
-      if (mouth === undefined) this.bays.delete(key);
-      else this.bays.set(key, mouth);
-      changed = true;
-      if (rebake) {
-        if (this.paintSig !== '') {
-          groundMap.unpreview();
-          seaMap.unpreview();
-          this.paintSig = '';
-        }
-        if (!this.board.get(q, r)) groundMap.clearEmptyCell(q, r, this.unwarp);
-        for (const [dq, dr] of DIRS) {
-          const p = this.board.get(q + dq, r + dr);
-          if (p) rebake.add(p);
-        }
-      }
-    }
-    if (changed) seaMap.setBays(this.bays, this.unwarp);
+    return { hill, hand, skirt, rapids };
   }
 
   /**
@@ -1652,7 +1618,7 @@ export class World {
   /** Assinatura de tudo o que, na vizinhança, muda o chão da peça: o perfil, as bordas abertas e as corredeiras. */
   private hillSig(def: TileDef, at: { q: number; r: number; rot: number }, board: Board | null = this.board) {
     const o = this.hillFor(def, at, board);
-    return `${hillSignature(o.hill)}|${o.skirt?.map(Number).join('') ?? ''}|${o.bay?.join(',') ?? ''}|${o.rapids?.join(',') ?? ''}`;
+    return `${hillSignature(o.hill)}|${o.skirt?.map(Number).join('') ?? ''}|${o.rapids?.join(',') ?? ''}`;
   }
 
   private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; spring?: boolean; eggs?: BuildOpts['eggs']; levels?: BuildOpts['levels']; at?: { q: number; r: number; rot: number } }) {
@@ -1814,8 +1780,6 @@ export class World {
     this.widths.clear();
     groundMap.clear();
     seaMap.clear();
-    this.bays.clear();
-    this.updateBays(board.frontier, (q, r) => board.tiles.has(hkey(q, r)));
     riverMap.clear();
     this.paintSig = null;
     this.lib.setEra(board.era);
@@ -2201,16 +2165,11 @@ export class World {
     const t0 = performance.now();
     let n = 0;
     if (this.hillsOn) {
-      const affected = new Set([p]);
-      const cells = [p.key];
+      n = this.rebakeHill(p) ? 1 : 0;
       for (const [dq, dr] of DIRS) {
         const nb = this.board.get(p.q + dq, p.r + dr);
-        if (nb) affected.add(nb);
-        else cells.push(hkey(p.q + dq, p.r + dr));
+        if (nb && nb !== p && this.rebakeHill(nb)) n++;
       }
-      // A baía acompanha as peças já no chão. Uma quinta ou sexta vizinha pode mudar a saia até do outro lado da casa.
-      this.updateBays(cells, (q, r) => this.baked.has(hkey(q, r)), affected);
-      for (const tile of affected) if (this.rebakeHill(tile)) n++;
     }
     if (n) {
       for (const pool of this.pools.values()) pool.flush();
@@ -2511,18 +2470,14 @@ export class World {
 
   /** Coloca várias peças de uma vez, sem animação (modo automático / teste de carga). */
   placeInstant(list: Placed[], board: Board) {
-    this.board = board;
-    const affected = new Set<Placed>();
-    this.updateBays(new Set([...this.bays.keys(), ...board.frontier]), (q, r) => board.tiles.has(hkey(q, r)), affected);
     this.feedEggs(board.list);
     for (const p of list) this.bake(p, this.buildPlaced(p), false);
     // As peças que já estavam no mapa e encostam nas novas mudam de encosta.
     const fresh = new Set(list);
     for (const p of list) for (const [dq, dr] of DIRS) {
       const nb = board.get(p.q + dq, p.r + dr);
-      if (nb) affected.add(nb);
+      if (nb && !fresh.has(nb)) this.rebakeHill(nb);
     }
-    for (const tile of affected) if (!fresh.has(tile)) this.rebakeHill(tile);
     // Paisagem viva: as peças antigas cujo estágio mudou com o lote (vizinhas e manchas da Terra) são refeitas já, sem fila.
     this.queueLiving();
     this.drainLiving(0, true);
@@ -2996,7 +2951,7 @@ export class World {
     }
     this.nbMarks.visible = this.nbMarks.count > 0 && this.showSlots;
     this.nbT += dt;
-    this.nbMat.opacity = 0.15 + 0.06 * Math.sin(this.nbT * 2.2);
+    this.nbMat.opacity = 0.26 + 0.1 * Math.sin(this.nbT * 2.2);
   }
 
   clearGhost() {
@@ -3587,6 +3542,7 @@ export class World {
     this.stepTrace(dt);
     this.stepNeighbors(dt);
     groundMap.flush();
+    seaMap.flush();
     riverMap.flush();
     // Aurora boreal: a cúpula acompanha a câmera e só existe à noite, quando o tema a pede.
     this.auroraDome.visible = this.quality !== 'low' && U.aurora.value > 0.01;
@@ -3838,8 +3794,6 @@ export class World {
     // Grão: um padrão novo a cada quadro (passageiro, não precisa de semente). Sem o nó, o uniforme não entra no shader.
     P.grainSeed.value = Math.floor(Math.random() * 3e6);
 
-    // Uma peça pode ter mudado o contorno da baía ao assentar neste quadro.
-    seaMap.flush();
     if (this.post) this.post.pipeline.render();
     else this.renderer.render(this.scene, this.camera);
     if (this.gpuOn) this.pollGpu();

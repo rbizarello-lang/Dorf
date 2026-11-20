@@ -21,7 +21,6 @@ import { isStrict, T } from '../src/core/tiles';
 import { HillSurface } from '../src/render/hillSurface';
 import { THEMES } from '../src/themes/themes';
 import './village-terraces';
-import './inner-bays';
 
 const N = Number(process.argv[2] ?? 12);
 let failed = 0;
