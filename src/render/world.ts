@@ -165,6 +165,20 @@ const synSig = (s: { sector: number; kind: SynKind }[]) =>
 class Pool {
   mesh: THREE.InstancedMesh;
   count = 0;
+  /** Chave do kit sem o "~" (para as conferências de cena). */
+  tag = '';
+  /** Instâncias em uso (as soltas por `remove` não contam). */
+  get live() {
+    return this.count - this.free.length;
+  }
+  /** Matriz e cor da instância `i`, arredondadas (conferência de cena). */
+  fingerprint(i: number): string {
+    const e = this.mesh.instanceMatrix.array as Float32Array;
+    const c = this.mesh.geometry.getAttribute('iColor').array as Float32Array;
+    const r = (v: number) => (Math.round(v * 1000) / 1000 || 0).toFixed(3);
+    const o = i * 16;
+    return [e[o], e[o + 2], e[o + 5], e[o + 10], e[o + 12], e[o + 13], e[o + 14]].map(r).join(',') + '#' + [c[i * 3], c[i * 3 + 1], c[i * 3 + 2]].map(r).join(',');
+  }
   constructor(
     private geo: THREE.BufferGeometry,
     private mat: THREE.Material,
@@ -406,6 +420,22 @@ class Chunk {
     return { start: this.wN - wAdd, count: wAdd, gStart, gCount: gAdd };
   }
 
+  /** Impressão digital do chão de uma peça (triângulos com área, somas arredondadas de posição e cor): conferência de cena, sem ordem. */
+  groundDigest(start: number, count: number) {
+    let tris = 0;
+    const sum = [0, 0, 0, 0, 0, 0];
+    for (let v = start; v < start + count; v += 3) {
+      const a = v * 3;
+      if (this.gPos[a] === this.gPos[a + 3] && this.gPos[a + 1] === this.gPos[a + 4] && this.gPos[a + 2] === this.gPos[a + 5] && this.gPos[a] === this.gPos[a + 6] && this.gPos[a + 1] === this.gPos[a + 7] && this.gPos[a + 2] === this.gPos[a + 8]) continue;
+      tris++;
+      for (let k = 0; k < 9; k++) {
+        sum[k % 3] += this.gPos[a + k];
+        sum[3 + (k % 3)] += this.gCol[a + k];
+      }
+    }
+    return `${tris}:${sum.map((x) => (Math.round(x * 100) / 100 || 0).toFixed(2)).join(',')}`;
+  }
+
   /** Escreve o chão da peça `b` (matriz `m`) a partir do vértice `at`, e avisa a GPU só dessa faixa. */
   private writeGround(at: number, b: TileBuild, m: THREE.Matrix4) {
     const e = m.elements, src = b.pos;
@@ -512,6 +542,9 @@ interface Drop {
   hold: number;
   /** O andaime já desmontou (poeira lançada). */
   cleared: boolean;
+  /** Assinaturas (encosta, paisagem viva) com que a peça foi montada: o pouso as guarda, e não as da hora do pouso. */
+  sig: string;
+  vsig: string;
 }
 
 /** Construções de interação: sobem do chão depois que a peça assenta. */
@@ -720,7 +753,33 @@ export class World {
   private pools = new Map<string, Pool>();
   private vbufWatch: VertexBufferWatch | null = null;
   private board: Board | null = null;
-  private chimneys: number[] = [];
+  /**
+   * Chaminés (x, y, z, casa) no mundo, por peça: refazer uma peça troca a lista dela, então o número de emissores de fumaça acompanha
+   * o número de casas de agora (e não o de quando a peça pousou). `chimneys` junta tudo, só remontado quando alguma mudou.
+   */
+  private chimMap = new Map<number, number[]>();
+  private chimFlat: number[] = [];
+  private chimDirty = false;
+  private get chimneys(): number[] {
+    if (this.chimDirty) {
+      this.chimDirty = false;
+      this.chimFlat = [];
+      for (const list of this.chimMap.values()) for (const v of list) this.chimFlat.push(v);
+    }
+    return this.chimFlat;
+  }
+  /** Chaminés de uma peça no mundo, a partir do que o `buildTile` devolveu e da matriz da peça. */
+  private setChimneys(key: number, b: TileBuild, m: THREE.Matrix4) {
+    const out: number[] = [];
+    const v = new THREE.Vector3();
+    for (let i = 0; i < b.chimneys.length; i += 4) {
+      v.set(b.chimneys[i], b.chimneys[i + 1], b.chimneys[i + 2]).applyMatrix4(m);
+      out.push(v.x, v.y, v.z, b.chimneys[i + 3]);
+    }
+    if (out.length) this.chimMap.set(key, out);
+    else this.chimMap.delete(key);
+    this.chimDirty = true;
+  }
   private sun = new THREE.DirectionalLight();
   /**
    * Alta e Média têm uma sombra só. Ela não redesenha todo quadro: a câmera andou, uma peça
@@ -762,6 +821,14 @@ export class World {
   private infl: THREE.InstancedMesh;
   private inflMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.95, depthWrite: false, fog: false });
   private hoverRing: THREE.Mesh;
+  private nbMarks!: THREE.InstancedMesh;
+  private nbMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.3, depthWrite: false, depthTest: false, fog: false });
+  /** A jogada do fantasma de que se quer a prévia das vizinhas, e a chave da que está desenhada (só depois de `GHOST_SETTLE_MS` parado). */
+  private nbWant: { def: TileDef; q: number; r: number; rot: number } | null = null;
+  private nbShown = '';
+  private nbT = 0;
+  /** Quantas vizinhas sobem e quantas crescem na prévia desenhada (depuração e testes: `window.__nbPreview`). */
+  nbInfo = { rise: 0, grow: 0 };
   /** Terra contínua (Fase 3): o fantasma que mostra a paisagem (contorno da mancha, bordas abertas, laço que fecha, umidade) e o laço do pouso. */
   private readonly trace = new LandTrace();
   /** A vista da jogada do fantasma, à espera do atraso de ~120 ms, e a casa (e giro) a que pertence; `traceShown` = já montada. */
@@ -953,6 +1020,13 @@ export class World {
     this.hoverRing = new THREE.Mesh(new THREE.RingGeometry(0.84, 0.97, 6).rotateX(-Math.PI / 2), this.hoverMat);
     this.hoverRing.visible = false;
     this.scene.add(this.hoverRing);
+    // Prévia das vizinhas que sobem (Encostas) ou crescem (Paisagem viva) com a peça do fantasma: um realce suave sobre a casa delas.
+    this.nbMarks = new THREE.InstancedMesh(new THREE.CircleGeometry(0.93, 6).rotateX(-Math.PI / 2), this.nbMat, 24);
+    this.nbMarks.count = 0;
+    this.nbMarks.frustumCulled = false;
+    this.nbMarks.renderOrder = 3;
+    this.nbMarks.visible = false;
+    this.scene.add(this.nbMarks);
     this.scene.add(this.trace.group);
 
     const pill = new THREE.CapsuleGeometry(0.026, 0.5, 3, 8).rotateZ(Math.PI / 2);
@@ -1363,10 +1437,10 @@ export class World {
   }
 
   /** Nível (0 a 2) da casa (q, r): função pura da semente, vale para casas ainda vazias. */
-  levelOf(q: number, r: number): number {
+  levelOf(q: number, r: number, board: Board | null = this.board): number {
     if (!this.reliefMax) return 0;
     if (this.pieceRelief) {
-      const h = this.board?.get(q, r)?.heights;
+      const h = board?.get(q, r)?.heights;
       return h ? Math.min(...h) : 0;
     }
     const k = hkey(q, r);
@@ -1479,25 +1553,26 @@ export class World {
    * Encostas da peça `def`: com `at`, o perfil dela naquela casa e giro (com as vizinhas assentadas); sem `at` (a pilha), o perfil
    * "na mão". `hand` fixa onde as casas assentam. Sem `hillsOn`, nada (o chão de antes).
    */
-  private hillFor(def: TileDef, at?: { q: number; r: number; rot: number }): Pick<BuildOpts, 'hill' | 'hand' | 'skirt' | 'rapids'> {
-    if (!this.hillsOn || !this.board) return {};
-    const hand = handHill(def, logicLevels(this.board, def));
-    const hill = at ? boardHill(this.board, at.q, at.r, def, at.rot, this.reliefMax && !this.pieceRelief ? (q, r) => this.levelOf(q, r) : undefined) : hand;
+  private hillFor(def: TileDef, at?: { q: number; r: number; rot: number }, board: Board | null = this.board): Pick<BuildOpts, 'hill' | 'hand' | 'skirt' | 'rapids'> {
+    if (!this.hillsOn || !board) return {};
+    const hand = handHill(def, logicLevels(board, def));
+    const hill = at ? boardHill(board, at.q, at.r, def, at.rot, this.reliefMax && !this.pieceRelief ? (q, r) => this.levelOf(q, r, board) : undefined) : hand;
     if (!this.flatDraw) return { hill, hand };
     // Relevo e Terra: costa da base nas bordas abertas (a vizinha ainda não veio) e corredeira onde a água pontuada desce de nível
-    // para uma vizinha assentada ANTES desta peça (a peça que chega depois é quem desenha a corredeira: a mais velha não muda).
+    // para a vizinha. A corredeira é desenhada pela peça ALTA da borda (soleira, espuma e a névoa da queda), seja ela a mais nova ou a
+    // mais velha: só os dois níveis decidem, nunca a ordem das jogadas (a peça baixa não desenha nada ali, e a mais velha é refeita
+    // quando a vizinha chega, porque `rapids` está na assinatura dela). Uma corredeira completa por borda.
     const skirt = [true, true, true, true, true, true];
     const rapids = [0, 0, 0, 0, 0, 0];
     if (at) {
-      const here = this.board.get(at.q, at.r);
-      const my = here ? here.index : Infinity;
-      const mine = here?.heights ?? this.board.heightsOf(def, at.rot);
+      const here = board.get(at.q, at.r);
+      const mine = here?.heights ?? board.heightsOf(def, at.rot);
       const own = mine ? Math.min(...mine) : 0;
       for (let i = 0; i < 6; i++) {
         const w = (i + at.rot) % 6;
-        const nb = this.board.get(at.q + DIRS[w][0], at.r + DIRS[w][1]);
+        const nb = board.get(at.q + DIRS[w][0], at.r + DIRS[w][1]);
         skirt[i] = !nb;
-        if (nb && nb.index < my && def.edges[i] === T.Water && nb.edges[opposite(w)] === T.Water) rapids[i] = own - this.levelOf(nb.q, nb.r);
+        if (nb && def.edges[i] === T.Water && nb.edges[opposite(w)] === T.Water) rapids[i] = Math.max(0, own - this.levelOf(nb.q, nb.r, board));
       }
     }
     return { hill, hand, skirt, rapids };
@@ -1541,8 +1616,8 @@ export class World {
   }
 
   /** Assinatura de tudo o que, na vizinhança, muda o chão da peça: o perfil, as bordas abertas e as corredeiras. */
-  private hillSig(def: TileDef, at: { q: number; r: number; rot: number }) {
-    const o = this.hillFor(def, at);
+  private hillSig(def: TileDef, at: { q: number; r: number; rot: number }, board: Board | null = this.board) {
+    const o = this.hillFor(def, at, board);
     return `${hillSignature(o.hill)}|${o.skirt?.map(Number).join('') ?? ''}|${o.rapids?.join(',') ?? ''}`;
   }
 
@@ -1621,7 +1696,7 @@ export class World {
    * É o que permite refazer a peça quando uma vizinha muda a encosta dela (`rebakeHill`): os blocos continuam só crescendo
    * (invariante 10), mas o trecho antigo é reescrito no lugar ou esvaziado, e as instâncias soltas voltam ao lote.
    */
-  private baked = new Map<number, { sig: string; vsig: string; keys: string[]; chunk: Chunk; gStart: number; gCount: number; decos: ({ pool: Pool; i: number } | null)[]; chim: number }>();
+  private baked = new Map<number, { sig: string; vsig: string; keys: string[]; chunk: Chunk; gStart: number; gCount: number; decos: ({ pool: Pool; i: number } | null)[]; moversSig: string }>();
   /** Quantas peças foram refeitas por causa de uma vizinha e o último custo (ms): para as medidas (`window.__hills`). */
   hillRebakes = 0;
   hillMs = 0;
@@ -1694,7 +1769,8 @@ export class World {
     this.pools.clear();
     for (const d of this.drops) d.live.dispose();
     this.drops = [];
-    this.chimneys = [];
+    this.chimMap.clear();
+    this.chimDirty = true;
     this.sprites.clear();
     this.life.reset(this.theme);
     this.life.phase = phaseOfTod(this.timeOfDay);
@@ -1974,6 +2050,7 @@ export class World {
       const geo = (this.farTrees && !fine && this.lib.farGeo(base)) || this.lib.geo(base);
       if (!geo) return null;
       p = new Pool(geo, fine ? this.lib.fineMaterial(base) : this.lib.material(base), this.staticRoot, this.lib.castsShadow(base));
+      p.tag = base;
       this.pools.set(id, p);
     }
     return p;
@@ -1995,7 +2072,38 @@ export class World {
     return key.startsWith('crop:') || key === 'grass' || key === 'flower';
   }
 
-  private bake(p: Placed, b0: TileBuild, flush = true) {
+  /**
+   * `built`: as assinaturas (encosta e paisagem viva) com que `b0` foi MONTADA. Uma peça que cai enquanto outra pousa ao lado foi montada
+   * com a vizinhança de antes: guardar a de agora faria o `rebakeHill` achar que ela já está em dia. Sem `built`, `b0` é de agora.
+   */
+  /** Itens que se movem (pás, bichos, aldeões, peixes, barco ancorado, ponte) de uma decoração, já na matriz do mundo `tmpM`; devolve se era um deles. */
+  private addMover(d: TileBuild['decos'][number], m: THREE.Matrix4): boolean {
+    if (d.key === 'bridge') this.life.addBridge(tmpM);
+    if (d.anim === 'spin-z' || d.anim === 'spin-x') {
+      // As pás giram sobre a base do moinho: a `Life` soma a altura do chão ali, na hora (a encosta pode subir depois).
+      const base = d.support && new THREE.Vector3(d.support[0], 0, d.support[1]).applyMatrix4(m);
+      this.life.addSpinner(d.key, tmpM, d.anim === 'spin-x' ? 'x' : 'z', base?.x, base?.z);
+    } else if (d.anim === 'wander') this.life.addAnimal(d.key, tmpM, d.color, d.when);
+    else if (d.anim === 'chop' || d.anim === 'tend' || d.anim === 'carry') this.life.addWorker(d.key, tmpM, d.color, d.anim);
+    else if (d.anim === 'swim') this.life.addFish(tmpM, d.color, d.orbit ?? 0);
+    else if (d.anim === 'bob') this.life.addBobber(tmpM, d.color);
+    else return false;
+    return true;
+  }
+
+  /** Quem se move numa peça (kit, anim e posição no plano): se muda ao refazer a peça, os itens dela na `Life` são trocados. */
+  private moversSig(b: TileBuild, m: THREE.Matrix4): string {
+    const out: string[] = [];
+    for (const d of b.decos) {
+      if (!d.anim && d.key !== 'bridge') continue;
+      decoMatrix(d, tmpM);
+      tmpM.premultiply(m);
+      out.push(`${d.key}:${d.anim ?? ''}:${(Math.round(tmpM.elements[12] * 1000) / 1000).toFixed(3)},${(Math.round(tmpM.elements[14] * 1000) / 1000).toFixed(3)}`);
+    }
+    return out.join('|');
+  }
+
+  private bake(p: Placed, b0: TileBuild, flush = true, built?: { sig: string; vsig: string }) {
     // A pintura de verdade vem sobre o chão como era: as pré-visualizações saem antes e voltam no próximo quadro (`restamp`).
     if (this.paintSig !== '') {
       groundMap.unpreview();
@@ -2007,14 +2115,15 @@ export class World {
     const ch = this.chunkFor(p.q, p.r);
     const slot = ch.append(b, m);
     if (slot.count) this.waterSlots.set(p.key, { chunk: ch, start: slot.start, count: slot.count });
-    const rec: { sig: string; vsig: string; keys: string[]; chunk: Chunk; gStart: number; gCount: number; decos: ({ pool: Pool; i: number } | null)[]; chim: number } = { sig: this.hillSig(p.def, p), vsig: this.vivaSig(p.def, p), keys: b.decos.map((d) => d.key), chunk: ch, gStart: slot.gStart, gCount: slot.gCount, decos: [], chim: this.chimneys.length };
+    const rec: { sig: string; vsig: string; keys: string[]; chunk: Chunk; gStart: number; gCount: number; decos: ({ pool: Pool; i: number } | null)[]; moversSig: string } = { sig: built?.sig ?? this.hillSig(p.def, p), vsig: built?.vsig ?? this.vivaSig(p.def, p), keys: b.decos.map((d) => d.key), chunk: ch, gStart: slot.gStart, gCount: slot.gCount, decos: [], moversSig: '' };
     this.baked.set(p.key, rec);
     this.surfaces.set(p.key, b.hill);
     groundMap.add(b, m, this.waterColor);
-    this.falls.append(b, m);
+    this.falls.append(p.key, b, m);
     // Modo Relevo: a saia das bordas altas avança sobre a casa vazia, e a areia e a espuma do mar começam no pé dela.
     seaMap.add(p.q, p.r, this.skirtOf(p.heights), this.unwarp);
     if (this.theme.floodplain && b.water.length) riverMap.add(b.water, m, this.theme.floodplain.reach);
+    this.life.owner = p.key;
     for (const d of b.decos) {
       if (d.transient) {
         rec.decos.push(null);
@@ -2031,26 +2140,16 @@ export class World {
         // Sombra de contato: o chão escurece em volta da casa (0 draw call; o material do chão lê o mapa).
         groundMap.contact(x, z, 0.65, 0.13 * tmpM.getMaxScaleOnAxis());
       }
-      if (d.key === 'bridge') this.life.addBridge(tmpM);
-      if (d.anim === 'spin-z' || d.anim === 'spin-x') {
-        // As pás giram sobre a base do moinho: a `Life` soma a altura do chão ali, na hora (a encosta pode subir depois).
-        const base = d.support && new THREE.Vector3(d.support[0], 0, d.support[1]).applyMatrix4(m);
-        this.life.addSpinner(d.key, tmpM, d.anim === 'spin-x' ? 'x' : 'z', base?.x, base?.z);
-      } else if (d.anim === 'wander') this.life.addAnimal(d.key, tmpM, d.color, d.when);
-      else if (d.anim === 'chop' || d.anim === 'tend' || d.anim === 'carry') this.life.addWorker(d.key, tmpM, d.color, d.anim);
-      else if (d.anim === 'swim') this.life.addFish(tmpM, d.color, d.orbit ?? 0);
-      else if (d.anim === 'bob') this.life.addBobber(tmpM, d.color);
-      else {
+      const mover = this.addMover(d, m);
+      if (!mover)      {
         const pool = this.pool(this.isLod(d.key) && this.lodFlip++ % 2 ? `${d.key}~` : d.key, p.q, p.r);
         if (pool) slotted = { pool, i: pool.add(tmpM, d.color) };
       }
       rec.decos.push(slotted);
     }
-    const v = new THREE.Vector3();
-    for (let i = 0; i < b.chimneys.length; i += 4) {
-      v.set(b.chimneys[i], b.chimneys[i + 1], b.chimneys[i + 2]).applyMatrix4(m);
-      this.chimneys.push(v.x, v.y, v.z, b.chimneys[i + 3]);
-    }
+    this.life.owner = undefined;
+    rec.moversSig = this.moversSig(b, m);
+    this.setChimneys(p.key, b, m);
     if (flush) for (const pool of this.pools.values()) pool.flush();
     // A peça nova entra na sombra no próximo redesenho, sem esperar o relógio de 0,25 s.
     this.shadowClock = 0.25;
@@ -2132,6 +2231,8 @@ export class World {
     // Só o estágio mudou: o chão é o mesmo (a paisagem viva só mexe na decoração).
     if (ground) {
       rec.chunk.replaceGround(rec, b, m);
+      // A corredeira (espuma, soleira, névoa) é função das vizinhas: a peça refeita troca a dela na camada das quedas.
+      this.falls.append(p.key, b, m);
       groundMap.add(b, m, this.waterColor);
       this.surfaces.set(p.key, b.hill);
     }
@@ -2159,14 +2260,58 @@ export class World {
       });
       rec.keys = keys;
     }
-    const v = new THREE.Vector3();
-    for (let i = 0; i < b.chimneys.length; i += 4) {
-      v.set(b.chimneys[i], b.chimneys[i + 1], b.chimneys[i + 2]).applyMatrix4(m);
-      this.chimneys[rec.chim + i + 1] = v.y;
+    // Bichos, aldeões, pás e peixes: se o conjunto (ou o lugar) mudou, os da peça são trocados (a `Life` não conhece a encosta).
+    const mv = this.moversSig(b, m);
+    if (mv !== rec.moversSig) {
+      this.life.dropOwner(p.key);
+      this.life.owner = p.key;
+      for (const d of b.decos) {
+        if (d.transient) continue;
+        decoMatrix(d, tmpM);
+        tmpM.premultiply(m);
+        this.addMover(d, m);
+      }
+      this.life.owner = undefined;
+      rec.moversSig = mv;
     }
+    // As chaminés seguem as casas de agora: o número delas pode ter mudado (a encosta muda onde a casa assenta), então a lista é refeita.
+    this.setChimneys(p.key, b, m);
     rec.sig = sig;
     rec.vsig = vsig;
     return true;
+  }
+
+  /**
+   * Conferência de cena (testes e `window.__sceneSig`): o que cada peça assentada tem agora, em forma comparável com a de uma
+   * reconstrução integral. Por peça: as decorações estáticas (kit sem o "~", matriz e cor arredondadas, sem ordem), o chão
+   * (triângulos com área e somas), as chaminés (emissores de fumaça), a corredeira (lâmina, espuma e quedas, as origens da névoa) e a
+   * soma dos lotes (instâncias vivas que nenhuma peça reclama são "órfãs"). `pending` diz se ainda há peça caindo ou na fila.
+   */
+  pending() {
+    return { drops: this.drops.length, queue: this.livingQueue.length };
+  }
+
+  sceneSig() {
+    this.falls.flush();
+    const r = (v: number) => (Math.round(v * 1000) / 1000 || 0).toFixed(3);
+    const pieces: Record<string, { decos: string[]; ground: string; smoke: string[]; falls: unknown }> = {};
+    let claimed = 0;
+    for (const [key, rec] of this.baked) {
+      const decos: string[] = [];
+      for (const slot of rec.decos) {
+        if (!slot) continue;
+        decos.push(`${slot.pool.tag}@${slot.pool.fingerprint(slot.i)}`);
+        claimed++;
+      }
+      const smoke: string[] = [];
+      const ch = this.chimMap.get(key) ?? [];
+      for (let i = 0; i < ch.length; i += 4) smoke.push([ch[i], ch[i + 1], ch[i + 2], ch[i + 3]].map(r).join(','));
+      const p = this.board?.tiles.get(key);
+      pieces[p ? `${p.q},${p.r}` : String(key)] = { decos: decos.sort(), ground: rec.chunk.groundDigest(rec.gStart, rec.gCount), smoke: smoke.sort(), falls: this.falls.digest(key) };
+    }
+    let live = 0;
+    for (const pool of this.pools.values()) live += pool.live;
+    return { pieces, pending: this.pending(), orphans: live - claimed, smokeTotal: this.chimneys.length / 4, mistTotal: this.falls.spots.length, life: this.life.staticCounts() };
   }
 
   updateFrontier(board: Board) {
@@ -2244,6 +2389,8 @@ export class World {
   placeAnimated(p: Placed) {
     // A peça pousa e as vizinhas mudam: os fantasmas guardados da peça anterior não valem mais.
     this.clearGhostCache();
+    this.nbWant = null;
+    this.hideNeighbors();
     const syn = synBase(p.synergies, p.rot);
     const flow = this.settleFlow(p);
     const widths = this.settleWidths(p);
@@ -2271,7 +2418,7 @@ export class World {
     live.group.position.set(x, y0, z);
     this.hoverRing.visible = false;
     for (const m of this.markers) m.visible = false;
-    this.drops.push({ live, placed: p, t: 0, y0, ly, landed: false, hold: live.has(BUILDS) ? SCAFFOLD_DOWN + 0.3 : 0.55, cleared: false });
+    this.drops.push({ live, placed: p, t: 0, y0, ly, landed: false, hold: live.has(BUILDS) ? SCAFFOLD_DOWN + 0.3 : 0.55, cleared: false, sig: hillSig, vsig: this.vivaSig(p.def, p) });
   }
 
   /** Depuração: leva as peças caindo ao instante `t` (segundos de queda; o `tick` com `timeScale` 0 só reavalia a pose). */
@@ -2550,6 +2697,9 @@ export class World {
     }
     this.ghost.group.visible = true;
     this.ghostAngle = angle;
+    // Prévia das vizinhas: só da jogada válida; mudar de casa ou de giro apaga a anterior na hora (a nova espera o fantasma parar).
+    if (!this.nbWant || this.nbWant.q !== q || this.nbWant.r !== r || this.nbWant.rot !== rot || this.nbWant.def !== def) this.hideNeighbors();
+    this.nbWant = check.valid ? { def, q, r, rot } : null;
     const { x, z } = hexToWorld(q, r);
     const ly = lvs ? lvs.own * LEVEL_STEP : 0;
     this.ghostTarget.set(x, (MAGRA.ghost ? 0.14 : 0.32) + ly, z);
@@ -2741,7 +2891,71 @@ export class World {
     this.trace.play(views, 0.5);
   }
 
+  /**
+   * Vizinhas assentadas que mudam se a peça `def` pousar em (q, r) com o giro `rot`: as que SOBEM (o perfil da encosta ou a corredeira muda) e
+   * as que CRESCEM (estágio da Paisagem viva). Compara a assinatura que cada uma tem desenhada (`baked`) com a que teria num tabuleiro
+   * copiado com a peça posta, então é exatamente o que o pouso refaria (`refreshHills`). Só roda quando o fantasma para na casa.
+   */
+  private neighborsChanging(def: TileDef, q: number, r: number, rot: number): { rise: Placed[]; grow: Placed[] } {
+    const out = { rise: [] as Placed[], grow: [] as Placed[] };
+    if (!this.board || (!this.hillsOn && !this.vivaOn)) return out;
+    const c = this.board.clone();
+    try {
+      c.placeRaw(q, r, def, rot);
+    } catch {
+      return out;
+    }
+    const stages = this.vivaOn ? livingStages(c) : null;
+    for (const [key, rec] of this.baked) {
+      const p = c.tiles.get(key);
+      const real = this.board.tiles.get(key);
+      if (!p || !real) continue;
+      const near = Math.abs(p.q - q) <= 1 && Math.abs(p.r - r) <= 1 && Math.abs(p.q - q + p.r - r) <= 1;
+      if (this.hillsOn && near && this.hillSig(p.def, p, c) !== rec.sig) out.rise.push(real);
+      else if (stages && stageSig(stages.get(key) ?? NO_STAGES) !== rec.vsig) out.grow.push(real);
+    }
+    return out;
+  }
+
+  private hideNeighbors() {
+    this.nbShown = '';
+    this.nbMarks.visible = false;
+    this.nbMarks.count = 0;
+    this.nbInfo = { rise: 0, grow: 0 };
+  }
+
+  /** Cada quadro: monta (uma vez por jogada do fantasma) o realce das vizinhas que mudam, e o faz respirar devagar. */
+  private stepNeighbors(dt: number) {
+    const w = this.nbWant;
+    const ok = !!w && !!this.ghost?.group.visible && !!this.ghostCell && this.ghostCell.q === w.q && this.ghostCell.r === w.r && performance.now() - this.ghostSince >= World.GHOST_SETTLE_MS;
+    if (!ok || !w) {
+      if (this.nbShown) this.hideNeighbors();
+      return;
+    }
+    const key = `${w.def.seed}:${w.q},${w.r},${w.rot}:${this.board?.list.length ?? 0}`;
+    if (key !== this.nbShown) {
+      this.nbShown = key;
+      const { rise, grow } = this.neighborsChanging(w.def, w.q, w.r, w.rot);
+      const cells = [...rise.map((p) => ({ p, rise: true })), ...grow.map((p) => ({ p, rise: false }))].slice(0, 24);
+      const up = new THREE.Color('#ffd36b'), gr = new THREE.Color('#9be37a');
+      cells.forEach(({ p, rise: isRise }, i) => {
+        const { x, z } = hexToWorld(p.q, p.r);
+        const f = this.fl(x, z);
+        this.nbMarks.setMatrixAt(i, tmpM.makeTranslation(f.x, this.heightOf(p.q, p.r) + this.riseAt(x, z) + 0.04, f.z));
+        this.nbMarks.setColorAt(i, isRise ? up : gr);
+      });
+      this.nbMarks.count = cells.length;
+      this.nbMarks.instanceMatrix.needsUpdate = true;
+      if (this.nbMarks.instanceColor) this.nbMarks.instanceColor.needsUpdate = true;
+      this.nbInfo = { rise: rise.length, grow: grow.length };
+    }
+    this.nbMarks.visible = this.nbMarks.count > 0 && this.showSlots;
+    this.nbT += dt;
+    this.nbMat.opacity = 0.26 + 0.1 * Math.sin(this.nbT * 2.2);
+  }
+
   clearGhost() {
+    this.nbWant = null;
     this.setTerraView(null);
     if (this.ghost) this.ghost.group.visible = false;
     this.hoverRing.visible = false;
@@ -2749,6 +2963,7 @@ export class World {
   }
 
   dropGhost() {
+    this.nbWant = null;
     this.setTerraView(null);
     this.ghost?.dispose();
     this.ghost = null;
@@ -3325,6 +3540,7 @@ export class World {
     A.far.value = near + eye * 2.7;
     this.restamp();
     this.stepTrace(dt);
+    this.stepNeighbors(dt);
     groundMap.flush();
     seaMap.flush();
     riverMap.flush();
@@ -3531,7 +3747,7 @@ export class World {
         });
       }
       if (d.t > fall + d.hold) {
-            this.bake(d.placed, d.live.build);
+            this.bake(d.placed, d.live.build, true, { sig: d.sig, vsig: d.vsig });
         this.refreshHills(d.placed);
         this.syncWater();
         d.live.dispose();

@@ -2593,6 +2593,50 @@ function start(data: unknown) {
 (window as unknown as { __hills: () => { rebakes: number; ms: number } }).__hills = () => ({ rebakes: world.hillRebakes, ms: world.hillMs });
 // Paisagem viva: ligada, peças refeitas por estágio e o pior tempo de uma rodada (ms); `stages` = quantas peças têm algum estágio, por estágio 0 a 3.
 (window as unknown as { __living: () => unknown }).__living = () => ({ on: world.vivaOn, rebakes: world.livingRebakes, maxMs: world.livingMaxMs, stages: world.livingHistogram() });
+// Conferência de cena (E8, `scripts/scene-sync.mjs`): a assinatura do que cada peça tem agora, para comparar com a de uma reconstrução integral.
+// `__legalMoves` lista as jogadas válidas da peça atual; `__playMove` joga uma (com animação); `__land` faz as peças em queda assentarem no próximo quadro;
+// `__rebuildScene` refaz o mapa do zero com o tabuleiro de agora; `__replayScene` refaz a partida pelo replay (como a recarga do save); `__undoMove` é o desfazer.
+const sceneHooks = window as unknown as Record<string, unknown>;
+sceneHooks.__sceneSig = () => world.sceneSig();
+sceneHooks.__legalMoves = () => {
+  const out: number[][] = [];
+  if (!game.current) return out;
+  const keep = game.rot;
+  for (const k of [...game.board.frontier].sort((a, b) => a - b)) {
+    const [q, r] = unkey(k);
+    for (let rot = 0; rot < 6; rot++) {
+      game.rot = rot;
+      if (game.check(q, r)?.valid) out.push([q, r, rot]);
+    }
+  }
+  game.rot = keep;
+  return out;
+};
+sceneHooks.__playMove = (q: number, r: number, rot: number) => {
+  hud.hideModal();
+  if (!game.current || game.offers.length) return false;
+  while (game.rot !== rot) rotate(1);
+  const n = moves.length;
+  place(q, r);
+  return moves.length > n;
+};
+sceneHooks.__waterTouch = (q: number, r: number, rot: number) => {
+  if (!game.current) return 0;
+  const e = rotateEdges(game.current.edges, rot);
+  let n = 0;
+  for (let i = 0; i < 6; i++) {
+    const nb = game.board.get(q + DIRS[i][0], r + DIRS[i][1]);
+    if (nb && e[i] === T.Water && nb.edges[(i + 3) % 6] === T.Water) n++;
+  }
+  return n;
+};
+sceneHooks.__nbPreview = () => world.nbInfo;
+sceneHooks.__pending = () => world.pending();
+sceneHooks.__land = () => world.seekDrops(5);
+sceneHooks.__rebuildScene = () => world.rebuild(game.board);
+sceneHooks.__replayScene = () => newGame(game.seed, moves.map((m) => [...m] as MoveRec), game.board.score, undone, game.specials);
+sceneHooks.__undoMove = () => undo();
+sceneHooks.__setViva = (on: boolean) => world.setViva(on, game.board);
 (window as unknown as { __placeBest: () => boolean }).__placeBest = () => {
   const m = game.bestMove();
   if (!m) return false;

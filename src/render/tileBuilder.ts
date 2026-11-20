@@ -148,8 +148,8 @@ export interface BuildOpts {
   skirt?: readonly boolean[];
   /**
    * Corredeira no vale (Relevo e Terra com as Encostas, onde o desenho não tem platô por peça): borda (origem) de água em que a água
-   * pontuada desce de nível para a vizinha assentada ANTES desta peça. Valor = quantos níveis desce (positivo: esta peça é a alta;
-   * negativo: a baixa). A peça põe espuma, degraus de pedra e a névoa; a água não muda.
+   * pontuada desce de nível para a vizinha, qualquer que seja a ordem das jogadas. Valor = quantos níveis desce, só na peça ALTA (a baixa
+   * recebe 0 e não desenha nada ali): ela põe a soleira de pedra, a espuma e a névoa, uma corredeira completa por borda; a água não muda.
    */
   rapids?: readonly number[];
   /** 1 = densidade total de plantas e capim; menor em qualidade baixa. */
