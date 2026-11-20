@@ -1,4 +1,6 @@
 import * as THREE from 'three/webgpu';
+import { hexToWorld, worldToHex } from '../core/hex';
+import { FLUID_AMP } from './fluid';
 import { onMagra } from './magra';
 import type { TileBuild } from './tileBuilder';
 
@@ -112,6 +114,25 @@ export class GroundMap {
     this.land.fill(0);
     this.relief.fill(RELIEF_VOID);
     this.previews.length = 0;
+    this.dirty = true;
+  }
+
+  /** Apaga as saias antigas de uma casa vazia antes de repintar todas as vizinhas. Preserva a luz dos lampiões. */
+  clearEmptyCell(q: number, r: number, unwarp: (x: number, z: number) => readonly [number, number]) {
+    const { x, z } = hexToWorld(q, r);
+    const reach = 1 + FLUID_AMP;
+    const x0 = Math.max(0, Math.floor((x - reach + GROUND_EXTENT) / TEXEL)), x1 = Math.min(GROUND_SIZE - 1, Math.ceil((x + reach + GROUND_EXTENT) / TEXEL));
+    const y0 = Math.max(0, Math.floor((z - reach + GROUND_EXTENT) / TEXEL)), y1 = Math.min(GROUND_SIZE - 1, Math.ceil((z + reach + GROUND_EXTENT) / TEXEL));
+    for (let row = y0; row <= y1; row++) for (let col = x0; col <= x1; col++) {
+      const [wx, wz] = unwarp((col + 0.5) * TEXEL - GROUND_EXTENT, (row + 0.5) * TEXEL - GROUND_EXTENT);
+      const [cq, cr] = worldToHex(wx, wz);
+      if (cq !== q || cr !== r) continue;
+      const p = row * GROUND_SIZE + col;
+      this.data.fill(0, p * 4, p * 4 + 3);
+      this.cover[p] = this.height[p] = 0;
+      this.land.fill(0, p * 4, p * 4 + 4);
+      this.relief[p] = RELIEF_VOID;
+    }
     this.dirty = true;
   }
 
