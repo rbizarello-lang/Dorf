@@ -307,6 +307,12 @@ export const indirectShare = (m: THREE.Material | null | undefined): N =>
 /** Recebe a sombra do sol e multiplica pelas nuvens (o tipo do three declara a função sem parâmetro). */
 const shadowWithClouds = Fn(([shadow]: [N]) => shadow.mul(cloudLight(positionWorld.xz))) as unknown as () => THREE.Node;
 
+export function makeHarborMaterial() {
+  const material = new LitMaterial({ vertexColors: true, roughness: 0.88 });
+  material.receivedShadowNode = shadowWithClouds;
+  return material;
+}
+
 /** Deslocamento do vento nas copas (espaço do mundo; `h` = altura acima do tronco). */
 const treeSway = (p: N3, h: N, t: N) => {
   const ph = p.x.mul(0.55).add(p.z.mul(0.45));

@@ -45,6 +45,7 @@ const cases = [
   { name: 'terra-hash-webgl', q: 'theme=brasil&seed=3&auto=12&quality=low&webgl', hash: '#mode=terra', backend: 'webgl2', mode: 'Terra contínua' },
   { name: 'entrepostos', q: 'mode=entrepostos&layout=forquilha&freight=madeira&theme=holanda&seed=42&auto=12&quality=low', backend: 'webgpu', mode: 'Entrepostos' },
   { name: 'entrepostos-hash-webgl', q: 'theme=egito&seed=42&auto=12&quality=low&webgl', hash: '#mode=entrepostos&layout=enseada&freight=direto', backend: 'webgl2', mode: 'Entrepostos' },
+  { name: 'entrepostos-dialogo-webgl', q: 'mode=entrepostos&seed=3&auto=6&webgl&quality=low', backend: 'webgl2', mode: 'Entrepostos', tiles: 7, freightDialog: true },
   // Limite de buffers de vértice do WebGPU (maxVertexBuffers = 8): a Alta com a Paisagem viva e o TRAA tem o pior caso (matriz anterior da instância).
   // O `?vbuf` conta, em qualquer backend, os buffers que cada malha usa; roda em WebGL2 para valer também sem GPU.
   { name: 'buffers-de-vertice', q: 'theme=holanda&seed=7&auto=60&quality=high&mode=zen&viva=1&vbuf&webgl', backend: 'webgl2', vbuf: true, tiles: 61 },
@@ -75,7 +76,10 @@ let failed = 0;
 for (const c of cases) {
   const page = await browser.newPage({ viewport: { width: 960, height: 600 } });
   const errors = [];
-  page.on('console', (m) => m.type() === 'error' && !IGNORE.test(m.text()) && errors.push(m.text()));
+  page.on('console', (m) => {
+    if (c.freightDialog && m.type() === 'warning' && m.text().includes('THREE.AttributeNode: Vertex attribute')) errors.push(m.text());
+    if (m.type() === 'error' && !IGNORE.test(m.text())) errors.push(m.text());
+  });
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('response', (r) => r.status() >= 400 && r.url().startsWith(base) && errors.push(`${r.status()} ${r.url()}`));
   const t0 = Date.now();
@@ -90,6 +94,13 @@ for (const c of cases) {
   }
   // Mais alguns quadros: pipelines de materiais novos compilam no primeiro desenho e podem falhar depois. Os casos curtos esperam menos.
   if (stats?.tiles >= want(c) && !errors.length) await page.waitForTimeout(c.tiles ? 2500 : 5000);
+  if (c.freightDialog && stats?.tiles >= want(c) && !errors.length) {
+    await page.evaluate(() => {
+      document.getElementById('btn-new').click();
+      document.querySelector('button[data-mode="entrepostos"]').click();
+    });
+    await page.waitForTimeout(2500);
+  }
   if (c.live && stats?.tiles >= want(c) && !errors.length) {
     // Baixa já está; sobe para Alta, Ultra, desce para Média, e percorre a hora até a noite.
     for (const q of ['high', 'ultra', 'medium']) {
@@ -146,6 +157,7 @@ for (const c of cases) {
     // O cabeçalho do ?bench (placa, navegador, tela, medidor de GPU, nível do Auto) precisa vir junto, para a tabela colada dizer onde foi medida.
     if (c.bench && !(await page.evaluate(() => (window.__bench?.info?.length ?? 0) >= 5 && document.querySelectorAll('.bench li').length >= 5))) problems.push('o cabeçalho do ?bench (placa, tela, medidor de GPU) não apareceu');
     if (c.mode && !(await page.evaluate((m) => document.getElementById('era')?.textContent?.includes(m) ?? false, c.mode))) problems.push(`o modo na tela não é ${c.mode}`);
+    if (c.freightDialog && !(await page.locator('button[data-act="freight"]').first().isVisible())) problems.push('o diálogo de frete não apareceu');
     if (c.vbuf) {
       const over = await page.evaluate(() => window.__vbuf?.(9) ?? null);
       if (over === null) problems.push('o gancho __vbuf não existe');
