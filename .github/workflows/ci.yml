@@ -11,7 +11,8 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Com as Encostas e a Paisagem viva o smoke leva de 9 a 12 min no runner (software); 15 min de limite cortava o job no fim.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
