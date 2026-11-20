@@ -6,6 +6,7 @@ import { createRenderer } from './gpu';
 import { instGeometry, setInstColor, type Lib } from './lib';
 import { LiveTile } from './liveTile';
 import { U } from './materials';
+import { MAGRA } from './magra';
 import { TILE_T, tc, type TileBuild } from './tileBuilder';
 
 const tmpM = new THREE.Matrix4();
@@ -83,7 +84,7 @@ export class PreviewView {
       }
     }
     this.angle = angle;
-    const n = Math.min(40, Math.max(0, stack - 1));
+    const n = Math.min(40, Math.ceil(Math.max(0, stack - 1) * MAGRA.pile));
     for (let i = 0; i < n; i++) this.pillar.setMatrixAt(i, tmpM.makeTranslation(0, -TILE_T - 0.035 - i * 0.075, 0));
     this.pillar.count = n;
     this.pillar.instanceMatrix.needsUpdate = true;
@@ -108,12 +109,13 @@ export class PreviewView {
     tile.inner.rotation.y += (-this.angle - tile.inner.rotation.y) * (1 - Math.exp(-dt * 16));
     // A pilha usa sempre luz de dia, para a peça da vez ficar legível.
     // Sem o mapa do chão (luz rebatida, lampiões e costura de cor): ele é do tabuleiro, não da pilha.
-    const night = U.night.value, seam = U.seam.value, clouds = U.clouds.value, lamps = U.lamps.value, halo = U.halo.value, flood = U.flood.value;
+    const night = U.night.value, seam = U.seam.value, land = U.land.value, clouds = U.clouds.value, lamps = U.lamps.value, halo = U.halo.value, flood = U.flood.value;
     const bounce = tmpBounce.copy(U.bounce.value);
     U.night.value = 0;
     U.clouds.value = 0;
     U.lamps.value = 0;
     U.seam.value = 0;
+    U.land.value = 0;
     U.halo.value = 0;
     U.flood.value = 0; // a várzea é do mapa de rios do tabuleiro, não da pilha
     U.bounce.value.setRGB(0, 0, 0);
@@ -122,6 +124,7 @@ export class PreviewView {
     U.clouds.value = clouds;
     U.lamps.value = lamps;
     U.seam.value = seam;
+    U.land.value = land;
     U.halo.value = halo;
     U.flood.value = flood;
     U.bounce.value.copy(bounce);

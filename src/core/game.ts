@@ -3,8 +3,10 @@ import { Board, type PlaceResult, type Rules } from './board';
 import { unkey } from './hex';
 import { mulberry32, type Rng } from './rng';
 import { generateSites } from './sites';
+import { generateHiddenSprings } from './water';
 import { type SpecialKind, specialSlots, specialTile } from './specials';
 import { routePosts } from './routes';
+import type { TerraView } from './terra';
 import { T, generateTile, rotateEdges, type TileDef } from './tiles';
 
 export interface Move {
@@ -41,7 +43,7 @@ export class Game {
   ) {
     this.rng = mulberry32(seed);
     this.slots = specialSlots(seed, specials);
-    this.board = new Board(rules);
+    this.board = new Board(rules, seed);
     if (rules.routes) this.board.posts = routePosts(seed);
     const starter: TileDef = {
       edges: [T.Grass, T.Grass, T.Forest, T.Forest, T.Field, T.Village],
@@ -51,6 +53,7 @@ export class Game {
     this.board.placeRaw(0, 0, starter, 0);
     this.board.computeGroups();
     this.board.sites = generateSites(seed, rules.sites, rules.siteScale);
+    if (rules.relief && rules.springs) this.board.springSites = generateHiddenSprings(seed, rules.hiddenSprings);
     this.stack = rules.startTiles;
     this.current = this.draw();
     this.next = this.draw();
@@ -109,7 +112,7 @@ export class Game {
 
   check(q: number, r: number) {
     const edges = this.currentEdges();
-    return edges ? this.board.check(q, r, edges) : null;
+    return this.current && edges ? this.board.checkDef(q, r, this.current, this.rot) : null;
   }
 
   /**
@@ -123,8 +126,7 @@ export class Game {
   private previewAt(q: number, r: number, rot: number): PlaceResult | null {
     const def = this.current;
     if (!def) return null;
-    const edges = rotateEdges(def.edges, rot);
-    if (!this.board.check(q, r, edges).valid) return null;
+    if (!this.board.checkDef(q, r, def, rot).valid) return null;
     const board = this.board.clone();
     const res = board.place(q, r, def, rot);
     if (this.rules.endOnSites && board.sites.length && board.sitesLeft() === 0) {
@@ -134,6 +136,13 @@ export class Game {
       res.leftoverBonus = bonus;
     }
     return res;
+  }
+
+  /** Terra contínua: as manchas, as bordas abertas e o fechamento da jogada em (q, r) com o giro atual, e a umidade que sobe (para o fantasma). */
+  terraView(q: number, r: number): TerraView | null {
+    const def = this.current;
+    if (!def || !this.rules.terra || !this.board.checkDef(q, r, def, this.rot).valid) return null;
+    return this.board.terraView(q, r, def, this.rot);
   }
 
   place(q: number, r: number): PlaceResult | null {
@@ -189,7 +198,7 @@ export class Game {
   hasAnyMove(def: TileDef) {
     for (const k of this.board.frontier) {
       const [q, r] = unkey(k);
-      for (let rot = 0; rot < 6; rot++) if (this.board.check(q, r, rotateEdges(def.edges, rot)).valid) return true;
+      for (let rot = 0; rot < 6; rot++) if (this.board.checkDef(q, r, def, rot).valid) return true;
     }
     return false;
   }
@@ -228,9 +237,12 @@ export class Game {
     for (const k of this.board.frontier) {
       const [q, r] = unkey(k);
       for (let rot = 0; rot < 6; rot++) {
-        const c = this.board.check(q, r, rotateEdges(def.edges, rot));
+        const c = this.board.checkDef(q, r, def, rot);
         if (!c.valid) continue;
-        const score = c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) + rand() * 0.5;
+        // Terra contínua: o que paga é a continuidade das emendas (os pontos de cada uma), não só o terreno igual.
+        const score = c.terra
+          ? c.terra.pay.reduce((a, b) => a + b, 0) * 0.3 - (c.neighbors - c.matches) * 2 + (c.terra.perfect ? c.neighbors : 0) + (c.water?.gain ?? 0) * 0.3 + rand() * 0.5
+          : c.matches * 3 - (c.neighbors - c.matches) * 2 + (c.matches === c.neighbors ? c.neighbors : 0) + (c.water?.gain ?? 0) * 0.3 + rand() * 0.5;
         if (!best || score > best.score) best = { q, r, rot, score };
       }
     }

@@ -13,6 +13,7 @@ const all = [
 ];
 // RUNS=1000:high,2500:low roda só esses casos. Rode sem outros navegadores abertos:
 // o render por software divide a CPU e distorce a medida de CPU por quadro.
+// EXTRA='&mode=relevo&theme=holanda' acrescenta parâmetros à URL (medir outro modo ou tema).
 const only = (process.env.RUNS ?? '').split(',').filter(Boolean);
 const runs = only.length ? all.filter((r) => only.includes(`${r.n}:${r.quality}`)) : all;
 const browser = await launch();
@@ -22,7 +23,7 @@ for (const r of runs) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   // Fechar a cena anterior no SwiftShader pode passar de 30 s; o mapa grande espera o mesmo prazo da montagem.
-  await page.goto(`${base}?stress=${r.n}&quality=${r.quality}&seed=42`, { timeout: 120000 });
+  await page.goto(`${base}?stress=${r.n}&quality=${r.quality}&seed=42${process.env.EXTRA ?? ''}`, { timeout: 120000 });
   await page.waitForFunction(() => window.__load && window.__stats, null, { timeout: 120000 });
   await page.waitForTimeout(6000);
   const { load, stats, heap } = await page.evaluate(() => ({ load: window.__load, stats: window.__stats, heap: performance.memory?.usedJSHeapSize ?? 0 }));

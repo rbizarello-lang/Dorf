@@ -10,6 +10,9 @@ import { timelineSvg, type TurnNote } from '../src/ui/minimap';
 import { monumentsDue } from '../src/ui/progress';
 import { DAILY_RULES, dailyDate, dailyRule, dailySeed, modeRules, MODES } from '../src/core/modes';
 import { shareLine, shareUrl, terrainPoints } from '../src/core/share';
+import { tileProfile } from '../src/core/relief';
+import { isSpring } from '../src/core/water';
+import { smearComp } from '../src/core/terra';
 
 const rules: Rules = { ...DEFAULT_RULES };
 let bad = 0;
@@ -338,6 +341,208 @@ const water6: TileDef = { edges: [T.Water, T.Water, T.Water, T.Water, T.Water, T
   b.placeRaw(-1, 1, land(T.Field), 0);
   const tp = terrainPoints(b, { matchPoints: 10, matchBonus: { [T.Forest]: 3 } });
   ok(tp.length === 2 && tp[0][0] === T.Forest && tp[0][1] === 13 && tp[1][0] === T.Field && tp[1][1] === 10, 'terrenos que mais pontuaram: floresta 13, plantação depois');
+}
+
+// ---- 12) Águas que descem (modo Relevo): a água só desce; a nascente abre o curso, o mar paga, a subida fica parada.
+{
+  console.log('Cenário 12: águas que descem');
+  const relevo = MODES.find((m) => m.id === 'relevo')!;
+  const R: Rules = { ...DEFAULT_RULES, ...relevo.rules, startTiles: 1 };
+  const G = T.Grass, W = T.Water;
+  /** Uma peça com estas bordas, nível de rio e nascente (ou não): procura a semente pelo gerador do núcleo. */
+  const def = (edges: T[], level: number, spring: boolean): TileDef => {
+    for (let seed = 1; seed < 20000; seed++) if (tileProfile(edges, seed).h[0] === level && isSpring(seed, edges, level) === spring) return { edges, seed, quest: null };
+    throw new Error('sem semente');
+  };
+  const start = (rules: Rules) => {
+    const b = new Board(rules);
+    b.placeRaw(0, 0, land(G), 0);
+    b.computeGroups();
+    return b;
+  };
+  const src = def([W, G, G, G, G, G], 1, true);
+  const straight = (lv: number) => def([W, G, G, W, G, G], lv, false);
+  const lake = def([W, W, W, W, G, G], 1, false);
+  const b = start(R);
+  const r1 = b.place(1, 0, src, 0);
+  ok(r1.water?.spring === true && r1.water.flowing === 1 && r1.water.points === 8, `nascente no nível 1 já corre: +8 (${r1.water?.points})`);
+  const r2 = b.place(2, 0, straight(1), 0);
+  ok(r2.water?.flowing === 1 && r2.water.points === 8, 'rio no mesmo nível, ligado à nascente: +8');
+  const chk = b.checkDef(3, 0, straight(2), 0);
+  ok(chk.valid && chk.water?.flows === false && chk.water.gain === 0, 'rio um nível acima do curso: jogada válida, água parada, vale 0');
+  const r3 = b.place(3, 0, straight(2), 0);
+  ok(r3.water?.flowing === 0 && r3.water.points === 0 && b.waterNow().flow.size === 2, 'rio que sobe não ganha pontos nem muda o curso');
+  // Outra partida: a nascente, um rio e o lago (mar) no fim do curso.
+  const c = start(R);
+  c.place(1, 0, src, 0);
+  c.place(2, 0, straight(1), 0);
+  const pre = c.checkDef(3, 0, lake, 0);
+  ok(pre.water?.sea === true && pre.water.gain === 8 + 60, `a prévia do lago já mostra o mar: +68 (${pre.water?.gain})`);
+  const r4 = c.place(3, 0, lake, 0);
+  ok(r4.water?.seas === 1 && r4.water.points === 68 && r4.tilesGained >= R.seaTiles, 'chegar ao mar: +8 da peça, +60 e 2 peças');
+  const r5 = c.place(3, 1, straight(1), 0);
+  ok((r5.water?.seas ?? 0) === 0, 'o mar paga uma vez por nascente');
+  // O curso é função do tabuleiro: refazer as mesmas jogadas dá o mesmo estado, e o modo Clássico não paga água.
+  const again = start(R);
+  again.place(1, 0, src, 0);
+  again.place(2, 0, straight(1), 0);
+  again.place(3, 0, lake, 0);
+  ok(JSON.stringify([...again.waterNow().flow]) === JSON.stringify([...c.waterNow().flow].slice(0, 3)) || again.waterNow().flow.size === 3, 'a água corrente se refaz igual (replay)');
+  const classic = start({ ...DEFAULT_RULES, startTiles: 1 });
+  const rc = classic.place(1, 0, src, 0);
+  ok(rc.water === undefined && classic.waterNow().flow.size === 0, 'fora do Relevo não há nascente nem pontos de água');
+}
+
+// ---- 13) Nascentes escondidas: a casa só se revela com uma peça de água ao lado; o rio que pousa nela vira a nascente.
+{
+  console.log('Cenário 13: nascentes escondidas');
+  const relevo = MODES.find((m) => m.id === 'relevo')!;
+  const R: Rules = { ...DEFAULT_RULES, ...relevo.rules, startTiles: 1 };
+  const G = T.Grass, W = T.Water;
+  const def = (edges: T[], level: number): TileDef => {
+    for (let seed = 1; seed < 20000; seed++) if (tileProfile(edges, seed).h[0] === level && !isSpring(seed, edges, level)) return { edges, seed, quest: null };
+    throw new Error('sem semente');
+  };
+  const start = () => {
+    const b = new Board(R);
+    b.placeRaw(0, 0, land(G), 0);
+    b.computeGroups();
+    b.springSites = [{ q: 2, r: 0 }, { q: -3, r: 0 }];
+    return b;
+  };
+  const b = start();
+  ok(b.revealedSprings().length === 0, 'nenhuma nascente escondida aparece sozinha');
+  b.place(1, 0, def([W, G, G, G, G, G], 1), 0);
+  ok(JSON.stringify(b.revealedSprings()) === JSON.stringify([{ q: 2, r: 0 }]), 'a peça de água ao lado revela a casa (e só ela)');
+  const pre = b.checkDef(2, 0, def([W, G, G, W, G, G], 1), 0);
+  ok(pre.water?.hidden === true && pre.water.spring === true && pre.water.gain === 2 * R.flowPoints + R.hiddenSpringPoints, `a prévia mostra a nascente escondida: +${2 * R.flowPoints + R.hiddenSpringPoints} (${pre.water?.gain})`);
+  const r = b.place(2, 0, def([W, G, G, W, G, G], 1), 0);
+  ok(r.placed.spring === true && r.placed.hiddenSpring === true && r.water?.hidden === true && r.water.points === 2 * R.flowPoints + R.hiddenSpringPoints, `o rio sobre a casa vira nascente e rende +${R.hiddenSpringPoints}: ${r.water?.points}`);
+  ok(b.revealedSprings().length === 0, 'a casa ocupada some da lista das reveladas');
+  // Rio no nível 0 não vira nascente (a água nasce no alto); terra sobre a casa a perde sem pontos; a casa longe da água não se revela.
+  const c = start();
+  c.place(1, 0, def([W, G, G, G, G, G], 1), 0);
+  const low = c.checkDef(2, 0, def([W, G, G, W, G, G], 0), 0);
+  ok(low.water?.hidden === false && low.water.spring === false, 'rio no nível 0 sobre a casa não é nascente');
+  const d = start();
+  const rl = d.place(1, 0, land(G), 0);
+  ok(rl.water === undefined && d.revealedSprings().length === 0, 'terra ao lado não revela nada');
+  // Preservada pelo clone (a prévia da jogada) e a mesma para quem refaz as jogadas.
+  const cl = b.clone();
+  ok(JSON.stringify(cl.springSites) === JSON.stringify(b.springSites) && cl.get(2, 0)?.hiddenSpring === true, 'o clone guarda as nascentes escondidas e a que foi achada');
+}
+
+// ---- 14) Terra contínua: fechar manchas de 1, 3 e 7 peças, a peça de volta (e seus limites) e a umidade que chega só às peças de antes.
+{
+  console.log('Cenário 14: Terra contínua');
+  const terra = MODES.find((m) => m.id === 'terra')!;
+  ok(terra.more === true && terra.rules.terra === true && !MODES.some((m) => m.id !== 'terra' && m.rules.terra), 'o modo Terra contínua existe, fica em "Mais modos" e só ele liga a regra');
+  const R: Rules = { ...DEFAULT_RULES, ...terra.rules, eraScores: [0], blessings: false, influence: false, seasonBonus: false, sites: 0 };
+  const G = T.Grass, F = T.Forest, Fi = T.Field, W = T.Water;
+  const start = (extra: Partial<Rules> = {}) => {
+    const b = new Board({ ...R, ...extra }, 7);
+    b.placeRaw(0, 0, land(G), 0);
+    b.computeGroups();
+    return b;
+  };
+  /** A fórmula do fechamento, escrita aqui à parte: 20·a^1,5·forma, forma = 0,55 + 0,45·min(1, 6√a/P). */
+  const closeValue = (a: number, perimeter: number) => Math.round(20 * a ** 1.5 * (0.55 + 0.45 * Math.min(1, (6 * Math.sqrt(a)) / perimeter)));
+  /** Põe a mancha de `forest` (terreno Mata) e depois cerca com `ring` (Prado): devolve o resultado de cada jogada do cerco. */
+  const enclose = (b: Board, patch: [number, number][], ring: [number, number][]) => {
+    for (const [q, r] of patch) b.place(q, r, land(F), 0);
+    return ring.map(([q, r]) => b.place(q, r, land(G), 0));
+  };
+
+  // Mancha de 1 peça: 20 pontos e 1 peça de volta, só na jogada que fecha a sexta borda.
+  {
+    const b = start();
+    const res = enclose(b, [[1, 0]], [[0, 1], [1, 1], [2, 0], [1, -1], [2, -1]]);
+    const last = res[res.length - 1];
+    ok(res.slice(0, -1).every((x) => x.terra!.closedPatches === 0 && x.terra!.closePoints === 0), 'mancha de 1: antes da última borda nada fecha');
+    ok(last.terra!.closedPatches === 1 && last.terra!.closePoints === closeValue(1, 6) && last.terra!.closePoints === 20, `mancha de 1 fecha: +${last.terra!.closePoints} (20)`);
+    ok(last.terra!.backTiles === 1 && last.tilesGained === 1, `mancha de 1: devolve 1 peça (${last.terra!.backTiles}, ganhas ${last.tilesGained})`);
+  }
+  // Mancha de 3 peças (triângulo): perímetro 12.
+  {
+    const b = start();
+    const res = enclose(b, [[1, 0], [2, -1], [2, 0]], [[0, 1], [1, 1], [1, -1], [3, -1], [3, -2], [2, -2], [3, 0], [2, 1]]);
+    const last = res[res.length - 1];
+    ok(res.slice(0, -1).every((x) => x.terra!.closedPatches === 0), 'mancha de 3: só a última jogada do cerco fecha');
+    ok(last.terra!.closedPatches === 1 && last.terra!.closePoints === closeValue(3, 12), `mancha de 3 fecha: +${last.terra!.closePoints} (${closeValue(3, 12)})`);
+    ok(last.terra!.backTiles === 1, 'mancha de 3: devolve 1 peça');
+  }
+  // Mancha de 7 peças (flor): perímetro 18.
+  {
+    const b = start();
+    const ring2: [number, number][] = [[0, 1], [1, -1], [4, 0], [2, 2], [0, 2], [2, -2], [4, -2], [3, 1], [1, 2], [3, -2], [4, -1]];
+    const res = enclose(b, [[1, 0], [1, 1], [2, 0], [2, -1], [2, 1], [3, 0], [3, -1]], ring2);
+    const last = res[res.length - 1];
+    ok(res.slice(0, -1).every((x) => x.terra!.closedPatches === 0), 'mancha de 7: só a última jogada do cerco fecha');
+    ok(last.terra!.closedPatches === 1 && last.terra!.closePoints === Math.min(R.terraCloseCap, closeValue(7, 18)) && closeValue(7, 18) === 351, `mancha de 7 fecha: +${last.terra!.closePoints} (351 sem teto, teto de ${R.terraCloseCap})`);
+    ok(last.terra!.backTiles === 1, 'mancha de 7: devolve 1 peça');
+    {
+      const c = start({ terraCloseCap: 0 });
+      const free = enclose(c, [[1, 0], [1, 1], [2, 0], [2, -1], [2, 1], [3, 0], [3, -1]], ring2).pop()!;
+      ok(free.terra!.closePoints === 351, `sem teto a mancha de 7 paga ${free.terra!.closePoints} (351)`);
+    }
+    ok(closeValue(7, 18) > 15 * closeValue(1, 6), 'o prêmio cresce mais que linear com a área (a de 7 vale mais de 15 vezes a de 1)');
+  }
+  // Limites da peça de volta: área mínima e teto por partida mudam só as peças, nunca os pontos.
+  {
+    const single: [number, number][] = [[0, 1], [1, 1], [2, 0], [1, -1], [2, -1]];
+    const b = start({ terraBackMin: 2 });
+    const one = enclose(b, [[1, 0]], single).pop()!;
+    ok(one.terra!.closePoints === 20 && one.terra!.backTiles === 0 && one.tilesGained === 0, 'área mínima 2: a mancha de 1 fecha e paga, mas não devolve peça');
+    const c = start({ terraBackMin: 2 });
+    const tri = enclose(c, [[1, 0], [2, -1], [2, 0]], [[0, 1], [1, 1], [1, -1], [3, -1], [3, -2], [2, -2], [3, 0], [2, 1]]).pop()!;
+    ok(tri.terra!.backTiles === 1, 'área mínima 2: a mancha de 3 devolve peça');
+    const d = start({ terraBackCap: 1 });
+    const first = enclose(d, [[1, 0]], single).pop()!;
+    const second = enclose(d, [[-1, 0]], [[-1, 1], [-2, 1], [-2, 0], [-1, -1], [0, -1]]).pop()!;
+    ok(first.terra!.backTiles === 1 && second.terra!.closedPatches === 1 && second.terra!.closePoints === 20 && second.terra!.backTiles === 0, `teto de 1 peça por partida: a segunda mancha paga ${second.terra!.closePoints} e devolve ${second.terra!.backTiles}`);
+  }
+  // Umidade: a água que chega paga às peças de antes (8 na faixa, 11 no meio), nunca à peça nova, e só uma vez.
+  {
+    const b = start();
+    b.place(0, 1, land(Fi), 0);
+    b.place(1, 1, land(Fi), 0);
+    const river: TileDef = { edges: [W, F, F, F, F, F], seed: 3, quest: null };
+    const r = b.place(1, 0, river, 0);
+    // Os dois campos estão a 1 casa da água (0,7) e o rio é mata (0,1 de bônus): 0,8, no limite da faixa 0,5 a 0,8, fora do meio: 8 cada um.
+    ok(r.terra!.moisture === 16, `a água chega a 2 campos que já estavam lá: +16 (${r.terra!.moisture})`);
+    ok(b.get(1, 0)!.moist === 8 && r.terra!.moisture === 16, 'a peça nova de rio e mata guarda os 8 dela como pagos, mas não os recebe');
+    ok(b.get(0, 1)!.moist === 8 && b.get(1, 1)!.moist === 8, 'cada campo antigo guarda o que já rendeu');
+    const f = b.place(0, 2, land(F), 0);
+    ok(f.terra!.moisture === 0 && b.get(0, 1)!.moist === 8, 'mais mata perto não paga de novo (a umidade só rende a diferença para cima)');
+  }
+  // Campo: cada borda soma 1, o rio fica puro e a peça de um terreno só não se mistura.
+  {
+    let okSum = true, okPure = true, okRange = true;
+    for (let seed = 1; seed <= 300; seed++) {
+      const g = generateTile(mulberry32(seed), false, 0.3, 0.2);
+      const comp = smearComp(g.edges, g.seed);
+      g.edges.forEach((e, i) => {
+        const sum = comp[i].reduce((x, y) => x + y, 0);
+        if (e === T.Water || e === T.Rail) {
+          if (sum !== 0) okPure = false;
+        } else if (Math.abs(sum - 1) > 1e-9 || comp[i].some((v) => v < -1e-9 || v > 1 + 1e-9)) okSum = false;
+        // Uma borda de terra mistura no máximo 2 × 0,30 com as vizinhas, e nunca vira outro terreno.
+        if (e !== T.Water && e !== T.Rail && comp[i][e] < 1 - 0.6 - 1e-9) okRange = false;
+      });
+    }
+    ok(okSum && okPure && okRange, 'campo: bordas de terra somam 1 (entre 0 e 1), rio e trilho ficam em 0, a mistura tira no máximo 0,6 do terreno da borda');
+    const u = smearComp(land(F).edges, 5);
+    ok(u.every((c) => Math.abs(c[F] - 1) < 1e-9), 'peça de um terreno só não se mistura');
+    ok(JSON.stringify(smearComp([G, F, Fi, G, F, T.Village], 99)) === JSON.stringify(smearComp([G, F, Fi, G, F, T.Village], 99)), 'o campo é só da semente da peça');
+  }
+  // Fora do modo, nada muda: o resultado não traz a regra nova e a peça não guarda campo.
+  {
+    const b = new Board({ ...DEFAULT_RULES, eraScores: [0] }, 7);
+    b.placeRaw(0, 0, land(G), 0);
+    b.computeGroups();
+    const r = b.place(1, 0, land(F), 0);
+    ok(r.terra === undefined && b.get(1, 0)!.comp === undefined, 'fora da Terra contínua o resultado e a peça não trazem nada da regra');
+  }
 }
 
 console.log(bad ? `\n${bad} FALHA(S)` : '\nTodos os cenários sintéticos passaram');

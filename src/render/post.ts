@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { Fn, convertToTexture, diffuseColor, dot, float, hash, length, max, mix, mrt, normalView, output, packNormalToRGB, pass, perspectiveDepthToViewZ, renderOutput, rtt, roughness, sample, screenCoordinate, screenUV, select, smoothstep, uniform, unpackRGBToNormal, vec2, vec3, vec4, velocity } from 'three/tsl';
+import { Fn, cameraProjectionMatrixInverse, cameraWorldMatrix, convertToTexture, diffuseColor, dot, float, getViewPosition, hash, length, max, mix, mrt, normalView, output, packNormalToRGB, pass, perspectiveDepthToViewZ, renderOutput, rtt, roughness, sample, screenCoordinate, screenUV, select, smoothstep, uniform, unpackRGBToNormal, vec2, vec3, vec4, velocity } from 'three/tsl';
 import { bilateralBlur } from 'three/addons/tsl/display/BilateralBlurNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
@@ -11,7 +11,7 @@ import { ssgi } from 'three/addons/tsl/display/SSGINode.js';
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { sharpen } from 'three/addons/tsl/display/SharpenNode.js';
 import { traa } from 'three/addons/tsl/display/TRAANode.js';
-import { indirectShare, ssrMask } from './materials';
+import { indirectShare, ssrMask, U } from './materials';
 
 // Pós-processamento por perfil de qualidade, montado como um grafo de nós (RenderPipeline).
 //   cinema: luz indireta SSGI (mais amostras), reflexos SSR na água em resolução cheia, raios de luz,
@@ -242,16 +242,28 @@ const ink = (input: any, depth: any, normal: any, camera: THREE.PerspectiveCamer
     const offs = [...dirs.map(([x, y]) => px.mul(vec2(x, y)).mul(w)), ...dirs.slice(0, 4).map(([x, y]) => px.mul(vec2(x, y)).mul(w.mul(0.5).ceil()))];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let gap: any = float(0);
-    for (const o of offs) gap = max(gap, distAt(screenUV.add(o)).sub(dc));
+    // Modo Relevo: o traço fica só na silhueta da ilha (o que está atrás é o mar ou o céu); a divisa entre uma peça e a vizinha, que
+    // é chão contra chão, quase some. `back` = o quanto o pixel mais fundo da vizinhança é fundo de mar (abaixo do chão das peças) ou céu.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let back: any = float(0);
+    for (const o of offs) {
+      const uv = screenUV.add(o);
+      const g = distAt(uv).sub(dc);
+      const raw = depth.sample(uv).r;
+      const wy = cameraWorldMatrix.mul(vec4(getViewPosition(uv, raw, cameraProjectionMatrixInverse), 1)).y;
+      const isBack = max(smoothstep(-0.3, -0.36, wy), smoothstep(0.985, 0.999, raw));
+      back = select(g.greaterThan(gap), isBack, back);
+      gap = max(gap, g);
+    }
     // Salto relativo: o chão visto de lado varia pouco por pixel; uma casa contra o chão, muito.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let e: any = smoothstep(0.015, 0.04, gap.div(dc));
+    let e: any = smoothstep(0.015, 0.04, gap.div(dc)).mul(mix(float(1), mix(float(0.15), float(1), back), U.rock));
     if (normal) {
       const nc = unpackRGBToNormal(normal.sample(screenUV).rgb);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let bend: any = float(0);
       for (const o of offs.slice(8)) bend = max(bend, float(1).sub(dot(nc, unpackRGBToNormal(normal.sample(screenUV.add(o)).rgb))));
-      e = max(e, smoothstep(0.3, 0.6, bend).mul(0.5));
+      e = max(e, smoothstep(0.3, 0.6, bend).mul(mix(float(0.5), float(0.2), U.rock)));
     }
     e = e.mul(smoothstep(P.inkFar, P.inkNear, dc)).mul(P.ink);
     // Quase só tinta, com um pouco da cor do objeto: escuro também sobre a mata escura.

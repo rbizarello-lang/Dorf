@@ -9,12 +9,14 @@ import { shareLine, shareUrl, terrainPoints } from './core/share';
 import { LOOKOUT_MOVES, SITE_REWARD, type SiteKind } from './core/sites';
 import { SPECIALS, SPECIAL_KINDS, type SpecialKind } from './core/specials';
 import { mulberry32 } from './core/rng';
-import { T } from './core/tiles';
+import { T, rotateEdges } from './core/tiles';
+import { previewGrowth } from './core/living';
 import { DIRS, edgeMid, hexDistance, hexToWorld, hkey, unkey, worldToHex } from './core/hex';
 import { routeMarks, type RouteHit, type RouteMark } from './core/routes';
 import type { PassingWeather, Quality, TimeOfDay } from './render/world';
 import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
 import { DynRes } from './render/dynres';
+import { groundMap } from './render/groundMap';
 import { RefreshMeter, capFor, dtCap, isEconomy, shouldRender, targetFps } from './render/framePacing';
 import { readGpuInfo } from './render/gpu';
 import { autoStartTier, gpuName } from './render/gpuTier';
@@ -70,6 +72,15 @@ interface Hot {
 }
 
 const params = new URLSearchParams(location.search);
+// A prévia publicada não recebe parâmetros de URL, só o #hash: `#bench`, `#bench=relevo`, `#gpu` e `#debug` valem como o `?` deles.
+// Só nomes e valores conhecidos (invariante 12); a query, quando existe, vence o hash.
+{
+  const HASH_FLAGS: Record<string, readonly string[] | undefined> = { bench: ['', 'tudo', 'classico', 'relevo'], gpu: [''], debug: [''], encostas: ['0', '1'], viva: ['0', '1'] };
+  for (const part of location.hash.slice(1).split('&')) {
+    const [k, v = ''] = part.split('=');
+    if (Object.hasOwn(HASH_FLAGS, k) && HASH_FLAGS[k]!.includes(v) && !params.has(k)) params.set(k, v);
+  }
+}
 // `hud` nasce logo abaixo; o aviso só roda numa gravação, bem depois.
 const warnSaveFailed = once(() => hud.toast(SAVE_FAIL_NOTICE, 'bad'));
 const store = {
@@ -102,6 +113,26 @@ async function createWorld(): Promise<World> {
   }
 }
 const world = await createWorld();
+// Encaixe fluido: ligado por padrão no modo Relevo (`World.setPieceRelief`); `?fluido=0` desliga e `?fluido` liga em qualquer modo.
+// Vem antes de qualquer peça, para o desenho de todas já nascer deslocado.
+{
+  const fl = params.get('fluido');
+  world.fluidPref = fl === null ? 'auto' : fl === '0' ? 'off' : 'on';
+  // `?fantasma=0`: o fantasma e a queda voltam ao desenho de antes do pouso e os barcos e trens ao hexágono (comparar capturas).
+  world.ghostTrue = params.get('fantasma') !== '0';
+}
+// `?encostas=0` (ou `#encostas=0`) desliga as Encostas (relevo de toda peça, em todos os modos) e volta ao desenho de antes (comparar capturas).
+world.hillsOn = params.get('encostas') !== '0';
+// Paisagem viva (`core/living.ts`, `render/livingBuild.ts`): casas que sobem, mata que adensa, cultivo com celeiro, conforme os encaixes
+// (e, na Terra, as manchas). Só aparência. `?viva=0|1` (ou `#viva=0|1`) força; sem isso vale a preferência gravada em Aa (`retalhos.viva`,
+// '0' ou '1'); sem preferência, liga no Zen e na Terra contínua e, na prévia publicada, em todos os modos.
+const vivaForce = params.get('viva') === '1' ? true : params.get('viva') === '0' ? false : null;
+const vivaDefault = (m: { id: string }) => import.meta.env?.VITE_PREVIEW === 'relevo' || m.id === 'zen' || m.id === 'terra';
+function vivaWanted(m: { id: string }): boolean {
+  if (vivaForce !== null) return vivaForce;
+  const v = store.get('viva');
+  return v === '1' ? true : v === '0' ? false : vivaDefault(m);
+}
 // `?levels=0` desliga o relevo (platôs): o tabuleiro sai plano, como antes (comparar capturas).
 world.levelsEnabled = params.get('levels') !== '0';
 {
@@ -139,6 +170,8 @@ const a11y = {
   safe: store.get('a11y-safe') === '1',
   /** Interface mínima: ligada por padrão; só o valor '0' guardado a desliga. */
   minimal: store.get('minimal') !== '0',
+  /** Contorno da missão no chão ao escolhê-la na lista: desligado por padrão; só o valor '1' guardado o liga. */
+  questTrace: store.get('quest-trace') === '1',
   calm: a11yCalm === '1' || (a11yCalm !== '0' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)),
 };
 
@@ -185,6 +218,10 @@ function showA11y() {
       <p>A onda dourada, os voos da câmera, o bando de pássaros e o quique da peça param. O vento e a água continuam.</p>
       <label><input type="checkbox" name="minimal"${a11y.minimal ? ' checked' : ''}> Interface mínima</label>
       <p>Esconde o brasão do placar e começa com o minimapa fechado. O Almanaque fica na tecla <kbd>I</kbd> (e no menu ⋯), o brasão no menu de temas, e o minimapa na tecla <kbd>M</kbd>.</p>
+      <label><input type="checkbox" name="viva"${vivaWanted(mode) ? ' checked' : ''}> Paisagem viva</label>
+      <p>As casas sobem, a mata adensa e o cultivo ganha celeiro conforme as bordas iguais se encaixam (na Terra contínua, também com as manchas grandes e fechadas). É só a aparência: os pontos não mudam. Vem ligada no Zen e na Terra contínua.</p>
+      <label><input type="checkbox" name="questtrace"${a11y.questTrace ? ' checked' : ''}> Mostrar a missão no chão</label>
+      <p>Ao escolher uma missão de grupo na lista, o chão desenha o contorno do grupo e pulsa as bordas que ainda dão para o vazio (o que falta para fechar).</p>
       <button type="button" class="secondary">Fechar</button>
     </form>`);
   const form = hud.modalBody.querySelector('form')!;
@@ -198,6 +235,10 @@ function showA11y() {
     store.set('a11y-calm', a11y.calm ? '1' : '0');
     a11y.minimal = (form.querySelector('input[name="minimal"]') as HTMLInputElement).checked;
     store.set('minimal', a11y.minimal ? '1' : '0');
+    a11y.questTrace = (form.querySelector('input[name="questtrace"]') as HTMLInputElement).checked;
+    store.set('quest-trace', a11y.questTrace ? '1' : '0');
+    store.set('viva', (form.querySelector('input[name="viva"]') as HTMLInputElement).checked ? '1' : '0');
+    world.vivaOn = vivaWanted(mode);
     applyA11y();
     const s = shownTheme();
     world.setTheme(s, game.board);
@@ -217,6 +258,17 @@ let tradeMarks: RouteMark[] = [];
 /** Rota que a peça da vez renderia na casa do fantasma. */
 let routePeek: RouteHit[] = [];
 let scorePeek: number | null = null;
+/** Águas que descem: o que a água da peça do fantasma rende ("água +8", "chega ao mar", "água parada"); vazio sem água. */
+let waterPeek = '';
+/** Terra contínua: a etiqueta do fantasma leva só o total da jogada e, se ela fecha uma mancha, " · fecha" (o resto o fantasma mostra na paisagem); vazio nos outros modos. */
+let terraPeek = '';
+/** Paisagem viva: no fantasma, quantas vizinhas ganham um estágio (" · N crescem"); vazio sem a opção ou sem ganho. */
+let vivaPeek = '';
+/** Prévia das vizinhas que mudam (calculada no mundo depois que o fantasma para): " · 1 sobe · 2 crescem"; vazio enquanto não há. */
+const nbLabel = () => {
+  const { rise, grow } = world.nbInfo;
+  return `${rise ? ` · ${rise} ${rise > 1 ? 'sobem' : 'sobe'}` : ''}${grow ? ` · ${grow} cresc${grow > 1 ? 'em' : 'e'}` : ''}`;
+};
 /** "Onde encaixa": as melhores casas da peça atual. Valem só para a jogada e o giro em que foram pedidas. */
 let hints: { q: number; r: number; rot: number; points: number }[] | null = null;
 let hintsKey = '';
@@ -262,7 +314,13 @@ function loadBest() {
 const BENCH_SEED = 7;
 const BENCH_TILES = 60;
 const BENCH_SECONDS = 15;
+/**
+ * O que o `?bench` mede, passo a passo: `?bench` (ou `tudo`) = o Clássico na Alta de referência e depois o Relevo em Baixa, Média, Alta e
+ * Ultra; `?bench=classico` e `?bench=relevo` = os quatro níveis de um modo só. A prévia publicada usa `#bench`.
+ */
 const BENCH_LEVELS: Quality[] = ['low', 'medium', 'high', 'ultra'];
+const benchPlan = (what: string | null): { mode: string; level: Quality }[] =>
+  what === 'classico' || what === 'relevo' ? BENCH_LEVELS.map((level) => ({ mode: what, level })) : [{ mode: 'classico', level: 'high' }, ...BENCH_LEVELS.map((level) => ({ mode: 'relevo', level }))];
 // O seletor em tempo real vai até o Ultra. O Cinema só existe na foto e no vídeo; para medir o Cinema ao
 // vivo, `?quality=cinema` vale junto de um gancho de depuração (debug, perf, stress, auto ou demo).
 const QUALITIES: QualityMode[] = ['auto', 'ultra', 'high', 'medium', 'low'];
@@ -288,7 +346,10 @@ const forcedSpecials: SpecialKind[] | null = params.has('specials') ? (params.ge
 const rulesFor = (t: Theme, seed: number, m: Mode = mode): Rules => ({ ...DEFAULT_RULES, ...(m.daily ? {} : t.rules), ...modeRules(m, seed) });
 /** Nome do modo no HUD; no desafio do dia, com a regra do dia. */
 const modeLabel = () => (mode.daily ? `${mode.name} · ${dailyRule(game.seed).name}` : mode.name);
-let mode: Mode = modeById(params.get('mode') ?? store.get('mode'));
+// A prévia publicada (`VITE_PREVIEW=relevo npm run build`) não recebe parâmetros de URL: abre no Clássico (as Encostas valem em todos os modos).
+// O que chega é o #hash: `#mode=relevo` e `#mode=terra` abrem os outros modos (o id é conferido contra a lista de modos; outro valor é ignorado).
+const hashMode = MODES.find((m) => m.id === /^#mode=([a-z]{1,16})(?:&|$)/.exec(location.hash)?.[1]);
+let mode: Mode = modeById(params.get('mode') ?? hashMode?.id ?? store.get('mode'));
 let undone = 0;
 const ERA_NAMES = ['Aldeia', 'Vila', 'Burgo', 'Cidade'];
 const eraName = (i: number) => (theme.eras ?? ERA_NAMES)[i] ?? ERA_NAMES[ERA_NAMES.length - 1];
@@ -322,6 +383,9 @@ function newGame(seed = mode.daily ? dailySeed() : 1 + Math.floor(Math.random() 
   game = new Game(seed, rulesFor(rulesTheme, seed), specials ?? forcedSpecials ?? (mode.daily ? [] : progress.unlocked));
   // Os níveis de altura (relevo) saem só da semente: o mundo os lê daqui até a próxima partida.
   world.reliefSeed = seed;
+  // Modo Relevo: a altura é da peça (perfil sorteado com ela), não da casa.
+  world.setPieceRelief(game.rules.relief);
+  world.vivaOn = vivaWanted(mode);
   // Partida nova (não um replay do desfazer ou do save): ainda não entrou no progresso.
   if (!replay.length) committed = false;
   undone = undos;
@@ -558,6 +622,10 @@ function place(q: number, r: number) {
   if (!check?.valid) {
     if (check && !check.occupied && check.neighbors > 0) {
       sfx.invalid();
+      if (check.heightState.includes(3)) {
+        hud.toast('Altura demais: a borda só encaixa com no máximo 1 degrau de diferença.', 'bad');
+        return;
+      }
       const [water, rail] = [theme.terrainNames[4], theme.terrainNames[5]];
       hud.toast(`${water} só encosta em ${water.toLowerCase()}, e ${rail.toLowerCase()} só em ${rail.toLowerCase()}.`, 'bad');
     }
@@ -652,6 +720,8 @@ function offerTips(res: PlaceResult) {
   if (res.newQuest)
     tutorial.offer('missao', 'Nova missão', `${questLabel(res.newQuest, theme)}: cumprida, rende +${res.newQuest.reward} peças. Peças com "!" trazem missões; as ativas ficam no canto e com um estandarte no mapa.`);
   if (res.synergies.length) tutorial.offer('interacao', 'Interação', `Bordas diferentes que "conversam" também pontuam (+${R.synergyPoints}) e erguem uma construção. A prévia acende em dourado antes de colocar.`);
+  if (res.terra?.closedPatches)
+    tutorial.offer('mancha', 'Mancha fechada', `Uma mancha fechada, cercada sem borda aberta, paga de uma vez${res.terra.backTiles ? ' e devolve uma peça' : ''}. Fechar é o contrário de casar: cerque a mancha com outros terrenos.`);
   if (res.site) tutorial.offer('sitio', 'Sítio descoberto', 'Os carimbos no mapa escondem ruínas (pontos), tesouros (peças), relíquias (os dois) e mirantes (mostram as próximas peças). Coloque uma peça em cima para descobrir.');
   if (res.eraUp !== null) tutorial.offer('era', 'Nova era', `A vila mudou de era e ganhou +${R.eraTiles} peças. O Centro mudou de forma, e a próxima peça com vila ergue o marco da era.`);
   if (res.wonder?.started) tutorial.offer('maravilha', 'Maravilha', `Esta peça virou o canteiro da maravilha. Cada peça colocada depois avança uma etapa; pronta, rende +${R.wonderPoints} pontos e +${R.wonderTiles} peças.`);
@@ -808,7 +878,10 @@ function refreshRoutePeek() {
   if (!hover || !game.current) {
     routePeek = [];
     scorePeek = null;
+    terraPeek = '';
+    vivaPeek = '';
     routePeekAt = '';
+    world.setTerraView(null);
     return;
   }
   const key = `${hover.q}:${hover.r}:${game.rot}`;
@@ -816,7 +889,22 @@ function refreshRoutePeek() {
   routePeekAt = key;
   const peek = game.preview(hover.q, hover.r);
   scorePeek = peek ? peek.points : null;
+  const cw = peek ? game.check(hover.q, hover.r)?.water : undefined;
+  waterPeek = !cw ? '' : cw.sea ? ` · chega ao mar +${cw.gain}` : cw.flows ? (cw.hidden ? ` · nascente escondida +${cw.gain}` : cw.spring ? ` · nascente +${cw.gain}` : ` · água +${cw.gain}`) : ' · água parada';
   routePeek = peek?.routes ?? [];
+  // Paisagem viva: custa só a conta dos encaixes das vizinhas (sem refazer nada na cena); o próprio fantasma já aparece desenvolvido.
+  const grow = peek && world.vivaOn && game.current ? previewGrowth(game.board, hover.q, hover.r, rotateEdges(game.current.edges, game.rot)) : 0;
+  vivaPeek = grow ? ` · ${grow} cresc${grow > 1 ? 'em' : 'e'}` : '';
+  // Terra contínua: o fantasma mostra a paisagem (contorno da mancha, bordas abertas, laço que fecha, umidade que sobe); a etiqueta só leva o total e "fecha".
+  if (game.rules.terra) {
+    const view = peek ? game.terraView(hover.q, hover.r) : null;
+    world.setTerraView(view, hover.q, hover.r, game.rot);
+    terraPeek = view?.patches.some((v) => v.closes) ? ' · fecha' : '';
+    waterPeek = '';
+  } else {
+    world.setTerraView(null);
+    terraPeek = '';
+  }
 }
 
 function announce(res: PlaceResult) {
@@ -865,6 +953,20 @@ function announce(res: PlaceResult) {
     notes.push({ text: `Missão perdida: ${questLabel(q, theme)} (passou de ${q.target})`, kind: 'bad' });
   }
   if (res.newQuest) notes.push({ text: `Nova missão: ${questLabel(res.newQuest, theme)}` });
+  // Terra contínua: fechar a mancha (cercada, sem borda aberta) paga de uma vez e devolve peça.
+  if (res.terra?.closedPatches) {
+    const t = res.terra;
+    const back = t.backTiles ? ` · +${t.backTiles} peça${t.backTiles > 1 ? 's' : ''}` : '';
+    notes.push({ text: `Mancha fechada${t.closedPatches > 1 ? `s (${t.closedPatches})` : ''} +${t.closePoints}${back}`, kind: 'good' });
+    hud.floater(s.x, s.y - (res.perfect ? 78 : 46), `Mancha fechada +${t.closePoints}${back}`, 'tiles');
+    sfx.discover();
+  }
+  if (res.water?.hidden) notes.push({ text: `Nascente escondida achada · +${game.rules.hiddenSpringPoints}`, kind: 'good' });
+  else if (res.water?.spring) notes.push({ text: 'Nascente: a água começa a correr', kind: 'good' });
+  if (res.water && res.water.seas > 0) {
+    notes.push({ text: `A água chegou ao mar · +${game.rules.seaPoints} · +${game.rules.seaTiles * res.water.seas} peças`, kind: 'good' });
+    sfx.discover();
+  }
   if (res.site) {
     notes.push({ text: `${SITE_LABEL[res.site.kind].name}: ${siteReward(res.site.kind)}`, kind: 'good' });
     sfx.discover();
@@ -913,8 +1015,9 @@ function showHelp(tab = 'basico') {
     [
       'basico',
       'Básico',
-      `<p>Monte uma paisagem peça por peça. Cada borda que combina com a vizinha vale ${R.matchPoints} pontos.</p>
+      `${R.terra ? `<p>Monte uma paisagem peça por peça. Aqui ela é um campo só: o terreno de cada borda se mistura com o das vizinhas dentro da peça, e a emenda paga pela <b>continuidade</b> (até ${R.matchPoints} pontos quando casa de verdade, quase nada quando mal casa).</p>` : `<p>Monte uma paisagem peça por peça. Cada borda que combina com a vizinha vale ${R.matchPoints} pontos.</p>`}
       <div class="legend">${legend}</div>
+      ${R.terra ? terraHelp(R) : ''}
       <ul>
         <li><b>${theme.terrainNames[4]}</b> e <b>${theme.terrainNames[5]}</b> precisam continuar: só encostam neles mesmos.</li>
         <li><b>Encaixe perfeito</b>: a peça encosta em 2 ou mais vizinhas e todas as bordas combinam (+${R.perfectBonus}).</li>
@@ -972,6 +1075,18 @@ function showHelp(tab = 'basico') {
     <div class="tabs" role="tablist">${tabs.map(([id, name]) => `<button type="button" role="tab" data-tab="${id}" aria-selected="${id === pick}">${name}</button>`).join('')}</div>
     ${tabs.map(([id, , html]) => `<section class="tab" data-tab="${id}"${id === pick ? '' : ' hidden'}>${html}</section>`).join('')}
     <div class="row"><button class="primary" type="button" data-act="close">Jogar</button><button class="secondary" type="button" data-act="tips">Rever as dicas</button></div>`);
+}
+
+/** Terra contínua: o que o modo muda, no "Como jogar". */
+function terraHelp(R: Rules) {
+  const back = R.terraBackTiles > 0 ? ` Cada mancha fechada${R.terraBackMin > 1 ? ` de ${R.terraBackMin} peças ou mais` : ''} devolve ${R.terraBackTiles} peça${R.terraBackCap > 0 ? ` (no máximo ${R.terraBackCap} por partida)` : ''}.` : '';
+  return `<ul class="terra-help">
+        <li><b>Manchas</b>: terrenos iguais que se encostam formam uma mancha. Ela paga ao crescer, mais se for gorda e redonda do que se for um fio, e paga <b>de uma vez</b> quando é fechada, isto é, cercada, sem nenhuma borda virada para o vazio. Fechar é o contrário de casar: cerque a mancha com outros terrenos.${back} O fantasma desenha no chão o contorno da mancha a que a peça se junta; as bordas dela que ainda dão para o vazio pulsam devagar (é o que falta para fechar); se a jogada fecha, o contorno vira um laço dourado e a etiqueta diz "fecha".</li>
+        <li><b>Perfeito e cerco</b>: valem quando todas as emendas têm continuidade alta (${R.perfectBonus} e ${R.closedBonus} pontos, o cerco devolve ${R.closedTiles} peça).</li>
+        <li><b>Água</b>: o rio nasce numa nascente acima do nível do mar e só desce. Cada peça de água corrente rende ${R.flowPoints}, e o curso que chega ao mar rende ${R.seaPoints} e ${R.seaTiles} peças. A altura é a do terreno do mapa, não da peça.</li>
+        <li><b>Umidade</b>: a água (e a mata) que chega faz render as terras que já estavam lá e gostam dela: prado, mata, plantação e vila têm cada um a sua faixa. A peça nova não recebe a própria umidade: quem a recebe é a vizinha, quando a água chega.</li>
+        <li>As interações entre terrenos diferentes (${R.synergyPoints} pontos) só contam onde a emenda não paga.</li>
+      </ul>`;
 }
 
 /** Maior recorde do tema entre os modos (cada modo guarda o seu). */
@@ -1311,9 +1426,11 @@ const input = bindInput({
   choose: (pick) => !!hud.modalBody.querySelector('.blessings') && chooseBlessing(pick),
 });
 
-hud.onQuestGoto = (q, r) => {
+hud.onQuestGoto = (q, r, quest) => {
   const w = hexToWorld(q, r);
   world.rig.goal.set(w.x, 0, w.z);
+  // Opção (desligada por padrão): o contorno do grupo da missão e as bordas que faltam, no chão, com a mesma camada do fantasma da Terra.
+  if (a11y.questTrace && (quest.kind === 'group' || quest.kind === 'close') && quest.state === 'active') world.showQuestTrace(game.board.groupView(quest.anchor, quest.sector));
 };
 
 document.getElementById('rot-left')!.addEventListener('click', () => {
@@ -1519,6 +1636,7 @@ let last = performance.now();
 let ambienceAt = 0;
 
 interface BenchRow {
+  mode: string;
   quality: string;
   /** Resolução interna desenhada (pixels) e a densidade usada. */
   res: string;
@@ -1534,6 +1652,12 @@ interface BenchRow {
   triangles: number;
   /** Quanto sobra do orçamento de 16,7 ms (60 qps). */
   slack: string;
+  /** Pior quadro da janela de medição (soluço), em ms. */
+  worstMs: number;
+  /** Tempo de JS para trocar o fantasma de casa (média de 3 casas novas), para pôr a peça (`place`) e o pior quadro nos 3 s seguintes (a queda e a montagem), em ms. */
+  ghostMs: number;
+  placeMs: number;
+  landMs: number;
 }
 
 const pct = (sorted: number[], p: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] ?? 0;
@@ -1562,17 +1686,17 @@ async function runBench() {
     return [
       `Placa: ${gpuLabel || '?'} (${world.backend === 'webgpu' ? 'WebGPU' : 'WebGL2'}${gpu.vendor ? `, ${gpu.vendor}${gpu.architecture ? ' ' + gpu.architecture : ''}` : ''})`,
       `Navegador: ${navigator.userAgent.replace(/^Mozilla\/5\.0 /, '')}`,
-      `Tela: ${screen.width}x${screen.height}, janela ${d.cssW}x${d.cssH}, densidade do navegador ${d.dpr}`,
+      `Tela: ${screen.width}x${screen.height} (CSS), janela ${d.cssW}x${d.cssH}, densidade do navegador ${d.dpr} (escala do Windows ~${Math.round(d.dpr * 100)}%; tela física ~${Math.round(screen.width * d.dpr)}x${Math.round(screen.height * d.dpr)})`,
       `Medidor de GPU: ${world.gpuOn ? 'sim (timestamp query)' : 'não (o navegador não oferece; só FPS e CPU)'}`,
       `Auto começaria em: ${qualityLabel[autoStart]}`,
     ];
   };
-  const head = ['Nível', 'Resolução interna', 'FPS (mediana)', 'p95 (ms)', 'CPU (ms)', 'GPU (ms)', 'GPU p95 (ms)', 'Draw calls', 'Triângulos (mil)', 'Folga'];
-  const cells = (r: BenchRow) => [r.quality, `${r.res} (x${round1(r.ratio)})`, String(r.fps), String(r.p95Ms), String(r.cpuMs), r.gpuMs === null ? 'n/d' : String(r.gpuMs), r.gpuP95Ms === null ? 'n/d' : String(r.gpuP95Ms), String(r.calls), String(Math.round(r.triangles / 1000)), r.slack];
+  const head = ['Modo', 'Nível', 'Resolução interna', 'FPS (mediana)', 'p95 (ms)', 'Pior quadro (ms)', 'CPU (ms)', 'GPU (ms)', 'GPU p95 (ms)', 'Draw calls', 'Triângulos (mil)', 'Fantasma (ms)', 'Jogada (ms)', 'Pico da queda (ms)', 'Folga'];
+  const cells = (r: BenchRow) => [r.mode, r.quality, `${r.res} (x${round1(r.ratio)})`, String(r.fps), String(r.p95Ms), String(r.worstMs), String(r.cpuMs), r.gpuMs === null ? 'n/d' : String(r.gpuMs), r.gpuP95Ms === null ? 'n/d' : String(r.gpuP95Ms), String(r.calls), String(Math.round(r.triangles / 1000)), String(r.ghostMs), String(r.placeMs), String(r.landMs), r.slack];
   const render = (status: string) => {
     out.info = info();
     const body = rows.map(cells);
-    panel.innerHTML = `<h3>Medição (?bench)</h3><p></p><ul></ul><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map((r) => `<tr>${r.map(() => '<td></td>').join('')}</tr>`).join('')}</tbody></table><p class="sum"></p><button type="button" disabled>Copiar</button>`;
+    panel.innerHTML = `<h3>Medição (bench)</h3><p></p><ul></ul><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map((r) => `<tr>${r.map(() => '<td></td>').join('')}</tr>`).join('')}</tbody></table><p class="sum"></p><button type="button" disabled>Copiar</button>`;
     panel.querySelector('p')!.textContent = status;
     panel.querySelector('p.sum')!.textContent = out.summary;
     const ul = panel.querySelector('ul')!;
@@ -1589,9 +1713,19 @@ async function runBench() {
   const rig = world.rig;
   const yaw0 = rig.goalYaw;
   let bestFps = 0;
-  for (const level of BENCH_LEVELS) {
+  const plan = benchPlan(params.get('bench'));
+  for (const { mode: modeId, level } of plan) {
     applyQuality(level);
-    render(`Medindo ${qualityLabel[level]}… (${BENCH_SECONDS} s)`);
+    const label = `${modeById(modeId).name} · ${qualityLabel[level]}`;
+    render(`Medindo ${label}… (${BENCH_SECONDS} s)`);
+    // Mesmo tabuleiro (semente e peças) em todos os passos: o modo troca a partida, e os testes de jogada do passo anterior não sobram.
+    mode = modeById(modeId);
+    rulesTheme = theme;
+    newGame(BENCH_SEED);
+    autoPlace(BENCH_TILES, true);
+    // A virada de era abre a escolha de carta (modal) e trava a jogada: o bench escolhe a primeira e segue.
+    while (game.offers.length) game.choose(0);
+    hud.hideModal();
     // Um instante para os pipelines do nível compilarem fora da medição.
     await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
     await new Promise((r) => setTimeout(r, 1500));
@@ -1621,19 +1755,55 @@ async function runBench() {
     const gpuMs = gpuT.length >= 5 ? round1(pct(gpuT, 0.5)) : null;
     const gpuP95Ms = gpuT.length >= 5 ? round1(pct(gpuT, 0.95)) : null;
     const fps = mid > 0 ? round1(1000 / mid) : 0;
+    const worstMs = round1(samples[samples.length - 1] ?? 0);
     bestFps = Math.max(bestFps, fps);
+    // Soluços de jogada: trocar o fantasma de casa (no Relevo cada casa é uma peça nova), pôr a peça e o pior quadro da queda e da montagem.
+    const front = [...game.board.frontier];
+    const picks = [front[0], front[Math.floor(front.length / 2)], front[front.length - 1]].filter((k) => k !== undefined);
+    let ghostTotal = 0;
+    for (const k of picks) {
+      const [q, r] = unkey(k);
+      hover = { q, r };
+      const t = performance.now();
+      updateGhost();
+      ghostTotal += performance.now() - t;
+      await new Promise<void>((r2) => requestAnimationFrame(() => r2()));
+    }
+    let placeMs = 0;
+    let landMs = 0;
+    const best = game.bestMove();
+    if (best) {
+      hover = { q: best.q, r: best.r };
+      while (game.rot !== best.rot) rotate(1);
+      updateGhost();
+      await new Promise<void>((r2) => requestAnimationFrame(() => r2()));
+      const t = performance.now();
+      place(best.q, best.r);
+      placeMs = performance.now() - t;
+      await new Promise<void>((resolve) => {
+        const t1 = performance.now();
+        let p = t1;
+        const f = (now: number) => {
+          landMs = Math.max(landMs, now - p);
+          p = now;
+          if (now - t1 < 3000) requestAnimationFrame(f);
+          else resolve();
+        };
+        requestAnimationFrame(f);
+      });
+    }
     // Folga: sem o medidor de GPU, só dá para dizer que o quadro cabe quando o FPS encosta no refresh.
     const busy = Math.max(cpuMs, gpuP95Ms ?? 0);
     const slack = gpuP95Ms === null ? (fps < 55 ? 'pesado' : 'cabe (sem medidor de GPU)') : busy <= 10 ? 'folga' : busy <= 1000 / 60 ? 'no limite' : 'pesado';
-    rows.push({ quality: qualityLabel[level], res: `${d.w}x${d.h}`, ratio: d.ratio, fps, p95Ms: round1(p95), cpuMs: round1(cpuMs), gpuMs, gpuP95Ms, calls: s.calls, triangles: s.triangles, slack });
+    rows.push({ mode: modeById(modeId).name, quality: qualityLabel[level], res: `${d.w}x${d.h}`, ratio: d.ratio, fps, p95Ms: round1(p95), cpuMs: round1(cpuMs), gpuMs, gpuP95Ms, calls: s.calls, triangles: s.triangles, slack, worstMs, ghostMs: round1(picks.length ? ghostTotal / picks.length : 0), placeMs: round1(placeMs), landMs: round1(landMs) });
   }
   rig.goalYaw = yaw0;
   // Sem pelo menos ~24 qps em algum nível não há como adivinhar a taxa do monitor (placa lenta demais, ou software).
   const hz = bestFps >= 24 ? REFRESH_RATES.reduce((a, b) => (Math.abs(b - bestFps) < Math.abs(a - bestFps) ? b : a)) : 0;
-  const fits = rows.filter((r) => r.slack === 'folga' || r.slack === 'no limite' || r.slack.startsWith('cabe')).map((r) => r.quality);
+  const fits = rows.filter((r) => r.slack === 'folga' || r.slack === 'no limite' || r.slack.startsWith('cabe')).map((r) => `${r.mode} ${r.quality}`);
   out.summary = `${hz ? `Monitor: o melhor FPS parou em ~${hz} Hz.` : 'Monitor: poucos quadros para estimar a taxa.'} Cabem em 16,7 ms (60 qps): ${fits.length ? fits.join(', ') : 'nenhum nível'}. Folga = GPU e CPU até 10 ms.`;
   out.done = true;
-  render('Pronto. A câmera girou devagar sobre o mesmo tabuleiro em cada nível.');
+  render('Pronto. A câmera girou devagar sobre o mesmo tabuleiro em cada passo.');
 }
 
 /**
@@ -1796,6 +1966,14 @@ function step(now: number) {
     const s = screenOf(st.q, st.r, 0.05);
     markers.push({ id: 100000 + st.q * 1000 + st.r, x: s.x, y: s.y + 30, visible: s.visible, text: `${SITE_LABEL[st.kind].icon} ${SITE_LABEL[st.kind].name}: ${siteReward(st.kind)}`, color: '#8a6a3a', kind: st.kind });
   }
+  // Nascente escondida já revelada por uma peça de água: a etiqueta aparece com o fantasma em cima (ou a um passo dela).
+  if (hover && game.current && game.rules.springs) {
+    const sp = game.board.revealedSprings().find((x) => hexDistance(hover!.q, hover!.r, x.q, x.r) <= 1);
+    if (sp) {
+      const s = screenOf(sp.q, sp.r, 0.05);
+      markers.push({ id: 110000 + sp.q * 1000 + sp.r, x: s.x, y: s.y + 30, visible: s.visible, text: `💧 Nascente escondida: rio no nível 1+ aqui rende +${game.rules.hiddenSpringPoints}`, color: '#2f6f8f', kind: 'spring' });
+    }
+  }
   for (const m of tradeMarks) {
     const s = screenOf(m.q, m.r, 0.2);
     const dim = !!hover && hexDistance(hover.q, hover.r, m.q, m.r) <= 1;
@@ -1816,7 +1994,7 @@ function step(now: number) {
   if (scorePeek !== null && hover) {
     const s = screenOf(hover.q, hover.r, 0.55);
     const route = routePeek.length ? ` · ${routePeek.map(routeLabel).join(' · ')}` : '';
-    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${route}`, color: theme.ui.accent, kind: 'score' });
+    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${terraPeek}${waterPeek}${nbLabel() || vivaPeek}${route}`, color: theme.ui.accent, kind: 'score' });
   }
   // Influência das construções: o ganho aparece com o fantasma numa casa contornada.
   const inf = hover && game.current && !st ? game.board.influenceAt(hover.q, hover.r, game.current.edges) : null;
@@ -1875,6 +2053,8 @@ function start(data: unknown) {
   // Um link com ?seed= (desafio) vence a partida salva de outra semente.
   const wantSeed = params.has('bench') ? BENCH_SEED : Math.floor(Number(params.get('seed'))) || 0;
   if (saved && wantSeed > 0 && saved.seed !== wantSeed) saved = null;
+  // O link com #mode= pede aquele modo: uma partida salva de outro modo não o atropela.
+  if (saved && hashMode && saved.mode !== hashMode.id) saved = null;
   let resumed = false;
   if (saved) {
     rulesTheme = themeById(saved.rulesId);
@@ -1887,6 +2067,11 @@ function start(data: unknown) {
     rulesTheme = theme;
     newGame(wantSeed > 0 ? wantSeed : undefined);
     if (mode.daily && !special) announceDaily();
+  }
+  // `?vbuf`: liga a contagem de buffers de vértice por malha antes de qualquer quadro (ver render/vbuf.ts).
+  if (params.has('vbuf')) {
+    world.watchVbuf();
+    (window as unknown as { __vbuf: (n?: number) => unknown }).__vbuf = (n?: number) => world.vbufReport(n);
   }
   if (params.has('stress')) {
     const r = autoPlace(Number(params.get('stress')) || 1000, true);
@@ -1947,6 +2132,12 @@ function start(data: unknown) {
     world.rig.tilt = world.rig.goalTilt = pitchDeg * THREE.MathUtils.DEG2RAD - world.rig.basePitch(world.rig.goalDist);
   }
   if (params.has('focus')) (window as unknown as { __focus: (t: number) => boolean }).__focus(Number(params.get('focus')));
+  if (params.has('coast')) (window as unknown as { __coast: (i: number) => boolean }).__coast(Number(params.get('coast')) || 0);
+  // ?spring=i centraliza na i-ésima nascente (modo Relevo); ?spring=mar.i, no i-ésimo lago que a água alcançou.
+  if (params.has('spring')) {
+    const [a, b] = (params.get('spring') ?? '').split('.');
+    (window as unknown as { __water: (i: number, zoom: number | undefined, mar: boolean) => unknown }).__water(Number(a === 'mar' ? b : a) || 0, params.has('zoom') ? Number(params.get('zoom')) : undefined, a === 'mar');
+  }
   // ?step=rail ou ?step=water.1 (a i-ésima borda entre níveis): centraliza na rampa ou na cachoeira.
   if (params.has('step')) {
     const [k, i] = (params.get('step') ?? '').split('.');
@@ -1969,14 +2160,153 @@ function start(data: unknown) {
 // Ajuda para capturas de tela automatizadas: mostra a peça atual na melhor posição.
 (window as unknown as { __over: () => void }).__over = () => showGameOver();
 
-(window as unknown as { __ghostBest: () => void }).__ghostBest = () => {
-  const m = game.bestMove();
+(window as unknown as { __ghostBest: (zoom?: number) => void }).__ghostBest = (zoom) => {
+  // Com `zoom` (capturas do estudo R7a) a jogada é a 1ª do ranking, que é determinística; sem ele, a da IA gulosa (desempate sorteado).
+  const m = zoom ? game.rankMoves(1)[0] ?? game.bestMove() : game.bestMove();
   if (!m) return;
   hover = { q: m.q, r: m.r };
   while (game.rot !== m.rot) rotate(1);
   updateGhost();
   const { x, z } = hexToWorld(m.q, m.r);
   world.rig.goal.set(x, 0, z);
+  // Com `zoom`, a câmera vai direto ao fantasma (capturas do estudo R7a).
+  if (zoom) {
+    world.rig.target.set(x, 0, z);
+    world.rig.dist = world.rig.goalDist = zoom;
+  }
+};
+
+// Terra contínua: põe o fantasma na i-ésima jogada de um tipo (a ordem é a do ranking de pontos): `'cresce'` (junta uma mancha antiga), `'fecha'`
+// (fecha uma mancha), `'agua'` (a água dela molha terras antigas) ou `'une'` (junta duas manchas ou mais). Devolve `{ q, r, rot, n }` (n = quantas
+// há) ou null; com `zoom`, a câmera vai ao fantasma. Capturas do fantasma da paisagem.
+(window as unknown as { __ghostTerra: (kind?: string, i?: number, zoom?: number) => { q: number; r: number; rot: number; n: number } | null }).__ghostTerra = (kind = 'cresce', i = 0, zoom) => {
+  if (!game.current || !game.rules.terra) return null;
+  const found: { q: number; r: number; rot: number; points: number; w: number }[] = [];
+  for (const k of game.board.frontier) {
+    const [q, r] = unkey(k);
+    for (let rot = 0; rot < 6; rot++) {
+      game.rot = rot;
+      const v = game.terraView(q, r);
+      if (!v) continue;
+      const ok = kind === 'fecha' ? v.patches.some((p) => p.closes) : kind === 'agua' ? v.moist.length > 0 : kind === 'une' ? v.patches.some((p) => p.merged > 1) : v.patches.some((p) => p.merged > 0 && !p.closes && p.area >= 1.5 && p.area <= 12);
+      if (ok) found.push({ q, r, rot, points: game.preview(q, r)?.points ?? 0, w: kind === 'agua' ? v.moist.length : 0 });
+    }
+  }
+  game.rot = 0;
+  found.sort((a, b) => b.w - a.w || b.points - a.points || a.q - b.q || a.r - b.r || a.rot - b.rot);
+  const m = found[i];
+  if (!m) return null;
+  hover = { q: m.q, r: m.r };
+  while (game.rot !== m.rot) rotate(1);
+  updateGhost();
+  const { x, z } = hexToWorld(m.q, m.r);
+  world.rig.goal.set(x, 0, z);
+  if (zoom) {
+    world.rig.target.set(x, 0, z);
+    world.rig.dist = world.rig.goalDist = zoom;
+  }
+  return { q: m.q, r: m.r, rot: m.rot, n: found.length };
+};
+
+// Congela o mundo e põe o pouso que fecha uma mancha (laço dourado, chão que respira, peça que sobe) na idade dada, em segundos (0 a 2,5); depois de `__placeGhost` numa jogada que fecha.
+(window as unknown as { __land: (age: number) => boolean }).__land = (age) => {
+  world.timeScale = 0;
+  return world.seekLand(age);
+};
+
+(window as unknown as { __trace: () => unknown }).__trace = () => world.traceInfo();
+
+// Coloca a peça exatamente onde o fantasma está (a mesma jogada que o __ghostBest mostrou: o bestMove sorteia empates).
+(window as unknown as { __placeGhost: () => boolean }).__placeGhost = () => {
+  if (!hover || !game.current || !game.board.frontier.has(hkey(hover.q, hover.r))) return false;
+  // As cartas de era que o `?auto=` deixou na mesa seguram a jogada: escolhe a primeira de cada uma (depuração).
+  while (game.offers.length) game.choose(0);
+  place(hover.q, hover.r);
+  return true;
+};
+
+// Congela o mundo e leva a peça caindo ao instante `t` (0,05 = no meio da queda, 0,7 = o último quadro antes de virar chão); `t` > 0,72 assenta.
+// Com `t` nulo, solta o mundo. Capturas antes e depois do pouso sem depender do relógio.
+(window as unknown as { __drop: (t?: number) => number }).__drop = (t) => {
+  if (t === undefined) {
+    world.timeScale = 1;
+    return 0;
+  }
+  world.timeScale = 0;
+  return world.seekDrops(t);
+};
+
+// Custo de mover o fantasma: passa por até `n` casas da fronteira (uma por quadro) e devolve, por troca de casa, os ms da montagem
+// da peça (`setGhost`) e da pré-visualização no mapa do chão (o GPU não entra: ele só enfileira o envio das texturas).
+(window as unknown as { __ghostCost: (n?: number, pausa?: number) => Promise<{ ghost: number[]; stamp: number[]; frame: number[]; uploads: number }> }).__ghostCost = async (n = 20, pausa = 0) => {
+  const cells = [...game.board.frontier].slice(0, n).map((k) => unkey(k));
+  const out = { ghost: [] as number[], stamp: [] as number[], frame: [] as number[], uploads: 0 };
+  // `pausa` (ms) = quanto o fantasma fica parado em cada casa: 0 é uma varredura rápida do mouse; 150 deixa o campo entrar nos mapas.
+  const up0 = groundMap.uploads;
+  for (const [q, r] of cells) {
+    hover = { q, r };
+    updateGhost();
+    const t0 = performance.now();
+    await new Promise<void>((res) => requestAnimationFrame(() => res()));
+    out.frame.push(performance.now() - t0);
+    out.ghost.push(world.ghostMs);
+    if (pausa) await new Promise<void>((res) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => res())), pausa));
+    out.stamp.push(world.stampMs);
+  }
+  out.uploads = groundMap.uploads - up0;
+  return out;
+};
+
+// Varredura do mouse mais rápida que o desenho: troca de casa a cada `passo` ms, chamando a pintura do mapa a cada troca, e devolve quantas vezes o campo foi pintado.
+(window as unknown as { __ghostSweep: (n?: number, passo?: number, espera?: number) => Promise<{ pintou: number; depois: number }> }).__ghostSweep = async (n = 24, passo = 30, espera = 300) => {
+  const cells = [...game.board.frontier].slice(0, n).map((k) => unkey(k));
+  const r0 = world.stampRuns;
+  for (const [q, r] of cells) {
+    hover = { q, r };
+    updateGhost();
+    world.restampNow();
+    await new Promise<void>((res) => setTimeout(res, passo));
+    world.restampNow();
+  }
+  const pintou = world.stampRuns - r0;
+  // Parado na última casa: depois de ~120 ms o campo entra.
+  await new Promise<void>((res) => setTimeout(res, espera));
+  world.restampNow();
+  return { pintou, depois: world.stampRuns - r0 - pintou };
+};
+
+// Joga com a IA (sem animação) até a peça da vez ter rio e pelo menos `kinds` terrenos diferentes (capturas do fantasma com paisagem variada).
+// Devolve quantas peças pôs, ou -1 se não achou em `max`.
+(window as unknown as { __autoUntil: (kinds?: number, max?: number) => number }).__autoUntil = (kinds = 3, max = 40) => {
+  for (let i = 0; i < max && game.current; i++) {
+    const e = game.current.edges;
+    if (e.includes(T.Water) && new Set(e).size >= kinds) return i;
+    if (game.offers.length) return -1;
+    autoPlace(1, false);
+  }
+  return -1;
+};
+
+// Águas que descem: põe o fantasma na jogada em que a água da peça rende mais (devolve o ganho, 0 se a peça da vez não tem rio).
+(window as unknown as { __ghostWater: () => number }).__ghostWater = () => {
+  const def = game.current;
+  if (!def) return 0;
+  let best: { q: number; r: number; rot: number; gain: number } | null = null;
+  for (const k of game.board.frontier) {
+    const [q, r] = unkey(k);
+    for (let rot = 0; rot < 6; rot++) {
+      const c = game.board.checkDef(q, r, def, rot);
+      if (c.valid && c.water && (!best || c.water.gain > best.gain)) best = { q, r, rot, gain: c.water.gain };
+    }
+  }
+  if (!best) return 0;
+  hover = { q: best.q, r: best.r };
+  while (game.rot !== best.rot) rotate(1);
+  updateGhost();
+  const { x, z } = hexToWorld(best.q, best.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  return best.gain;
 };
 
 // Centraliza a câmera na peça com mais bordas de um terreno (?focus=4 para rios, nas capturas).
@@ -1994,6 +2324,32 @@ function start(data: unknown) {
   return true;
 };
 
+// Centraliza a câmera na i-ésima peça mais longe do centro do mapa (a costa, para conferir a areia e a espuma do mar nas capturas).
+(window as unknown as { __coast: (i?: number, zoom?: number) => boolean }).__coast = (i = 0, zoom) => {
+  const far = game.board.list.map((p) => ({ p, d: Math.hypot(hexToWorld(p.q, p.r).x, hexToWorld(p.q, p.r).z) })).sort((a, b) => b.d - a.d);
+  const t = far[Math.min(i, far.length - 1)]?.p;
+  if (!t) return false;
+  const { x, z } = hexToWorld(t.q, t.r);
+  world.rig.goal.set(x, 0, z);
+  world.rig.target.set(x, 0, z);
+  if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  return true;
+};
+
+// Águas que descem: centraliza na i-ésima nascente (ou, com `mar`, no ponto onde o curso chegou ao mar) e devolve o estado da água.
+(window as unknown as { __water: (i?: number, zoom?: number, mar?: boolean) => unknown }).__water = (i = 0, zoom, mar = false) => {
+  const st = game.board.waterNow();
+  const springs = game.board.list.filter((p) => p.spring);
+  const sea = game.board.list.filter((p) => p.heights && p.edges.filter((e) => e === T.Water).length >= 3 && st.flow.has(p.key));
+  const t = (mar ? sea : springs)[i];
+  if (t) {
+    const { x, z } = hexToWorld(t.q, t.r);
+    world.rig.goal.set(x, 0, z);
+    world.rig.target.set(x, 0, z);
+    if (zoom) world.rig.dist = world.rig.goalDist = zoom;
+  }
+  return { springs: springs.length, flowing: st.flow.size, reached: st.reached.size, lakes: sea.length, at: t ? [t.q, t.r] : null };
+};
 // Dispara a onda do chão no foco da câmera, já com `age` segundos (capturas com ?timescale=0.01).
 (window as unknown as { __celebrate: () => void }).__celebrate = () => {
   world.halo(world.rig.target.x, world.rig.target.z, 2);
@@ -2237,6 +2593,53 @@ function start(data: unknown) {
 };
 
 // Coloca a peça atual na melhor posição, com animação (capturas da queda e da onda).
+(window as unknown as { __hills: () => { rebakes: number; ms: number } }).__hills = () => ({ rebakes: world.hillRebakes, ms: world.hillMs });
+// Paisagem viva: ligada, peças refeitas por estágio e o pior tempo de uma rodada (ms); `stages` = quantas peças têm algum estágio, por estágio 0 a 3.
+(window as unknown as { __living: () => unknown }).__living = () => ({ on: world.vivaOn, rebakes: world.livingRebakes, maxMs: world.livingMaxMs, stages: world.livingHistogram() });
+// Conferência de cena (E8, `scripts/scene-sync.mjs`): a assinatura do que cada peça tem agora, para comparar com a de uma reconstrução integral.
+// `__legalMoves` lista as jogadas válidas da peça atual; `__playMove` joga uma (com animação); `__land` faz as peças em queda assentarem no próximo quadro;
+// `__rebuildScene` refaz o mapa do zero com o tabuleiro de agora; `__replayScene` refaz a partida pelo replay (como a recarga do save); `__undoMove` é o desfazer.
+const sceneHooks = window as unknown as Record<string, unknown>;
+sceneHooks.__sceneSig = () => world.sceneSig();
+sceneHooks.__legalMoves = () => {
+  const out: number[][] = [];
+  if (!game.current) return out;
+  const keep = game.rot;
+  for (const k of [...game.board.frontier].sort((a, b) => a - b)) {
+    const [q, r] = unkey(k);
+    for (let rot = 0; rot < 6; rot++) {
+      game.rot = rot;
+      if (game.check(q, r)?.valid) out.push([q, r, rot]);
+    }
+  }
+  game.rot = keep;
+  return out;
+};
+sceneHooks.__playMove = (q: number, r: number, rot: number) => {
+  hud.hideModal();
+  if (!game.current || game.offers.length) return false;
+  while (game.rot !== rot) rotate(1);
+  const n = moves.length;
+  place(q, r);
+  return moves.length > n;
+};
+sceneHooks.__waterTouch = (q: number, r: number, rot: number) => {
+  if (!game.current) return 0;
+  const e = rotateEdges(game.current.edges, rot);
+  let n = 0;
+  for (let i = 0; i < 6; i++) {
+    const nb = game.board.get(q + DIRS[i][0], r + DIRS[i][1]);
+    if (nb && e[i] === T.Water && nb.edges[(i + 3) % 6] === T.Water) n++;
+  }
+  return n;
+};
+sceneHooks.__nbPreview = () => world.nbInfo;
+sceneHooks.__pending = () => world.pending();
+sceneHooks.__land = () => world.seekDrops(5);
+sceneHooks.__rebuildScene = () => world.rebuild(game.board);
+sceneHooks.__replayScene = () => newGame(game.seed, moves.map((m) => [...m] as MoveRec), game.board.score, undone, game.specials);
+sceneHooks.__undoMove = () => undo();
+sceneHooks.__setViva = (on: boolean) => world.setViva(on, game.board);
 (window as unknown as { __placeBest: () => boolean }).__placeBest = () => {
   const m = game.bestMove();
   if (!m) return false;

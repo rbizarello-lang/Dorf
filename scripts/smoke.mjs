@@ -37,6 +37,21 @@ const cases = [
   { name: 'bench', q: 'bench&quality=low', backend: 'webgpu', bench: true },
   { name: 'webgpu', q: 'theme=holanda&seed=3&auto=12&quality=low', backend: 'webgpu' },
   { name: 'webgl', q: 'theme=egito&seed=3&auto=12&quality=low&webgl', backend: 'webgl2' },
+  // O modo Relevo liga o encaixe fluido (chão, água e costa deslocados) por padrão: confere os dois backends.
+  { name: 'relevo', q: 'mode=relevo&theme=holanda&seed=3&auto=12&quality=low', backend: 'webgpu' },
+  { name: 'relevo-webgl', q: 'mode=relevo&theme=oriental&seed=3&auto=12&quality=low&webgl', backend: 'webgl2' },
+  // Terra contínua: pelo parâmetro e pelo #hash (a prévia publicada só recebe o hash), nos dois backends. O texto da era traz o nome do modo.
+  { name: 'terra', q: 'mode=terra&theme=holanda&seed=3&auto=12&quality=low', backend: 'webgpu', mode: 'Terra contínua' },
+  { name: 'terra-hash-webgl', q: 'theme=brasil&seed=3&auto=12&quality=low&webgl', hash: '#mode=terra', backend: 'webgl2', mode: 'Terra contínua' },
+  // Limite de buffers de vértice do WebGPU (maxVertexBuffers = 8): a Alta com a Paisagem viva e o TRAA tem o pior caso (matriz anterior da instância).
+  // O `?vbuf` conta, em qualquer backend, os buffers que cada malha usa; roda em WebGL2 para valer também sem GPU.
+  { name: 'buffers-de-vertice', q: 'theme=holanda&seed=7&auto=60&quality=high&mode=zen&viva=1&vbuf&webgl', backend: 'webgl2', vbuf: true, tiles: 61 },
+  // Vida útil dos buffers (issue #115): o three destrói o buffer da GPU de uma geometria descartada, e um buffer intercalado dividido entre lotes
+  // quebrava os outros (`Buffer used in submit while destroyed`). Queda animada, troca de era, zoom além das árvores leves (rig.dist 18) e desfazer.
+  { name: 'vida-dos-buffers', q: 'mode=terra&theme=holanda&seed=16&auto=15&quality=high', backend: 'webgpu', mode: 'Terra contínua', vida: true, tiles: 16 },
+  { name: 'vida-dos-buffers-webgl', q: 'mode=terra&theme=holanda&seed=16&auto=15&quality=high&webgl', backend: 'webgl2', mode: 'Terra contínua', vida: true, tiles: 16 },
+  // Um #mode= inventado é ignorado (abre no modo de sempre).
+  { name: 'hash-invalido', q: 'theme=holanda&seed=3&auto=12&quality=low', hash: '#mode=inventado', backend: 'webgpu', mode: 'Clássico' },
   // Alta e Ultra ligam sombras, GTAO, TRAA, bloom e tilt-shift: poucas peças bastam para compilar tudo.
   { name: 'webgpu-alta', q: 'theme=inverno&seed=5&auto=8&quality=high', backend: 'webgpu', tiles: 9 },
   { name: 'webgpu-ultra', q: 'theme=oriental&seed=5&auto=8&quality=ultra', backend: 'webgpu', tiles: 9 },
@@ -62,7 +77,9 @@ for (const c of cases) {
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('response', (r) => r.status() >= 400 && r.url().startsWith(base) && errors.push(`${r.status()} ${r.url()}`));
   const t0 = Date.now();
-  await page.goto(base + '?' + c.q);
+  // A carga pode passar de 30 s (o padrão do Playwright) quando o `?auto=` monta muitas peças com as Encostas no WebGL por software:
+  // o mesmo prazo do tabuleiro vale para a abertura, e um erro aqui conta como falha do caso, sem derrubar os seguintes.
+  await page.goto(base + '?' + c.q + (c.hash ?? ''), { timeout: TIMEOUT }).catch((e) => errors.push(`abertura: ${String(e).split('\n')[0]}`));
   let stats = null;
   while (Date.now() - t0 < TIMEOUT && !errors.length) {
     stats = await page.evaluate(() => window.__stats ?? null);
@@ -86,6 +103,39 @@ for (const c of cases) {
     const lbl = (id) => page.evaluate((i) => document.getElementById(i)?.textContent?.trim(), id);
     console.log(`  ao vivo: hora final "${await lbl('btn-time')}", qualidade "${await lbl('btn-quality')}"`);
   }
+  if (c.vida && stats?.tiles >= want(c) && !errors.length) {
+    const wait = (ms) => page.waitForTimeout(ms);
+    const run = (f, ...a) => page.evaluate(f, ...a);
+    // Várias peças em sequência, cada uma com a queda animada (a peça viva é descartada ao pousar).
+    for (let i = 0; i < 4 && !errors.length; i++) {
+      await run(() => window.__placeBest());
+      await wait(900);
+    }
+    await run(() => window.__land?.());
+    // Troca de era (Pool.retarget das casas) e zoom de longe e de perto, passando o limite das árvores leves.
+    for (const era of [1, 2, 3, 0]) {
+      if (errors.length) break;
+      await run((e) => window.__era(e, 1, 6), era);
+      await wait(700);
+      await run(() => window.__goto(0, 0, 30));
+      await wait(900);
+      await run(() => window.__goto(0, 0, 6));
+      await wait(900);
+    }
+    // Desfazer e jogar de novo.
+    for (let i = 0; i < 2 && !errors.length; i++) {
+      await run(() => window.__undoMove?.());
+      await wait(700);
+    }
+    for (let i = 0; i < 2 && !errors.length; i++) {
+      await run(() => window.__placeBest());
+      await wait(900);
+    }
+    await run(() => window.__goto(0, 0, 30));
+    await wait(1500);
+    await run(() => window.__goto(0, 0, 8));
+    await wait(1500);
+  }
   const problems = [...errors];
   if (!stats) problems.push('o jogo não desenhou nenhum quadro (window.__stats vazio)');
   else {
@@ -93,6 +143,12 @@ for (const c of cases) {
     if (c.bench && !(await page.evaluate(() => !!window.__bench && !!document.querySelector('.bench table')))) problems.push('o painel do ?bench não apareceu');
     // O cabeçalho do ?bench (placa, navegador, tela, medidor de GPU, nível do Auto) precisa vir junto, para a tabela colada dizer onde foi medida.
     if (c.bench && !(await page.evaluate(() => (window.__bench?.info?.length ?? 0) >= 5 && document.querySelectorAll('.bench li').length >= 5))) problems.push('o cabeçalho do ?bench (placa, tela, medidor de GPU) não apareceu');
+    if (c.mode && !(await page.evaluate((m) => document.getElementById('era')?.textContent?.includes(m) ?? false, c.mode))) problems.push(`o modo na tela não é ${c.mode}`);
+    if (c.vbuf) {
+      const over = await page.evaluate(() => window.__vbuf?.(9) ?? null);
+      if (over === null) problems.push('o gancho __vbuf não existe');
+      else for (const r of over) problems.push(`malha ${r.key} (${r.material}) usa ${r.n} buffers de vértice (pior caso ${r.pior}), o WebGPU aceita 8: ${r.attrs.join(',')}`);
+    }
     if (stats.backend !== c.backend) problems.push(`backend ${stats.backend}, esperado ${c.backend}`);
   }
   const s = ((Date.now() - t0) / 1000).toFixed(1);

@@ -8,7 +8,10 @@ const tmpM = new THREE.Matrix4();
 const tmpM2 = new THREE.Matrix4();
 
 /** Peça "viva": fantasma sob o cursor, peça caindo e a peça da pilha. */
+let nextId = 0;
 export class LiveTile {
+  /** Identidade da peça viva (a pré-visualização no mapa do chão confere se a mesma peça segue estampada). */
+  readonly id = nextId++;
   readonly group = new THREE.Group();
   readonly inner = new THREE.Group();
   private readonly groundGeo: THREE.BufferGeometry;

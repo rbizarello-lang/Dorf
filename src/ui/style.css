@@ -1995,7 +1995,8 @@ html.poster .sheet {
   top: 16px;
   z-index: 50;
   max-width: calc(100vw - 32px);
-  overflow-x: auto;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
   padding: 12px 16px;
   border-radius: 14px;
   background: var(--panel);

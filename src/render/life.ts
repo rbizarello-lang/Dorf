@@ -9,6 +9,7 @@ import { instGeometry, setInstColor, type Lib } from './lib';
 import { WAKES, WAKE_MAX, WAKE_N } from './materials';
 import { LEVEL_STEP, railCurve, RAMP_ROAD, ROAD_Y, WATER_Y } from './tileBuilder';
 import { TJALK_MAST_FOOT } from './kits/holanda';
+import { warpPath, type Warp } from './fluid';
 
 // Vida do mapa: tudo que se move depois de assentado.
 // - pás de moinho e rodas d'água girando
@@ -92,14 +93,21 @@ class AnimPool {
 }
 
 interface Spinner {
+  /** Peça (chave) que pôs este item: refazer a peça troca os dela (`dropOwner`). */
+  owner?: number;
   pool: 'sails' | 'wheel' | 'rotor';
   base: THREE.Matrix4;
   axis: THREE.Vector3;
   speed: number;
   phase: number;
+  /** Onde o eixo pousa no chão (a base do moinho): a encosta sob ele dá a altura. */
+  sx: number;
+  sz: number;
 }
 
 interface Animal {
+  /** Peça (chave) que pôs este item: refazer a peça troca os dela (`dropOwner`). */
+  owner?: number;
   /** Pool do bicho: 'animal' (o do pasto do tema) ou `fauna:<kind>` (Theme.fauna). */
   key: string;
   /** Só aparece nesta fase do dia; fora dela some aos poucos (`vis` vai a 0). */
@@ -119,6 +127,8 @@ interface Animal {
 }
 
 interface Worker {
+  /** Peça (chave) que pôs este item: refazer a peça troca os dela (`dropOwner`). */
+  owner?: number;
   key: 'folk:axe' | 'folk:hoe' | 'folk:sack';
   anim: 'chop' | 'tend' | 'carry';
   base: THREE.Matrix4;
@@ -127,6 +137,8 @@ interface Worker {
 }
 
 interface Fish {
+  /** Peça (chave) que pôs este item: refazer a peça troca os dela (`dropOwner`). */
+  owner?: number;
   cx: number;
   cz: number;
   r: number;
@@ -141,6 +153,8 @@ interface Fish {
 }
 
 interface Bobber {
+  /** Peça (chave) que pôs este item: refazer a peça troca os dela (`dropOwner`). */
+  owner?: number;
   base: THREE.Matrix4;
   color: THREE.Color;
   phase: number;
@@ -236,12 +250,22 @@ const smooth01 = (a: number, b: number, x: number) => {
 export class Life {
   /** Nível de altura da casa (relevo, R2); o World põe o dele. Sem relevo, 0. */
   levelOf: (q: number, r: number) => number = () => 0;
+  /** Encostas: quanto o chão sobe no ponto (x, z) do mundo; o World põe a dele. Quem se move (pás, bichos, aldeões, trilhos) soma isto na hora. */
+  groundRise: (x: number, z: number) => number = () => 0;
+  /** Encaixe fluido: o deslocamento do desenho das peças (o World põe o dele); barcos e trens andam pela água e pelo trilho deslocados. */
+  warp: Warp | null = null;
 
   /**
    * Altura da via no ponto: o chão da casa, menos a descida da rampa de estrada na borda que dá numa casa mais baixa
    * (a mesma curva do `tileBuilder`: `RAMP_ROAD` da borda para dentro). Contínua entre as peças.
    */
   private roadLift(x: number, z: number): number {
+    return this.roadLiftBase(x, z) + this.groundRise(x, z);
+  }
+
+  private roadLiftBase(x: number, z: number): number {
+    // No fluido o ponto já vem deslocado; a casa é a da grade sem deslocamento.
+    if (this.warp) [x, z] = this.warp.inverse(x, z);
     const [q, r] = worldToHex(x, z);
     const own = this.levelOf(q, r);
     if (!own) return 0;
@@ -293,7 +317,7 @@ export class Life {
   private fish: Fish[] = [];
   private bobbers: Bobber[] = [];
   /** Centros (x, z) das pontes baixas do mapa: o barco baixa o mastro ao passar sob elas (`boat:rig`). */
-  private bridges: { x: number; y: number; z: number }[] = [];
+  private bridges: { x: number; y: number; z: number; owner?: number }[] = [];
   /** Respingo quando um peixe sai ou volta para a água (o World desenha as gotas). */
   onSplash: (x: number, z: number) => void = () => {};
   /** Fumaça da locomotiva do easter egg (o World solta o rolo de fumaça). */
@@ -320,6 +344,11 @@ export class Life {
     parent: THREE.Object3D,
   ) {
     parent.add(this.root);
+  }
+
+  /** Quantos de cada coisa que se move (conferência de cena). */
+  staticCounts() {
+    return { spinners: this.spinners.length, animals: this.animals.length, workers: this.workers.length, fish: this.fish.length, bobbers: this.bobbers.length, bridges: this.bridges.length };
   }
 
   reset(theme: Theme) {
@@ -353,23 +382,36 @@ export class Life {
     return p;
   }
 
-  addSpinner(key: string, world: THREE.Matrix4, axis: 'x' | 'z') {
+  /** Peça que está pondo os itens fixos de agora (`World.bake`); quem não tem dono (rotas, bandos) fica de fora de `dropOwner`. */
+  owner: number | undefined;
+
+  /** Tira os itens fixos (pás, bichos, aldeões, peixes, barcos ancorados, pontes) postos pela peça `key`: ela foi refeita. */
+  dropOwner(key: number) {
+    this.spinners = this.spinners.filter((x) => x.owner !== key);
+    this.animals = this.animals.filter((x) => x.owner !== key);
+    this.workers = this.workers.filter((x) => x.owner !== key);
+    this.fish = this.fish.filter((x) => x.owner !== key);
+    this.bobbers = this.bobbers.filter((x) => x.owner !== key);
+    this.bridges = this.bridges.filter((x) => x.owner !== key);
+  }
+
+  addSpinner(key: string, world: THREE.Matrix4, axis: 'x' | 'z', sx = world.elements[12], sz = world.elements[14]) {
     if (key !== 'sails' && key !== 'wheel' && key !== 'rotor') return;
     if (!this.pool(key)) return;
-    this.spinners.push({ pool: key, base: world.clone(), axis: axis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1), speed: key === 'sails' ? 0.9 + Math.random() * 0.4 : key === 'rotor' ? 2.2 + Math.random() * 0.6 : 1.4, phase: Math.random() * 6 });
+    this.spinners.push({ pool: key, base: world.clone(), axis: axis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1), speed: key === 'sails' ? 0.9 + Math.random() * 0.4 : key === 'rotor' ? 2.2 + Math.random() * 0.6 : 1.4, phase: Math.random() * 6, sx, sz, owner: this.owner });
   }
 
   addAnimal(key: string, world: THREE.Matrix4, color: THREE.Color, when?: DayPhase) {
     if (!this.pool(key)) return;
     const p = new THREE.Vector3().setFromMatrixPosition(world);
     const s = new THREE.Vector3().setFromMatrixScale(world).x;
-    this.animals.push({ key, when, vis: !when || when === this.phase ? 1 : 0, x: p.x, z: p.z, y: p.y, hx: p.x, hz: p.z, heading: Math.random() * Math.PI * 2, speed: 0, pause: Math.random() * 3, s, color: color.clone(), phase: Math.random() * 6 });
+    this.animals.push({ key, when, vis: !when || when === this.phase ? 1 : 0, x: p.x, z: p.z, y: p.y, hx: p.x, hz: p.z, heading: Math.random() * Math.PI * 2, speed: 0, pause: Math.random() * 3, s, color: color.clone(), phase: Math.random() * 6, owner: this.owner });
   }
 
   addWorker(key: string, world: THREE.Matrix4, color: THREE.Color, anim: 'chop' | 'tend' | 'carry') {
     if (key !== 'folk:axe' && key !== 'folk:hoe' && key !== 'folk:sack') return;
     if (this.folkCount() >= FOLK_MAX || !this.pool(key)) return;
-    this.workers.push({ key, anim, base: world.clone(), color: color.clone(), phase: Math.random() * 20 });
+    this.workers.push({ key, anim, base: world.clone(), color: color.clone(), phase: Math.random() * 20, owner: this.owner });
   }
 
   /** Peixe de cardume: a matriz dá a posição e a direção; `orbit` é o raio (negativo = horário). */
@@ -383,18 +425,18 @@ export class Life {
     // O centro fica à esquerda da direção no sentido anti-horário, à direita no horário.
     const cx = px - r * (cw ? -vz : vz), cz = pz - r * (cw ? vx : -vx);
     const w = ((cw ? -1 : 1) * (0.022 + Math.random() * 0.012)) / r;
-    this.fish.push({ cx, cz, r, a: Math.atan2(pz - cz, px - cx), w, y: e[13], color: color.clone(), next: 6 + Math.random() * 30, jump: -1 });
+    this.fish.push({ cx, cz, r, a: Math.atan2(pz - cz, px - cx), w, y: e[13], color: color.clone(), next: 6 + Math.random() * 30, jump: -1, owner: this.owner });
   }
 
   /** Ponte levadiça assentada (só as baixas, do kit `draw`): o velame dos barcos que passam por baixo desce. */
   addBridge(world: THREE.Matrix4) {
-    if (this.theme.bridge?.style === 'draw' && this.lib.geo('boat:rig')) this.bridges.push({ x: world.elements[12], y: world.elements[13], z: world.elements[14] });
+    if (this.theme.bridge?.style === 'draw' && this.lib.geo('boat:rig')) this.bridges.push({ x: world.elements[12], y: world.elements[13], z: world.elements[14], owner: this.owner });
   }
 
   /** Barco ancorado: balança no lugar. */
   addBobber(world: THREE.Matrix4, color: THREE.Color) {
     if (!this.pool('moored')) return;
-    this.bobbers.push({ base: world.clone(), color: color.clone(), phase: Math.random() * 6 });
+    this.bobbers.push({ base: world.clone(), color: color.clone(), phase: Math.random() * 6, owner: this.owner });
   }
 
   scout(x0: number, z0: number, x1: number, z1: number) {
@@ -479,6 +521,7 @@ export class Life {
       q4.setFromAxisAngle(s.axis, this.time * s.speed + s.phase);
       m4.makeRotationFromQuaternion(q4);
       m4b.copy(s.base).multiply(m4);
+      m4b.elements[13] += this.groundRise(s.sx, s.sz);
       p.set(i, m4b);
     }
     for (const [k, c] of Object.entries(counts)) this.pools.get(k)!.commit(c + 1);
@@ -510,7 +553,7 @@ export class Life {
         // Fora da hora o bicho já saiu de cena: não ocupa instância.
         if (a.vis < 0.02) continue;
         q4.setFromAxisAngle(UP, -a.heading);
-        m4.compose(v3.set(a.x, a.y + bob, a.z), q4, s3.setScalar(a.s * a.vis));
+        m4.compose(v3.set(a.x, a.y + bob + this.groundRise(a.x, a.z), a.z), q4, s3.setScalar(a.s * a.vis));
         if (graze) m4.multiply(m4b.makeRotationZ(graze));
         ap.set(i, m4, a.color);
         used.set(a.key, i + 1);
@@ -636,6 +679,7 @@ export class Life {
         if (back) m4.multiply(m4b.makeRotationY(Math.PI));
       }
       if (s < 1) m4.multiply(m4b.makeScale(s, s, s));
+      m4.elements[13] += this.groundRise(m4.elements[12], m4.elements[14]);
       p.set(n[w.key]++, m4, w.color);
     }
     const sack = pools['folk:sack'];
@@ -680,6 +724,8 @@ export class Life {
         pts.push([u * u * A[0] + t * t * B[0], u * u * A[1] + t * t * B[1]]);
       }
     } else pts = [end(m.a), [0, 0], end(m.b)];
+    // Encaixe fluido: a água e o trilho foram desenhados deslocados por uma função do mundo, então o caminho leva o mesmo deslocamento.
+    if (this.warp) pts = warpPath(pts, cx, cz, this.warp);
     m.route.length = 0;
     m.cum.length = 0;
     let acc = 0;

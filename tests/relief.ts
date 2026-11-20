@@ -1,7 +1,9 @@
 // Níveis de altura (src/core/relief.ts): determinismo, vizinhos a no máximo 1 degrau, origem no 0,
 // distribuição e platôs (sem casas soltas). Só aparência: nada disto entra no replay.
 import { DIRS, hexDistance } from '../src/core/hex';
-import { levelAt } from '../src/core/relief';
+import { levelAt, tileProfile } from '../src/core/relief';
+import { generateEdges, isStrict, T } from '../src/core/tiles';
+import { mulberry32 } from '../src/core/rng';
 
 let failed = 0;
 const check = (ok: boolean, msg: string) => {
@@ -58,6 +60,31 @@ check(steep === 0, `${steep} pares de vizinhos com diferença maior que 1`);
 check(lonely / cells < 0.002, `casas soltas demais: ${lonely} de ${cells}`);
 check(levelAt(7, 5, 5, 0) === 0, 'maxLevel 0 é plano');
 console.log(`relief: ${cells} casas, nível 0 em ${(mean0 * 100).toFixed(1)}%, ${lonely} soltas, ${steep} degraus duplos`);
+// Perfis por peça (modo Relevo): determinismo, faixa 0 a 2, setores vizinhos a no máximo 1 degrau, rio/trilho planos.
+{
+  const rng = mulberry32(99);
+  const shapes: Record<string, number> = {};
+  const levels = [0, 0, 0];
+  let n = 0, strictTiles = 0;
+  for (let i = 0; i < 20000; i++) {
+    const edges = generateEdges(rng, 0.17, 0.09);
+    const seed = Math.floor(rng() * 2 ** 31);
+    const a = tileProfile(edges, seed), b = tileProfile(edges, seed);
+    check(JSON.stringify(a) === JSON.stringify(b), 'perfil não determinístico');
+    n++;
+    shapes[a.shape] = (shapes[a.shape] ?? 0) + 1;
+    check(a.h.length === 6 && a.h.every((v) => Number.isInteger(v) && v >= 0 && v <= 2) && a.c >= Math.max(...a.h) && a.c <= 2, `perfil fora da faixa ${JSON.stringify(a)}`);
+    for (let k = 0; k < 6; k++) check(Math.abs(a.h[k] - a.h[(k + 1) % 6]) <= 1, `setores vizinhos com mais de 1 degrau ${JSON.stringify(a)}`);
+    if (edges.some(isStrict)) {
+      strictTiles++;
+      check(a.h.every((v) => v === a.h[0]) && a.c === a.h[0], 'peça com rio ou trilho não é plana');
+      if (edges.includes(T.Rail)) check(a.h[0] === 1, 'trilho fora do nível 1');
+    }
+    levels[Math.min(...a.h)]++;
+  }
+  check(Object.keys(shapes).length === 9, `faltam formas: ${Object.keys(shapes)}`);
+  console.log(`perfis: ${n} peças, ${strictTiles} com rio/trilho, formas ${JSON.stringify(shapes)}, base 0/1/2: ${levels.join('/')}`);
+}
 if (failed) {
   console.error(`${failed} falha(s)`);
   process.exit(1);

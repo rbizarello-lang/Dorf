@@ -242,7 +242,7 @@ export interface HouseMeta {
   chimney: [number, number, number] | null;
 }
 
-const BODY: Record<BodyStyle, { w: number; h: number; d: number }> = {
+export const BODY: Record<BodyStyle, { w: number; h: number; d: number }> = {
   cottage: { w: 0.14, h: 0.11, d: 0.12 },
   long: { w: 0.24, h: 0.085, d: 0.11 },
   cube: { w: 0.12, h: 0.1, d: 0.12 },
@@ -1703,11 +1703,19 @@ function siteGeometries(theme: Theme): Record<string, THREE.BufferGeometry> {
  * Carimbo de um sítio no mapa de pergaminho, deitado no plano xz, com ~0,6 de largura:
  * arco quebrado (ruína), X (tesouro), estrela de 8 pontas (relíquia) e torre (mirante).
  */
-export function stampGeometry(kind: SiteKind): THREE.BufferGeometry {
+export function stampGeometry(kind: SiteKind | 'spring'): THREE.BufferGeometry {
   const bar = (w: number, h: number, x: number, y: number, rot = 0) => new THREE.PlaneGeometry(w, h).rotateZ(rot).translate(x, y, 0);
   let parts: THREE.BufferGeometry[];
   if (kind === 'ruin') {
     parts = [bar(0.07, 0.3, -0.16, -0.06), bar(0.07, 0.17, 0.16, -0.125), new THREE.RingGeometry(0.125, 0.195, 8, 1, Math.PI * 0.42, Math.PI * 0.58).translate(0, 0.09, 0), bar(0.44, 0.05, 0, -0.22)];
+  } else if (kind === 'spring') {
+    // Nascente: uma gota com duas ondas em volta.
+    const drop = new THREE.Shape();
+    drop.moveTo(0, 0.2);
+    drop.quadraticCurveTo(0.12, 0.02, 0.1, -0.06);
+    drop.absarc(0, -0.06, 0.1, 0, Math.PI, true);
+    drop.quadraticCurveTo(-0.12, 0.02, 0, 0.2);
+    parts = [new THREE.ShapeGeometry(drop, 8), new THREE.RingGeometry(0.2, 0.235, 24), new THREE.RingGeometry(0.29, 0.315, 24, 1, 0.5, Math.PI * 1.5)];
   } else if (kind === 'treasure') {
     parts = [bar(0.5, 0.08, 0, 0, Math.PI / 4), bar(0.5, 0.08, 0, 0, -Math.PI / 4)];
   } else if (kind === 'relic') {
@@ -2366,13 +2374,53 @@ function specialsFor(theme: Theme, walls: string, roofs: string) {
 
 // ---------------------------------------------------------------- instâncias
 
+/** Os atributos float do kit já intercalados (a cópia em CPU), guardados por geometria-base. Só o array é compartilhado, nunca o buffer da GPU. */
+const packedOf = new WeakMap<THREE.BufferGeometry, { stride: number; data: Float32Array; plain: [string, number, number][] } | null>();
+
 /**
- * Geometria para um InstancedMesh: compartilha os atributos do kit e acrescenta
+ * Os atributos do kit (`position`, `normal`, `color`, `tint`, `glow`, `vol`...) num buffer intercalado só: o WebGPU aceita 8 buffers de
+ * vértice por malha e cada atributo solto conta um (mais `iColor` e a matriz da instância, que passa a 2 quando há mais de 1000
+ * instâncias e o TRAA pede a matriz anterior). Intercalado, os nomes e a leitura nos materiais não mudam, e o kit usa 1 buffer.
+ * O array em CPU vale por geometria-base (cache), mas cada geometria ganha o SEU `InterleavedBuffer`: o three destrói o buffer da GPU
+ * quando a geometria é descartada (`Geometries.onDispose` -> `Attributes.delete`), e um buffer dividido entre lotes quebrava os outros
+ * (`Buffer used in submit while destroyed`, issue #115). Os `BufferAttribute` soltos do `base` seguem compartilhados: o three só apaga a
+ * entrada deles e recria no próximo quadro.
+ */
+function interleaved(base: THREE.BufferGeometry) {
+  let packed = packedOf.get(base);
+  if (packed === undefined) {
+    const plain = Object.entries(base.attributes).filter(([, a]) => (a as THREE.BufferAttribute).isBufferAttribute && a.array instanceof Float32Array && !(a as THREE.BufferAttribute).normalized);
+    packed = null;
+    if (plain.length >= 3) {
+      const count = plain[0][1].count;
+      const stride = plain.reduce((n, [, a]) => n + a.itemSize, 0);
+      const data = new Float32Array(count * stride);
+      const layout: [string, number, number][] = [];
+      let off = 0;
+      for (const [k, a] of plain) {
+        for (let i = 0; i < count; i++) for (let c = 0; c < a.itemSize; c++) data[i * stride + off + c] = a.array[i * a.itemSize + c];
+        layout.push([k, a.itemSize, off]);
+        off += a.itemSize;
+      }
+      packed = { stride, data, plain: layout };
+    }
+    packedOf.set(base, packed);
+  }
+  const out = { ...base.attributes } as Record<string, THREE.BufferAttribute | THREE.InterleavedBufferAttribute>;
+  if (packed) {
+    const buf = new THREE.InterleavedBuffer(packed.data, packed.stride);
+    for (const [k, size, off] of packed.plain) out[k] = new THREE.InterleavedBufferAttribute(buf, size, off);
+  }
+  return out;
+}
+
+/**
+ * Geometria para um InstancedMesh: compartilha o array do kit (o buffer da GPU é de cada geometria) e acrescenta
  * `iColor`, a cor de cada instância (a mesma geometria base serve a vários meshes).
  */
 export function instGeometry(base: THREE.BufferGeometry, cap: number, colors?: Float32Array) {
   const g = new THREE.BufferGeometry();
-  for (const [k, a] of Object.entries(base.attributes)) g.setAttribute(k, a);
+  for (const [k, a] of Object.entries(interleaved(base))) g.setAttribute(k, a);
   if (base.index) g.setIndex(base.index);
   const arr = new Float32Array(cap * 3).fill(1);
   if (colors) arr.set(colors.subarray(0, Math.min(colors.length, arr.length)));
@@ -2405,7 +2453,13 @@ function lanternGeometry(): THREE.BufferGeometry {
 }
 
 export class Lib {
-  readonly ground = makeGroundMaterial();
+  private readonly groundFlat = makeGroundMaterial();
+  private groundField: ReturnType<typeof makeGroundMaterial> | null = null;
+  /** Terra contínua: o chão lê o campo de terreno do mundo (material à parte, compilado só quando o fluido liga; os outros modos ficam com o chão de sempre). */
+  land = false;
+  get ground() {
+    return this.land ? (this.groundField ??= makeGroundMaterial(true)) : this.groundFlat;
+  }
   readonly water = makeWaterMaterial();
   /** Cachoeira (R3): lâmina d'água (opaca) e espuma da bacia (transparente). */
   readonly fall = makeFallMaterial();
@@ -2521,6 +2575,12 @@ export class Lib {
       this.farGeos.set('hill', hillGeometry({ far: true }));
     }
     if (theme.irrigation) set('shaduf', shadufGeometry());
+    // Paisagem viva (estágio 2 do cultivo): o celeiro da plantação, na cor das casas do tema (um pool só; `render/livingBuild.ts`).
+    set('barn', kit([
+      { geo: box(0.07, 0.034, 0.05), color: theme.houses[0].walls[0] },
+      { geo: pyramid(0.082, 0.03, 0.062, 0.034), color: theme.houses[0].roofs[0] },
+      { geo: box(0.018, 0.022, 0.004, 0, 0, 0.026), color: DOOR },
+    ]));
     set('flower', kit([{ geo: oct(0.014).translate(0, 0.024, 0), color: '#fff', tint: 1 }, { geo: tri([-0.002, 0, 0], [0.002, 0, 0], [0, 0.02, 0]), color: '#4f7a3a' }]));
     set('lily', kit([{ geo: cyl(0.035, 0.035, 0.006, 7, 0, 0.011), color: '#fff', tint: 1 }, { geo: oct(0.008).translate(0.01, 0.02, 0.006), color: '#f7c6d8' }]));
     set('animal', animalGeometry(theme.animals.kind));
