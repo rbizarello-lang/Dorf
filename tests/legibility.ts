@@ -55,8 +55,16 @@ console.log(`Legibilidade: ${THEMES.length} temas, ${failed} com casas que somem
 
 // Noite: prado, mata e plantação precisam continuar distintos. Modelo simples de luz (difusa do
 // sol ou do luar mais o céu, em RGB linear) sobre a cor do chão de cada terreno; a menor diferença
-// entre os três à noite tem de ficar em pelo menos metade da do dia.
+// entre os três à noite tem de ficar em pelo menos metade da do dia E acima de um piso absoluto.
+// A proporção sozinha deixa passar um tema que já é quase igual de dia (o Inverno tem ΔE ~4 de dia,
+// então 2,0 à noite bastaria). O piso é ΔE 2,3 em CIELAB, o limiar da diferença "mal perceptível"
+// (JND): abaixo dele o olho não separa os terrenos. É um piso de segurança, não a meta: um contraste
+// confortável entre manchas vizinhas fica por volta de 5 (NIGHT_COMFORT, só um aviso). 2,3 é o maior
+// valor redondo que os 5 temas passam hoje (Inverno: 2,4 à noite); subir o piso pede mexer nas cores
+// do chão do Inverno, o que é decisão de arte (ver o relatório da D41).
 const NIGHT_SHARE = 0.5;
+const NIGHT_FLOOR = 2.3;
+const NIGHT_COMFORT = 5;
 const linRgb = (hex: string) => {
   const n = parseInt(hex.slice(1), 16);
   const lin = (c: number) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
@@ -77,9 +85,9 @@ for (const th of THEMES) {
   };
   const day = minPair(th.sun, th.sunIntensity, th.hemiSky, th.hemiIntensity);
   const night = minPair(NIGHT_LIGHT.sun, NIGHT_LIGHT.sunI, NIGHT_LIGHT.hemiSky, NIGHT_LIGHT.hemiI);
-  const bad = night < day * NIGHT_SHARE;
+  const bad = night < day * NIGHT_SHARE || night < NIGHT_FLOOR;
   if (bad) darkFailed++;
-  console.log(`  ${th.id.padEnd(9)} noite: prado, mata e plantação ΔE mín ${night.toFixed(1).padStart(5)} (dia ${day.toFixed(1).padStart(5)}, ${Math.round((night / day) * 100)}%)${bad ? '  ← somem no escuro' : ''}`);
+  console.log(`  ${th.id.padEnd(9)} noite: prado, mata e plantação ΔE mín ${night.toFixed(1).padStart(5)} (dia ${day.toFixed(1).padStart(5)}, ${Math.round((night / day) * 100)}%)${bad ? '  ← somem no escuro' : night < NIGHT_COMFORT ? '  (aviso: abaixo de 5, o conforto)' : ''}`);
 }
 console.log(`Noite: ${THEMES.length} temas, ${darkFailed} com terrenos que se confundem no escuro`);
 

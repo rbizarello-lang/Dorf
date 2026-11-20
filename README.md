@@ -87,6 +87,10 @@ O recorde é guardado por modo e por tema, com a semente; no fim da partida, "Re
 
 A terceira entrega encerra a viagem e cada peça restante vale 20 pontos. A viagem também acaba se a pilha esvaziar. Cada carta e frete têm recorde próprio por tema.
 
+**Encostas (em todos os modos e temas):** o chão de cada peça tem um morro suave ou uma serra baixa, e as casas, as árvores e as plantações acompanham a subida. É só aparência: não muda pontos, peças nem partidas salvas. Dá para voltar ao desenho de antes com `?encostas=0` (na prévia publicada, `#encostas=0`).
+
+**Paisagem viva (opção em Aa):** conforme você encaixa peças, a paisagem cresce: casas sobem de tamanho, a mata fica mais cheia e o cultivo ganha celeiro. Também é só aparência. Vem ligada no Zen e na Terra contínua e desligada nos outros modos; você muda em Aa, ou com `?viva=1` e `?viva=0`.
+
 **Interações:** algumas bordas diferentes também "conversam". Quando se encostam, rendem +5 e erguem uma construção na borda. A prévia acende em dourado antes de você colocar a peça.
 
 | Encontro | Construção (nome muda por tema) |
@@ -171,6 +175,7 @@ Eram 14 temas. O Jardim Sakura, o Jade Song e o Edo Tranquilo viraram o Terraço
 | `?webgl` | força o WebGL2 em vez do WebGPU |
 | `?mode=zen` | modo inicial: `classico`, `zen`, `diario`, `exploradores`, `entrepostos`, `rotas`, `rapida`, `relevo` ou `terra`; o `#mode=terra` (hash) vale igual e chega à prévia publicada |
 | `?mode=entrepostos&layout=confluencia&freight=madeira` | `layout` escolhe a carta (`confluencia`, `forquilha` ou `enseada`), `freight` escolhe o frete (`direto` ou `madeira`). Os parâmetros também funcionam no hash |
+| `?encostas=0` (ou `#encostas=0`) | desliga as Encostas e volta ao desenho de antes, com o chão plano por peça (serve para comparar capturas) |
 | `?viva=1` / `?viva=0` (ou `#viva=1`) | força a Paisagem viva ligada ou desligada. Sem o parâmetro vale a opção em Aa ("Paisagem viva"); sem opção gravada, vem ligada no Zen e na Terra contínua (e em todos os modos na prévia publicada) e desligada nos outros |
 | `?debug` | mostra FPS, draw calls, triângulos e instâncias |
 | `?bench` (ou `#bench` no fim do endereço, para a prévia publicada, que não recebe parâmetros) | mede o desempenho do seu aparelho: o Clássico na Alta e o Relevo em Baixa, Média, Alta e Ultra (cerca de 1 minuto e meio), e mostra uma tabela que dá para copiar: resolução interna, FPS, p95, pior quadro, tempo de CPU e, onde o navegador oferece, o de GPU por quadro, o custo de trocar o fantasma de casa e de pôr uma peça, e a folga contra os 16,7 ms de 60 qps. `?bench=classico` e `?bench=relevo` medem os quatro níveis de um modo só |

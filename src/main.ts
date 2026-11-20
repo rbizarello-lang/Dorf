@@ -31,7 +31,7 @@ import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor
 import { Capture, VIDEO_QUALITIES } from './ui/capture';
 import { Hud, TIME_ICON, TIME_LABEL, TIME_ORDER, glyph, questLabel, questMarker } from './ui/hud';
 import { bindInput } from './ui/input';
-import { persist as requestPersistence, exportKeys, importKeys } from './ui/storage';
+import { persist as requestPersistence, exportKeys, importKeys, safeWrite, once, SAVE_FAIL_NOTICE } from './ui/storage';
 import { MONUMENT_KINDS, MONUMENT_NAME, Progress, cleanProgress, SPECIAL_NAME, UNLOCKS, type MonumentKind } from './ui/progress';
 import { Tutorial } from './ui/tutorial';
 import { blessingName, blessingRule, choiceHtml } from './ui/eraChoice';
@@ -87,6 +87,8 @@ const params = new URLSearchParams(location.search);
     if (Object.hasOwn(HASH_FLAGS, k) && HASH_FLAGS[k]!.includes(v) && !params.has(k)) params.set(k, v);
   }
 }
+// `hud` nasce logo abaixo; o aviso só roda numa gravação, bem depois.
+const warnSaveFailed = once(() => hud.toast(SAVE_FAIL_NOTICE, 'bad'));
 const store = {
   get(k: string) {
     try {
@@ -96,12 +98,8 @@ const store = {
     }
   },
   set(k: string, v: string | null) {
-    try {
-      if (v === null) localStorage.removeItem(`retalhos.${k}`);
-      else localStorage.setItem(`retalhos.${k}`, v);
-    } catch {
-      /* armazenamento indisponível: segue sem salvar */
-    }
+    // Armazenamento indisponível: o jogo segue sem salvar e avisa uma vez por sessão.
+    safeWrite(() => localStorage, `retalhos.${k}`, v, warnSaveFailed);
   },
 };
 
@@ -274,6 +272,11 @@ let waterPeek = '';
 let terraPeek = '';
 /** Paisagem viva: no fantasma, quantas vizinhas ganham um estágio (" · N crescem"); vazio sem a opção ou sem ganho. */
 let vivaPeek = '';
+/** Prévia das vizinhas que mudam (calculada no mundo depois que o fantasma para): " · 1 sobe · 2 crescem"; vazio enquanto não há. */
+const nbLabel = () => {
+  const { rise, grow } = world.nbInfo;
+  return `${rise ? ` · ${rise} ${rise > 1 ? 'sobem' : 'sobe'}` : ''}${grow ? ` · ${grow} cresc${grow > 1 ? 'em' : 'e'}` : ''}`;
+};
 /** "Onde encaixa": as melhores casas da peça atual. Valem só para a jogada e o giro em que foram pedidas. */
 let hints: { q: number; r: number; rot: number; points: number }[] | null = null;
 let hintsKey = '';
@@ -298,10 +301,13 @@ let routePeekAt = '';
 let rotSteps = 0;
 let hover: { q: number; r: number } | null = null;
 let scoutPending = false;
-/** Recorde por modo e por tema (o Exploradores e o Clássico não disputam o mesmo número), com a semente. */
+/** Recorde por modo e tema, com a semente. Entrepostos separa também carta e frete. */
 let best = 0;
 let bestSeed = 0;
-const bestKey = () => `best.${mode.id}.${rulesTheme.id}`;
+function bestKey(id: ModeId = mode.id, themeId = rulesTheme.id, voyage: Voyage = voyageSettings) {
+  const base = `best.${id}.${themeId}`;
+  return id === 'entrepostos' ? `${base}.${voyage.layout}.${voyage.freight}` : base;
+}
 function loadBest() {
   best = 0;
   bestSeed = 0;
@@ -467,7 +473,7 @@ function snapshot(): Save {
 }
 
 /**
- * Aceita só saves completos, da versão atual e de um tema que ainda existe; qualquer outra coisa é descartada.
+ * Aceita saves completos da versão atual ou da v13 para os modos que já existiam.
  * Sem `anyTheme`, um save de tema que saiu ou foi fundido (sakura, viking, vale...) é recusado: a regra dele
  * mudou ou sumiu, e o replay não bateria. Com `anyTheme`, só o formato do id conta (a importação do backup).
  */
@@ -1000,7 +1006,9 @@ function announce(res: PlaceResult, fairConnected: boolean) {
   if (fair && !fairConnected && fair.connectedAt !== undefined && !fair.delivered) {
     notes.push({ text: 'A Feira está ligada e espera a madeira da Serraria.' });
   }
-  if (game.finalSupplyBonus) notes.push({ text: `Três entregas · +${game.finalSupplyBonus} pontos pelas peças da pilha`, kind: 'good' });
+  if (game.rules.riverTrade && res.leftoverBonus) {
+    notes.push({ text: `Três entregas · +${res.leftoverBonus} pontos pelas peças da pilha`, kind: 'good' });
+  }
   res.routes.forEach((rt, i) => {
     notes.push({ text: routeLabel(rt), kind: 'good' });
     hud.floater(s.x, s.y - (res.perfect ? 78 : 46) - i * 28, routeLabel(rt), 'route');
@@ -1174,10 +1182,16 @@ function terraHelp(R: Rules) {
 
 /** Maior recorde do tema entre os modos (cada modo guarda o seu). */
 function themeBest(id: string) {
+  const keys = MODES.filter((m) => m.id !== 'entrepostos').map((m) => bestKey(m.id, id));
+  for (const layout of Object.keys(CHARTS) as Voyage['layout'][]) {
+    for (const freight of Object.keys(FREIGHT_CONTRACTS) as Voyage['freight'][]) {
+      keys.push(bestKey('entrepostos', id, { layout, freight }));
+    }
+  }
   let top = 0;
-  for (const m of MODES) {
+  for (const key of keys) {
     try {
-      const v = JSON.parse(store.get(`best.${m.id}.${id}`) ?? 'null') as { score?: unknown } | null;
+      const v = JSON.parse(store.get(key) ?? 'null') as { score?: unknown } | null;
       if (v && Number.isSafeInteger(v.score)) top = Math.max(top, v.score as number);
     } catch {
       // valor corrompido: ignora
@@ -2122,7 +2136,7 @@ function step(now: number) {
   if (scorePeek !== null && hover) {
     const s = screenOf(hover.q, hover.r, 0.55);
     const route = routePeek.length ? ` · ${routePeek.map(routeLabel).join(' · ')}` : '';
-    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${terraPeek}${waterPeek}${vivaPeek}${route}${freightPeek}`, color: theme.ui.accent, kind: 'score' });
+    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${terraPeek}${waterPeek}${nbLabel() || vivaPeek}${route}${freightPeek}`, color: theme.ui.accent, kind: 'score' });
   }
   // Influência das construções: o ganho aparece com o fantasma numa casa contornada.
   const inf = hover && game.current && !st ? game.board.influenceAt(hover.q, hover.r, game.current.edges) : null;
