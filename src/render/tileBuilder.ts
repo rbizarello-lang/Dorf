@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { corner, edgeMid, INR } from '../core/hex';
 import { hillFlat, hillHeight, hillRiser, type HillProfile } from '../core/hills';
 import { HillSurface } from './hillSurface';
+import { BAY_RADIUS, bayBlend } from './bay';
 import type { DayPhase, EggKit } from '../core/eggs';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
 import { FALL_D, HILL, hillProfile, PEAK, PEAK_CONES, PEAK_REACH } from './relief';
@@ -146,6 +147,8 @@ export interface BuildOpts {
    * Quando a vizinha chega, a peça é refeita sem a saia desse lado.
    */
   skirt?: readonly boolean[];
+  /** Saia de uma baía estreita. Por setor: -1 se fechada, ou a direção da boca na orientação da peça. */
+  bay?: readonly (number | undefined)[];
   /**
    * Corredeira no vale (Relevo e Terra com as Encostas, onde o desenho não tem platô por peça): borda (origem) de água em que a água
    * pontuada desce de nível para a vizinha, qualquer que seja a ordem das jogadas. Valor = quantos níveis desce, só na peça ALTA (a baixa
@@ -1348,20 +1351,29 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const own0 = spec?.own ?? 0;
     const [mx, mz] = edgeMid(i);
     const nrm: V3 = [mx / INR, 0, mz / INR];
+    const mouth = opts.bay?.[i];
+    const bayX = 2 * mx, bayZ = 2 * mz;
     // O pé da encosta vira terra escura (a cor da lateral do tema), nunca areia cinzenta: é a ilha que desce para a água.
     const soil = shade(tc(theme.side).clone().lerp(tc(theme.sideDark), 0.3), 0.9);
     const floorY = -TILE_T - own0 * LEVEL_STEP;
     const M = 8;
     /** Linhas da saia (fração da largura): mais cerradas junto da borda, onde a boca de água faz o degrau. */
     const FR = [0, 0.03, 0.08, 0.15, 0.3, 0.5, 0.7, 0.85, 1];
+    const MF = Math.round(M * 0.5);
+    const d0 = (k: number) => Math.max(0, WATER_Y - V(N - k, k).p[1]);
     /** Boca de água: a encosta cai logo (`SKIRT_CHUTE` níveis em `SKIRT_CHUTE_W` da largura), como a queda que a vizinha mais baixa fará. */
     const SKIRT_CHUTE = 1.15, SKIRT_CHUTE_W = 0.14;
     type P = { p: V3; c: THREE.Color; s: Splat };
     /** Uma coluna da saia: do ponto da borda para fora, na direção (dx, dz), com a altura `hb` (níveis do mundo) na borda. */
-    const column = (base: { p: V3; c: THREE.Color; s: Splat }, dx: number, dz: number, hb: number): P[] => {
+    const column = (base: P, dx: number, dz: number, hb: number, keepWater = false): P[] => {
       const w = Math.max(skirtWidth(hb), 0.02);
       const grass = base.c;
       const out: P[] = [];
+      const bx = base.p[0] - bayX, bz = base.p[2] - bayZ;
+      const blend = mouth === undefined ? 0 : bayBlend(mouth, bx, bz);
+      const radius = blend ? BAY_RADIUS / Math.hypot(bx, bz) : 0;
+      // Conserva as colunas da película de rio. Só o trecho seco entre o fim da película e o pé muda de rumo.
+      const from = keepWater ? FR[MF] : 0;
       // Coluna sob a água (o fundo já subiu ao lábio): `ck` = 1 faz o degrau da boca; na margem some.
       const ck = edges[i] === T.Water ? Math.max(0, Math.min(1, (WATER_Y - base.p[1]) / 0.01)) : 0;
       const total = hb + skirtEnd(hb);
@@ -1372,9 +1384,12 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       for (let m = 0; m <= M; m++) {
         // A cor passa do chão da borda para a terra só no flanco e no pé (pela altura que já desceu), nunca para um cinza liso.
         const rho = w * FR[m], f = smooth(0.35, 1, dropAt(rho) / Math.max(1e-6, total));
+        const turn = blend * Math.max(0, (FR[m] - from) / (1 - from));
+        const x = base.p[0] + dx * rho + (bx * (radius - 1) - dx * w) * turn;
+        const z = base.p[2] + dz * rho + (bz * (radius - 1) - dz * w) * turn;
         out.push({
           // A saia fica um fio abaixo do chão que a vizinha vai ter ali (que segue a mesma curva): sem isso as duas superfícies coincidem e cintilam.
-          p: [base.p[0] + dx * rho, base.p[1] - (dropAt(rho) + SKIRT_UNDER * smooth(0, 0.25, rho)) * LEVEL_STEP, base.p[2] + dz * rho],
+          p: [x, base.p[1] - (dropAt(rho) + SKIRT_UNDER * smooth(0, 0.25, rho)) * LEVEL_STEP, z],
           c: grass.clone().lerp(soil, MAGRA.soil * f),
           s: base.s.map((v, j) => v + (SPLAT_WALL[j] - v) * f * (MAGRA.soil / 0.7)) as unknown as Splat,
         });
@@ -1384,6 +1399,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const cols: P[][] = [];
     // Leque do canto i: do raio do canto (limite com a outra casa) até a normal da borda.
     const wedge = (c: number, base: P, hb: number, rev: boolean) => {
+      // No canto cercado as duas saias dividem a mesma coluna radial. Na boca, conservam o leque da costa.
+      if (mouth !== undefined && bayBlend(mouth, base.p[0] - bayX, base.p[2] - bayZ) === 1) return [];
       const [cx, cz] = corner(c);
       const l = Math.hypot(cx, cz), ux = cx / l, uz = cz / l;
       const steps = [0, 0.5];
@@ -1397,17 +1414,17 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const hbOf = (v: { p: V3 }) => own0 + v.p[1] / LEVEL_STEP;
     const b0 = V(N, 0), bN = V(0, N);
     cols.push(...wedge(i, b0, hbOf(b0), false));
+    const offset = cols.length;
     for (let k = 0; k <= N; k++) {
       const v = V(N - k, k);
-      cols.push(column(v, nrm[0], nrm[2], hbOf(v)));
+      const keepWater = mouth !== undefined && edges[i] === T.Water && (d0(k) > 0 || d0(Math.max(0, k - 1)) > 0 || d0(Math.min(N, k + 1)) > 0);
+      cols.push(column(v, nrm[0], nrm[2], hbOf(v), keepWater));
     }
     cols.push(...wedge((i + 1) % 6, bN, hbOf(bN), true));
     // Boca de água: a água segue pela encosta como uma película fina (espuma), até metade da saia, e some na beira do rio.
     if (wb && edges[i] === T.Water) {
-      const MF = Math.round(M * 0.5);
-      const d0 = (k: number) => Math.max(0, WATER_Y - V(N - k, k).p[1]);
       for (let k = 0; k < N; k++) {
-        const ca = cols[2 + k], cb = cols[3 + k], da = d0(k), db = d0(k + 1);
+        const ca = cols[offset + k], cb = cols[offset + k + 1], da = d0(k), db = d0(k + 1);
         if (da <= 0 && db <= 0) continue;
         const vt = (col: P[], m: number, d: number, kk: number) => {
           const th = d * (1 - m / MF);

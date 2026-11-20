@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { mrt, vec3, vec4 } from 'three/tsl';
+import { attribute, mrt, uniform, vec3, vec4 } from 'three/tsl';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Board, Check, PlaceResult, Placed } from '../core/board';
@@ -24,6 +24,7 @@ import { CLOUD_TOP, U, makeVoidMaterial, slotAlpha, slotBlob, softShadowFilter }
 import { A, fogNode } from './atmosphere';
 import { CL, makeCloudMesh } from './clouds';
 import { seaMap } from './seaMap';
+import { bayMouth } from './bay';
 import { riverMap } from './riverMap';
 import { makeAuroraDome } from './aurora';
 import { GROUND_EXTENT, GROUND_SIZE, groundMap } from './groundMap';
@@ -821,8 +822,10 @@ export class World {
   private infl: THREE.InstancedMesh;
   private inflMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.95, depthWrite: false, fog: false });
   private hoverRing: THREE.Mesh;
-  private nbMarks!: THREE.InstancedMesh;
-  private nbMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.3, depthWrite: false, depthTest: false, fog: false });
+  /** Manchas de luz no chão das vizinhas que mudam: malha que segue o terreno, com teste de profundidade (não cobre casa nem árvore). */
+  private nbMesh!: THREE.Mesh;
+  private nbPulse = uniform(1);
+  private nbMat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide, fog: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   /** A jogada do fantasma de que se quer a prévia das vizinhas, e a chave da que está desenhada (só depois de `GHOST_SETTLE_MS` parado). */
   private nbWant: { def: TileDef; q: number; r: number; rot: number } | null = null;
   private nbShown = '';
@@ -1021,12 +1024,12 @@ export class World {
     this.hoverRing.visible = false;
     this.scene.add(this.hoverRing);
     // Prévia das vizinhas que sobem (Encostas) ou crescem (Paisagem viva) com a peça do fantasma: um realce suave sobre a casa delas.
-    this.nbMarks = new THREE.InstancedMesh(new THREE.CircleGeometry(0.93, 6).rotateX(-Math.PI / 2), this.nbMat, 24);
-    this.nbMarks.count = 0;
-    this.nbMarks.frustumCulled = false;
-    this.nbMarks.renderOrder = 3;
-    this.nbMarks.visible = false;
-    this.scene.add(this.nbMarks);
+    this.nbMat.colorNode = vec4(attribute('color', 'vec3'), attribute('alpha', 'float').mul(this.nbPulse));
+    this.nbMesh = new THREE.Mesh(new THREE.BufferGeometry(), this.nbMat);
+    this.nbMesh.frustumCulled = false;
+    this.nbMesh.renderOrder = 3;
+    this.nbMesh.visible = false;
+    this.scene.add(this.nbMesh);
     this.scene.add(this.trace.group);
 
     const pill = new THREE.CapsuleGeometry(0.026, 0.5, 3, 8).rotateZ(Math.PI / 2);
@@ -1553,7 +1556,7 @@ export class World {
    * Encostas da peça `def`: com `at`, o perfil dela naquela casa e giro (com as vizinhas assentadas); sem `at` (a pilha), o perfil
    * "na mão". `hand` fixa onde as casas assentam. Sem `hillsOn`, nada (o chão de antes).
    */
-  private hillFor(def: TileDef, at?: { q: number; r: number; rot: number }, board: Board | null = this.board): Pick<BuildOpts, 'hill' | 'hand' | 'skirt' | 'rapids'> {
+  private hillFor(def: TileDef, at?: { q: number; r: number; rot: number }, board: Board | null = this.board): Pick<BuildOpts, 'hill' | 'hand' | 'skirt' | 'bay' | 'rapids'> {
     if (!this.hillsOn || !board) return {};
     const hand = handHill(def, logicLevels(board, def));
     const hill = at ? boardHill(board, at.q, at.r, def, at.rot, this.reliefMax && !this.pieceRelief ? (q, r) => this.levelOf(q, r, board) : undefined) : hand;
@@ -1563,6 +1566,7 @@ export class World {
     // mais velha: só os dois níveis decidem, nunca a ordem das jogadas (a peça baixa não desenha nada ali, e a mais velha é refeita
     // quando a vizinha chega, porque `rapids` está na assinatura dela). Uma corredeira completa por borda.
     const skirt = [true, true, true, true, true, true];
+    const bay = new Array<number | undefined>(6);
     const rapids = [0, 0, 0, 0, 0, 0];
     if (at) {
       const here = board.get(at.q, at.r);
@@ -1570,12 +1574,44 @@ export class World {
       const own = mine ? Math.min(...mine) : 0;
       for (let i = 0; i < 6; i++) {
         const w = (i + at.rot) % 6;
-        const nb = board.get(at.q + DIRS[w][0], at.r + DIRS[w][1]);
+        const q = at.q + DIRS[w][0], r = at.r + DIRS[w][1];
+        const nb = board.get(q, r);
         skirt[i] = !nb;
+        const mouth = this.bays.get(hkey(q, r));
+        if (!nb && mouth !== undefined) bay[i] = mouth < 0 ? -1 : (mouth + 6 - at.rot) % 6;
         if (nb && def.edges[i] === T.Water && nb.edges[opposite(w)] === T.Water) rapids[i] = Math.max(0, own - this.levelOf(nb.q, nb.r, board));
       }
     }
-    return { hill, hand, skirt, rapids };
+    return { hill, hand, skirt, bay, rapids };
+  }
+
+  /** Contorno das casas cercadas ou com uma única boca. Só o desenho consulta estas chaves. */
+  private readonly bays = new Map<number, number>();
+
+  private updateBays(cells: Iterable<number>, occupied: (q: number, r: number) => boolean, rebake?: Set<Placed>) {
+    if (!this.flatDraw || !this.unwarp || !this.board) return;
+    let changed = false;
+    for (const key of cells) {
+      const [q, r] = unkey(key);
+      const mouth = bayMouth(q, r, occupied);
+      if (mouth === this.bays.get(key)) continue;
+      if (mouth === undefined) this.bays.delete(key);
+      else this.bays.set(key, mouth);
+      changed = true;
+      if (rebake) {
+        if (this.paintSig !== '') {
+          groundMap.unpreview();
+          seaMap.unpreview();
+          this.paintSig = '';
+        }
+        if (!this.board.get(q, r)) groundMap.clearEmptyCell(q, r, this.unwarp);
+        for (const [dq, dr] of DIRS) {
+          const p = this.board.get(q + dq, r + dr);
+          if (p) rebake.add(p);
+        }
+      }
+    }
+    if (changed) seaMap.setBays(this.bays, this.unwarp);
   }
 
   /**
@@ -1618,7 +1654,7 @@ export class World {
   /** Assinatura de tudo o que, na vizinhança, muda o chão da peça: o perfil, as bordas abertas e as corredeiras. */
   private hillSig(def: TileDef, at: { q: number; r: number; rot: number }, board: Board | null = this.board) {
     const o = this.hillFor(def, at, board);
-    return `${hillSignature(o.hill)}|${o.skirt?.map(Number).join('') ?? ''}|${o.rapids?.join(',') ?? ''}`;
+    return `${hillSignature(o.hill)}|${o.skirt?.map(Number).join('') ?? ''}|${o.bay?.join(',') ?? ''}|${o.rapids?.join(',') ?? ''}`;
   }
 
   private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; spring?: boolean; eggs?: BuildOpts['eggs']; levels?: BuildOpts['levels']; at?: { q: number; r: number; rot: number } }) {
@@ -1780,6 +1816,8 @@ export class World {
     this.widths.clear();
     groundMap.clear();
     seaMap.clear();
+    this.bays.clear();
+    this.updateBays(board.frontier, (q, r) => board.tiles.has(hkey(q, r)));
     riverMap.clear();
     this.paintSig = null;
     this.lib.setEra(board.era);
@@ -2165,11 +2203,16 @@ export class World {
     const t0 = performance.now();
     let n = 0;
     if (this.hillsOn) {
-      n = this.rebakeHill(p) ? 1 : 0;
+      const affected = new Set([p]);
+      const cells = [p.key];
       for (const [dq, dr] of DIRS) {
         const nb = this.board.get(p.q + dq, p.r + dr);
-        if (nb && nb !== p && this.rebakeHill(nb)) n++;
+        if (nb) affected.add(nb);
+        else cells.push(hkey(p.q + dq, p.r + dr));
       }
+      // A baía acompanha as peças já no chão. Uma quinta ou sexta vizinha pode mudar a saia até do outro lado da casa.
+      this.updateBays(cells, (q, r) => this.baked.has(hkey(q, r)), affected);
+      for (const tile of affected) if (this.rebakeHill(tile)) n++;
     }
     if (n) {
       for (const pool of this.pools.values()) pool.flush();
@@ -2470,14 +2513,18 @@ export class World {
 
   /** Coloca várias peças de uma vez, sem animação (modo automático / teste de carga). */
   placeInstant(list: Placed[], board: Board) {
+    this.board = board;
+    const affected = new Set<Placed>();
+    this.updateBays(new Set([...this.bays.keys(), ...board.frontier]), (q, r) => board.tiles.has(hkey(q, r)), affected);
     this.feedEggs(board.list);
     for (const p of list) this.bake(p, this.buildPlaced(p), false);
     // As peças que já estavam no mapa e encostam nas novas mudam de encosta.
     const fresh = new Set(list);
     for (const p of list) for (const [dq, dr] of DIRS) {
       const nb = board.get(p.q + dq, p.r + dr);
-      if (nb && !fresh.has(nb)) this.rebakeHill(nb);
+      if (nb) affected.add(nb);
     }
+    for (const tile of affected) if (!fresh.has(tile)) this.rebakeHill(tile);
     // Paisagem viva: as peças antigas cujo estágio mudou com o lote (vizinhas e manchas da Terra) são refeitas já, sem fila.
     this.queueLiving();
     this.drainLiving(0, true);
@@ -2917,10 +2964,51 @@ export class World {
     return out;
   }
 
+  /**
+   * Uma mancha de luz por casa (dourada = sobe, verde = cresce): discos de bordas irregulares e macias, cujos vértices seguem a altura do
+   * chão naquele ponto (`riseAt`), um fio acima dele. Com o teste de profundidade ligado, casas e árvores ficam na frente da mancha.
+   */
+  private neighborGlow(cells: { p: Placed; rise: boolean }[]): THREE.BufferGeometry {
+    const RINGS = 6, SEG = 28;
+    const pos: number[] = [], col: number[] = [], alpha: number[] = [], idx: number[] = [];
+    const up = new THREE.Color('#ffd36b'), gr = new THREE.Color('#9be37a');
+    for (const { p, rise } of cells) {
+      const c = rise ? up : gr;
+      const o = hexToWorld(p.q, p.r);
+      const base = pos.length / 3;
+      const phase = ((p.q * 7 + p.r * 13) % 11) * 0.6;
+      for (let k = 0; k <= RINGS; k++) {
+        for (let sg = 0; sg < (k === 0 ? 1 : SEG); sg++) {
+          const a = (sg / SEG) * Math.PI * 2;
+          // Borda de "mancha": o raio oscila de leve com o ângulo, sem virar o hexágono da casa.
+          const R = 0.76 * (1 + 0.07 * Math.sin(3 * a + phase) + 0.04 * Math.sin(5 * a + phase * 1.7));
+          const rr = (k / RINGS) * R;
+          const ux = o.x + Math.cos(a) * rr, uz = o.z + Math.sin(a) * rr;
+          const f = this.fl(ux, uz);
+          pos.push(f.x, this.heightOf(p.q, p.r) + this.riseAt(f.x, f.z) + 0.07, f.z);
+          col.push(c.r, c.g, c.b);
+          const t = k / RINGS;
+          alpha.push(0.8 * (1 - THREE.MathUtils.smoothstep(t, 0.4, 1)));
+        }
+      }
+      const ring = (k: number) => (k === 0 ? base : base + 1 + (k - 1) * SEG);
+      for (let sg = 0; sg < SEG; sg++) {
+        const n = (sg + 1) % SEG;
+        idx.push(ring(0), ring(1) + sg, ring(1) + n);
+        for (let k = 1; k < RINGS; k++) idx.push(ring(k) + sg, ring(k + 1) + sg, ring(k + 1) + n, ring(k) + sg, ring(k + 1) + n, ring(k) + n);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.setAttribute('alpha', new THREE.Float32BufferAttribute(alpha, 1));
+    g.setIndex(idx);
+    return g;
+  }
+
   private hideNeighbors() {
     this.nbShown = '';
-    this.nbMarks.visible = false;
-    this.nbMarks.count = 0;
+    this.nbMesh.visible = false;
     this.nbInfo = { rise: 0, grow: 0 };
   }
 
@@ -2937,21 +3025,13 @@ export class World {
       this.nbShown = key;
       const { rise, grow } = this.neighborsChanging(w.def, w.q, w.r, w.rot);
       const cells = [...rise.map((p) => ({ p, rise: true })), ...grow.map((p) => ({ p, rise: false }))].slice(0, 24);
-      const up = new THREE.Color('#ffd36b'), gr = new THREE.Color('#9be37a');
-      cells.forEach(({ p, rise: isRise }, i) => {
-        const { x, z } = hexToWorld(p.q, p.r);
-        const f = this.fl(x, z);
-        this.nbMarks.setMatrixAt(i, tmpM.makeTranslation(f.x, this.heightOf(p.q, p.r) + this.riseAt(x, z) + 0.04, f.z));
-        this.nbMarks.setColorAt(i, isRise ? up : gr);
-      });
-      this.nbMarks.count = cells.length;
-      this.nbMarks.instanceMatrix.needsUpdate = true;
-      if (this.nbMarks.instanceColor) this.nbMarks.instanceColor.needsUpdate = true;
+      this.nbMesh.geometry.dispose();
+      this.nbMesh.geometry = this.neighborGlow(cells);
       this.nbInfo = { rise: rise.length, grow: grow.length };
     }
-    this.nbMarks.visible = this.nbMarks.count > 0 && this.showSlots;
+    this.nbMesh.visible = this.nbInfo.rise + this.nbInfo.grow > 0 && this.showSlots;
     this.nbT += dt;
-    this.nbMat.opacity = 0.26 + 0.1 * Math.sin(this.nbT * 2.2);
+    this.nbPulse.value = 0.85 + 0.15 * Math.sin(this.nbT * 2.2);
   }
 
   clearGhost() {
@@ -3542,7 +3622,6 @@ export class World {
     this.stepTrace(dt);
     this.stepNeighbors(dt);
     groundMap.flush();
-    seaMap.flush();
     riverMap.flush();
     // Aurora boreal: a cúpula acompanha a câmera e só existe à noite, quando o tema a pede.
     this.auroraDome.visible = this.quality !== 'low' && U.aurora.value > 0.01;
@@ -3794,6 +3873,8 @@ export class World {
     // Grão: um padrão novo a cada quadro (passageiro, não precisa de semente). Sem o nó, o uniforme não entra no shader.
     P.grainSeed.value = Math.floor(Math.random() * 3e6);
 
+    // Uma peça pode ter mudado o contorno da baía ao assentar neste quadro.
+    seaMap.flush();
     if (this.post) this.post.pipeline.render();
     else this.renderer.render(this.scene, this.camera);
     if (this.gpuOn) this.pollGpu();

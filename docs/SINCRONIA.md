@@ -18,8 +18,8 @@ O Roger pediu que os dois agentes trabalhem em sincronia no mesmo repositório. 
 | E6 Paisagem viva no jogo (ideia do Roger, referência do Astra) | Claude | `dorf/e5-encostas` | feita (`a2b9157`; relatório em `docs/propostas/e6/`); falta: canal mais largo, celeiro com desenho próprio, conferir o WebGPU e a GPU real |
 | Patamares de vila em geometria (muro de arrimo, como a Aldeia na crista) | Astra | `astra/e5-patamares` a partir de `fcc7530` | feita (`774c2a2`), [relatório e prancha](propostas/e5-patamares/RELATORIO.md); juntada à `dorf/e5-encostas` (`91084f3`) |
 | E7 Limite de buffers de vértice no WebGPU (árvores com 9 buffers acima de 1000 instâncias; também na `main`) | Claude | `dorf/e5-encostas` | feita; atributos do kit intercalados em `instGeometry`, gancho `?vbuf`, teste e caso no smoke ([relatório](propostas/e7/RELATORIO.md)); falta conferir na GPU real; na `main` pelo PR #116 (`dorf/d43-webgpu-buffers`) |
-| Casas vazias internas com contorno redondo (hoje leem como baías hexagonais) | Astra | `astra/baias-internas` a partir de `91084f3` | em andamento (issue #115) |
-| E8 Atualização das vizinhas: emissor de fumaça que sobra (semente 1, (1,0) giro 2), peça que assenta durante a queda da anterior (semente 3, Viva), corredeira nas duas ordens, prévia da vizinha que vai subir | Claude | `dorf/e5-encostas` | em andamento (issue #115) |
+| Casas vazias internas com contorno redondo | Astra | `astra/baias-internas` a partir de `bd371dc` | feita (`f702699`), [relatório e pranchas](propostas/baias-internas/RELATORIO.md), issue #115 |
+| E8 Atualização das vizinhas: fumaça, peça que assenta durante a queda, corredeira nas duas ordens, prévia da vizinha que sobe | Claude | `dorf/e5-encostas` | feita (`4081afe` e seguintes; [relatório](propostas/e8/RELATORIO.md)); `npm run scene` compara cena incremental e reconstrução (16 casos ok); falta conferir o WebGPU e a GPU real (issue #115) |
 | Entrepostos como modo sobre a base (cais, fretes, oráculo independente do contrato) | livre (sugestão: Astra) | `astra/entrepostos-modo` | livre, depois da E6 |
 
 ## Coordenação

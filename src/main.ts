@@ -266,6 +266,11 @@ let waterPeek = '';
 let terraPeek = '';
 /** Paisagem viva: no fantasma, quantas vizinhas ganham um estágio (" · N crescem"); vazio sem a opção ou sem ganho. */
 let vivaPeek = '';
+/** Prévia das vizinhas que mudam (calculada no mundo depois que o fantasma para): " · 1 sobe · 2 crescem"; vazio enquanto não há. */
+const nbLabel = () => {
+  const { rise, grow } = world.nbInfo;
+  return `${rise ? ` · ${rise} ${rise > 1 ? 'sobem' : 'sobe'}` : ''}${grow ? ` · ${grow} cresc${grow > 1 ? 'em' : 'e'}` : ''}`;
+};
 /** "Onde encaixa": as melhores casas da peça atual. Valem só para a jogada e o giro em que foram pedidas. */
 let hints: { q: number; r: number; rot: number; points: number }[] | null = null;
 let hintsKey = '';
@@ -1991,7 +1996,7 @@ function step(now: number) {
   if (scorePeek !== null && hover) {
     const s = screenOf(hover.q, hover.r, 0.55);
     const route = routePeek.length ? ` · ${routePeek.map(routeLabel).join(' · ')}` : '';
-    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${terraPeek}${waterPeek}${vivaPeek}${route}`, color: theme.ui.accent, kind: 'score' });
+    markers.push({ id: 210000, x: s.x, y: s.y, visible: s.visible, text: `+${scorePeek}${terraPeek}${waterPeek}${nbLabel() || vivaPeek}${route}`, color: theme.ui.accent, kind: 'score' });
   }
   // Influência das construções: o ganho aparece com o fantasma numa casa contornada.
   const inf = hover && game.current && !st ? game.board.influenceAt(hover.q, hover.r, game.current.edges) : null;

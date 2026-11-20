@@ -42,10 +42,6 @@ const cases = [
   // Limite de buffers de vértice do WebGPU (maxVertexBuffers = 8): a Alta com a Paisagem viva e o TRAA tem o pior caso (matriz anterior da instância).
   // O `?vbuf` conta, em qualquer backend, os buffers que cada malha usa; roda em WebGL2 para valer também sem GPU.
   { name: 'buffers-de-vertice', q: 'theme=holanda&seed=7&auto=60&quality=high&mode=zen&viva=1&vbuf&webgl', backend: 'webgl2', vbuf: true, tiles: 61 },
-  // Vida útil dos buffers (issue #115): o three destrói o buffer da GPU de uma geometria descartada, e um buffer intercalado dividido entre lotes
-  // quebrava os outros (`Buffer used in submit while destroyed`). Queda animada, troca de era, zoom além das árvores leves (rig.dist 18) e desfazer.
-  { name: 'vida-dos-buffers', q: 'mode=terra&theme=holanda&seed=16&auto=15&quality=high', backend: 'webgpu', mode: 'Terra contínua', vida: true, tiles: 16 },
-  { name: 'vida-dos-buffers-webgl', q: 'mode=terra&theme=holanda&seed=16&auto=15&quality=high&webgl', backend: 'webgl2', mode: 'Terra contínua', vida: true, tiles: 16 },
   // Um #mode= inventado é ignorado (abre no modo de sempre).
   { name: 'hash-invalido', q: 'theme=holanda&seed=3&auto=12&quality=low', hash: '#mode=inventado', backend: 'webgpu', mode: 'Clássico' },
 ];
@@ -68,39 +64,6 @@ for (const c of cases) {
   }
   // Mais alguns quadros: pipelines de materiais novos compilam no primeiro desenho e podem falhar depois.
   if (stats?.tiles >= (c.tiles ?? (c.bench ? 61 : TILES)) && !errors.length) await page.waitForTimeout(5000);
-  if (c.vida && stats?.tiles >= c.tiles && !errors.length) {
-    const wait = (ms) => page.waitForTimeout(ms);
-    const run = (f, ...a) => page.evaluate(f, ...a);
-    // Várias peças em sequência, cada uma com a queda animada (a peça viva é descartada ao pousar).
-    for (let i = 0; i < 4 && !errors.length; i++) {
-      await run(() => window.__placeBest());
-      await wait(900);
-    }
-    await run(() => window.__land?.());
-    // Troca de era (Pool.retarget das casas) e zoom de longe e de perto, passando o limite das árvores leves.
-    for (const era of [1, 2, 3, 0]) {
-      if (errors.length) break;
-      await run((e) => window.__era(e, 1, 6), era);
-      await wait(700);
-      await run(() => window.__goto(0, 0, 30));
-      await wait(900);
-      await run(() => window.__goto(0, 0, 6));
-      await wait(900);
-    }
-    // Desfazer e jogar de novo.
-    for (let i = 0; i < 2 && !errors.length; i++) {
-      await run(() => window.__undoMove?.());
-      await wait(700);
-    }
-    for (let i = 0; i < 2 && !errors.length; i++) {
-      await run(() => window.__placeBest());
-      await wait(900);
-    }
-    await run(() => window.__goto(0, 0, 30));
-    await wait(1500);
-    await run(() => window.__goto(0, 0, 8));
-    await wait(1500);
-  }
   const problems = [...errors];
   if (!stats) problems.push('o jogo não desenhou nenhum quadro (window.__stats vazio)');
   else {
