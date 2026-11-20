@@ -2366,41 +2366,48 @@ function specialsFor(theme: Theme, walls: string, roofs: string) {
 
 // ---------------------------------------------------------------- instâncias
 
-const interleavedOf = new WeakMap<THREE.BufferGeometry, Record<string, THREE.BufferAttribute | THREE.InterleavedBufferAttribute>>();
+/** Os atributos float do kit já intercalados (a cópia em CPU), guardados por geometria-base. Só o array é compartilhado, nunca o buffer da GPU. */
+const packedOf = new WeakMap<THREE.BufferGeometry, { stride: number; data: Float32Array; plain: [string, number, number][] } | null>();
 
 /**
  * Os atributos do kit (`position`, `normal`, `color`, `tint`, `glow`, `vol`...) num buffer intercalado só: o WebGPU aceita 8 buffers de
  * vértice por malha e cada atributo solto conta um (mais `iColor` e a matriz da instância, que passa a 2 quando há mais de 1000
  * instâncias e o TRAA pede a matriz anterior). Intercalado, os nomes e a leitura nos materiais não mudam, e o kit usa 1 buffer.
- * Vale por geometria-base (cache), então todos os lotes do mesmo kit dividem o mesmo buffer.
+ * O array em CPU vale por geometria-base (cache), mas cada geometria ganha o SEU `InterleavedBuffer`: o three destrói o buffer da GPU
+ * quando a geometria é descartada (`Geometries.onDispose` -> `Attributes.delete`), e um buffer dividido entre lotes quebrava os outros
+ * (`Buffer used in submit while destroyed`, issue #115). Os `BufferAttribute` soltos do `base` seguem compartilhados: o three só apaga a
+ * entrada deles e recria no próximo quadro.
  */
 function interleaved(base: THREE.BufferGeometry) {
-  let out = interleavedOf.get(base);
-  if (out) return out;
-  const plain = Object.entries(base.attributes).filter(([, a]) => (a as THREE.BufferAttribute).isBufferAttribute && a.array instanceof Float32Array && !(a as THREE.BufferAttribute).normalized);
-  out = { ...base.attributes } as Record<string, THREE.BufferAttribute | THREE.InterleavedBufferAttribute>;
-  if (plain.length >= 3) {
-    const count = plain[0][1].count;
-    const stride = plain.reduce((n, [, a]) => n + a.itemSize, 0);
-    const data = new Float32Array(count * stride);
-    let off = 0;
-    for (const [, a] of plain) {
-      for (let i = 0; i < count; i++) for (let c = 0; c < a.itemSize; c++) data[i * stride + off + c] = a.array[i * a.itemSize + c];
-      off += a.itemSize;
+  let packed = packedOf.get(base);
+  if (packed === undefined) {
+    const plain = Object.entries(base.attributes).filter(([, a]) => (a as THREE.BufferAttribute).isBufferAttribute && a.array instanceof Float32Array && !(a as THREE.BufferAttribute).normalized);
+    packed = null;
+    if (plain.length >= 3) {
+      const count = plain[0][1].count;
+      const stride = plain.reduce((n, [, a]) => n + a.itemSize, 0);
+      const data = new Float32Array(count * stride);
+      const layout: [string, number, number][] = [];
+      let off = 0;
+      for (const [k, a] of plain) {
+        for (let i = 0; i < count; i++) for (let c = 0; c < a.itemSize; c++) data[i * stride + off + c] = a.array[i * a.itemSize + c];
+        layout.push([k, a.itemSize, off]);
+        off += a.itemSize;
+      }
+      packed = { stride, data, plain: layout };
     }
-    const buf = new THREE.InterleavedBuffer(data, stride);
-    off = 0;
-    for (const [k, a] of plain) {
-      out[k] = new THREE.InterleavedBufferAttribute(buf, a.itemSize, off);
-      off += a.itemSize;
-    }
+    packedOf.set(base, packed);
   }
-  interleavedOf.set(base, out);
+  const out = { ...base.attributes } as Record<string, THREE.BufferAttribute | THREE.InterleavedBufferAttribute>;
+  if (packed) {
+    const buf = new THREE.InterleavedBuffer(packed.data, packed.stride);
+    for (const [k, size, off] of packed.plain) out[k] = new THREE.InterleavedBufferAttribute(buf, size, off);
+  }
   return out;
 }
 
 /**
- * Geometria para um InstancedMesh: compartilha os atributos do kit e acrescenta
+ * Geometria para um InstancedMesh: compartilha o array do kit (o buffer da GPU é de cada geometria) e acrescenta
  * `iColor`, a cor de cada instância (a mesma geometria base serve a vários meshes).
  */
 export function instGeometry(base: THREE.BufferGeometry, cap: number, colors?: Float32Array) {

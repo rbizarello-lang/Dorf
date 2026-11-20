@@ -46,6 +46,10 @@ const cases = [
   // Limite de buffers de vértice do WebGPU (maxVertexBuffers = 8): a Alta com o TRAA tem o pior caso (matriz anterior da instância).
   // O `?vbuf` conta, em qualquer backend, os buffers que cada malha usa; roda em WebGL2 para valer também sem GPU.
   { name: 'buffers-de-vertice', q: 'theme=holanda&seed=7&auto=60&quality=high&mode=zen&vbuf&webgl', backend: 'webgl2', tiles: 61, vbuf: true },
+  // Vida útil dos buffers (issue #115): o three destrói o buffer da GPU de uma geometria descartada, e um buffer intercalado dividido entre lotes
+  // quebrava os outros (`Buffer used in submit while destroyed`). Queda animada, troca de era, zoom além das árvores leves (rig.dist 18) e desfazer.
+  { name: 'vida-dos-buffers', q: 'mode=zen&theme=holanda&seed=16&auto=15&quality=high', backend: 'webgpu', vida: true, tiles: 16 },
+  { name: 'vida-dos-buffers-webgl', q: 'mode=zen&theme=holanda&seed=16&auto=15&quality=high&webgl', backend: 'webgl2', vida: true, tiles: 16 },
   { name: 'ao-vivo-webgl', q: 'theme=holanda&seed=3&auto=6&quality=low&time=day&webgl', backend: 'webgl2', tiles: 7, live: true },
 ];
 
@@ -88,6 +92,39 @@ for (const c of cases) {
     stats = await page.evaluate(() => window.__stats ?? null);
     const lbl = (id) => page.evaluate((i) => document.getElementById(i)?.textContent?.trim(), id);
     console.log(`  ao vivo: hora final "${await lbl('btn-time')}", qualidade "${await lbl('btn-quality')}"`);
+  }
+  if (c.vida && stats?.tiles >= c.tiles && !errors.length) {
+    const wait = (ms) => page.waitForTimeout(ms);
+    const run = (f, ...a) => page.evaluate(f, ...a);
+    // Várias peças em sequência, cada uma com a queda animada (a peça viva é descartada ao pousar).
+    for (let i = 0; i < 4 && !errors.length; i++) {
+      await run(() => window.__placeBest());
+      await wait(900);
+    }
+    await run(() => window.__land?.());
+    // Troca de era (Pool.retarget das casas) e zoom de longe e de perto, passando o limite das árvores leves.
+    for (const era of [1, 2, 3, 0]) {
+      if (errors.length) break;
+      await run((e) => window.__era(e, 1, 6), era);
+      await wait(700);
+      await run(() => window.__goto(0, 0, 30));
+      await wait(900);
+      await run(() => window.__goto(0, 0, 6));
+      await wait(900);
+    }
+    // Desfazer e jogar de novo.
+    for (let i = 0; i < 2 && !errors.length; i++) {
+      await run(() => document.getElementById('btn-undo')?.click());
+      await wait(700);
+    }
+    for (let i = 0; i < 2 && !errors.length; i++) {
+      await run(() => window.__placeBest());
+      await wait(900);
+    }
+    await run(() => window.__goto(0, 0, 30));
+    await wait(1500);
+    await run(() => window.__goto(0, 0, 8));
+    await wait(1500);
   }
   const problems = [...errors];
   if (!stats) problems.push('o jogo não desenhou nenhum quadro (window.__stats vazio)');
