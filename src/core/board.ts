@@ -1,5 +1,6 @@
 import { BLESSING, SYN_BLESSING, type BlessingId } from './blessings';
 import { DIRS, hexDistance, hkey, opposite } from './hex';
+import { riverPath, voyage, type ChartId, type FreightContractId, type Port } from './ports';
 import { LOOKOUT_MOVES, SITE_REWARD, type Site, type SiteKind } from './sites';
 import { SPECIALS, type SpecialKind } from './specials';
 import { SEASON_BONUS, SEASON_KIND, seasonAt } from './seasons';
@@ -62,6 +63,10 @@ export interface Rules {
   railChance: number;
   /** Rotas de comércio: mercados e portos da mesma rede rendem pela distância (src/core/routes.ts). */
   routes: boolean;
+  /** Entrepostos: ligue três cais à vila pelo rio e cumpra o frete escolhido. */
+  riverTrade: boolean;
+  layout: ChartId;
+  freight: FreightContractId;
   /** Peças por missão: grupo (mais 1 a cada 6 peças pedidas), grupo exato, fechar, contagem (perfeitos, interações). */
   groupQuestTiles: number;
   exactQuestTiles: number;
@@ -121,6 +126,9 @@ export const DEFAULT_RULES: Rules = {
   waterChance: 0.17,
   railChance: 0.09,
   routes: false,
+  riverTrade: false,
+  layout: 'confluencia',
+  freight: 'direto',
   groupQuestTiles: 5,
   exactQuestTiles: 7,
   closeQuestTiles: 6,
@@ -275,6 +283,8 @@ export interface PlaceResult {
   wonder: { stage: number; started: boolean; done: boolean } | null;
   /** Exploradores: pontos pelas peças que sobraram quando o último sítio foi achado. */
   leftoverBonus?: number;
+  /** Cais pagos nesta jogada, na ordem das entregas. */
+  deliveries: Port[];
   /** Peça especial colocada: quantas peças à volta contaram, pontos e peças ganhos. */
   special: { kind: SpecialKind; count: number; points: number; tiles: number } | null;
   /** Influência das construções vizinhas que esta peça aproveitou. */
@@ -284,6 +294,7 @@ export interface PlaceResult {
 }
 
 export class Board {
+  ports: Port[] = [];
   readonly tiles = new Map<number, Placed>();
   readonly list: Placed[] = [];
   readonly frontier = new Set<number>();
@@ -410,7 +421,8 @@ export class Board {
     const lastEra = R.eraScores.length > 1 && this.era === R.eraScores.length - 1;
     const wonder = !this.wonder && R.wonderStages > 0 && lastEra && eraMark === null && edges.filter((e) => e === T.Village).length >= 2;
     const water = heights && def && this.rules.springs && edges.includes(T.Water) && !occupied ? this.waterIf(q, r, edges, heights[edges.indexOf(T.Water)], def) : undefined;
-    return { valid: !occupied && neighbors > 0 && !conflict, occupied, neighbors, matches, edgeState, heightState, terra, steps, falls, water, synergies, site: this.siteAt(q, r), eraMark, wonder, influence: this.influenceAt(q, r, edges) };
+    const dryPort = this.ports.length > 0 && !edges.includes(T.Water) && this.ports.some((p) => p.q === q && p.r === r);
+    return { valid: !occupied && neighbors > 0 && !conflict && !dryPort, occupied, neighbors, matches, edgeState, heightState, terra, steps, falls, water, synergies, site: this.siteAt(q, r), eraMark, wonder, influence: this.influenceAt(q, r, edges) };
   }
 
   /**
@@ -519,6 +531,7 @@ export class Board {
     b.lookout = this.lookout;
     b.questSeq = this.questSeq;
     b.sites = this.sites.map((s) => ({ ...s }));
+    b.ports = this.ports.map((p) => ({ ...p }));
     if (this.wonder) b.wonder = { tile: b.list[this.wonder.tile.index], stage: this.wonder.stage };
     for (const [k, set] of this.influence) b.influence.set(k, new Set(set));
     b.blessings.push(...this.blessings);
@@ -612,6 +625,15 @@ export class Board {
       }
     }
     return p;
+  }
+
+  /** Simula as ligações e pagamentos da peça candidata sem alterar o tabuleiro. */
+  voyageAt(q: number, r: number, edges: readonly T[]) {
+    return voyage(this.ports, this.rules.freight, (x, y) => x === q && y === r ? edges : this.get(x, y)?.edges, q, r);
+  }
+
+  riverPath(q: number, r: number, from?: readonly [number, number]): [number, number][] {
+    return riverPath((x, y) => this.get(x, y)?.edges, q, r, from);
   }
 
   place(q: number, r: number, def: TileDef, rot: number): PlaceResult {
@@ -808,6 +830,18 @@ export class Board {
       points += h.points;
       tilesGained += h.tiles;
     }
+    const deliveries: Port[] = [];
+    if (this.ports.length) {
+      const { connected, shipments } = this.voyageAt(q, r, edges);
+      for (const port of connected) port.connectedAt ??= placed.index;
+      for (const { port, tiles } of shipments) {
+        port.delivered = true;
+        port.paidAt = placed.index;
+        port.reward = tiles;
+        tilesGained += tiles;
+        deliveries.push(port);
+      }
+    }
 
     this.score += points;
     // Eras: a pontuação acumulada abre a próxima, que traz peças.
@@ -818,7 +852,7 @@ export class Board {
       eraUp = this.era;
       this.markPending = this.era;
     }
-    return { placed, points, matches: c.matches, neighbors: c.neighbors, steps: c.steps, falls: c.falls, terra, water, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special, influence: c.influence, routes };
+    return { placed, points, matches: c.matches, neighbors: c.neighbors, steps: c.steps, falls: c.falls, terra, water, perfect, closed, synergies: c.synergies, tilesGained, questsDone, questsFailed, newQuest, site, eraUp, wonder, special, influence: c.influence, routes, deliveries };
   }
 
   blessed(id: BlessingId) {

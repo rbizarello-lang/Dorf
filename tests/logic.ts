@@ -1056,8 +1056,8 @@ const N_GAMES = Number(process.argv[2] ?? 300);
 const t0 = Date.now();
 const logs: GameLog[] = [];
 const POLICIES: Policy[] = ['greedy', 'quest', 'random', 'worst'];
-// Os modos de antes do Relevo: a mistura das 600 partidas (e a saída delas) não muda com o modo novo.
-const OLD_MODES = MODES.filter((m) => m.id !== 'relevo' && m.id !== 'terra');
+// Os modos de antes do Relevo mantêm a mistura das 600 partidas. Os demais têm oráculos próprios.
+const OLD_MODES = MODES.filter((m) => m.id !== 'relevo' && m.id !== 'terra' && m.id !== 'entrepostos');
 for (let g = 0; g < N_GAMES; g++) {
   const themeIdx = g % THEMES.length;
   const policy = POLICIES[Math.floor(g / THEMES.length) % POLICIES.length];

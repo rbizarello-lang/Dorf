@@ -1,0 +1,126 @@
+.voyage {
+  position: fixed;
+  left: var(--gutter-l);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px + var(--map-lift));
+  width: min(274px, calc(100vw - var(--gutter-l) - var(--gutter-r) - 118px));
+  max-height: 54dvh;
+  overflow: auto;
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  font-size: 0.84em;
+}
+
+#voyage-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55em;
+  width: 100%;
+  min-height: 44px;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+#voyage-toggle span {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+#voyage-toggle span::after { content: '▾'; }
+#voyage-toggle[aria-expanded="true"] span::after { content: '▴'; }
+
+#voyage-body { padding: 0 8px 8px; }
+#voyage-order { margin: 0 2px 6px; }
+#voyage-ports { margin: 0; padding: 0; list-style: none; }
+
+#voyage-ports button {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 37px;
+  padding: 3px 2px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  text-align: left;
+}
+
+.voyage-number {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 7px;
+  background: var(--harbor-color);
+  color: #242019;
+  font-weight: 800;
+}
+
+.voyage-state { font-size: 0.87em; }
+.voyage .delivered .voyage-state, .voyage .waiting .voyage-state { font-weight: 800; }
+.voyage-actions { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 5px; }
+
+.voyage-actions button {
+  min-height: 35px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--ink) 20%, transparent);
+  border-radius: 7px;
+  background: transparent;
+  font-size: 0.9em;
+  font-weight: 800;
+}
+
+#voyage-ports button:hover, #voyage-toggle:hover, .voyage-actions button:hover {
+  background: color-mix(in srgb, var(--ink) 8%, var(--panel));
+}
+
+.voyage-layout {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 0 0 12px;
+  font-weight: 800;
+}
+
+.voyage-layout select {
+  min-height: 35px;
+  padding: 3px 8px;
+  border: 1px solid var(--soft);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+}
+
+.marker.site.harbor {
+  translate: -50% 0;
+  padding-inline: 7px;
+  border: 2px solid var(--c);
+  background: #243638;
+  color: #fff8e9;
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+body.capture .voyage { display: none; }
+html[data-text='s'] .voyage { font-size: 0.78em; }
+html[data-text='l'] .voyage { font-size: 0.97em; }
+
+@media (pointer: coarse), (max-width: 650px) {
+  #voyage-ports button, .voyage-actions button { min-height: 44px; }
+}
+
+@media (max-width: 360px) {
+  #voyage-toggle { flex-wrap: wrap; justify-content: flex-start; gap: 0 0.4em; }
+  #voyage-ports button { grid-template-columns: 22px 1fr; column-gap: 4px; }
+  .voyage-state { grid-column: 2; }
+}

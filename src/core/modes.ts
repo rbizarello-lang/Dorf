@@ -4,7 +4,7 @@ import { T } from './tiles';
 // Versões alternativas do jogo. Um modo é dado: muda regras e o que a interface oferece
 // (desfazer, semente do dia). As regras finais são padrão ← tema ← modo.
 
-export type ModeId = 'classico' | 'zen' | 'diario' | 'exploradores' | 'rotas' | 'rapida' | 'relevo' | 'terra';
+export type ModeId = 'classico' | 'zen' | 'diario' | 'exploradores' | 'entrepostos' | 'rotas' | 'rapida' | 'relevo' | 'terra';
 
 export interface Mode {
   id: ModeId;
@@ -49,6 +49,13 @@ export const MODES: readonly Mode[] = [
     // Sítios à metade da distância: com o padrão (até 15 casas), nem quem caça sítios achava os 10 com 60 peças.
     rules: { sites: 10, siteScale: 0.5, startTiles: 60, endOnSites: true },
     undos: 1,
+  },
+  {
+    id: 'entrepostos',
+    name: 'Entrepostos',
+    tagline: 'Comece com 24 peças e leve o rio da vila até os três cais. Escolha a carta e o frete.',
+    rules: { riverTrade: true, startTiles: 24, sites: 0, maxQuests: 0, blessings: false, influence: false, wonderStages: 0, eraTiles: 0 },
+    undos: 5,
   },
   {
     id: 'rotas',

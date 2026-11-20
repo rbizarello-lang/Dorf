@@ -30,11 +30,20 @@ export interface MapNode {
   kind: 'market' | 'port' | 'both';
 }
 
+export interface MapHarbor {
+  q: number;
+  r: number;
+  id: number;
+  color: string;
+  delivered: boolean;
+}
+
 export interface MapFrame {
   quests: readonly MapQuest[];
   sites: readonly MapSite[];
   /** Mercados e portos da Estrada Real. */
   nodes: readonly MapNode[];
+  harbors?: readonly MapHarbor[];
   /** Cantos da tela no chão, na ordem do World.viewOnGround. */
   corners: readonly ({ x: number; z: number } | null)[];
 }
@@ -149,6 +158,7 @@ export class Minimap {
   private readonly bctx: CanvasRenderingContext2D;
   private readonly vctx: CanvasRenderingContext2D;
   private tiles: MapTile[] = [];
+  private anchors: readonly { q: number; r: number }[] = [];
   private colors: readonly string[] = [];
   private last: MapFrame | null = null;
   private ox = -2;
@@ -248,9 +258,10 @@ export class Minimap {
   }
 
   /** Troca de tema, partida nova ou desfazer: repinta tudo de uma vez. */
-  rebuild(tiles: readonly MapTile[], colors: readonly string[]) {
+  rebuild(tiles: readonly MapTile[], colors: readonly string[], anchors: readonly { q: number; r: number }[] = []) {
     this.colors = colors;
     this.tiles = tiles.slice();
+    this.anchors = anchors;
     this.fitTiles();
     this.redrawAll();
     if (!this.collapsed) this.paint();
@@ -287,7 +298,7 @@ export class Minimap {
     let maxX = -Infinity;
     let minZ = Infinity;
     let maxZ = -Infinity;
-    for (const t of this.tiles) {
+    for (const t of [...this.tiles, ...this.anchors]) {
       const { x, z } = hexToWorld(t.q, t.r);
       if (x < minX) minX = x;
       if (x > maxX) maxX = x;
@@ -384,6 +395,25 @@ export class Minimap {
     for (const n of view.nodes) this.node(ctx, n);
     for (const q of view.quests) this.pennant(ctx, q);
     this.trapezoid(ctx, view.corners);
+    for (const harbor of view.harbors ?? []) this.harbor(ctx, harbor);
+  }
+
+  private harbor(ctx: CanvasRenderingContext2D, harbor: MapHarbor) {
+    const { x, z } = hexToWorld(harbor.q, harbor.r);
+    const p = this.project(x, z);
+    const r = this.px <= 96 ? 5.4 : 7;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = harbor.color;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#27373a';
+    ctx.stroke();
+    ctx.fillStyle = '#242019';
+    ctx.font = `bold ${r * 1.4}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(harbor.delivered ? '✓' : String(harbor.id + 1), p.x, p.y + 0.5);
   }
 
   private node(ctx: CanvasRenderingContext2D, n: MapNode) {

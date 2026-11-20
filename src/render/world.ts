@@ -20,6 +20,7 @@ import { CameraRig, FOV } from './cameraRig';
 import { createRenderer, type Backend } from './gpu';
 import { Lib, WONDER_PODIUM, instGeometry, postStampGeometry, setInstColor, stampGeometry } from './lib';
 import { Life } from './life';
+import { HarborLayer } from './harbors';
 import { CLOUD_TOP, U, makeVoidMaterial, slotAlpha, slotBlob, softShadowFilter } from './materials';
 import { A, fogNode } from './atmosphere';
 import { CL, makeCloudMesh } from './clouds';
@@ -1002,6 +1003,7 @@ export class World {
     this.stamps.position.y = -0.115;
     this.stamps.renderOrder = 1;
     this.stamps.frustumCulled = false;
+    this.stamps.visible = false;
     this.scene.add(this.stamps);
 
     const hex = new THREE.CircleGeometry(0.9, 6).rotateX(-Math.PI / 2);
@@ -1630,6 +1632,13 @@ export class World {
 
   /** Superfície (Encostas) de cada peça assentada: a `Life` lê daqui a altura do chão sob o que se move. */
   private surfaces = new Map<number, HillSurface | undefined>();
+  private harbors: HarborLayer | null = null;
+
+  private syncHarbors(board: Board) {
+    if (!board.ports.length) return;
+    this.harbors ??= new HarborLayer(this.staticRoot);
+    this.harbors.sync(board, (q, r) => this.baked.has(hkey(q, r)), (q, r) => this.flq(q, r), (x, z) => this.heightAt(x, z) + this.riseAt(x, z));
+  }
 
   /** Quanto o chão sobe nesse ponto do mundo (já deslocado pelo fluido): a soma da encosta da peça que o cobre. */
   riseAt(x: number, z: number): number {
@@ -1756,6 +1765,7 @@ export class World {
 
   rebuild(board: Board) {
     this.board = board;
+    this.harbors?.reset();
     U.hillN.value = this.hillsOn && !this.warp ? 1 : 0;
     this.applySeason();
     for (const c of this.chunks.values()) c.dispose(this.staticRoot);
@@ -1788,6 +1798,7 @@ export class World {
     this.eggReset();
     this.feedEggs(board.list);
     for (const p of board.list) this.bake(p, this.buildPlaced(p), false);
+    this.syncHarbors(board);
     for (const pool of this.pools.values()) pool.flush();
     this.updateFrontier(board);
     this.life.sync(board);
@@ -2383,6 +2394,7 @@ export class World {
     }
     this.stamps.geometry.dispose();
     this.stamps.geometry = geos.length ? mergeGeometries(geos)! : new THREE.BufferGeometry();
+    this.stamps.visible = geos.length > 0;
   }
 
   /** Coloca com animação: a peça assenta, levanta poeira e depois é "cozida" no bloco. */
@@ -2481,6 +2493,7 @@ export class World {
     // Paisagem viva: as peças antigas cujo estágio mudou com o lote (vizinhas e manchas da Terra) são refeitas já, sem fila.
     this.queueLiving();
     this.drainLiving(0, true);
+    this.syncHarbors(board);
     for (const pool of this.pools.values()) pool.flush();
     groundMap.flush();
     this.updateFrontier(board);
@@ -3032,6 +3045,9 @@ export class World {
    */
   placeFx(res: PlaceResult) {
     const { x, z } = hexToWorld(res.placed.q, res.placed.r);
+    if (this.board && this.harbors && !this.reducedMotion) {
+      for (const port of res.deliveries) this.harbors.depart(this.board, port, (q, r) => this.flq(q, r), (q, r) => this.heightOf(q, r));
+    }
     if (res.perfect) {
       this.burst(x, z, 'sparkle', 26);
       this.halo(x, z);
@@ -3754,6 +3770,7 @@ export class World {
         if (this.board) {
           this.life.sync(this.board);
           this.fireflies.sync(this.board);
+          this.syncHarbors(this.board);
         }
         this.drops = this.drops.filter((x) => x !== d);
         if (this.board) this.syncWonder(this.board, true);
@@ -3784,6 +3801,7 @@ export class World {
     this.life.night = U.night.value;
     this.life.phase = phaseOfTod(this.timeOfDay);
     this.life.update(dt);
+    this.harbors?.tick(dt);
     this.life.wakes(this.rig.target.x, this.rig.target.z);
     this.spawnSmoke(dt);
     this.spawnMist(dt);
