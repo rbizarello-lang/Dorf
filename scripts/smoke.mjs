@@ -77,7 +77,9 @@ for (const c of cases) {
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('response', (r) => r.status() >= 400 && r.url().startsWith(base) && errors.push(`${r.status()} ${r.url()}`));
   const t0 = Date.now();
-  await page.goto(base + '?' + c.q + (c.hash ?? ''));
+  // A carga pode passar de 30 s (o padrão do Playwright) quando o `?auto=` monta muitas peças com as Encostas no WebGL por software:
+  // o mesmo prazo do tabuleiro vale para a abertura, e um erro aqui conta como falha do caso, sem derrubar os seguintes.
+  await page.goto(base + '?' + c.q + (c.hash ?? ''), { timeout: TIMEOUT }).catch((e) => errors.push(`abertura: ${String(e).split('\n')[0]}`));
   let stats = null;
   while (Date.now() - t0 < TIMEOUT && !errors.length) {
     stats = await page.evaluate(() => window.__stats ?? null);
