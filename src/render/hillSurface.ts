@@ -51,7 +51,18 @@ export class HillSurface {
 
   /** Altura no ponto local (x, z) (origem da peça), pela interpolação dos triângulos da malha. */
   at(x: number, z: number, base = false) {
-    const side = (Math.floor((Math.atan2(z, x) * 3) / Math.PI) + 6) % 6;
+    // Setor de 60° por produtos vetoriais (o `atan2` pesava: o desenho dos decalques chama `at` sete vezes por triângulo). Perto da
+    // divisa entre dois setores o sinal é incerto e vale o `atan2`, então o resultado é sempre o de antes.
+    let side = -1;
+    for (let k = 0; k < 6; k++) {
+      const c0 = corners[k], c1 = corners[(k + 1) % 6];
+      const s0 = c0[0] * z - c0[1] * x, s1 = c1[0] * z - c1[1] * x;
+      if (s0 >= 0 && s1 < 0) {
+        if (s0 > 1e-9 && -s1 > 1e-9) side = k;
+        break;
+      }
+    }
+    if (side < 0) side = (Math.floor((Math.atan2(z, x) * 3) / Math.PI) + 6) % 6;
     const [ax, az] = corners[side], [bx, bz] = corners[(side + 1) % 6];
     let u = Math.max(0, ((x * bz - z * bx) * this.divisions) / INR), v = Math.max(0, ((z * ax - x * az) * this.divisions) / INR);
     const sum = u + v;
