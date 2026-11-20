@@ -27,11 +27,16 @@ const specs = Array.from({ length: N }, (_, i) => {
   }
   return { def, hill };
 });
+/** Soma de verificação da geometria (posição, cor e pesos de terreno): uma otimização que não mexe na peça não muda a soma. */
+let check = 0;
 const run = (on: boolean) => {
   let top = 0, over = 0;
+  check = 0;
   const t0 = cpu();
   for (const s of specs) {
     const b = buildTile(s.def.edges, s.def.seed, theme, { detail: Number(process.env.DETAIL ?? 0.8), houses: [], hill: on ? s.hill : undefined, hand: on ? s.hill : undefined });
+    for (const a of [b.pos, b.col, b.splat, b.water]) for (let k = 0; k < a.length; k += 3) check += a[k] * (1 + (k % 13));
+    check += b.decos.length * 3.1 + b.decos.reduce((p, d) => p + d.x + d.z, 0);
     top += b.groundEnd / 9;
     over += (b.pos.length - b.groundEnd) / 9;
   }
@@ -40,5 +45,6 @@ const run = (on: boolean) => {
 run(false);
 run(true);
 const a = run(false), b = run(true);
+const sum = check;
 const f = (r: { ms: number; top: number; over: number }) => `${(r.ms / N).toFixed(2)} ms/peça, topo+lados ${r.top.toFixed(0)} tri, decalques+fundações ${r.over.toFixed(0)} tri`;
-console.log(`${N} peças (${theme.id})\n  sem Encostas: ${f(a)}\n  com Encostas: ${f(b)}`);
+console.log(`${N} peças (${theme.id})\n  sem Encostas: ${f(a)}\n  com Encostas: ${f(b)}\n  soma de verificação (com Encostas): ${sum.toFixed(6)}`);

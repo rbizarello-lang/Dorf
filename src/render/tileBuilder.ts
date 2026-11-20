@@ -237,13 +237,18 @@ class Buf {
     const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     if (nx * n[0] + ny * n[1] + nz * n[2] < 0) {
-      [b, c] = [c, b];
-      [cb, cc] = [cc, cb];
-      [sb, sc] = [sc, sb];
+      const t = b, tc = cb, ts = sb;
+      b = c;
+      c = t;
+      cb = cc;
+      cc = tc;
+      sb = sc;
+      sc = ts;
     }
-    this.pos.push(...a, ...b, ...c);
+    // Sem espalhar (`push(...a)`): é o laço mais quente do `buildTile` (centenas de milhares de triângulos por partida).
+    this.pos.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
     if (this.withColor) this.col.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b, cc.r, cc.g, cc.b);
-    this.spl.push(...sa, ...sb, ...sc);
+    this.spl.push(sa[0], sa[1], sa[2], sa[3], sb[0], sb[1], sb[2], sb[3], sc[0], sc[1], sc[2], sc[3]);
   }
 
   quad(a: V3, b: V3, c: V3, d: V3, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, cd: THREE.Color, n: V3, sp: Splat = NO_SPLAT) {
@@ -477,22 +482,25 @@ export function resolveFlow(edges: readonly T[], known?: readonly number[]): num
  */
 function nearestParam(x: number, z: number, p: Path) {
   const pts = p.pts;
-  let best = { d: Infinity, t: 0, tx: 1, tz: 0 };
+  let bd = Infinity, bt = 0, btx = 1, btz = 0;
   const n = pts.length - 1;
   for (let k = 0; k < n; k++) {
-    const [ax, az] = pts[k];
-    const [bx, bz] = pts[k + 1];
-    const dx = bx - ax, dz = bz - az;
+    const a = pts[k], b = pts[k + 1];
+    const ax = a[0], az = a[1];
+    const dx = b[0] - ax, dz = b[1] - az;
     const len2 = dx * dx + dz * dz || 1;
     const u = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2));
     const hw = p.hws ? p.hws[k] + (p.hws[k + 1] - p.hws[k]) * u : p.hw;
     const d = Math.hypot(x - ax - dx * u, z - az - dz * u) - hw;
-    if (d < best.d) {
+    if (d < bd) {
       const l = Math.sqrt(len2);
-      best = { d, t: (k + u) / n, tx: dx / l, tz: dz / l };
+      bd = d;
+      bt = (k + u) / n;
+      btx = dx / l;
+      btz = dz / l;
     }
   }
-  return best;
+  return { d: bd, t: bt, tx: btx, tz: btz };
 }
 
 const smooth = (a: number, b: number, x: number) => {
@@ -671,7 +679,7 @@ function waterField(shape: WaterShape, paths: Path[], widths: readonly number[],
     if (junction) d = Math.min(d, Math.hypot(x, z) - junction);
     return d + wiggle(x, z);
   };
-  const e = (x: number, z: number) => {
+  const e0 = (x: number, z: number) => {
     // Perfil das bordas próximas, misturado pelo inverso do quadrado da distância: na borda
     // vale exatamente o perfil dela (|s| − largura, ou terra), igual ao da vizinha.
     let A = 0, sw = 0, se = 0;
@@ -689,6 +697,15 @@ function waterField(shape: WaterShape, paths: Path[], widths: readonly number[],
     }
     const fi = interior(x, z);
     return A > 0 ? A * (se / sw) + (1 - A) * fi : fi;
+  };
+  // O mesmo ponto é pedido várias vezes seguidas (altura, cor, terraço, margem): guarda o último.
+  let ex = NaN, ez = NaN, ev = 0;
+  const e = (x: number, z: number) => {
+    if (x === ex && z === ez) return ev;
+    ev = e0(x, z);
+    ex = x;
+    ez = z;
+    return ev;
   };
   const ground = (x: number, z: number) => {
     const d = e(x, z);
