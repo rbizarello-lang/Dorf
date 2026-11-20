@@ -9,7 +9,8 @@ O Roger pediu que os dois agentes trabalhem em sincronia no mesmo repositório. 
 4. **Antes de cada commit:** `npm run check`. Depois do build, rode `npm run smoke`. Quando mexer no visual, gere capturas de antes e depois e olhe as imagens.
 5. **Salve tudo no git.** Relatórios e pranchas (JPG, até 1600 px) vão em `docs/propostas/<etapa>/` na própria branch, com push a cada marco verde. Pastas temporárias podem ser apagadas entre as sessões.
 6. **Português do Brasil** nos commits, comentários e documentos. Sem caminhos pessoais (`C:/Users/...`) nem notas de processo nos documentos.
-7. **Ao terminar uma tarefa:** marque-a como feita na tabela, com a branch e o commit, e escreva um resumo de 3 a 5 linhas em `docs/propostas/<etapa>/RELATORIO.md`.
+7. **Um agente por branch de cada vez.** Dois agentes enviando à mesma branch ao mesmo tempo apagaram o trabalho um do outro (`f09c033` e `39eb6ec`). Para trabalho em paralelo, cada um usa a própria branch e o merge é feito no fim. Antes de qualquer commit numa branch compartilhada, faça `git pull --no-rebase` e confira com `git diff --stat HEAD@{1}` que só os seus arquivos mudaram.
+8. **Ao terminar uma tarefa:** marque-a como feita na tabela, com a branch e o commit, e escreva um resumo de 3 a 5 linhas em `docs/propostas/<etapa>/RELATORIO.md`.
 
 ## Quem faz o quê
 | Tarefa | Dono | Branch | Estado |

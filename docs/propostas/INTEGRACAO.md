@@ -44,7 +44,7 @@ Medidos na cabeça da integração contra a `main` `f8a4458`, na mesma máquina,
 ## Verificação
 - `npm run check` verde (typecheck, testes, build).
 - `npm run smoke`: todos os casos WebGL verdes (`webgl`, `relevo-webgl`, `terra-hash-webgl`, `buffers-de-vertice`, `ao-vivo-webgl`), em 3 min 14 s no SwiftShader. Os casos WebGPU (`bench`, `webgpu`, `relevo`, `terra`, `hash-invalido`, `webgpu-alta`, `webgpu-ultra`) falham aqui só por "WebGPU Device Lost" do SwiftShader; a `main` falha igual nesta máquina. A CI do GitHub roda o WebGPU.
-- Os casos `vida-dos-buffers` e `vida-dos-buffers-webgl` citados no pedido não existem na branch: a E7b cobre a vida dos buffers no `buffers-de-vertice` e no `tests/`.
+- Os casos `vida-dos-buffers` (WebGPU) e `vida-dos-buffers-webgl` estão no smoke desde `5dd0abd`. Eles tinham se perdido quando dois agentes enviaram à branch ao mesmo tempo, e foram reaplicados com a E7b. Fazem quedas animadas, trocas de era, zoom de longe e de perto e desfazer na Terra, Holanda, semente 16, e falham com qualquer erro no console.
 
 ## Pendências conhecidas
 - Celeiro da Paisagem viva sem desenho próprio: hoje é uma caixa com telhado de quatro águas nas cores das casas e lê mal de perto.
