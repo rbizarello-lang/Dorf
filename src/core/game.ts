@@ -1,6 +1,7 @@
 import { type BlessingId, blessingOffer } from './blessings';
 import { Board, type PlaceResult, type Rules } from './board';
 import { unkey } from './hex';
+import { chart, channelTile } from './ports';
 import { mulberry32, type Rng } from './rng';
 import { generateSites } from './sites';
 import { generateHiddenSprings } from './water';
@@ -25,6 +26,7 @@ export class Game {
   rot = 0;
   placedCount = 0;
   discarded = 0;
+  finalSupplyBonus = 0;
   private drawn = 0;
   /**
    * Escolhas de era ainda por fazer, a mais antiga primeiro. Não travam a partida: a carta
@@ -50,6 +52,11 @@ export class Game {
       seed: Math.floor(this.rng() * 2 ** 31),
       quest: null,
     };
+    if (rules.riverTrade) {
+      const map = chart(seed, rules.layout);
+      starter.edges = map.edges;
+      this.board.ports = map.ports;
+    }
     this.board.placeRaw(0, 0, starter, 0);
     this.board.computeGroups();
     this.board.sites = generateSites(seed, rules.sites, rules.siteScale);
@@ -64,17 +71,25 @@ export class Game {
   }
 
   /**
-   * Cada peça tem um gerador próprio (semente + índice) e sempre consome os mesmos
-   * sorteios. Assim, a mesma semente dá a mesma sequência de peças para qualquer
-   * jogador; só a presença da missão depende do estado da partida. Uma peça especial
-   * liberada toma o lugar da peça do seu índice, sem mexer nas outras.
+   * Cada peça tem um gerador próprio (semente + índice). A mão e o mirante leem a
+   * mesma sequência; só a decisão de manter a missão depende do estado da partida.
    */
-  private draw(): TileDef {
-    const rng = mulberry32((this.seed + Math.imul(++this.drawn, 0x9e3779b1)) >>> 0);
-    const kind = this.slots.get(this.drawn);
-    if (kind) return specialTile(rng, kind);
+  private deal(index: number) {
+    const rng = mulberry32((this.seed + Math.imul(index, 0x9e3779b1)) >>> 0);
+    const kind = this.slots.get(index);
+    if (kind) return { def: specialTile(rng, kind), roll: 1 };
+    if (this.rules.riverTrade) {
+      const def = channelTile(rng, index, this.rules.layout);
+      if (def) return { def, roll: 1 };
+    }
     const roll = rng();
     const def = generateTile(rng, true, this.rules.waterChance, this.rules.railChance);
+    return { def, roll };
+  }
+
+  private draw(): TileDef {
+    const { def, roll } = this.deal(++this.drawn);
+    if (!def.quest) return def;
     // Missões ainda na mão (atual e próxima) contam para o limite.
     let pending = 0;
     for (const t of new Set([this.current, this.next])) if (t?.quest) pending++;
@@ -90,14 +105,8 @@ export class Game {
   upcoming(n: number): TileDef[] {
     const out: TileDef[] = [];
     for (let k = 1; k <= n; k++) {
-      const rng = mulberry32((this.seed + Math.imul(this.drawn + k, 0x9e3779b1)) >>> 0);
-      const kind = this.slots.get(this.drawn + k);
-      if (kind) {
-        out.push(specialTile(rng, kind));
-        continue;
-      }
-      rng();
-      out.push({ ...generateTile(rng, true, this.rules.waterChance, this.rules.railChance), quest: null });
+      const { def } = this.deal(this.drawn + k);
+      out.push({ ...def, quest: null });
     }
     return out;
   }
@@ -117,7 +126,7 @@ export class Game {
 
   /**
    * O que a jogada renderia em (q, r) com o giro atual, sem colocar a peça e sem mexer
-   * na pilha, nas rotas pagas ou na sequência. O total inclui a sobra dos Exploradores.
+   * na pilha, nas rotas pagas ou na sequência. O total inclui o bônus pela pilha restante.
    */
   preview(q: number, r: number): PlaceResult | null {
     return this.previewAt(q, r, this.rot);
@@ -129,8 +138,8 @@ export class Game {
     if (!this.board.checkDef(q, r, def, rot).valid) return null;
     const board = this.board.clone();
     const res = board.place(q, r, def, rot);
-    if (this.rules.endOnSites && board.sites.length && board.sitesLeft() === 0) {
-      const left = Math.max(0, this.stack + res.tilesGained - 1);
+    if (this.goalComplete(board)) {
+      const left = Math.max(0, this.stack + (this.rules.fixedStack ? 0 : res.tilesGained) - 1);
       const bonus = left * this.rules.leftoverPoints;
       res.points += bonus;
       res.leftoverBonus = bonus;
@@ -158,9 +167,10 @@ export class Game {
     if (this.rules.blessings) for (let e = era + 1; e <= this.board.era; e++) this.offers.push(blessingOffer(this.seed, e, [...this.board.blessings, ...this.offers.flat()]));
     if (this.rules.fixedStack) res.tilesGained = 0;
     if (!this.rules.infinite) this.stack += res.tilesGained - 1;
-    // Exploradores: achou o último sítio, a partida acaba e cada peça que sobrou vale pontos.
-    if (this.rules.endOnSites && this.board.sites.length && this.board.sitesLeft() === 0) {
+    // O último sítio ou frete encerra a partida e a pilha restante vira pontos.
+    if (this.goalComplete(this.board)) {
       const bonus = Math.max(0, this.stack) * this.rules.leftoverPoints;
+      this.finalSupplyBonus = bonus;
       this.board.score += bonus;
       res.points += bonus;
       res.leftoverBonus = bonus;
@@ -168,6 +178,11 @@ export class Game {
     }
     this.advance();
     return res;
+  }
+
+  private goalComplete(board: Board): boolean {
+    if (this.rules.riverTrade) return board.ports.length > 0 && board.ports.every((p) => p.delivered);
+    return this.rules.endOnSites && board.sites.length > 0 && board.sitesLeft() === 0;
   }
 
   /** Escolhe a carta 0 ou 1 da escolha de era mais antiga; devolve a carta, ou null se não havia escolha. */

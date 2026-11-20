@@ -43,6 +43,8 @@ const cases = [
   // Terra contínua: pelo parâmetro e pelo #hash (a prévia publicada só recebe o hash), nos dois backends. O texto da era traz o nome do modo.
   { name: 'terra', q: 'mode=terra&theme=holanda&seed=3&auto=12&quality=low', backend: 'webgpu', mode: 'Terra contínua' },
   { name: 'terra-hash-webgl', q: 'theme=brasil&seed=3&auto=12&quality=low&webgl', hash: '#mode=terra', backend: 'webgl2', mode: 'Terra contínua' },
+  { name: 'entrepostos', q: 'mode=entrepostos&layout=forquilha&freight=madeira&theme=holanda&seed=42&auto=12&quality=low', backend: 'webgpu', mode: 'Entrepostos' },
+  { name: 'entrepostos-hash-webgl', q: 'theme=egito&seed=42&auto=12&quality=low&webgl', hash: '#mode=entrepostos&layout=enseada&freight=direto', backend: 'webgl2', mode: 'Entrepostos' },
   // Limite de buffers de vértice do WebGPU (maxVertexBuffers = 8): a Alta com a Paisagem viva e o TRAA tem o pior caso (matriz anterior da instância).
   // O `?vbuf` conta, em qualquer backend, os buffers que cada malha usa; roda em WebGL2 para valer também sem GPU.
   { name: 'buffers-de-vertice', q: 'theme=holanda&seed=7&auto=60&quality=high&mode=zen&viva=1&vbuf&webgl', backend: 'webgl2', vbuf: true, tiles: 61 },

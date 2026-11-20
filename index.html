@@ -46,6 +46,20 @@
 
     <aside id="quests" class="quests" aria-label="Missões"></aside>
 
+    <aside id="voyage" class="voyage" aria-label="Progresso da viagem" hidden>
+      <button id="voyage-toggle" type="button" aria-expanded="false" aria-controls="voyage-body">
+        <strong>Carta fluvial</strong><span id="voyage-progress" aria-live="polite"></span>
+      </button>
+      <div id="voyage-body" hidden>
+        <p id="voyage-order"></p>
+        <ul id="voyage-ports"></ul>
+        <div class="voyage-actions">
+          <button id="voyage-fit" type="button">Enquadrar a carta</button>
+          <button id="voyage-change" type="button">Mudar frete</button>
+        </div>
+      </div>
+    </aside>
+
     <aside id="minimap" class="minimap collapsed" aria-label="Minimapa">
       <canvas id="minimap-canvas" width="140" height="140" aria-hidden="true"></canvas>
       <button id="minimap-toggle" class="minimap-btn" type="button" title="Abrir o minimapa (M)" aria-expanded="false" aria-controls="minimap-canvas">Mapa</button>
