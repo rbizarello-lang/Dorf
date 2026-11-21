@@ -95,6 +95,14 @@ const SHADOW_MAP: Record<Quality, number> = { cinema: 4096, ultra: 4096, high: 2
  * O Cinema divide o perto em mais faixas: a sombra junto ao alvo fica mais fina.
  */
 const CASCADES: Record<Quality, number[]> = { cinema: [0.18, 0.34, 0.56, 1], ultra: [0.3, 0.5, 1], high: [], medium: [], low: [] };
+/**
+ * Altura da laje das casas vazias acima do entorno (o pé comum das peças, `voidMesh`). A laje é translúcida e não grava profundidade:
+ * a meia altura (como era, a -0,12) ela deixava a parede e a encosta das peças vizinhas abaixo dela lavadas, como vidro. No pé nada
+ * fica abaixo dela, e as paredes, opacas, a cobrem sem teste especial. Só um fio acima do entorno, para não brigar com ele.
+ */
+const SLOT_LIFT = 0.012;
+/** Tom da laje das casas vazias à noite (luar frio). */
+const SLOT_MOON = new THREE.Color('#b9c8ee');
 const tmpM = new THREE.Matrix4();
 const tmpV2 = new THREE.Vector2();
 const tmpM2 = new THREE.Matrix4();
@@ -1086,7 +1094,7 @@ export class World {
     this.slots = new THREE.InstancedMesh(hex, this.slotMat, 512);
     this.slots.count = 0;
     this.slots.frustumCulled = false;
-    this.slots.position.y = -0.12;
+    this.slots.position.y = -TILE_T - 0.1 + SLOT_LIFT; // no pé das peças (ver SLOT_LIFT)
     this.scene.add(this.slots);
     this.infl = new THREE.InstancedMesh(dashGeometry(false), this.inflMat, 256);
     this.infl.count = 0;
@@ -1296,11 +1304,13 @@ export class World {
     this.voidU.sky.value.copy(s.hemiSky).multiplyScalar(Math.min(1, s.hemiI * 0.75));
     this.voidU.fill.value.copy(s.fill);
     this.voidU.line.value.copy(s.line);
-    this.slotMat.color.copy(s.line);
+    // À noite a laje clareia para um tom de luar e perde menos opacidade: escura sobre o mar escuro ela sumia.
+    this.slotMat.color.copy(s.line).lerp(SLOT_MOON, s.night * 0.7);
     // Nanquim dos carimbos: a tinta do tema diluída no papel.
     if (this.theme) this.stampMat.color.set(this.theme.ui.ink).lerp(s.fill, 0.5);
     // Sobre o mar e a areia as casas livres são só uma sombra leve: o fundo já é cenário, não papel.
-    this.slotMat.opacity = (0.55 - s.night * 0.3) * (this.voidU.sea.value ? 0.4 : this.voidU.sand.value ? 0.65 : 1);
+    const over = this.voidU.sea.value ? 0.4 : this.voidU.sand.value ? 0.65 : 1; // sobre o cenário a laje é só uma sombra leve
+    this.slotMat.opacity = (0.55 - s.night * 0.17) * (over + (Math.max(over, 0.7) - over) * s.night);
     slotAlpha.value = this.slotMat.opacity * 1.8;
     this.inflMat.color.set('#e0981c');
     this.sun.color.copy(s.sun);
@@ -1500,6 +1510,7 @@ export class World {
     // A peça magra (R7a) é só do Relevo; o Clássico segue a base. Vale antes de montar qualquer peça (a partida nova reconstrói tudo).
     setMagra(on);
     this.voidMesh.position.y = -TILE_T - 0.1;
+    this.slots.position.y = this.voidMesh.position.y + SLOT_LIFT;
     this.voidU.sandK.value = MAGRA.sand;
     this.setFluid(this.fluidPref === 'on' || (this.fluidPref === 'auto' && on));
     U.rock.value = on ? 1 : 0;
@@ -2553,7 +2564,7 @@ export class World {
       maxR = Math.max(maxR, Math.hypot(x, z));
       if (i >= 512) continue;
       const f = this.fl(x, z);
-      this.slots.setMatrixAt(i++, tmpM.makeTranslation(f.x, this.heightOf(q, r), f.z));
+      this.slots.setMatrixAt(i++, tmpM.makeTranslation(f.x, 0, f.z));
     }
     this.slotCount = i;
     this.slots.count = i;

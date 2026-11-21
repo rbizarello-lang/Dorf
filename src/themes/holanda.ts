@@ -66,6 +66,7 @@ export const holanda: Theme = {
   mill: 'windmill',
   gate: { style: 'brick', colors: ['#a04c34', '#e4d8bc'] },
   bridge: { style: 'draw', colors: ['#2f2a26', '#f1e6d2'] },
+  barn: { style: 'schuur', colors: ['#302a26', '#b3583d', '#e2c89d'] },
   crops: [
     // Faixas de cor em linhas retas: tulipas (o carro-chefe), jacintos e cereais.
     { style: 'tulip', weight: 0.46, colors: ['#e63946', '#f4c430', '#f28bb8', '#fbf6ee', '#9b5de5', '#ff7f2a'], soil: '#6b5a3e' },

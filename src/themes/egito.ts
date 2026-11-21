@@ -58,6 +58,7 @@ export const egito: Theme = {
   mill: 'granary',
   // Portal de pilone onde a trilha encosta na vila (não pontua). Sem ponte: o Egito antigo cruzava o Nilo de barco.
   gate: { style: 'pylon', colors: ['#e6d2a0', '#2a4b8d'] },
+  barn: { style: 'silos', colors: ['#c08b52', '#edbc79', '#8e603e'] },
   crops: [
     { style: 'wheat', weight: 0.35, colors: ['#e6b84a', '#d9a93c', '#efc65a'], soil: '#9a7440' },
     { style: 'barley', weight: 0.3, colors: ['#cfb85a', '#c2aa4c', '#d8c266'], soil: '#8f6e3e' },

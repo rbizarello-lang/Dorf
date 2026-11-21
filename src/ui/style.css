@@ -95,7 +95,7 @@ kbd {
   pointer-events: none;
 }
 
-.hud-top > * {
+.hud-top > :not(.toasts) {
   pointer-events: auto;
 }
 
@@ -595,6 +595,8 @@ kbd {
   margin-top: -6px;
 }
 
+/* De propósito: com 5 peças ou menos o número fica vermelho (aviso de que a pilha está acabando),
+   em todos os modos, inclusive o Entrepostos, onde a pilha é curta. Não é um ícone nem um erro. */
 .stack-count.low output {
   color: var(--bad);
 }
@@ -671,15 +673,15 @@ kbd {
 }
 
 .toasts {
-  position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 18px);
+  position: absolute;
+  top: calc(100% + 10px);
   left: 50%;
   transform: translateX(-50%);
   display: grid;
   justify-items: center;
   gap: 6px;
   pointer-events: none;
-  width: min(420px, calc(100vw - 2 * var(--gutter)));
+  width: min(420px, calc(100% - 2 * var(--gutter)));
 }
 
 /* Dica das primeiras partidas: um cartão por vez, acima da linha de controles. */
@@ -739,6 +741,8 @@ kbd {
 }
 
 .toast {
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 8px 16px;
   border-radius: 999px;
   background: var(--panel);
@@ -917,7 +921,9 @@ kbd {
 .stats {
   position: fixed;
   left: var(--gutter);
-  top: calc(env(safe-area-inset-top, 0px) + 110px);
+  /* Meio da borda esquerda: o canto de cima é do cartão de pontos (que cresce em janela estreita). */
+  top: 50%;
+  transform: translateY(-50%);
   margin: 0;
   padding: 8px 10px;
   border-radius: 10px;
@@ -936,6 +942,13 @@ kbd {
   padding: var(--gutter);
   background: color-mix(in srgb, var(--ink) 35%, transparent);
   z-index: 10;
+}
+
+/* Menu de modos: a lista é longa e cobre quase a altura toda, então a barra de cima aparecia pelas
+   bordas do diálogo. Fundo mais escuro (e um leve desfoque) para só o menu chamar o olhar. */
+.modal:has(.modes) {
+  background: color-mix(in srgb, var(--ink) 68%, transparent);
+  backdrop-filter: blur(3px);
 }
 
 .sheet {
@@ -1090,7 +1103,9 @@ kbd {
 
 .final {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* Uma coluna por quadro: modo sem missões mostra só pontos e peças, sem célula vazia. */
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 8px;
   margin: 16px 0 4px;
 }
@@ -1133,6 +1148,7 @@ kbd {
 }
 
 .final.small {
+  grid-auto-flow: row;
   grid-template-columns: repeat(3, 1fr);
   margin-top: 10px;
 }
@@ -1247,7 +1263,7 @@ kbd {
 
 /* ---------- foto e vídeo */
 /* Modo foto e vídeo: só o mapa (os avisos continuam). */
-body.capture .hud-top,
+body.capture .hud-top > :not(.toasts),
 body.capture .quests,
 body.capture .minimap,
 body.capture .stack,
@@ -1460,9 +1476,6 @@ body.capture #floaters {
   .quests {
     width: min(260px, calc(100vw - 2 * var(--gutter) - 150px));
   }
-  .toasts {
-    top: calc(env(safe-area-inset-top, 0px) + 104px);
-  }
   .tools .icon-btn#btn-quality {
     display: none;
   }
@@ -1471,9 +1484,6 @@ body.capture #floaters {
 @media (max-height: 480px) {
   .quest:nth-child(n + 4) {
     display: none;
-  }
-  .toasts {
-    top: calc(env(safe-area-inset-top, 0px) + 12px);
   }
 }
 
@@ -1487,6 +1497,29 @@ body.capture #floaters {
   .icon-btn {
     min-width: 34px;
     padding: 0 8px;
+  }
+}
+
+/* Janela estreita de computador (por exemplo 800×600): o nome do tema vira só a pastilha de cores
+   e os rótulos longos viram ícones (o title de cada botão segue dizendo o que é), para a barra
+   caber numa linha em vez de duas. Nada some: só encolhe. */
+@media (min-width: 521px) and (max-width: 900px) {
+  .chip #theme-name,
+  .icon-btn .long {
+    display: none;
+  }
+  .icon-btn .short {
+    display: inline;
+  }
+  .chip {
+    padding: 0 8px;
+  }
+  .tools {
+    gap: 4px;
+  }
+  .icon-btn {
+    min-width: 32px;
+    padding: 0 6px;
   }
 }
 
@@ -1597,7 +1630,6 @@ html[data-text='s'] .quests,
 html[data-text='s'] .stack,
 html[data-text='s'] .hint,
 html[data-text='s'] .tip,
-html[data-text='s'] .toasts,
 html[data-text='s'] .modal,
 html[data-text='s'] .popover,
 html[data-text='s'] .minimap {
@@ -1609,7 +1641,6 @@ html[data-text='l'] .quests,
 html[data-text='l'] .stack,
 html[data-text='l'] .hint,
 html[data-text='l'] .tip,
-html[data-text='l'] .toasts,
 html[data-text='l'] .modal,
 html[data-text='l'] .popover,
 html[data-text='l'] .minimap {

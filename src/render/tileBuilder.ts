@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { corner as corner0, edgeMid as edgeMid0, INR } from '../core/hex';
 import { hillFlat, hillHeight, hillRiser, type HillProfile } from '../core/hills';
 import { HillSurface } from './hillSurface';
+import { villageAccess, type VillageLane } from './villageAccess';
 import { BAY_RADIUS, bayBlend } from './bay';
 import type { DayPhase, EggKit } from '../core/eggs';
 import { mulberry32, pick, randInt, randRange, type Rng, weighted } from '../core/rng';
@@ -3021,6 +3022,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // --- Vida na vila: lotes de terra batida sob as casas, uma rua clara do meio de cada borda de
   // vila até o centro (ela emenda com a da peça vizinha) e, com vila em 3 ou mais bordas, uma
   // pracinha com poço onde as ruas se encontram. Sem sorteio: sai das posições das casas.
+  const accessLanes: VillageLane[] = [];
   const vSectors = [0, 1, 2, 3, 4, 5].filter((i) => edges[i] === T.Village);
   if (vSectors.length) {
     const vg = tc(theme.ground[T.Village]);
@@ -3032,6 +3034,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     // Trechos da rua que não pisam em rio, estrada nem construção reservada.
     const open = (x: number, z: number) => clear(x, z) > 0.035 && reserved.every(([rx, rz, rr]) => (rx - x) ** 2 + (rz - z) ** 2 > rr * rr * 0.8);
     const lane = (a: V2, b: V2, hw: number) => {
+      if (hill && !hasSec) accessLanes.push({ from: a, to: b, halfWidth: hw });
       let run: V2[] = [];
       for (const p of line(a, b, 10)) {
         if (open(p[0], p[1])) run.push(p);
@@ -3455,6 +3458,50 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     for (let k = groundEnd; k < g.pos.length; k += 3) g.pos.a[k + 1] += liftAt(g.pos.a[k], g.pos.a[k + 2]);
     for (const d of decos) d.y += liftAt(d.x, d.z);
     for (let k = 0; k < chimneys.length; k += 4) chimneys[k + 1] += liftAt(chimneys[k], chimneys[k + 2]);
+  }
+
+  // O acesso pertence à rua, sobre a encosta pronta e separado das fundações das casas.
+  if (hill && accessLanes.length && houses.length) {
+    const walls = decos.filter(d => d.key.startsWith('wall:')).map(d => ({
+      d, body: BODY[theme.houses[Number(d.key.slice(5))].body], c: Math.cos(d.ry), s: Math.sin(d.ry),
+    }));
+    const access = villageAccess(accessLanes, (x, z) => hill.at(x, z), (x, z) =>
+      Math.hypot(x, z) <= INR - 0.10 && edges[sectorAt(x, z)] === T.Village &&
+      (!field || field.e(x, z) >= 0.19) && (!road.paths.length || distToPaths(x, z, road.paths) >= 0.24) &&
+      reserved.every(([rx, rz, rr]) => Math.hypot(x - rx, z - rz) >= rr + 0.02) &&
+      houses.some(h => Math.hypot(x - h.x, z - h.z) < 0.38) &&
+      walls.every(({ d, body, c, s }) => {
+        const dx = x - d.x, dz = z - d.z;
+        return Math.abs(dx * c - dz * s) > body.w * d.sx * 0.60 + 0.009 ||
+          Math.abs(dx * s + dz * c) > body.d * d.sz * 0.60 + 0.024;
+      }),
+    );
+    if (access) {
+      const { from, along, across, halfWidth, treads } = access;
+      const stone = tc(theme.ground[T.Village]).clone().lerp(tc(theme.roadBed), 0.25).lerp(WHITE, 0.58);
+      const riser = shade(stone, 0.60);
+      const at = (t: number, side: number, y: number): V3 =>
+        [from[0] + t * along[0] + side * across[0], y, from[1] + t * along[1] + side * across[1]];
+      const foot = ([x, y, z]: V3): V3 => [x, Math.min(y, hill.at(x, z) - 0.006), z];
+      const street = stone.clone().lerp(tc(theme.ground[T.Village]), 0.55);
+      const apron = (start: number, end: number, first: THREE.Color, last: THREE.Color) => {
+        const corner = (t: number, side: number): V3 => {
+          const [x, , z] = at(t, side, 0);
+          return [x, hill.at(x, z) + 0.009, z];
+        };
+        g.quad(corner(start, -halfWidth), corner(start, halfWidth), corner(end, halfWidth), corner(end, -halfWidth), first, first, last, last, UP);
+      };
+      apron(-access.landing, 0, street, stone);
+      apron(treads[treads.length - 1].end, treads[treads.length - 1].end + access.landing, stone, street);
+      for (const { start, end, y } of treads) {
+        const a = at(start, -halfWidth, y), b = at(start, halfWidth, y);
+        const c = at(end, halfWidth, y), d = at(end, -halfWidth, y);
+        g.quad(a, b, c, d, stone, stone, stone, stone, UP);
+        g.quad(foot(a), foot(b), b, a, riser, riser, riser, riser, [-along[0], 0, -along[1]], SPLAT_WALL);
+        g.quad(foot(a), a, d, foot(d), riser, riser, riser, riser, [-across[0], 0, -across[1]], SPLAT_WALL);
+        g.quad(foot(b), b, c, foot(c), riser, riser, riser, riser, [across[0], 0, across[1]], SPLAT_WALL);
+      }
+    }
   }
 
   return {

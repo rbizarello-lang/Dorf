@@ -89,7 +89,7 @@ A terceira entrega encerra a viagem e cada peça restante vale 20 pontos. A viag
 
 **Encostas (em todos os modos e temas):** o chão de cada peça tem um morro suave ou uma serra baixa, e as casas, as árvores e as plantações acompanham a subida. É só aparência: não muda pontos, peças nem partidas salvas. Dá para voltar ao desenho de antes com `?encostas=0` (na prévia publicada, `#encostas=0`).
 
-**Paisagem viva (opção em Aa):** conforme você encaixa peças, as casas sobem de tamanho, a mata fica mais cheia e o cultivo ganha celeiro. Onde dois rios se ligam, a abertura cresce dos dois lados. Essas mudanças são visuais. A Paisagem viva vem ligada no Zen e na Terra contínua e desligada nos outros modos. Você pode mudar em Aa ou com `?viva=1` e `?viva=0`.
+**Paisagem viva (opção em Aa):** conforme você encaixa peças, as casas sobem de tamanho, a mata fica mais cheia e o cultivo ganha um celeiro próprio do tema a partir do segundo estágio. Onde dois rios se ligam, a abertura cresce dos dois lados. Essas mudanças são visuais. A Paisagem viva vem ligada no Zen e na Terra contínua e desligada nos outros modos. Você pode mudar em Aa ou com `?viva=1` e `?viva=0`.
 
 **Interações:** algumas bordas diferentes também "conversam". Quando se encostam, rendem +5 e erguem uma construção na borda. A prévia acende em dourado antes de você colocar a peça.
 

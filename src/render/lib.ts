@@ -1329,6 +1329,63 @@ function stiltGeometry(walls: Col, roofs: Col, wood: Col) {
   return kit(parts);
 }
 
+/** Celeiros do cultivo: cabem na clareira aberta por developBuild, com a frente voltada para +z. */
+function barnGeometry({ style, colors: [wall, roof, detail] }: Theme['barn']) {
+  const gable = (w: number, h: number, d: number, y: number) => new THREE.CylinderGeometry(1, 1, 1, 3)
+    .rotateX(-Math.PI / 2).scale(w / Math.sqrt(3), h / 1.5, d).translate(0, y + h / 3, 0);
+  const door = (w: number, h: number, z: number, y = 0): Part =>
+    ({ geo: box(w, h, 0.003, 0, y, z), color: detail });
+  const posts = (x: number, z: number, h: number): Part[] =>
+    [-x, x].flatMap((a) => [-z, z].map((b) => ({ geo: box(0.009, h, 0.009, a, 0, b), color: detail })));
+
+  switch (style) {
+    case 'schuur':
+      return kit([
+        { geo: box(0.096, 0.042, 0.063), color: wall },
+        { geo: gable(0.109, 0.048, 0.075, 0.042), color: roof },
+        { geo: box(0.034, 0.032, 0.003, 0, 0, 0.032), color: DOOR },
+        door(0.003, 0.032, 0.034),
+        { geo: box(0.094, 0.004, 0.064), color: detail },
+      ]);
+    case 'silos':
+      // Silos abobadados de adobe sobre um único embasamento.
+      return kit([
+        { geo: box(0.112, 0.012, 0.068), color: detail },
+        ...[-0.028, 0.028].flatMap((x) => [
+          { geo: cyl(0.023, 0.025, 0.043, 8, x, 0.012), color: wall },
+          { geo: cyl(0.012, 0.023, 0.014, 8, x, 0.055), color: roof },
+          { geo: box(0.014, 0.015, 0.004, x, 0.024, 0.024), color: detail },
+        ]),
+      ]);
+    case 'kura':
+      return kit([
+        { geo: box(0.066, 0.053, 0.057), color: wall },
+        { geo: gable(0.097, 0.031, 0.089, 0.053), color: roof },
+        { geo: box(0.042, 0.006, 0.028, 0, 0.033, 0.035), color: roof },
+        { geo: box(0.068, 0.013, 0.059), color: roof },
+        door(0.024, 0.028, 0.030, 0.011),
+      ]);
+    case 'paiol':
+      return kit([
+        ...posts(0.033, 0.023, 0.023),
+        { geo: box(0.082, 0.036, 0.057, 0, 0.023), color: wall },
+        { geo: gable(0.103, 0.033, 0.077, 0.059), color: roof },
+        door(0.016, 0.027, 0.03, 0.023),
+        { geo: box(0.085, 0.005, 0.06, 0, 0.025), color: detail },
+      ]);
+    case 'stabbur':
+      // Celeiro elevado, com o pavimento superior em balanço e neve no telhado.
+      return kit([
+        ...posts(0.021, 0.02, 0.026),
+        { geo: box(0.056, 0.021, 0.054, 0, 0.026), color: wall },
+        { geo: box(0.081, 0.024, 0.071, 0, 0.047), color: wall },
+        { geo: gable(0.093, 0.037, 0.083, 0.071), color: detail },
+        { geo: gable(0.096, 0.037, 0.085, 0.075), color: roof },
+        door(0.016, 0.016, 0.029, 0.026),
+      ]);
+  }
+}
+
 // ---------------------------------------------------------------- animais, barcos, veículos
 
 function animalGeometry(kind: AnimalKind): THREE.BufferGeometry {
@@ -2575,12 +2632,8 @@ export class Lib {
       this.farGeos.set('hill', hillGeometry({ far: true }));
     }
     if (theme.irrigation) set('shaduf', shadufGeometry());
-    // Paisagem viva (estágio 2 do cultivo): o celeiro da plantação, na cor das casas do tema (um pool só; `render/livingBuild.ts`).
-    set('barn', kit([
-      { geo: box(0.07, 0.034, 0.05), color: theme.houses[0].walls[0] },
-      { geo: pyramid(0.082, 0.03, 0.062, 0.034), color: theme.houses[0].roofs[0] },
-      { geo: box(0.018, 0.022, 0.004, 0, 0, 0.026), color: DOOR },
-    ]));
+    // A geometria segue o tema. A chave continua única em qualquer estágio.
+    set('barn', barnGeometry(theme.barn));
     set('flower', kit([{ geo: oct(0.014).translate(0, 0.024, 0), color: '#fff', tint: 1 }, { geo: tri([-0.002, 0, 0], [0.002, 0, 0], [0, 0.02, 0]), color: '#4f7a3a' }]));
     set('lily', kit([{ geo: cyl(0.035, 0.035, 0.006, 7, 0, 0.011), color: '#fff', tint: 1 }, { geo: oct(0.008).translate(0.01, 0.02, 0.006), color: '#f7c6d8' }]));
     set('animal', animalGeometry(theme.animals.kind));

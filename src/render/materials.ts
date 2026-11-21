@@ -1251,7 +1251,9 @@ export function makeVoidMaterial() {
     const dust = smoothstep(0.0, 0.45, d).mul(0.08);
     const farS = smoothstep(u.radius.add(6), u.radius.add(16), length(p.sub(u.center)));
     const col = mix(u.sandCol.mul(shade), u.sandCol.mul(0.8), dust);
-    return mix(col, u.bg.mul(0.95), farS.mul(0.8));
+    // À noite a duna esfria para o tom do luar (o `fill` da hora) em vez de virar um marrom chapado.
+    const moon = mix(col, u.fill.mul(1.25), U.night.mul(0.4));
+    return mix(moon, u.bg.mul(0.95), farS.mul(0.8));
   })();
 
   // Chapada (Theme.surround = 'chapada'): mar de capim seco. Faixas largas de capim mais claro e mais escuro levadas pelo

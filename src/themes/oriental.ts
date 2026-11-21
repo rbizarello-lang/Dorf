@@ -73,6 +73,7 @@ export const oriental: Theme = {
     { style: 'paifang', colors: ['#a8362a', '#3f6b5a'] },
   ],
   bridge: { style: 'wood', colors: ['#8a6a4a', '#c8402e'] },
+  barn: { style: 'kura', colors: ['#ece1cb', '#3a4850', '#77423a'] },
   crops: [
     { style: 'rice', weight: 0.5, colors: ['#8fc07a', '#a3ce86', '#7fb26e'], soil: '#7fb0ab' },
     // Arroz maduro num campo drenado: dourado sobre lama, em vez de lâmina d'água.
