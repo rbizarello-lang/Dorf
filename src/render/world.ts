@@ -41,7 +41,7 @@ import { MAGRA, setMagra } from './magra';
 import { skirtWidth } from './terrain';
 import type { HillSurface } from './hillSurface';
 import { Warp, isWarped, warpBuild } from './fluid';
-import { LEVEL_STEP, TILE_T, buildTile, decoMatrix, resolveFlow, tc, waterShape, WATER_Y, type BuildOpts, type TileBuild } from './tileBuilder';
+import { LEVEL_STEP, TILE_T, buildTile, decoMatrix, resolveFlow, riverAxis, tc, waterShape, WATER_Y, type BuildOpts, type TileBuild } from './tileBuilder';
 import { NIGHT_LIGHT } from './nightLight';
 import { VertexBufferWatch } from './vbuf';
 
@@ -306,6 +306,12 @@ class Pool {
     this.mesh.dispose();
   }
 }
+interface WaterRange {
+  start: number;
+  count: number;
+  capacity: number;
+}
+
 /** Buffer de vértices "somente acrescenta" para o chão e a água de um bloco de 8×8 peças. */
 class Chunk {
   readonly ground: THREE.Mesh;
@@ -326,16 +332,15 @@ class Chunk {
     this.ground.receiveShadow = true;
     this.water = new THREE.Mesh(new THREE.BufferGeometry(), lib.water);
     this.water.receiveShadow = true;
+    this.water.visible = false;
     parent.add(this.ground, this.water);
   }
 
-  append(b: TileBuild, m: THREE.Matrix4): { start: number; count: number; gStart: number; gCount: number } {
+  append(b: TileBuild, m: THREE.Matrix4): WaterRange & { gStart: number; gCount: number } {
     const e = m.elements;
     const gAdd = b.pos.length / 3;
-    const wAdd = b.water.length / 3;
     const gStart = this.gN;
     const growG = this.gN + gAdd > this.gPos.length / 3;
-    const growW = this.wN + wAdd > this.wPos.length / 3;
     if (growG) {
       const cap = Math.max(4096, (this.gN + gAdd) * 2);
       const p = new Float32Array(cap * 3);
@@ -351,23 +356,6 @@ class Chunk {
       this.ground.geometry.setAttribute('position', new THREE.BufferAttribute(p, 3));
       this.ground.geometry.setAttribute('color', new THREE.BufferAttribute(c, 3));
       this.ground.geometry.setAttribute('splat', new THREE.BufferAttribute(sp, 4));
-    }
-    if (growW) {
-      const cap = Math.max(1024, (this.wN + wAdd) * 2);
-      const p = new Float32Array(cap * 3);
-      p.set(this.wPos.subarray(0, this.wN * 3));
-      const f = new Float32Array(cap * 2);
-      f.set(this.wFlow.subarray(0, this.wN * 2));
-      const bd = new Float32Array(cap * 4);
-      bd.set(this.wBed.subarray(0, this.wN * 4));
-      this.wPos = p;
-      this.wFlow = f;
-      this.wBed = bd;
-      this.water.geometry.dispose();
-      this.water.geometry.setAttribute('position', new THREE.BufferAttribute(p, 3));
-      this.water.geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(cap * 3).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
-      this.water.geometry.setAttribute('wflow', new THREE.BufferAttribute(f, 2));
-      this.water.geometry.setAttribute('wbed', new THREE.BufferAttribute(bd, 4));
     }
     const xf = (src: Float32Array, dst: Float32Array, at: number) => {
       for (let i = 0; i < src.length; i += 3) {
@@ -391,29 +379,7 @@ class Chunk {
     }
     this.gN += gAdd;
     this.ground.geometry.setDrawRange(0, this.gN);
-    if (wAdd) {
-      xf(b.water, this.wPos, this.wN * 3);
-      // A correnteza gira junto com a peça.
-      for (let i = 0; i < wAdd; i++) {
-        const fx = b.wflow[i * 2], fz = b.wflow[i * 2 + 1];
-        this.wFlow[(this.wN + i) * 2] = e[0] * fx + e[8] * fz;
-        this.wFlow[(this.wN + i) * 2 + 1] = e[2] * fx + e[10] * fz;
-      }
-      this.wBed.set(b.wbed, this.wN * 4);
-      const attrs: [string, number][] = [
-        ['position', 3],
-        ['wflow', 2],
-        ['wbed', 4],
-      ];
-      for (const [name, size] of attrs) {
-        const a = this.water.geometry.getAttribute(name) as THREE.BufferAttribute;
-        if (!growW) a.addUpdateRange(this.wN * size, wAdd * size);
-        a.needsUpdate = true;
-      }
-      this.wN += wAdd;
-      this.water.geometry.setDrawRange(0, this.wN);
-    }
-    this.water.visible = this.wN > 0;
+    const water = this.appendWater(b, m);
     // Esfera envolvente aproximada a partir dos centros das peças (frustum culling por bloco).
     this.centerSum.x += e[12];
     this.centerSum.z += e[14];
@@ -421,10 +387,101 @@ class Chunk {
     const c = this.centerSum.clone().multiplyScalar(1 / this.tiles);
     const radius = CHUNK * 1.9 + 1.5;
     for (const g of [this.ground.geometry, this.water.geometry]) g.boundingSphere = new THREE.Sphere(c, radius);
-    return { start: this.wN - wAdd, count: wAdd, gStart, gCount: gAdd };
+    return { ...water, gStart, gCount: gAdd };
   }
 
-  freightWater(start: number, count: number) {
+  private appendWater(b: TileBuild, m: THREE.Matrix4): WaterRange {
+    const start = this.wN, count = b.water.length / 3;
+    if (!count) return { start, count, capacity: count };
+    const end = start + count;
+    const growW = end > this.wPos.length / 3;
+    if (growW) {
+      const cap = Math.max(1024, (end) * 2);
+      const p = new Float32Array(cap * 3);
+      p.set(this.wPos.subarray(0, this.wN * 3));
+      const f = new Float32Array(cap * 2);
+      f.set(this.wFlow.subarray(0, this.wN * 2));
+      const bd = new Float32Array(cap * 4);
+      bd.set(this.wBed.subarray(0, this.wN * 4));
+      this.wPos = p;
+      this.wFlow = f;
+      this.wBed = bd;
+      this.water.geometry.dispose();
+      this.water.geometry.setAttribute('position', new THREE.BufferAttribute(p, 3));
+      this.water.geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(cap * 3).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+      this.water.geometry.setAttribute('wflow', new THREE.BufferAttribute(f, 2));
+      this.water.geometry.setAttribute('wbed', new THREE.BufferAttribute(bd, 4));
+    }
+    this.writeWater(start, b, m);
+    this.wN = end;
+    this.water.geometry.setDrawRange(0, this.wN);
+    this.water.visible = true;
+    return { start, count, capacity: count };
+  }
+
+  /** A água alargada pode cortar outros triângulos do leito: troca posição, profundidade e fluxo juntos. */
+  replaceWater(slot: WaterRange, b: TileBuild, m: THREE.Matrix4) {
+    const count = b.water.length / 3;
+    if (count > slot.capacity) {
+      this.collapseWater(slot.start, slot.count);
+      Object.assign(slot, this.appendWater(b, m));
+    } else {
+      this.writeWater(slot.start, b, m);
+      if (count < slot.count) this.collapseWater(slot.start + count, slot.count - count);
+      slot.count = count;
+    }
+  }
+
+  private writeWater(start: number, b: TileBuild, m: THREE.Matrix4) {
+    const e = m.elements;
+    const count = b.water.length / 3;
+    for (let i = 0; i < count; i++) {
+      const x = b.water[i * 3], y = b.water[i * 3 + 1], z = b.water[i * 3 + 2];
+      const fx = b.wflow[i * 2], fz = b.wflow[i * 2 + 1];
+      const v = start + i;
+      this.wPos[v * 3] = e[0] * x + e[4] * y + e[8] * z + e[12];
+      this.wPos[v * 3 + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+      this.wPos[v * 3 + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+      this.wFlow[v * 2] = e[0] * fx + e[8] * fz;
+      this.wFlow[v * 2 + 1] = e[2] * fx + e[10] * fz;
+    }
+    this.wBed.set(b.wbed, start * 4);
+    for (const [name, size] of [['position', 3], ['wflow', 2], ['wbed', 4]] as const) {
+      const a = this.water.geometry.getAttribute(name) as THREE.BufferAttribute;
+      a.addUpdateRange(start * size, count * size);
+      a.needsUpdate = true;
+    }
+  }
+
+  private collapseWater(start: number, count: number) {
+    const position = this.water.geometry.getAttribute('position') as THREE.BufferAttribute;
+    // Todos os vértices da faixa antiga coincidem, sem deixar um segundo canal visível.
+    this.wPos.fill(0, start * 3, (start + count) * 3);
+    position.addUpdateRange(start * 3, count * 3);
+    position.needsUpdate = true;
+  }
+
+  waterDigest(start: number, count: number) {
+    const pos = this.water.geometry.getAttribute('position');
+    const bed = this.water.geometry.getAttribute('wbed');
+    const quant = (v: number) => String(Math.round(v * 10000));
+    const triangles: string[] = [];
+    for (let i = start; i < start + count; i += 3) {
+      const corners = [i, i + 1, i + 2].map((v) => [pos.getX(v), pos.getY(v), pos.getZ(v), bed.getW(v)].map(quant).join(','));
+      corners.sort();
+      if (corners[0] !== corners[2]) triangles.push(corners.join('/'));
+    }
+    let hash = 2166136261;
+    for (const tri of triangles.sort()) {
+      for (let i = 0; i < tri.length; i++) hash = Math.imul(hash ^ tri.charCodeAt(i), 16777619);
+      hash = Math.imul(hash ^ 124, 16777619);
+    }
+    return `${triangles.length}:${(hash >>> 0).toString(16)}`;
+  }
+
+  freightWater(start: number, count: number, snapshot = false) {
+    // No canal vivo a fila pode realocar a faixa enquanto a barca calcula o caminho, em vários quadros.
+    if (snapshot) return { pos: this.wPos.slice(start * 3, (start + count) * 3), bed: this.wBed.slice(start * 4, (start + count) * 4), start: 0, count };
     return { pos: this.wPos, bed: this.wBed, start, count };
   }
 
@@ -515,7 +572,7 @@ class Chunk {
 
   /** Reescreve a correnteza de uma peça já assentada (mesma malha de água, outro sentido): a água parada passa a correr, ou o contrário. */
   setFlow(slot: { start: number; count: number }, b: TileBuild, m: THREE.Matrix4) {
-    if (b.wflow.length / 2 !== slot.count) return;
+    if (b.wflow.length / 2 !== slot.count) return false;
     const e = m.elements;
     for (let i = 0; i < slot.count; i++) {
       const fx = b.wflow[i * 2], fz = b.wflow[i * 2 + 1];
@@ -525,6 +582,7 @@ class Chunk {
     const a = this.water.geometry.getAttribute('wflow') as THREE.BufferAttribute;
     a.addUpdateRange(slot.start * 2, slot.count * 2);
     a.needsUpdate = true;
+    return true;
   }
 
   triangles() {
@@ -553,6 +611,7 @@ interface Drop {
   /** Assinaturas (encosta, paisagem viva) com que a peça foi montada: o pouso as guarda, e não as da hora do pouso. */
   sig: string;
   vsig: string;
+  widths: number[];
 }
 
 /** Construções de interação: sobem do chão depois que a peça assenta. */
@@ -975,6 +1034,14 @@ export class World {
     // Névoa por altura com bruma e névoa rasteira (atmosphere.ts) no lugar do THREE.Fog.
     (this.scene as THREE.Scene & { fogNode?: THREE.Node }).fogNode = fogNode;
     this.life = new Life(this.lib, this.scene);
+    this.life.riverLine = (p, a, b) => {
+      if (!this.vivaOn) return undefined;
+      const widths = this.widths.get(p.key);
+      if (!widths || !this.channelChanged(p, flowBase(waterShape(p.def.edges, p.def.seed).widths, (6 - p.rot) % 6))) return undefined;
+      const local = (side: number) => side < 0 ? -1 : (side - p.rot + 6) % 6;
+      const angle = p.rot * Math.PI / 3, c = Math.cos(angle), s = Math.sin(angle);
+      return riverAxis(p.def, flowBase(widths, p.rot), local(a), local(b)).map(([x, z]) => [x * c - z * s, x * s + z * c]);
+    };
     this.life.onSplash = (x, z) => this.sprites.splash(x, WATER_Y, z, 7);
     this.life.onTrade = (x, z) => this.burst(x, z, 'sparkle', 12, 0.12);
     this.life.levelOf = (q, r) => (this.flatDraw ? 0 : this.levelOf(q, r));
@@ -1740,7 +1807,7 @@ export class World {
   }
 
   /** Onde a água de cada peça assentada está no buffer do bloco (para trocar a correnteza sem refazer o mapa). */
-  private waterSlots = new Map<number, { chunk: Chunk; start: number; count: number }>();
+  private waterSlots = new Map<number, WaterRange & { chunk: Chunk }>();
 
   /**
    * O que cada peça assentada ocupa nos blocos (Encostas): o trecho do chão, a instância de cada decoração estática e as chaminés.
@@ -1766,9 +1833,12 @@ export class World {
       const old = this.flows.get(p.key);
       const now = st.flow.get(p.key) ?? [0, 0, 0, 0, 0, 0];
       if (!slot || !old || old.every((v, i) => v === now[i])) continue;
-      this.flows.set(p.key, now.slice());
+      // A fila escreve a lâmina e a correnteza em uma só operação quando a largura muda.
+      if (this.vivaOn && this.channelChanged(p, this.widthsAt(p.q, p.r, p.def, p.rot))) continue;
       const m = tileMatrix(p.q, p.r, p.rot, this.heightOf(p.q, p.r));
-      slot.chunk.setFlow(slot, this.build(p.def, synBase(p.synergies, p.rot), flowBase(now, p.rot), { center: false, widths: this.settleWidths(p), levels: this.levelsFor(p.q, p.r, p.rot, p.def) }), m);
+      const widths = flowBase(this.widths.get(p.key) ?? [0, 0, 0, 0, 0, 0], p.rot);
+      const b0 = this.build(p.def, synBase(p.synergies, p.rot), flowBase(now, p.rot), { center: p.index === 0, widths, levels: this.levelsFor(p.q, p.r, p.rot, p.def), at: p });
+      if (slot.chunk.setFlow(slot, b0, m)) this.flows.set(p.key, now.slice());
     }
   }
 
@@ -1785,17 +1855,55 @@ export class World {
    * sem degrau, e a boca larga de um lago emenda com o lago ao lado.
    */
   private widths = new Map<number, number[]>();
-  private widthsAt(q: number, r: number, def: TileDef, rot: number) {
+  private widthsAt(q: number, r: number, def: TileDef, rot: number, board = this.board, viva = this.vivaOn) {
     const own = waterShape(def.edges, def.seed).widths;
     const out = [0, 0, 0, 0, 0, 0];
+    if (!own.some(Boolean)) return out;
+    const candidate = { q, r, def, rot, edges: rotateEdges(def.edges, rot) };
+    const at = (aq: number, ar: number) => aq === q && ar === r ? candidate : board?.get(aq, ar);
+    const stage = (p: typeof candidate) => DIRS.reduce((n, [dq, dr], side) =>
+      n + Number(p.edges[side] === T.Water && at(p.q + dq, p.r + dr)?.edges[opposite(side)] === T.Water), 0);
+    const ownStage = viva ? stage(candidate) : 0;
     for (let i = 0; i < 6; i++) {
       const s = (i + rot) % 6;
       out[s] = own[i];
       if (!own[i]) continue;
-      const nw = this.widths.get(hkey(q + DIRS[s][0], r + DIRS[s][1]));
-      if (nw && nw[opposite(s)]) out[s] = nw[opposite(s)];
+      const nq = q + DIRS[s][0], nr = r + DIRS[s][1], other = opposite(s);
+      if (viva) {
+        const nb = at(nq, nr);
+        if (!nb || nb.edges[other] !== T.Water) continue;
+        const base = waterShape(nb.def.edges, nb.def.seed).widths[(other - nb.rot + 6) % 6];
+        const gain = 0.04 + 0.025 * (Math.min(3, Math.max(ownStage, stage(nb))) - 1);
+        // A boca comum cresce com o estágio maior, deixando terra antes dos cantos.
+        out[s] = Math.min(0.43, Math.max(own[i], base) + gain);
+      } else {
+        const nw = this.widths.get(hkey(nq, nr));
+        if (nw?.[other]) out[s] = nw[other];
+      }
     }
     return out;
+  }
+
+  /** Uma emenda nova também pode alargar as outras bocas da vizinha. */
+  private channelNeighbors(p: Placed, board: Board) {
+    const out = new Set<Placed>();
+    if (!this.vivaOn || !p.edges.includes(T.Water)) return out;
+    const collect = (from: Placed) => {
+      for (const [side, [dq, dr]] of DIRS.entries()) {
+        if (from.edges[side] !== T.Water) continue;
+        const nb = board.get(from.q + dq, from.r + dr);
+        if (nb?.edges[opposite(side)] === T.Water) out.add(nb);
+      }
+    };
+    collect(p);
+    for (const nb of [...out]) collect(nb);
+    out.delete(p);
+    return out;
+  }
+
+  private channelChanged(p: Placed, next: readonly number[]) {
+    const old = this.widths.get(p.key);
+    return !!old && next.some((w, i) => w !== old[i]);
   }
 
   /** Registra a largura da água de uma peça colocada e devolve a versão na orientação de origem. */
@@ -2159,7 +2267,7 @@ export class World {
     return out.join('|');
   }
 
-  private bake(p: Placed, b0: TileBuild, flush = true, built?: { sig: string; vsig: string }) {
+  private bake(p: Placed, b0: TileBuild, flush = true, built?: { sig: string; vsig: string; widths: number[] }) {
     // A pintura de verdade vem sobre o chão como era: as pré-visualizações saem antes e voltam no próximo quadro (`restamp`).
     if (this.paintSig !== '') {
       groundMap.unpreview();
@@ -2170,7 +2278,8 @@ export class World {
     const b = this.shaped(b0, p.q, p.r, p.rot);
     const ch = this.chunkFor(p.q, p.r);
     const slot = ch.append(b, m);
-    if (slot.count) this.waterSlots.set(p.key, { chunk: ch, start: slot.start, count: slot.count });
+    if (built && this.vivaOn) this.widths.set(p.key, flowBase(built.widths, (6 - p.rot) % 6));
+    if (slot.count) this.waterSlots.set(p.key, { chunk: ch, start: slot.start, count: slot.count, capacity: slot.capacity });
     const rec: { sig: string; vsig: string; keys: string[]; chunk: Chunk; gStart: number; gCount: number; decos: ({ pool: Pool; i: number } | null)[]; moversSig: string } = { sig: built?.sig ?? this.hillSig(p.def, p), vsig: built?.vsig ?? this.vivaSig(p.def, p), keys: b.decos.map((d) => d.key), chunk: ch, gStart: slot.gStart, gCount: slot.gCount, decos: [], moversSig: '' };
     this.baked.set(p.key, rec);
     this.surfaces.set(p.key, b.hill);
@@ -2234,6 +2343,12 @@ export class World {
       // fila e a `tick` as refaz em poucos ms por quadro: até 6 `buildTile` seguidos viravam um soluço de 30 ms na hora de pôr a peça.
       if (this.rebakeHill(p)) n++;
       for (const tile of affected) if (tile !== p && !this.hillQueue.includes(tile.key)) this.hillQueue.push(tile.key);
+    }
+    if (this.vivaOn && p.edges.includes(T.Water)) {
+      if (!this.hillsOn && this.rebakeHill(p)) n++;
+      for (const nb of this.channelNeighbors(p, this.board)) {
+        if (this.baked.has(nb.key) && !this.hillQueue.includes(nb.key)) this.hillQueue.push(nb.key);
+      }
     }
     this.hillMs = 0;
     this.hillTotalMs = 0;
@@ -2313,19 +2428,37 @@ export class World {
     if (!rec || !this.board) return false;
     const sig = this.hillsOn ? this.hillSig(p.def, p) : rec.sig;
     const vsig = this.vivaSig(p.def, p);
-    const ground = sig !== rec.sig;
+    const oldWidths = this.widths.get(p.key) ?? [0, 0, 0, 0, 0, 0];
+    const channelOn = this.vivaOn && p.edges.includes(T.Water);
+    const nextWidths = channelOn ? this.widthsAt(p.q, p.r, p.def, p.rot) : oldWidths;
+    const channel = channelOn && this.channelChanged(p, nextWidths);
+    const ground = channel || sig !== rec.sig;
     if (!ground && vsig === rec.vsig) return false;
-    const flow = flowBase(this.flows.get(p.key) ?? [0, 0, 0, 0, 0, 0], p.rot);
-    const widths = flowBase(this.widths.get(p.key) ?? [0, 0, 0, 0, 0, 0], p.rot);
+    const oldFlow = this.flows.get(p.key) ?? [0, 0, 0, 0, 0, 0];
+    const nextFlow = channelOn && this.pieceRelief && this.board.rules.springs ?
+      this.waterOf().flow.get(p.key) ?? [0, 0, 0, 0, 0, 0] : oldFlow;
+    const flow = flowBase(nextFlow, p.rot);
+    const widths = flowBase(nextWidths, p.rot);
     const b = this.shaped(this.build(p.def, synBase(p.synergies, p.rot), flow, { center: p.index === 0, eraMark: p.eraMark, site: p.site, wonder: p.wonder, widths, eggs: this.eggKits.get(p.key), spring: p.spring, levels: this.levelsFor(p.q, p.r, p.rot, p.def), at: p }), p.q, p.r, p.rot);
     const m = tileMatrix(p.q, p.r, p.rot, this.heightOf(p.q, p.r));
-    // Só o estágio mudou: o chão é o mesmo (a paisagem viva só mexe na decoração).
+    // O estágio de terra sozinho muda a decoração. O canal muda também o leito e a lâmina.
     if (ground) {
       rec.chunk.replaceGround(rec, b, m);
+      if (channelOn) {
+        const slot = this.waterSlots.get(p.key);
+        if (slot) slot.chunk.replaceWater(slot, b, m);
+        this.widths.set(p.key, nextWidths);
+        this.flows.set(p.key, nextFlow);
+        if (channel && this.theme.floodplain) riverMap.add(b.water, m, this.theme.floodplain.reach);
+      }
       // A corredeira (espuma, soleira, névoa) é função das vizinhas: a peça refeita troca a dela na camada das quedas.
       this.falls.append(p.key, b, m);
       groundMap.add(b, m, this.waterColor);
       this.surfaces.set(p.key, b.hill);
+      if (channel) {
+        this.life.refreshRiver(p);
+        this.syncHarbors(this.board);
+      }
     }
     const keys = b.decos.map((d) => d.key);
     if (keys.length === rec.keys.length && keys.every((k, i) => k === rec.keys[i])) {
@@ -2385,7 +2518,7 @@ export class World {
   sceneSig() {
     this.falls.flush();
     const r = (v: number) => (Math.round(v * 1000) / 1000 || 0).toFixed(3);
-    const pieces: Record<string, { decos: string[]; ground: string; smoke: string[]; falls: unknown }> = {};
+    const pieces: Record<string, { decos: string[]; ground: string; water: string | null; smoke: string[]; falls: unknown }> = {};
     let claimed = 0;
     for (const [key, rec] of this.baked) {
       const decos: string[] = [];
@@ -2398,11 +2531,16 @@ export class World {
       const ch = this.chimMap.get(key) ?? [];
       for (let i = 0; i < ch.length; i += 4) smoke.push([ch[i], ch[i + 1], ch[i + 2], ch[i + 3]].map(r).join(','));
       const p = this.board?.tiles.get(key);
-      pieces[p ? `${p.q},${p.r}` : String(key)] = { decos: decos.sort(), ground: rec.chunk.groundDigest(rec.gStart, rec.gCount), smoke: smoke.sort(), falls: this.falls.digest(key) };
+      const water = this.waterSlots.get(key);
+      pieces[p ? `${p.q},${p.r}` : String(key)] = {
+        decos: decos.sort(), ground: rec.chunk.groundDigest(rec.gStart, rec.gCount),
+        water: water ? water.chunk.waterDigest(water.start, water.count) : null,
+        smoke: smoke.sort(), falls: this.falls.digest(key),
+      };
     }
     let live = 0;
     for (const pool of this.pools.values()) live += pool.live;
-    return { pieces, pending: this.pending(), orphans: live - claimed, smokeTotal: this.chimneys.length / 4, mistTotal: this.falls.spots.length, life: this.life.staticCounts() };
+    return { pieces, settled: this.baked.size, pending: this.pending(), orphans: live - claimed, smokeTotal: this.chimneys.length / 4, mistTotal: this.falls.spots.length, life: this.life.staticCounts() };
   }
 
   updateFrontier(board: Board) {
@@ -2485,7 +2623,7 @@ export class World {
     this.hideNeighbors();
     const syn = synBase(p.synergies, p.rot);
     const flow = this.settleFlow(p);
-    const widths = this.settleWidths(p);
+    const widths = this.vivaOn ? flowBase(this.widthsAt(p.q, p.r, p.def, p.rot), p.rot) : this.settleWidths(p);
     // Ovos de peça desta jogada: o kit entra na peça; o resto (evento, céu, som) dispara quando ela assenta.
     if (this.board) this.feedEggs(this.board.list, p.index + 1, true);
     const eggs = this.eggKits.get(p.key);
@@ -2510,7 +2648,7 @@ export class World {
     live.group.position.set(x, y0, z);
     this.hoverRing.visible = false;
     for (const m of this.markers) m.visible = false;
-    this.drops.push({ live, placed: p, t: 0, y0, ly, landed: false, hold: live.has(BUILDS) ? SCAFFOLD_DOWN + 0.3 : 0.55, cleared: false, sig: hillSig, vsig: this.vivaSig(p.def, p) });
+    this.drops.push({ live, placed: p, t: 0, y0, ly, landed: false, hold: live.has(BUILDS) ? SCAFFOLD_DOWN + 0.3 : 0.55, cleared: false, sig: hillSig, vsig: this.vivaSig(p.def, p), widths });
   }
 
   /** Depuração: leva as peças caindo ao instante `t` (segundos de queda; o `tick` com `timeScale` 0 só reavalia a pose). */
@@ -2573,6 +2711,7 @@ export class World {
       const nb = board.get(p.q + dq, p.r + dr);
       if (nb) affected.add(nb);
     }
+    for (const p of list) for (const nb of this.channelNeighbors(p, board)) affected.add(nb);
     for (const tile of affected) if (!fresh.has(tile)) this.rebakeHill(tile);
     // Paisagem viva: as peças antigas cujo estágio mudou com o lote (vizinhas e manchas da Terra) são refeitas já, sem fila.
     this.queueLiving();
@@ -2754,7 +2893,7 @@ export class World {
     const own = this.pieceRelief ? lvs?.own ?? Math.min(...worldHeights(tileProfile(def.edges, def.seed), rot)) : undefined;
     const flow = flowBase(this.flowAt(q, r, ew, own, Infinity, !!check.water?.spring), rot);
     const hillSig = this.hillSig(def, { q, r, rot });
-    const widths = flowBase(this.widthsAt(q, r, def, rot), rot);
+    const widths = flowBase(this.widthsAt(q, r, def, rot, this.board, this.vivaOn && check.valid), rot);
     // O fantasma já mostra o marco da era que a peça ergueria.
     // A peça especial não ergue marco nem começa a maravilha (Board.place): o fantasma também não.
     const mark = check.valid && !def.special ? (check.eraMark ?? undefined) : undefined;
@@ -3009,7 +3148,8 @@ export class World {
       if (!p || !real) continue;
       const near = Math.abs(p.q - q) <= 1 && Math.abs(p.r - r) <= 1 && Math.abs(p.q - q + p.r - r) <= 1;
       if (this.hillsOn && near && this.hillSig(p.def, p, c) !== rec.sig) out.rise.push(real);
-      else if (stages && stageSig(stages.get(key) ?? NO_STAGES) !== rec.vsig) out.grow.push(real);
+      else if (stages && (stageSig(stages.get(key) ?? NO_STAGES) !== rec.vsig ||
+        (p.edges.includes(T.Water) && this.channelChanged(real, this.widthsAt(p.q, p.r, p.def, p.rot, c))))) out.grow.push(real);
     }
     return out;
   }
@@ -3164,8 +3304,10 @@ export class World {
     const { x, z } = hexToWorld(res.placed.q, res.placed.r);
     if (this.board && this.harbors && !this.reducedMotion) {
       for (const port of res.deliveries) this.harbors.depart(this.board, port, (q, r) => {
-        const slot = this.waterSlots.get(hkey(q, r));
-        return slot?.chunk.freightWater(slot.start, slot.count);
+        const key = hkey(q, r);
+        if (this.vivaOn && this.hillQueue.includes(key)) return undefined;
+        const slot = this.waterSlots.get(key);
+        return slot?.chunk.freightWater(slot.start, slot.count, this.vivaOn);
       }, (x, z) => this.fl(x, z));
     }
     if (res.perfect) {
@@ -3882,7 +4024,7 @@ export class World {
         });
       }
       if (d.t > fall + d.hold) {
-            this.bake(d.placed, d.live.build, true, { sig: d.sig, vsig: d.vsig });
+        this.bake(d.placed, d.live.build, true, { sig: d.sig, vsig: d.vsig, widths: d.widths });
         this.refreshHills(d.placed);
         this.syncWater();
         d.live.dispose();

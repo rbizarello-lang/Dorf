@@ -7,7 +7,7 @@ import { T } from '../src/core/tiles';
 import { GroundMap } from '../src/render/groundMap';
 import { SeaMap } from '../src/render/seaMap';
 import { Warp, warpBuild, warpPath } from '../src/render/fluid';
-import { buildTile } from '../src/render/tileBuilder';
+import { buildTile, riverAxis } from '../src/render/tileBuilder';
 import { THEMES } from '../src/themes/themes';
 
 let fails = 0;
@@ -67,6 +67,47 @@ console.log(`caminhos do barco sobre a água: deslocado ${within}/${total} (${((
 // Sem o deslocamento o barco sai da água no dobro dos pontos (ou mais); com ele, quase todos ficam sobre a água.
 ok(within / total > 0.9, `o caminho deslocado fica sobre a água (${within}/${total})`);
 ok(without >= 2 * (total - within), `sem deslocar o barco sai da água bem mais (${without} contra ${total - within} pontos): o teste distingue`);
+
+// Lago de três braços que apareceu na Holanda, semente 42, Zen. O rio da borda 0 à 2
+// atravessava uma ilhota quando seguia o eixo pelo meio. Mede a profundidade da malha,
+// inclusive o trecho seco dentro de um triângulo cortado pelo nível da água.
+{
+  const def = { edges: [W, W, W, G, G, G], seed: 1492881195, quest: null };
+  for (const widths of [[0.36, 0.36, 0.19, 0, 0, 0], [0.36, 0.425, 0.425, 0, 0, 0]]) {
+    const { water, wbed } = buildTile(def.edges, def.seed, theme, { detail: 0.4, houses: [], widths });
+    const depth = (x: number, z: number) => {
+      let out = -Infinity;
+      for (let v = 0; v < water.length / 3; v += 3) {
+        const i = v * 3;
+        const ax = water[i], az = water[i + 2];
+        const ux = water[i + 3] - ax, uz = water[i + 5] - az, vx = water[i + 6] - ax, vz = water[i + 8] - az;
+        const det = ux * vz - vx * uz;
+        if (Math.abs(det) < 1e-9) continue;
+        const a = ((x - ax) * vz - (z - az) * vx) / det;
+        const b = ((z - az) * ux - (x - ax) * uz) / det;
+        if (a < -1e-5 || b < -1e-5 || a + b > 1 + 1e-5) continue;
+        out = Math.max(out, (1 - a - b) * wbed[v * 4 + 3] + a * wbed[v * 4 + 7] + b * wbed[v * 4 + 11]);
+      }
+      return out;
+    };
+    for (const [a, b] of [[0, 1], [1, 0], [0, 2], [2, 0], [1, 2], [2, 1]]) {
+      const line = riverAxis(def, widths, a, b);
+      const label = `ilhota ${a}→${b}, bocas ${widths.slice(0, 3).join('/')}`;
+      ok(line.length >= 2, `${label}: rota presente`);
+      if (line.length < 2) continue;
+      const start = edgeMid(a), end = edgeMid(b);
+      ok(Math.hypot(line[0][0] - start[0], line[0][1] - start[1]) < 1e-6 &&
+        Math.hypot(line.at(-1)![0] - end[0], line.at(-1)![1] - end[1]) < 1e-6, `${label}: pontas na emenda`);
+      let dry = 0;
+      for (let i = 1; i < line.length; i++) {
+        const [x, z] = line[i - 1], [dx, dz] = [line[i][0] - x, line[i][1] - z];
+        const n = Math.max(1, Math.ceil(Math.hypot(dx, dz) / 0.02));
+        for (let k = 0; k < n; k++) if (depth(x + dx * k / n, z + dz * k / n) <= 0) dry++;
+      }
+      ok(dry === 0, `${label}: ${dry} pontos em terra`);
+    }
+  }
+}
 
 // A emenda: o ponto da borda é o mesmo visto das duas peças (a função do deslocamento é do mundo).
 {

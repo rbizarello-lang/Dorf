@@ -9,8 +9,7 @@
 //      mancha da regra (terra.ts). A área é em peças (cunhas ÷ 6, a mesma `a` da regra). Uma mancha FECHADA (nenhum setor dela dá para o
 //      vazio) leva todas as peças dela ao estágio máximo daquele terreno; uma mancha GRANDE (área ≥ `largeArea`) ainda aberta sobe um
 //      estágio em todas as peças dela. Assim o mundo responde nos pontos (a mancha paga ao crescer e ao fechar) e na paisagem.
-//   3. Rio e trilho (terrenos estritos) não têm estágio: o canal mais largo onde os rios se ligam NÃO foi feito (a largura de cada borda
-//      já é herdada da vizinha em `World.widthsAt`; alargá-la por estágio exigiria refazer a emenda de toda a cadeia de rio).
+//   3. Rio e trilho (terrenos estritos) não têm estágio neste mapa. O renderizador alarga as emendas dos rios de forma independente.
 import { DIRS, opposite } from './hex';
 import type { Board } from './board';
 import { LAND, T, isStrict } from './tiles';

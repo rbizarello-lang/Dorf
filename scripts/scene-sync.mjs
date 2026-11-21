@@ -1,6 +1,6 @@
 // Teste de cena (E8): a cena montada jogada a jogada (peça que cai, vizinhas refeitas no lugar, fila da Paisagem viva) precisa ser igual
 // à reconstrução integral, peça por peça: decorações (kit, posição, escala, cor), chão, emissores de fumaça (chaminés), corredeira
-// (lâmina, espuma e origens da névoa) e instâncias órfãs. Depois confere a recarga (replay) e o desfazer.
+// (lâmina, espuma e origens da névoa), malha de água (posição e profundidade) e instâncias órfãs. Depois confere a recarga (replay) e o desfazer.
 // Roda no navegador, em WebGL2 por software (o WebGPU por software perde o dispositivo nesta máquina; a CI roda os dois nos outros casos).
 // Uso: npm run build && node scripts/scene-sync.mjs [filtro]      (SCENE_TIMEOUT em ms; o filtro roda só os casos com esse trecho no nome)
 import http from 'node:http';
@@ -44,7 +44,7 @@ const cases = [
   // Defeito 3: corredeira (Holanda, semente 123) no Relevo e na Terra, em lotes rápidos e lentos, preferindo peças com água.
   { name: 'corredeira-terra', q: 'theme=holanda&seed=123&mode=terra&viva=0', fuzz: 26, rng: 123, water: true },
   { name: 'corredeira-relevo', q: 'theme=holanda&seed=123&mode=relevo&viva=0', fuzz: 26, rng: 124, water: true },
-  { name: 'corredeira-relevo-rapido', q: 'theme=holanda&seed=123&mode=relevo&viva=1', fuzz: 14, rng: 125, water: true, fast: true },
+  { name: 'corredeira-relevo-rapido', q: 'theme=holanda&seed=123&mode=relevo&viva=1', fuzz: 14, rng: 125, water: true, fast: true, wetRequired: true },
   // Desfazer e recarga a partir de uma sequência rápida.
   { name: 'desfazer-rapido', q: 'theme=holanda&seed=31&mode=classico&viva=1', fuzz: 10, rng: 31, fast: true, undo: true },
 ].filter((c) => c.name.includes(filter));
@@ -52,7 +52,7 @@ const cases = [
 const browser = await launch(['--ignore-gpu-blocklist']);
 let failed = 0;
 
-const diffPieces = (a, b) => {
+const diffPieces = (a, b, checkWater) => {
   const out = [];
   const keys = new Set([...Object.keys(a.pieces), ...Object.keys(b.pieces)]);
   for (const k of [...keys].sort()) {
@@ -67,6 +67,7 @@ const diffPieces = (a, b) => {
       out.push(`${k}: decorações com posição, tipo ou cor diferente (${d.length}), ex.: ${d[0]} contra ${y.decos[x.decos.indexOf(d[0])]}`);
     }
     if (x.ground !== y.ground) out.push(`${k}: chão ${x.ground} contra ${y.ground}`);
+    if (checkWater && x.water !== y.water) out.push(`${k}: água ${x.water} contra ${y.water}`);
     if (JSON.stringify(x.smoke) !== JSON.stringify(y.smoke)) out.push(`${k}: ${x.smoke.length} emissores de fumaça contra ${y.smoke.length}`);
     if (JSON.stringify(x.falls) !== JSON.stringify(y.falls)) out.push(`${k}: corredeira ${JSON.stringify(x.falls)} contra ${JSON.stringify(y.falls)}`);
   }
@@ -85,13 +86,15 @@ for (const c of cases) {
   page.on('console', (m) => m.type() === 'error' && !IGNORE.test(m.text()) && errors.push(m.text()));
   page.on('pageerror', (e) => errors.push(String(e)));
   const t0 = Date.now();
+  // A malha da água participa da fila quando a Paisagem viva está ligada.
+  const checkWater = new URLSearchParams(c.q).get('viva') === '1';
   const problems = [];
   let note = '';
   try {
     await page.goto(`${base}?${c.q}&quality=medium&webgl`);
     await page.waitForFunction(() => typeof window.__sceneSig === 'function' && window.__stats, null, { timeout: TIMEOUT });
     const settle = async () => {
-      // Faz as peças em queda assentarem e espera a fila da Paisagem viva esvaziar.
+      // Faz as quedas assentarem e espera esvaziar as filas de Encostas e Paisagem viva.
       for (let i = 0; i < 400; i++) {
         await page.evaluate(() => window.__land());
         const p = await page.evaluate(() => window.__pending());
@@ -111,6 +114,7 @@ for (const c of cases) {
     };
     const play = (m) => page.evaluate(([q, r, rot]) => window.__playMove(q, r, rot), m);
     const played = [];
+    let wetTouches = 0;
     if (c.moves) {
       for (const m of c.moves) {
         if (!(await play(m))) problems.push(`a jogada ${m} não foi aceita`);
@@ -127,6 +131,7 @@ for (const c of cases) {
         const m = list[Math.floor(rnd() * list.length)];
         if (!(await play(m.slice(0, 3)))) break;
         played.push(m.slice(0, 3));
+        if (m[3] > 0) wetTouches++;
         if (!c.fast) await settle();
       }
     }
@@ -135,15 +140,21 @@ for (const c of cases) {
     await page.evaluate(() => window.__rebuildScene());
     await settle();
     const full = await page.evaluate(() => window.__sceneSig());
-    for (const d of [...diffPieces(inc, full), ...diffTotals(inc, full)]) problems.push(`incremental x integral: ${d}`);
+    for (const [phase, scene] of [['incremental', inc], ['reconstrução', full]]) {
+      if (Object.keys(scene.pieces).length !== scene.settled) problems.push(`${phase}: a assinatura não tem uma chave por peça assentada`);
+    }
+    for (const d of [...diffPieces(inc, full, checkWater), ...diffTotals(inc, full)]) problems.push(`incremental x integral: ${d}`);
     if (inc.orphans || full.orphans) problems.push(`instâncias órfãs: ${inc.orphans} / ${full.orphans}`);
+    const wetPieces = Object.values(full.pieces).filter((p) => p.water && !p.water.startsWith('0:')).length;
+    if (c.wetRequired && (!wetTouches || wetPieces < 2)) problems.push('o caso dirigido deixou de exercitar um encaixe de água');
     const foam = Object.values(full.pieces).filter((p) => p.falls && p.falls.foam > 0).length;
-    note = `${played.length} jogadas, ${Object.keys(full.pieces).length} peças, ${full.smokeTotal} chaminés, ${full.mistTotal} névoas, ${foam} com corredeira`;
+    note = `${played.length} jogadas, ${Object.keys(full.pieces).length} peças, ${full.smokeTotal} chaminés, ${full.mistTotal} névoas, ${foam} com corredeira, ${wetPieces} com água, ${wetTouches} jogadas com encaixe de água`;
     // Recarga: o replay do save reconstrói a mesma cena.
     await page.evaluate(() => window.__replayScene());
     await settle();
     const rep = await page.evaluate(() => window.__sceneSig());
-    for (const d of [...diffPieces(rep, full), ...diffTotals(rep, full)]) problems.push(`recarga x integral: ${d}`);
+    if (Object.keys(rep.pieces).length !== rep.settled) problems.push('recarga: a assinatura não tem uma chave por peça assentada');
+    for (const d of [...diffPieces(rep, full, checkWater), ...diffTotals(rep, full)]) problems.push(`recarga x integral: ${d}`);
     if (c.undo && played.length) {
       // Desfazer e jogar de novo a última: o resultado é o mesmo (a peça da vez volta a ser a mesma).
       await page.evaluate(() => window.__undoMove());
@@ -151,7 +162,8 @@ for (const c of cases) {
       if (!(await play(played[played.length - 1]))) problems.push('a última jogada não pôde ser refeita depois do desfazer');
       await settle();
       const redo = await page.evaluate(() => window.__sceneSig());
-      for (const d of [...diffPieces(redo, full), ...diffTotals(redo, full)]) problems.push(`desfazer e refazer x integral: ${d}`);
+      if (Object.keys(redo.pieces).length !== redo.settled) problems.push('desfazer e refazer: a assinatura não tem uma chave por peça assentada');
+      for (const d of [...diffPieces(redo, full, checkWater), ...diffTotals(redo, full)]) problems.push(`desfazer e refazer x integral: ${d}`);
     }
   } catch (e) {
     problems.push(`erro no teste: ${String(e).slice(0, 300)}`);
