@@ -3411,7 +3411,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       }
     }
     // Sobre a pedra não nasce nada: o capim, as flores, as plantas e as árvores cujo pé cai dentro de uma fundação furariam o topo em
-    // pontas soltas e somem; o resto (poço, aldeão, lampião) sobe até o piso.
+    // pontas soltas e somem, e o que se move também; o resto estático (poço, lampião) sobe até o piso.
     const lifts = new Map<Deco, number>();
     if (blocks.length) {
       let kept = 0;
@@ -3420,7 +3420,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
           const dx = o.x - x, dz = o.z - z;
           return Math.abs(dx * cs - dz * sn) <= hw && Math.abs(dx * sn + dz * cs) <= hd;
         });
-        if (b && !o.anim && FOOT_PLANTS.test(o.key)) continue;
+        // O que se move (bicho, aldeão) não é levantado: a `Life` já soma a altura do chão (`groundRise`) e a cota daqui é absoluta; se
+        // nasce sobre a pedra, some.
+        if (b && (o.anim || FOOT_PLANTS.test(o.key))) continue;
         if (b) lifts.set(o, b.floor);
         decos[kept++] = o;
       }

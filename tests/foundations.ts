@@ -132,7 +132,10 @@ for (let seed = 1; seed <= N; seed++) {
           for (const o of tile.decos) {
             if (o === d || o.key.startsWith('wall:') || o.key.startsWith('roof:')) continue;
             const dx = o.x - d.x, dz = o.z - d.z;
-            if (Math.abs(dx * cs - dz * sn) < body.w * d.sx * FOOT_HALF - 1e-4 && Math.abs(dx * sn + dz * cs) < body.d * d.sz * FOOT_HALF - 1e-4 && o.y < floor - 1e-4) complain(`${where}: ${o.key} sobre a fundação, ${(floor - o.y).toFixed(3)} abaixo do piso`);
+            const within = Math.abs(dx * cs - dz * sn) < body.w * d.sx * FOOT_HALF - 1e-4 && Math.abs(dx * sn + dz * cs) < body.d * d.sz * FOOT_HALF - 1e-4;
+            // O que se move não nasce sobre a pedra nem ganha o piso (a `Life` soma a altura do chão: contaria em dobro).
+            if (within && o.anim) complain(`${where}: ${o.key} (anim) dentro da fundação`);
+            if (within && o.y < floor - 1e-4) complain(`${where}: ${o.key} sobre a fundação, ${(floor - o.y).toFixed(3)} abaixo do piso`);
           }
           // Em volta da fundação o decalque não escala o arrimo: nenhum triângulo (fora do retângulo, que fica sob a pedra) tem os vértices
           // em cotas de chão mais de DRAPE_STEP distantes, que o vê em pé como uma lasca solta.
