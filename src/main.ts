@@ -29,6 +29,7 @@ import { THEMES, themeById, type Theme } from './themes/themes';
 import { withSafeColors } from './ui/a11y';
 import { bannerSvg, dress, validBanner, validHouse, type Banner, type HouseColor } from './ui/banner';
 import { Capture, VIDEO_QUALITIES } from './ui/capture';
+import { plural, pluralWord } from './ui/plural';
 import { Hud, TIME_ICON, TIME_LABEL, TIME_ORDER, glyph, questLabel, questMarker } from './ui/hud';
 import { bindInput } from './ui/input';
 import { persist as requestPersistence, exportKeys, importKeys, safeWrite, once, SAVE_FAIL_NOTICE } from './ui/storage';
@@ -320,6 +321,13 @@ function loadBest() {
   } catch {
     // valor salvo corrompido: começa sem recorde
   }
+}
+/** Guarda o recorde se a partida passou dele (partidas de teste, `special`, não gravam). Também roda no fim, para o preenchimento automático. */
+function noteBest() {
+  if (game.board.score <= best) return;
+  best = game.board.score;
+  bestSeed = game.seed;
+  if (!special) store.set(bestKey(), JSON.stringify({ score: best, seed: bestSeed }));
 }
 /** `?bench`: tabuleiro fixo (semente e peças) e tempo por nível, para as medições serem comparáveis. */
 const BENCH_SEED = 7;
@@ -721,11 +729,7 @@ function place(q: number, r: number) {
     hud.toast(`Peça especial: ${SPECIAL_NAME[sp]}. ${specialRule(sp)}`, 'good');
     tutorial.offer('especial', 'Peça especial', `${SPECIAL_NAME[sp]}: ${specialRule(sp).toLowerCase()} As peças especiais são liberadas jogando e entram duas vezes em cada partida.`);
   }
-  if (game.board.score > best) {
-    best = game.board.score;
-    bestSeed = game.seed;
-    if (!special) store.set(bestKey(), JSON.stringify({ score: best, seed: bestSeed }));
-  }
+  noteBest();
   // Passar do recorde é um momento: comemora uma vez por partida (não na primeira partida).
   if (!recordCheered && bestAtStart > 0 && game.board.score > bestAtStart && !special) {
     recordCheered = true;
@@ -1273,7 +1277,22 @@ async function shareResult() {
 function showGameOver() {
   ensureTurns();
   const b = game.board;
-  const record = b.score > bestAtStart && b.score > 0;
+  noteBest();
+  // Partida de teste (?auto, ?stress, ?demo) não grava recorde, então não o comemora.
+  const record = !special && b.score > bestAtStart && b.score > 0;
+  const hasQuests = (game.rules.maxQuests > 0 && game.rules.questChance > 0) || b.questsCompleted > 0;
+  const nSites = b.sites.length;
+  const nSyn = Object.values(b.synergyCount).reduce((a, c) => a + c, 0);
+  const details = [
+    `Era ${eraName(b.era)}`,
+    ...(nSites ? [`${b.sites.filter((x) => x.found).length} de ${nSites} ${pluralWord(nSites, 'sítio', 'sítios')}`] : []),
+    plural(b.perfects, 'encaixe perfeito', 'encaixes perfeitos'),
+    plural(nSyn, 'interação', 'interações'),
+  ].join(', ');
+  // Recorde: o anterior quando esta partida o bateu, o vigente quando não; nada sem recorde nem em partida de teste.
+  const bestLine = special ? '' :
+    record ? bestAtStart > 0 ? `Recorde anterior em ${mode.name} · ${rulesTheme.name}: ${bestAtStart.toLocaleString('pt-BR')} ${pluralWord(bestAtStart, 'ponto', 'pontos')}.` : `Primeiro recorde em ${mode.name} · ${rulesTheme.name}.` :
+    best > 0 ? `Recorde em ${mode.name} · ${rulesTheme.name}: ${best.toLocaleString('pt-BR')} ${pluralWord(best, 'ponto', 'pontos')} (semente ${bestSeed}).` : '';
   const harborCount = b.ports.filter((p) => p.delivered).length;
   const voyageWon = b.ports.length > 0 && harborCount === b.ports.length;
   const title = game.rules.riverTrade ? voyageWon ? 'Viagem concluída!' : 'A pilha acabou' :
@@ -1282,17 +1301,17 @@ function showGameOver() {
     <h2 id="modal-title">${title}</h2>
     <p class="muted">${modeLabel()} · ${theme.name} · semente ${game.seed}</p>
     <div class="final">
-      <div><b data-count="${b.score}">${b.score.toLocaleString('pt-BR')}</b><span>pontos</span></div>
-      <div><b>${game.placedCount}</b><span>peças</span></div>
-      ${game.rules.riverTrade ? `<div><b>${harborCount}/${b.ports.length}</b><span>entregas</span></div>` : `<div><b>${b.questsCompleted}</b><span>missões</span></div>`}
+      <div><b data-count="${b.score}">${b.score.toLocaleString('pt-BR')}</b><span>${pluralWord(b.score, 'ponto', 'pontos')}</span></div>
+      <div><b>${game.placedCount}</b><span>${pluralWord(game.placedCount, 'peça', 'peças')}</span></div>
+      ${game.rules.riverTrade ? `<div><b>${harborCount}/${b.ports.length}</b><span>${pluralWord(harborCount, 'entrega', 'entregas')}</span></div>` : hasQuests ? `<div><b>${b.questsCompleted}</b><span>${pluralWord(b.questsCompleted, 'missão', 'missões')}</span></div>` : ''}
     </div>
     ${game.rules.riverTrade ? `<p><b>${CHARTS[voyageSettings.layout]} · ${FREIGHT_CONTRACTS[voyageSettings.freight]}</b></p>
       <ul>${b.ports.map((p) => `<li>${HARBORS[p.id].name} · ${p.delivered ? `entrega concluída, +${p.reward} peças` : p.connectedAt !== undefined ? 'em espera' : 'sem ligação à vila'}</li>`).join('')}</ul>
       ${voyageWon ? `<p>Bônus da pilha: +${game.finalSupplyBonus.toLocaleString('pt-BR')} pontos.</p>` : ''}` : ''}
     ${timelineSvg(turns, shownTheme().terrainColors, theme.ui.accent, theme.terrainNames)}
-    ${game.rules.riverTrade ? '' : `<p class="muted">Era ${eraName(b.era)}, ${b.sites.filter((x) => x.found).length} de ${b.sites.length} sítios, ${b.perfects} encaixes perfeitos, ${Object.values(b.synergyCount).reduce((a, c) => a + c, 0)} interações.</p>`}
+    ${game.rules.riverTrade ? '' : `<p class="muted">${details}.</p>`}
     ${b.blessings.length ? `<p class="muted">Cartas da vila: ${b.blessings.map((id) => blessingName(id, theme)).join(', ')}.</p>` : ''}
-    <p class="muted">Recorde em ${mode.name} · ${rulesTheme.name}: ${best.toLocaleString('pt-BR')} pontos (semente ${bestSeed}).</p>
+    ${bestLine ? `<p class="muted">${bestLine}</p>` : ''}
     ${special ? '' : specialsLine()}
     <div class="row">
       <button class="primary" type="button" data-act="new">Jogar de novo</button>
