@@ -300,6 +300,13 @@ export class Life {
     return d < 0 ? 0.18 : d > 0 ? 0.27 : 0;
   }
 
+  /** Eixo do canal da Paisagem viva, na orientação do mundo e relativo ao centro da peça. */
+  riverLine: (tile: Placed, a: number, b: number) => [number, number][] | undefined = () => undefined;
+
+  refreshRiver(tile: Placed) {
+    for (const mover of this.movers) if (mover.boat && mover.tile.key === tile.key) this.setRoute(mover);
+  }
+
   private root = new THREE.Group();
   private pools = new Map<string, AnimPool>();
   private spinners: Spinner[] = [];
@@ -710,7 +717,32 @@ export class Life {
       return pull ? [mx * (1 - pull / INR), mz * (1 - pull / INR)] : [mx, mz];
     };
     let pts: [number, number][];
-    if (m.a < 0 || m.b < 0) pts = [end(m.a), end(m.b)];
+    const river = m.boat ? this.riverLine(m.tile, m.a, m.b) : undefined;
+    if (river && river.length >= 2) {
+      const trim = (line: [number, number][], pull: number) => {
+        if (pull <= 0) return;
+        let i = 0;
+        while (i + 1 < line.length) {
+          const [ax, az] = line[i], [bx, bz] = line[i + 1];
+          const dist = Math.hypot(bx - ax, bz - az);
+          if (dist > pull) {
+            line[i] = [ax + (bx - ax) * (pull / dist), az + (bz - az) * (pull / dist)];
+            break;
+          }
+          if (i + 2 === line.length) break;
+          pull -= dist;
+          i++;
+        }
+        line.splice(0, i);
+      };
+      pts = river;
+      if (m.a >= 0) trim(pts, this.fallPull(m.tile, m.a));
+      if (m.b >= 0) {
+        pts.reverse();
+        trim(pts, this.fallPull(m.tile, m.b));
+        pts.reverse();
+      }
+    } else if (m.a < 0 || m.b < 0) pts = [end(m.a), end(m.b)];
     else if (!m.boat) {
       const rot = m.tile.rot;
       const c = Math.cos((rot * Math.PI) / 3), s = Math.sin((rot * Math.PI) / 3);

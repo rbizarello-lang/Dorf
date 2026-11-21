@@ -20,14 +20,14 @@ O Roger pediu que os dois agentes trabalhem em sincronia no mesmo repositório. 
 | Patamares de vila em geometria (muro de arrimo, como a Aldeia na crista) | Astra | `astra/e5-patamares` a partir de `fcc7530` | na `main` (#117), [relatório e prancha](propostas/e5-patamares/RELATORIO.md) |
 | E7 Limite de buffers de vértice no WebGPU (árvores com 9 buffers acima de 1000 instâncias; também na `main`) | Claude | `dorf/e5-encostas` | na `main` (#117), com a E7b (um buffer intercalado por geometria) e os casos `buffers-de-vertice` e `vida-dos-buffers` no smoke ([relatório](propostas/e7/RELATORIO.md)); o #116 foi fechado como substituído |
 | D46 Encostas mais leves (montagem 34% mais rápida, vizinhas refeitas em fila) | Claude | `dorf/d46-encostas-leves` | na `main` (#123), [relatório](propostas/d46/RELATORIO.md) |
-| D47 Fundações das casas nos patamares (sem recortes na junção com a capa) | Claude | `dorf/d47-fundacoes` | feita; PR para revisão do Roger, [relatório](propostas/d47/RELATORIO.md) |
-| Piloto de acessos entre patamares e aviso abaixo do cabeçalho | Astra | `astra/acessos-da-vila` | em revisão. [Relatório e prancha](propostas/acessos-da-vila/RELATORIO.md) |
+| D47 Fundações das casas nos patamares (sem recortes na junção com a capa) | Claude | `dorf/d47-fundacoes` | na `main` (#129, `5017a19`), [relatório](propostas/d47/RELATORIO.md) |
+| Piloto de acessos entre patamares e aviso abaixo do cabeçalho | Astra | `astra/acessos-da-vila` | na `main` (#126, `d9e56e7`). [Relatório e prancha](propostas/acessos-da-vila/RELATORIO.md) |
 | Casas vazias internas com contorno redondo | Astra | `astra/baias-internas` a partir de `bd371dc` | na `main` (#117), [relatório e pranchas](propostas/baias-internas/RELATORIO.md) |
 | E8 Atualização das vizinhas: fumaça, peça que assenta durante a queda, corredeira nas duas ordens, prévia da vizinha que sobe | Claude | `dorf/e5-encostas` | feita (`4081afe` e seguintes; [relatório](propostas/e8/RELATORIO.md)); `npm run scene` compara cena incremental e reconstrução (16 casos ok); falta conferir o WebGPU e a GPU real (issue #115) |
 | Entrepostos como modo sobre a base (cais, fretes, oráculo independente do contrato) | Astra | `astra/entrepostos-modo` | feito em `f4ad35f`, integrado à base do #117. [Relatório e prancha](propostas/entrepostos-modo/RELATORIO.md). PR para revisão do Roger |
 | Acabamento do Entrepostos (renderização dos cais, balizas e trajeto das barcas) | Astra | `astra/entrepostos-acabamento` | feito em `3103d77`. [Relatório e pranchas](propostas/entrepostos-acabamento/RELATORIO.md). PR para revisão do Roger |
-| Paisagem viva: celeiros por tema | Astra | `astra/paisagem-viva` | entregues nos cinco temas, em revisão no #122. [Relatório](propostas/paisagem-viva/RELATORIO.md) |
-| Paisagem viva: alargamento dos canais | Astra | a definir | pendente em etapa própria. D46 integrada à `main` (#123, `2ef6955`) |
+| Paisagem viva: celeiros por tema | Astra | `astra/paisagem-viva` | na `main` nos cinco temas (#122, `c126e2a`). [Relatório](propostas/paisagem-viva/RELATORIO.md) |
+| Paisagem viva: alargamento dos canais | Astra | `astra/canal-vivo` | implementado em `4654028` e em revisão no #125, com emenda simétrica, atualização da malha e teste de reconstrução. D46 integrada à `main` (#123, `2ef6955`). [Relatório e prancha](propostas/canal-vivo/RELATORIO.md) |
 
 ## Coordenação
 A conversa entre os agentes fica na issue #115 ("Continuidade das Encostas entre Claude e Codex"). Ao pegar ou terminar uma tarefa, comente lá, com a branch e o commit, e atualize esta tabela.
