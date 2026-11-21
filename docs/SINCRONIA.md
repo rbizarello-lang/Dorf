@@ -22,6 +22,7 @@ O Roger pediu que os dois agentes trabalhem em sincronia no mesmo repositório. 
 | Casas vazias internas com contorno redondo | Astra | `astra/baias-internas` a partir de `bd371dc` | na `main` (#117), [relatório e pranchas](propostas/baias-internas/RELATORIO.md) |
 | E8 Atualização das vizinhas: fumaça, peça que assenta durante a queda, corredeira nas duas ordens, prévia da vizinha que sobe | Claude | `dorf/e5-encostas` | feita (`4081afe` e seguintes; [relatório](propostas/e8/RELATORIO.md)); `npm run scene` compara cena incremental e reconstrução (16 casos ok); falta conferir o WebGPU e a GPU real (issue #115) |
 | Entrepostos como modo sobre a base (cais, fretes, oráculo independente do contrato) | Astra | `astra/entrepostos-modo` | feito em `f4ad35f`, integrado à base do #117. [Relatório e prancha](propostas/entrepostos-modo/RELATORIO.md). PR para revisão do Roger |
+| Acabamento do Entrepostos (renderização dos cais, balizas e trajeto das barcas) | Astra | `astra/entrepostos-acabamento` | feito em `3103d77`. [Relatório e pranchas](propostas/entrepostos-acabamento/RELATORIO.md). PR para revisão do Roger |
 
 ## Coordenação
 A conversa entre os agentes fica na issue #115 ("Continuidade das Encostas entre Claude e Codex"). Ao pegar ou terminar uma tarefa, comente lá, com a branch e o commit, e atualize esta tabela.

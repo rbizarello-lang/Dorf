@@ -424,6 +424,10 @@ class Chunk {
     return { start: this.wN - wAdd, count: wAdd, gStart, gCount: gAdd };
   }
 
+  freightWater(start: number, count: number) {
+    return { pos: this.wPos, bed: this.wBed, start, count };
+  }
+
   /** Impressão digital do chão de uma peça (triângulos com área, somas arredondadas de posição e cor): conferência de cena, sem ordem. */
   groundDigest(start: number, count: number) {
     let tris = 0;
@@ -1008,6 +1012,7 @@ export class World {
     this.stamps.position.y = -0.115;
     this.stamps.renderOrder = 1;
     this.stamps.frustumCulled = false;
+    this.stamps.visible = false;
     this.scene.add(this.stamps);
 
     const hex = new THREE.CircleGeometry(0.9, 6).rotateX(-Math.PI / 2);
@@ -1674,7 +1679,7 @@ export class World {
   private syncHarbors(board: Board) {
     if (!board.ports.length) return;
     this.harbors ??= new HarborLayer(this.staticRoot);
-    this.harbors.sync(board, (q, r) => this.baked.has(hkey(q, r)), (q, r) => this.flq(q, r), (x, z) => this.heightAt(x, z) + this.riseAt(x, z));
+    this.harbors.sync(board, (q, r) => this.baked.has(hkey(q, r)), (q, r) => this.flq(q, r), (x, z) => this.heightAt(x, z) + this.riseAt(x, z), this.voidMesh.position.y);
   }
 
   /** Quanto o chão sobe nesse ponto do mundo (já deslocado pelo fluido): a soma da encosta da peça que o cobre. */
@@ -2469,6 +2474,7 @@ export class World {
     }
     this.stamps.geometry.dispose();
     this.stamps.geometry = geos.length ? mergeGeometries(geos)! : new THREE.BufferGeometry();
+    this.stamps.visible = geos.length > 0;
   }
 
   /** Coloca com animação: a peça assenta, levanta poeira e depois é "cozida" no bloco. */
@@ -3157,7 +3163,10 @@ export class World {
   placeFx(res: PlaceResult) {
     const { x, z } = hexToWorld(res.placed.q, res.placed.r);
     if (this.board && this.harbors && !this.reducedMotion) {
-      for (const port of res.deliveries) this.harbors.depart(this.board, port, (q, r) => this.flq(q, r), (q, r) => this.heightOf(q, r));
+      for (const port of res.deliveries) this.harbors.depart(this.board, port, (q, r) => {
+        const slot = this.waterSlots.get(hkey(q, r));
+        return slot?.chunk.freightWater(slot.start, slot.count);
+      }, (x, z) => this.fl(x, z));
     }
     if (res.perfect) {
       this.burst(x, z, 'sparkle', 26);

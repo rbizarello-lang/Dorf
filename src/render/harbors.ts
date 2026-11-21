@@ -1,10 +1,11 @@
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Board } from '../core/board';
-import { DIRS } from '../core/hex';
+import { DIRS, hexToWorld } from '../core/hex';
 import { HARBORS, type Port } from '../core/ports';
 import { T } from '../core/tiles';
-import { WATER_Y } from './tileBuilder';
+import { makeHarborMaterial } from './materials';
+import { FreightTrack, freightRoute, type FreightWater } from './freightRoute';
 
 function paint(geometry: THREE.BufferGeometry, hex: string) {
   const g = geometry.index ? geometry.toNonIndexed() : geometry;
@@ -30,8 +31,17 @@ function log(x: number, y: number, z: number, radius: number, length: number) {
   return paint(new THREE.CylinderGeometry(radius, radius, length, 7).rotateX(Math.PI / 2).translate(x, y, z), '#986b45');
 }
 
+/** A baliza marca a casa na carta enquanto a peça com rio ainda não assentou. */
+function chartStake(port: Port) {
+  const color = HARBORS[port.id].color;
+  const parts = [beam(0, 0.06, 0, 0.46, 0.12, 0.46, '#654938'), beam(0, 0.135, 0, 0.40, 0.03, 0.40, '#f7e8be')];
+  parts.push(beam(0, 0.38, 0, 0.055, 0.51, 0.055, '#654938'));
+  parts.push(paint(new THREE.OctahedronGeometry(0.19).scale(1, 1.3, 1).translate(0, 0.66, 0), color));
+  return parts;
+}
+
 /** Toldo de feira, pilha de toras e casco no cavalete distinguem os cais pela forma. */
-function dock(port: Port, settled: boolean) {
+function dock(port: Port) {
   const color = HARBORS[port.id].color;
   const parts = [beam(-0.36, -0.03, 0, 0.56, 0.27, 0.49, '#8b8a73'), beam(-0.36, 0.11, 0, 0.58, 0.05, 0.51, '#d8c394')];
   for (let i = 0; i < 5; i++) parts.push(beam(0.02, 0.09, (i - 2) * 0.075, 0.31, 0.05, 0.07, i % 2 ? '#ae8052' : '#c8a071'));
@@ -51,7 +61,7 @@ function dock(port: Port, settled: boolean) {
     for (const z of [-0.13, 0.13]) parts.push(beam(-0.36, 0.23, z, 0.37, 0.21, 0.04, '#a67f55'));
     parts.push(paint(new THREE.SphereGeometry(1, 10, 5).scale(0.16, 0.105, 0.24).translate(-0.36, 0.36, 0), '#834e37'));
   }
-  if (settled && port.delivered) parts.push(beam(0.02, 0.17, 0.07, 0.13, 0.12, 0.13, color));
+  if (port.delivered) parts.push(beam(0.02, 0.17, 0.07, 0.13, 0.12, 0.13, color));
   return parts;
 }
 
@@ -67,10 +77,11 @@ type Coord = (q: number, r: number) => { x: number; z: number };
 
 /** Um desenho para os cais; só as barcas em trânsito têm uma malha por frete. */
 export class HarborLayer {
-  private material = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.88 });
+  private material = makeHarborMaterial();
   private docks: THREE.Mesh | null = null;
   private signature = '';
-  private ships: { mesh: THREE.Mesh; track: THREE.CurvePath<THREE.Vector3>; progress: number; length: number }[] = [];
+  private waiting: (() => boolean)[] = [];
+  private ships: { mesh: THREE.Mesh; track: FreightTrack; progress: number }[] = [];
 
   constructor(private readonly scene: THREE.Object3D) {}
 
@@ -80,13 +91,14 @@ export class HarborLayer {
       ship.mesh.geometry.dispose();
     }
     this.ships = [];
+    this.waiting = [];
     this.signature = '';
     this.docks?.removeFromParent();
     this.docks?.geometry.dispose();
     this.docks = null;
   }
 
-  sync(board: Board, settled: (q: number, r: number) => boolean, at: Coord, ground: (x: number, z: number) => number) {
+  sync(board: Board, settled: (q: number, r: number) => boolean, at: Coord, ground: (x: number, z: number) => number, voidY: number) {
     if (!board.ports.length) return;
     const docks = board.ports.map((port) => {
       const tile = settled(port.q, port.r) ? board.get(port.q, port.r) : undefined;
@@ -94,7 +106,7 @@ export class HarborLayer {
       const last = tile ? board.riverPath(port.q, port.r).at(-2) : undefined;
       const edge = last ? DIRS.findIndex(([q, r]) => port.q + q === last[0] && port.r + r === last[1]) : tile?.edges.indexOf(T.Water) ?? -1;
       const yaw = edge < 0 ? 0 : (edge - 1) * Math.PI / 3;
-      const y = tile ? ground(x - 0.36 * Math.cos(yaw), z - 0.36 * Math.sin(yaw)) : -0.08;
+      const y = tile ? ground(x - 0.36 * Math.cos(yaw), z - 0.36 * Math.sin(yaw)) : voidY;
       return { port, tile, x, y, z, yaw };
     });
     const state = docks.map(({ port, tile, x, y, z, yaw }) => [x, y.toFixed(3), z, yaw, +!!tile, +port.delivered].join(',')).join('|');
@@ -102,53 +114,79 @@ export class HarborLayer {
     this.signature = state;
     this.docks?.removeFromParent();
     this.docks?.geometry.dispose();
-    const parts = docks.flatMap(({ port, tile, x, y, z, yaw }) => dock(port, !!tile).map((g) => g.rotateY(-yaw).translate(x, y, z)));
+    const parts = docks.flatMap(({ port, tile, x, y, z, yaw }) => (tile ? dock(port) : chartStake(port)).map((g) => g.rotateY(-yaw).translate(x, y, z)));
     this.docks = new THREE.Mesh(combine(parts), this.material);
     this.docks.name = 'Entrepostos';
+    this.docks.receiveShadow = true;
     this.scene.add(this.docks);
   }
 
-  depart(board: Board, port: Port, at: Coord, heightOf: (q: number, r: number) => number) {
+  depart(board: Board, port: Port, waterAt: (q: number, r: number) => FreightWater | undefined, warp: Coord) {
     const mill = board.ports[1];
     const timber = board.rules.freight === 'madeira' && port.id === 0;
     const from = timber ? [mill.q, mill.r] as const : undefined;
-    const path = board.riverPath(port.q, port.r, from).map(([q, r]) => {
-      const { x, z } = at(q, r);
-      return new THREE.Vector3(x, heightOf(q, r) + WATER_Y + 0.053, z);
-    });
+    const path = board.riverPath(port.q, port.r, from);
     if (path.length < 2) return;
-    const track = new THREE.CurvePath<THREE.Vector3>();
-    let prev = path[0];
-    for (let i = 1; i < path.length - 1; i++) {
-      const center = path[i], enter = center.clone().lerp(path[i - 1], 0.19), leave = center.clone().lerp(path[i + 1], 0.19);
-      track.add(new THREE.LineCurve3(prev, enter));
-      track.add(new THREE.QuadraticBezierCurve3(enter, center, leave));
-      prev = leave;
-    }
-    track.add(new THREE.LineCurve3(prev, path[path.length - 1]));
-    const mesh = new THREE.Mesh(barge(HARBORS[port.id].color, timber), this.material);
-    mesh.name = 'Frete fluvial';
-    mesh.visible = false;
-    this.scene.add(mesh);
-    this.ships.push({ mesh, track, length: track.getLength(), progress: -0.22 });
+
+    // O frete é anunciado enquanto a peça ainda cai. A barca espera a água assentar.
+    let calculation: ReturnType<typeof freightRoute> | undefined;
+    this.waiting.push(() => {
+      if (!calculation) {
+        const water: FreightWater[] = [];
+        for (const [q, r] of path) {
+          const patch = waterAt(q, r);
+          if (!patch) return false;
+          water.push(patch);
+        }
+        const centers = path.map(([q, r]) => hexToWorld(q, r));
+        const waypoints = [warp(centers[0].x, centers[0].z)];
+        for (let i = 1; i < centers.length; i++) {
+          const [a, b] = [centers[i - 1], centers[i]];
+          waypoints.push(warp((a.x + b.x) / 2, (a.z + b.z) / 2));
+        }
+        const last = centers.at(-1)!;
+        waypoints.push(warp(last.x, last.z));
+        calculation = freightRoute(water, waypoints);
+      }
+      // Cota fixa de trabalho por quadro para caber também na renderização do vídeo.
+      let route: THREE.Vector3[] | undefined;
+      for (let work = 0; work < 12; work++) {
+        const step = calculation.next();
+        if (!step.done) continue;
+        route = step.value;
+        break;
+      }
+      if (!route) return false;
+      if (route.length < 2) return true;
+      const track = new FreightTrack(route);
+      const mesh = new THREE.Mesh(barge(HARBORS[port.id].color, timber), this.material);
+      mesh.name = 'Frete fluvial';
+      mesh.receiveShadow = true;
+      // Casco estreito para a barca passar nos canais menores, com a vela à altura dos cais.
+      mesh.scale.set(0.5, 1, 0.5);
+      mesh.visible = false;
+      this.scene.add(mesh);
+      this.ships.push({ mesh, track, progress: -0.22 });
+      return true;
+    });
   }
 
   tick(dt: number) {
+    if (dt <= 0) return;
+    if (this.waiting[0]?.()) this.waiting.shift();
     for (let i = this.ships.length - 1; i >= 0; i--) {
       const ship = this.ships[i];
       ship.progress += dt;
       if (ship.progress < 0) continue;
-      const t = (ship.progress * 2.5) / ship.length;
-      if (t >= 1) {
+      const distance = ship.progress * 2.5;
+      if (distance >= ship.track.length) {
         ship.mesh.removeFromParent();
         ship.mesh.geometry.dispose();
         this.ships.splice(i, 1);
         continue;
       }
       ship.mesh.visible = true;
-      ship.track.getPoint(t, ship.mesh.position);
-      const next = ship.track.getPoint(Math.min(1, t + 0.002));
-      ship.mesh.rotation.y = Math.atan2(next.x - ship.mesh.position.x, next.z - ship.mesh.position.z);
+      ship.mesh.rotation.y = ship.track.pose(distance, ship.mesh.position);
     }
   }
 }

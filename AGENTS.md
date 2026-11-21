@@ -204,6 +204,8 @@ src/render/
   sky.ts         céu procedural para a luz de ambiente (IBL)
   preview.ts     a peça da vez sobre a pilha, com canvas e renderizador próprios
   life.ts        Life: barcos, veículos, animais, aldeões, moinhos, peixes e pássaros que se movem
+  harbors.ts     Entrepostos: balizas nas casas vazias, cais assentados e barcas de frete
+  freightRoute.ts  Trajeto das barcas pela malha da água, preparado em etapas por quadro
   cameraRig.ts   câmera orbital: inclinação baixa pela curva do zoom mais o ajuste de quem joga (`tilt`);
                  lente de 40° com `rig.eye` = distância real (`rig.dist` é o enquadramento)
   nightLight.ts  luz da noite (luar e céu) sem three.js: o `skyFor` e o teste de legibilidade leem a mesma tabela
