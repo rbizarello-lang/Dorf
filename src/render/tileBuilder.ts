@@ -78,6 +78,15 @@ const BANK_EXTRA = 0.055;
 const BED_DEPTH = 0.048;
 const BANK_W = 0.075;
 export const ROAD_HW = 0.1;
+/**
+ * Fundação das casas nas Encostas: metade da largura da fundação em frações da parede (a Paisagem viva alarga a casa até 15% depois
+ * da montagem, então a pedra já nasce larga o bastante), a grade e a fileira de lado com que se mede o chão sob ela, o desnível
+ * abaixo do qual a casa dispensa a fundação, a folga do piso sobre o ponto mais alto do chão e quanto a parede afunda sob o mais baixo.
+ */
+export const FOOT_HALF = 0.58;
+/** O que cresce do chão (capim, flores, plantas, árvores, tufos do tema): não nasce sobre a fundação. */
+const FOOT_PLANTS = /^(grass|flower|bush|reed|berry|crop:|tree:|ground:)|~$/;
+const FOOT_GRID = 16, FOOT_EDGE = 20, FOOT_MIN = 0.012, FOOT_MARGIN = 0.004, FOOT_SINK = 0.02;
 /** Altura em que veículos andam (maglev flutua sobre a via). */
 export const ROAD_Y = { rail: 0.03, dirt: 0.006, stone: 0.008, sand: 0.006, maglev: 0.075, dike: 0.054, stepstone: 0.007 } as const;
 /** Altura do topo do dique (`road: 'dike'`): aterro gramado com o caminho de tijolo por cima. */
@@ -335,7 +344,7 @@ class Buf {
    * recursivamente, onde o chão se afasta do plano dele (no meio das arestas e no centro) mais que `DRAPE_TOL`, e cada vértice
    * sobe pela altura do chão naquele ponto. Onde o chão é quase plano o triângulo fica inteiro (poucos triângulos a mais).
    */
-  drape(start: number, hill: HillSurface) {
+  drape(start: number, hill: HillSurface, steepSkip?: (x: number, z: number) => boolean) {
     const pos = this.pos.take(start), col = this.col.take(start), spl = this.spl.take((start / 3) * 4);
     // Vértice = [x, y, z, r, g, b, s0..s3]; o ponto do meio de uma aresta é a média dos dez valores.
     const mid = (a: number[], b: number[]) => {
@@ -352,6 +361,9 @@ class Buf {
       dev = Math.max(dev, hill.at((t0[0] + t1[0] + t2[0]) / 3, (t0[2] + t1[2] + t2[2]) / 3) - (r0 + r1 + r2) / 3);
       if (dev < DRAPE_TOL || depth >= DRAPE_DEPTH) {
         const up = Math.max(0, dev);
+        // Um triângulo que escala um arrimo inteiro vira uma lasca em pé: onde `steepSkip` manda, o decalque não é desenhado ali (a face
+        // de pedra do arrimo aparece no lugar).
+        if (steepSkip && Math.max(r0, r1, r2) - Math.min(r0, r1, r2) > DRAPE_STEP && steepSkip((t0[0] + t1[0] + t2[0]) / 3, (t0[2] + t1[2] + t2[2]) / 3)) return;
         this.put(t0, r0 + up);
         this.put(t1, r1 + up);
         this.put(t2, r2 + up);
@@ -383,6 +395,8 @@ const SCRATCH = new Buf(true);
 /** Encostas: desvio máximo (altura) entre o decalque e o chão antes de dividir o triângulo, e a profundidade máxima da divisão. */
 const DRAPE_TOL = 0.016;
 const DRAPE_DEPTH = 1;
+/** Desnível (entre os vértices) a partir do qual um decalque sobre o arrimo de uma casa é descartado, e o anel em volta da fundação onde vale. */
+export const DRAPE_STEP = 0.05, DRAPE_RING = 0.12;
 const UP: V3 = [0, 1, 0];
 const WHITE = new THREE.Color(1, 1, 1);
 /** Terraços (Theme.terraces): altura de cada patamar, altura do beiral sobre ele e o tamanho de cada patamar de cima em relação à parcela (2 e 3 patamares). */
@@ -3324,50 +3338,98 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
 
   // Encostas: decalques, ruas e parcelas seguem a malha do chão; as casas ganham fundação; o resto da decoração assenta no ponto onde está.
   if (hill) {
-    g.drape(groundEnd, hill);
+    const homes = decos.filter((o) => o.key.startsWith('wall:')).map((o) => {
+      const body = BODY[theme.houses[Number(o.key.slice(5))].body];
+      return { x: o.x, z: o.z, cs: Math.cos(o.ry), sn: Math.sin(o.ry), hw: body.w * o.sx * FOOT_HALF + DRAPE_RING, hd: body.d * o.sz * FOOT_HALF + DRAPE_RING };
+    });
+    g.drape(groundEnd, hill, (x, z) => homes.some((h) => Math.abs((x - h.x) * h.cs - (z - h.z) * h.sn) <= h.hw && Math.abs((x - h.x) * h.sn + (z - h.z) * h.cs) <= h.hd));
     const pads = new Map<string, number>();
+    const decalEnd = g.pos.length;
+    const blocks: { x: number; z: number; cs: number; sn: number; hw: number; hd: number; floor: number }[] = [];
     for (const d of decos) {
       if (!d.key.startsWith('wall:')) continue;
       const body = BODY[theme.houses[Number(d.key.slice(5))].body];
-      const pad: V3[] = [];
-      const cs = Math.cos(d.ry), sn = Math.sin(d.ry);
-      for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-        const u = a * body.w * d.sx * 0.52, v = b * body.d * d.sz * 0.52;
-        const x = d.x + u * cs + v * sn, z = d.z - u * sn + v * cs;
-        pad.push([x, hill.at(x, z), z]);
-      }
-      const high = Math.max(...pad.map((p) => p[1])), low = Math.min(...pad.map((p) => p[1]));
-      if (high - low < 0.018) continue;
-      // O piso da casa é horizontal; o embasamento de pedra fecha o vão do lado de baixo.
-      const seat = hill.at(d.x, d.z);
-      const floor = Math.min(seat + 0.045, Math.max(seat, high - Math.min(0.055, 0.47 * (high - low))));
-      pads.set(d.x + ',' + d.z, floor);
-      const top: V3[] = pad.map(([x, , z]) => [x, floor, z]);
-      const stone = tc(theme.rock).clone().lerp(d.color, 0.32);
-      g.quad(top[0], top[1], top[2], top[3], stone, stone, stone, stone, UP);
-      const skirt: V3[] = pad.map(([x, y, z]) => {
-        const dx = x - d.x, dz = z - d.z, len = Math.hypot(dx, dz);
-        const extension = Math.min(0.13, Math.max(0, (floor - y - 0.025) * 0.8));
-        let xx = x + (dx * extension) / len, zz = z + (dz * extension) / len;
-        const side = (Math.floor((Math.atan2(zz, xx) * 3) / Math.PI) + 6) % 6;
-        const [nx, nz] = edgeMid(side);
-        const out = (xx * nx + zz * nz) / (INR * INR);
-        if (out > 0.985) {
-          xx *= 0.985 / out;
-          zz *= 0.985 / out;
+      const cs = Math.cos(d.ry), sn = Math.sin(d.ry), hw = body.w * d.sx * FOOT_HALF, hd = body.d * d.sz * FOOT_HALF;
+      const local = (a: number, b: number): V3 => {
+        const u = a * hw, v = b * hd, x = d.x + u * cs + v * sn, z = d.z - u * sn + v * cs;
+        return [x, groundY(x, z) + hill.at(x, z), z];
+      };
+      // O chão desenhado sob a casa inteira, capas e arrimos dos patamares inclusive (`HillSurface.at` lê o mesmo triângulo da GPU):
+      // uma grade pela área e uma fileira mais fina em cada lado. Cantos, meios dos lados e centro entram em qualquer grade.
+      let high = -Infinity, low = Infinity, peakA = 0, peakB = 0;
+      const sideLow = [Infinity, Infinity, Infinity, Infinity];
+      for (let i = 0; i <= FOOT_GRID; i++) {
+        for (let j = 0; j <= FOOT_GRID; j++) {
+          const a = (2 * i) / FOOT_GRID - 1, b = (2 * j) / FOOT_GRID - 1, y = local(a, b)[1];
+          if (y > high) (high = y), (peakA = a), (peakB = b);
+          low = Math.min(low, y);
         }
-        return [xx, Math.min(floor - 0.025, hill.at(xx, zz) - 0.012), zz];
-      });
-      const earth = tc(theme.ground[T.Village]).clone().lerp(tc(theme.rock), 0.26);
-      for (let k = 0; k < 4; k++) {
-        const j = (k + 1) % 4, a = pad[k], b = pad[j];
-        // Só o lado de baixo precisa de embasamento: onde o chão já está junto do piso, o muro seria só triângulos a mais.
-        if (Math.min(a[1], b[1]) > floor - 0.03) continue;
-        const n: V3 = [(a[0] + b[0]) * 0.5 - d.x, 0, (a[2] + b[2]) * 0.5 - d.z];
-        const lipA: V3 = [a[0], floor - 0.026, a[2]], lipB: V3 = [b[0], floor - 0.026, b[2]];
-        g.quad(lipA, lipB, top[j], top[k], stone, stone, stone, stone, n);
-        g.quad(skirt[k], skirt[j], lipB, lipA, earth, earth, earth, earth, n);
       }
+      // A quina de uma capa pode cair entre duas amostras: refina em volta do ponto mais alto da grade (dois passos de meia malha).
+      for (let step = 1 / FOOT_GRID; step > 0.004; step /= 2) {
+        const a0 = peakA, b0 = peakB;
+        for (const [da, db] of [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]]) {
+          const a = Math.max(-1, Math.min(1, a0 + da * step)), b = Math.max(-1, Math.min(1, b0 + db * step)), y = local(a, b)[1];
+          if (y > high) (high = y), (peakA = a), (peakB = b);
+        }
+      }
+      const corners4: [number, number][] = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+      for (let k = 0; k < 4; k++) {
+        const [ax, bz] = corners4[k], [cx, dz] = corners4[(k + 1) % 4];
+        for (let i = 0; i <= FOOT_EDGE; i++) {
+          const f = i / FOOT_EDGE, y = local(ax + (cx - ax) * f, bz + (dz - bz) * f)[1];
+          high = Math.max(high, y);
+          low = Math.min(low, y);
+          sideLow[k] = Math.min(sideLow[k], y);
+        }
+      }
+      // O piso fica acima de todo o chão sob a casa: nenhuma capa passa por cima da fundação, então a junção não recorta. A fundação
+      // é um bloco de pedra de paredes verticais que afunda até abaixo da menor cota de cada lado (a linha onde o chão encontra a
+      // parede é o contorno limpo do terreno, sem triângulos que se cruzam).
+      if (high - low < FOOT_MIN) {
+        pads.set(d.x + ',' + d.z, high);
+        continue;
+      }
+      const floor = high + FOOT_MARGIN;
+      pads.set(d.x + ',' + d.z, floor);
+      // Os decalques (ruas, parcelas, praça) que cobrem o chão sob a fundação sobem sobre as encostas dos patamares e furariam o topo
+      // da pedra em pontas soltas: o que está dentro do retângulo desce para baixo do piso, onde a pedra o esconde.
+      for (let i = groundEnd; i < decalEnd; i += 3) {
+        const dx = g.pos.a[i] - d.x, dz = g.pos.a[i + 2] - d.z;
+        if (Math.abs(dx * cs - dz * sn) <= hw && Math.abs(dx * sn + dz * cs) <= hd) g.pos.a[i + 1] = Math.min(g.pos.a[i + 1], floor - FOOT_SINK / 2);
+      }
+      blocks.push({ x: d.x, z: d.z, cs, sn, hw, hd, floor });
+      const stone = tc(theme.rock).clone().lerp(d.color, 0.32);
+      const top = corners4.map(([a, b]): V3 => {
+        const [x, , z] = local(a, b);
+        return [x, floor, z];
+      });
+      g.quad(top[0], top[1], top[2], top[3], stone, stone, stone, stone, UP);
+      for (let k = 0; k < 4; k++) {
+        // Só o lado de baixo precisa de parede: onde o chão já está junto do piso o bloco seria só triângulos a mais.
+        if (floor - sideLow[k] < FOOT_MIN) continue;
+        const j = (k + 1) % 4, a = top[k], b = top[j], base = sideLow[k] - FOOT_SINK;
+        const n: V3 = [(a[0] + b[0]) * 0.5 - d.x, 0, (a[2] + b[2]) * 0.5 - d.z];
+        g.quad([a[0], base, a[2]], [b[0], base, b[2]], b, a, stone, stone, stone, stone, n);
+      }
+    }
+    // Sobre a pedra não nasce nada: o capim, as flores, as plantas e as árvores cujo pé cai dentro de uma fundação furariam o topo em
+    // pontas soltas e somem, e o que se move também; o resto estático (poço, lampião) sobe até o piso.
+    const lifts = new Map<Deco, number>();
+    if (blocks.length) {
+      let kept = 0;
+      for (const o of decos) {
+        const b = o.key.startsWith('wall:') || o.key.startsWith('roof:') ? undefined : blocks.find(({ x, z, cs, sn, hw, hd }) => {
+          const dx = o.x - x, dz = o.z - z;
+          return Math.abs(dx * cs - dz * sn) <= hw && Math.abs(dx * sn + dz * cs) <= hd;
+        });
+        // O que se move (bicho, aldeão) não é levantado: a `Life` já soma a altura do chão (`groundRise`) e a cota daqui é absoluta; se
+        // nasce sobre a pedra, some.
+        if (b && (o.anim || FOOT_PLANTS.test(o.key))) continue;
+        if (b) lifts.set(o, b.floor);
+        decos[kept++] = o;
+      }
+      decos.length = kept;
     }
     // O eixo das pás acompanha a base do moinho; quem se move (pás, bichos, aldeões) lê a altura do chão na hora, na `Life`.
     for (const d of decos) {
@@ -3377,8 +3439,12 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       }
       if (d.anim) continue;
       const x = d.support?.[0] ?? d.x, z = d.support?.[1] ?? d.z;
-      d.y += d.key.startsWith('wall:') || d.key.startsWith('roof:') ? pads.get(x + ',' + z) ?? hill.at(x, z) : hill.at(x, z);
+      // O piso da casa (parede e telhado) é uma cota absoluta: a mesma do topo da fundação.
+      const floor = d.key.startsWith('wall:') || d.key.startsWith('roof:') ? pads.get(x + ',' + z) : undefined;
+      if (floor !== undefined) d.y = floor;
+      else d.y += hill.at(x, z);
     }
+    for (const [o, floor] of lifts) o.y = Math.max(o.y, floor);
     for (const [i, [x, z]] of chimneyHomes.entries()) chimneys[i * 4 + 1] += pads.get(x + ',' + z) ?? hill.at(x, z);
   }
   // Relevo por peça: o que foi posto depois do chão (decalques, ruas, praça) e a decoração sobem com o campo de altura, no ponto onde estão.

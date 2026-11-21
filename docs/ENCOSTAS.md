@@ -11,7 +11,7 @@ Cada peça ganha uma superfície de chão (`HillProfile`: ombros por borda, divi
 - `src/render/villageTerraces.ts`: patamares de vila em geometria.
 - `src/render/tileBuilder.ts`: `buildTile` com `opts.hill`/`opts.hand` (levanta o chão, recorta decalques, assenta casas).
 - `src/render/world.ts`: `refreshHills`, `hillQueue`/`drainHills` (vizinhas que mudam), `rebakeHill`, `drainLiving`.
-- Testes: `tests/hills.ts` (`npm run hills`), `tests/village-terraces.ts`, `tests/hills-cost.ts` (`npm run hills:custo`, com soma de verificação da geometria), `npm run scene` (cena incremental × reconstrução).
+- Testes: `tests/hills.ts` (`npm run hills`), `tests/village-terraces.ts`, `tests/foundations.ts` (fundações das casas, D47: `docs/propostas/d47/`), `tests/hills-cost.ts` (`npm run hills:custo`, com soma de verificação da geometria), `npm run scene` (cena incremental × reconstrução).
 - Ganchos: `?encostas=0` desliga; `window.__hills()` devolve `{ rebakes, ms, total }`.
 
 ## Custo e a etapa D46 (Encostas mais leves)
