@@ -50,7 +50,7 @@ Metas (draw calls ≤ +10%, triângulos ≤ +15%, montagem ≤ +25%) atendidas n
 Fecha: núcleo puro e testado com oráculo independente; independência da ordem, replay e desfazer; opção, `?viva=`/`#viva=` e `#mode=zen` na prévia; orçamento de draw calls, triângulos e montagem; casas, mata e cultivo; celeiro com um pool só; Terra ligada às manchas.
 
 Não fecha:
-- **Canal mais largo onde os rios se ligam: não feito.** A largura de cada borda já é herdada da vizinha (`World.widthsAt`); alargá-la por estágio exigiria refazer a emenda de toda a cadeia de rio. Documentado.
+- **Canal mais largo onde os rios se ligam:** etapa posterior com atualização da geometria dos dois lados da emenda. [Relatório e prancha](../canal-vivo/RELATORIO.md).
 - **O celeiro lê mal:** na captura de perto é uma casinha pequena de telhado alaranjado junto ao campo, não um celeiro claro. Falta um desenho próprio (hoje é caixa com telhado de quatro águas nas cores das casas).
 - **Fantasma das vizinhas:** só o aviso " · N crescem"; as vizinhas não aparecem crescendo.
 - **Terra com mancha fechada:** a captura mostra a paisagem desenvolvida (vários terrenos em estágio 3), mas não isolei uma mancha específica fechando antes e depois; quem confere o efeito das manchas é o teste.
