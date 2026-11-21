@@ -2740,7 +2740,7 @@ function start(data: unknown) {
 };
 
 // Coloca a peça atual na melhor posição, com animação (capturas da queda e da onda).
-(window as unknown as { __hills: () => { rebakes: number; ms: number } }).__hills = () => ({ rebakes: world.hillRebakes, ms: world.hillMs });
+(window as unknown as { __hills: () => { rebakes: number; ms: number; total: number } }).__hills = () => ({ rebakes: world.hillRebakes, ms: world.hillMs, total: world.hillTotalMs });
 // Paisagem viva: ligada, peças refeitas por estágio e o pior tempo de uma rodada (ms); `stages` = quantas peças têm algum estágio, por estágio 0 a 3.
 (window as unknown as { __living: () => unknown }).__living = () => ({ on: world.vivaOn, rebakes: world.livingRebakes, maxMs: world.livingMaxMs, stages: world.livingHistogram() });
 // Conferência de cena (E8, `scripts/scene-sync.mjs`): a assinatura do que cada peça tem agora, para comparar com a de uma reconstrução integral.
