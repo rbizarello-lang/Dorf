@@ -69,6 +69,8 @@ function poolKey(id: string) {
 /** O alto do céu um pouco mais azul que a cor "do céu" do tema (que é quase branca). */
 const ZENITH_TINT = new THREE.Color(0.86, 0.93, 1.08);
 // Ultra e Cinema passam de 1: mais árvores, capim e plantações de perto (alvo: GPUs acima da atual).
+/** Encostas: tempo (ms) que a `tick` gasta por quadro refazendo as vizinhas de uma jogada (sempre ao menos uma peça). */
+const HILL_BUDGET_MS = 5;
 const DETAIL: Record<Quality, number> = { cinema: 1.6, ultra: 1.35, high: 1, medium: 0.65, low: 0.4 };
 /** Mapa de sombra por nível. No Ultra e no Cinema, cada uma das cascatas tem esse tamanho. */
 // Conta os draw calls dos passes de sombra (um por cascata redesenhada): é o que mostra, em
@@ -1807,6 +1809,7 @@ export class World {
     this.chunks.clear();
     this.baked.clear();
     this.livingQueue = [];
+    this.hillQueue = [];
     this.stageCache = null;
     this.surfaces.clear();
     this.falls.clear();
@@ -2222,18 +2225,48 @@ export class World {
       }
       // A baía acompanha as peças já no chão. Uma quinta ou sexta vizinha pode mudar a saia até do outro lado da casa.
       this.updateBays(cells, (q, r) => this.baked.has(hkey(q, r)), affected);
-      for (const tile of affected) if (this.rebakeHill(tile)) n++;
+      // A peça que acabou de pousar é refeita já (em geral nada muda: ela foi montada com a vizinhança de agora). As vizinhas vão para a
+      // fila e a `tick` as refaz em poucos ms por quadro: até 6 `buildTile` seguidos viravam um soluço de 30 ms na hora de pôr a peça.
+      if (this.rebakeHill(p)) n++;
+      for (const tile of affected) if (tile !== p && !this.hillQueue.includes(tile.key)) this.hillQueue.push(tile.key);
+    }
+    this.hillMs = 0;
+    this.hillTotalMs = 0;
+    if (n) {
+      for (const pool of this.pools.values()) pool.flush();
+      groundMap.flush();
+      this.shadowClock = 0.25;
+      this.hillRebakes += n;
+    }
+    this.hillMs = this.hillTotalMs = performance.now() - t0;
+    // Paisagem viva: as peças cujo estágio mudou (as vizinhas e, na Terra, as da mancha) entram numa fila, que a `tick` esvazia em
+    // poucas por quadro (uma mancha grande que fecha muda dezenas de uma vez: o pior quadro não pode juntar todas).
+    this.queueLiving();
+  }
+
+  /** Encostas: vizinhas à espera de serem refeitas depois de uma jogada (`drainHills`, no `tick`). */
+  private hillQueue: number[] = [];
+  /** Soma do custo (ms) da última jogada, na parte síncrona mais os lotes da fila: `hillMs` guarda só o pior deles (o pior quadro). */
+  hillTotalMs = 0;
+  /** Refaz vizinhas da fila até gastar `budget` ms (sempre ao menos uma). Devolve se ainda resta. */
+  private drainHills(budget: number, all = false): boolean {
+    if (!this.hillQueue.length || !this.board) return false;
+    const t0 = performance.now();
+    let n = 0;
+    while (this.hillQueue.length && (all || n === 0 || performance.now() - t0 < budget)) {
+      const p = this.board.tiles.get(this.hillQueue.shift()!);
+      if (p && this.rebakeHill(p)) n++;
     }
     if (n) {
       for (const pool of this.pools.values()) pool.flush();
       groundMap.flush();
       this.shadowClock = 0.25;
       this.hillRebakes += n;
-      this.hillMs = performance.now() - t0;
+      const ms = performance.now() - t0;
+      this.hillMs = Math.max(this.hillMs, ms);
+      this.hillTotalMs += ms;
     }
-    // Paisagem viva: as peças cujo estágio mudou (as vizinhas e, na Terra, as da mancha) entram numa fila, que a `tick` esvazia em
-    // poucas por quadro (uma mancha grande que fecha muda dezenas de uma vez: o pior quadro não pode juntar todas).
-    this.queueLiving();
+    return this.hillQueue.length > 0;
   }
 
   /** Paisagem viva: as peças assentadas cujo estágio é outro que o desenhado, em ordem de chave (a ordem não importa ao resultado). */
@@ -2341,7 +2374,7 @@ export class World {
    * soma dos lotes (instâncias vivas que nenhuma peça reclama são "órfãs"). `pending` diz se ainda há peça caindo ou na fila.
    */
   pending() {
-    return { drops: this.drops.length, queue: this.livingQueue.length };
+    return { drops: this.drops.length, queue: this.livingQueue.length + this.hillQueue.length };
   }
 
   sceneSig() {
@@ -3857,6 +3890,7 @@ export class World {
     this.drops = still;
 
     // Paisagem viva: refaz poucas peças por quadro (o pior quadro de uma jogada que desenvolve muitas fica limitado).
+    if (this.hillQueue.length) this.drainHills(HILL_BUDGET_MS);
     if (this.livingQueue.length) this.drainLiving(2);
 
     // Nível de detalhe: de longe, metade das plantas basta (as parcelas já têm a cor da cultura).

@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { corner, edgeMid, INR } from '../core/hex';
+import { corner as corner0, edgeMid as edgeMid0, INR } from '../core/hex';
 import { hillFlat, hillHeight, hillRiser, type HillProfile } from '../core/hills';
 import { HillSurface } from './hillSurface';
 import { BAY_RADIUS, bayBlend } from './bay';
@@ -14,6 +14,12 @@ import type { SpecialKind } from '../core/specials';
 import { isStrict, T } from '../core/tiles';
 import { gatesOf, type CropKind, type Theme } from '../themes/types';
 import { BODY, CROP_LAYOUT, type HouseMeta } from './lib';
+
+// `corner` e `edgeMid` fazem seno e cosseno a cada chamada e entram nos laços de cada vértice (distância à borda, arrimos): guarda por índice.
+const cornerMemo: ([number, number] | undefined)[] = [];
+const edgeMidMemo: ([number, number] | undefined)[] = [];
+const corner = (i: number): [number, number] => (cornerMemo[i + 8] ??= corner0(i));
+const edgeMid = (i: number): [number, number] => (edgeMidMemo[i + 8] ??= edgeMid0(i));
 
 // Gera a peça na orientação de origem (rotação 0), em coordenadas locais.
 // O mesmo resultado serve para o fantasma, a animação de queda e o "cozimento"
@@ -226,10 +232,76 @@ export function tc(hex: string): THREE.Color {
 type Splat = readonly [number, number, number, number];
 const NO_SPLAT: Splat = [0, 0, 0, 0];
 
+/** Vetor de números que cresce (Float64Array): muito mais barato que `number[]` com `push` nas centenas de milhares de triângulos do chão. */
+class Vec {
+  a = new Float64Array(2048);
+  n = 0;
+  get length() {
+    return this.n;
+  }
+  /** Esvazia mantendo a memória (o `Buf` de trabalho do `buildTile` é reaproveitado entre peças: o resultado sai copiado em `f32`). */
+  clear() {
+    this.n = 0;
+  }
+  private room(k: number) {
+    if (this.n + k <= this.a.length) return;
+    const b = new Float64Array(Math.max(this.a.length * 2, this.n + k));
+    b.set(this.a.subarray(0, this.n));
+    this.a = b;
+  }
+  push3(x: number, y: number, z: number) {
+    this.room(3);
+    const a = this.a, n = this.n;
+    a[n] = x;
+    a[n + 1] = y;
+    a[n + 2] = z;
+    this.n = n + 3;
+  }
+  push4(x: number, y: number, z: number, w: number) {
+    this.room(4);
+    const a = this.a, n = this.n;
+    a[n] = x; a[n + 1] = y; a[n + 2] = z; a[n + 3] = w;
+    this.n = n + 4;
+  }
+  push9(a0: number, a1: number, a2: number, a3: number, a4: number, a5: number, a6: number, a7: number, a8: number) {
+    this.room(9);
+    const a = this.a, n = this.n;
+    a[n] = a0; a[n + 1] = a1; a[n + 2] = a2; a[n + 3] = a3; a[n + 4] = a4; a[n + 5] = a5; a[n + 6] = a6; a[n + 7] = a7; a[n + 8] = a8;
+    this.n = n + 9;
+  }
+  push12(a0: number, a1: number, a2: number, a3: number, a4: number, a5: number, a6: number, a7: number, a8: number, a9: number, a10: number, a11: number) {
+    this.room(12);
+    const a = this.a, n = this.n;
+    a[n] = a0; a[n + 1] = a1; a[n + 2] = a2; a[n + 3] = a3; a[n + 4] = a4; a[n + 5] = a5; a[n + 6] = a6; a[n + 7] = a7; a[n + 8] = a8; a[n + 9] = a9; a[n + 10] = a10; a[n + 11] = a11;
+    this.n = n + 12;
+  }
+  append(o: Vec) {
+    this.room(o.n);
+    this.a.set(o.a.subarray(0, o.n), this.n);
+    this.n += o.n;
+  }
+  /** Tira tudo a partir de `start` e devolve (uma cópia). */
+  take(start: number) {
+    const out = this.a.slice(start, this.n);
+    this.n = start;
+    return out;
+  }
+  f32() {
+    return new Float32Array(this.a.subarray(0, this.n));
+  }
+}
+
 class Buf {
-  pos: number[] = [];
-  col: number[] = [];
-  spl: number[] = [];
+  /** Esvazia os três vetores e devolve o próprio `Buf`. */
+  reset() {
+    this.pos.clear();
+    this.col.clear();
+    this.spl.clear();
+    return this;
+  }
+  pos = new Vec();
+  col = new Vec();
+  spl = new Vec();
   constructor(readonly withColor: boolean) {}
 
   tri(a: V3, b: V3, c: V3, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, n: V3, sa: Splat = NO_SPLAT, sb: Splat = sa, sc: Splat = sa) {
@@ -237,13 +309,18 @@ class Buf {
     const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     if (nx * n[0] + ny * n[1] + nz * n[2] < 0) {
-      [b, c] = [c, b];
-      [cb, cc] = [cc, cb];
-      [sb, sc] = [sc, sb];
+      const t = b, tc = cb, ts = sb;
+      b = c;
+      c = t;
+      cb = cc;
+      cc = tc;
+      sb = sc;
+      sc = ts;
     }
-    this.pos.push(...a, ...b, ...c);
-    if (this.withColor) this.col.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b, cc.r, cc.g, cc.b);
-    this.spl.push(...sa, ...sb, ...sc);
+    // Sem espalhar (`push(...a)`): é o laço mais quente do `buildTile` (centenas de milhares de triângulos por partida).
+    this.pos.push9(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+    if (this.withColor) this.col.push9(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b, cc.r, cc.g, cc.b);
+    this.spl.push12(sa[0], sa[1], sa[2], sa[3], sb[0], sb[1], sb[2], sb[3], sc[0], sc[1], sc[2], sc[3]);
   }
 
   quad(a: V3, b: V3, c: V3, d: V3, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color, cd: THREE.Color, n: V3, sp: Splat = NO_SPLAT) {
@@ -258,39 +335,49 @@ class Buf {
    * sobe pela altura do chão naquele ponto. Onde o chão é quase plano o triângulo fica inteiro (poucos triângulos a mais).
    */
   drape(start: number, hill: HillSurface) {
-    const pos = this.pos.splice(start), col = this.col.splice(start), spl = this.spl.splice((start / 3) * 4);
-    const mid = (a: number[], b: number[]) => a.map((v, k) => (v + b[k]) / 2);
-    const emit = (t: number[][], depth: number) => {
-      const rise = t.map((p) => hill.at(p[0], p[2]));
+    const pos = this.pos.take(start), col = this.col.take(start), spl = this.spl.take((start / 3) * 4);
+    // Vértice = [x, y, z, r, g, b, s0..s3]; o ponto do meio de uma aresta é a média dos dez valores.
+    const mid = (a: number[], b: number[]) => {
+      const m = new Array<number>(10);
+      for (let k = 0; k < 10; k++) m[k] = (a[k] + b[k]) / 2;
+      return m;
+    };
+    const emit = (t0: number[], t1: number[], t2: number[], depth: number) => {
+      const r0 = hill.at(t0[0], t0[2]), r1 = hill.at(t1[0], t1[2]), r2 = hill.at(t2[0], t2[2]);
       // O quanto o chão passa ACIMA do plano do triângulo (no meio das arestas e no centro): o decalque sobe esse tanto para não afundar.
-      let dev = 0;
-      for (let k = 0; k < 3; k++) {
-        const j = (k + 1) % 3;
-        dev = Math.max(dev, hill.at((t[k][0] + t[j][0]) / 2, (t[k][2] + t[j][2]) / 2) - (rise[k] + rise[j]) / 2);
-      }
-      dev = Math.max(dev, hill.at((t[0][0] + t[1][0] + t[2][0]) / 3, (t[0][2] + t[1][2] + t[2][2]) / 3) - (rise[0] + rise[1] + rise[2]) / 3);
+      let dev = hill.at((t0[0] + t1[0]) / 2, (t0[2] + t1[2]) / 2) - (r0 + r1) / 2;
+      dev = Math.max(dev, hill.at((t1[0] + t2[0]) / 2, (t1[2] + t2[2]) / 2) - (r1 + r2) / 2);
+      dev = Math.max(dev, hill.at((t2[0] + t0[0]) / 2, (t2[2] + t0[2]) / 2) - (r2 + r0) / 2);
+      dev = Math.max(dev, hill.at((t0[0] + t1[0] + t2[0]) / 3, (t0[2] + t1[2] + t2[2]) / 3) - (r0 + r1 + r2) / 3);
       if (dev < DRAPE_TOL || depth >= DRAPE_DEPTH) {
-        for (let k = 0; k < 3; k++) this.put(t[k], rise[k] + Math.max(0, dev));
+        const up = Math.max(0, dev);
+        this.put(t0, r0 + up);
+        this.put(t1, r1 + up);
+        this.put(t2, r2 + up);
         return;
       }
-      const m01 = mid(t[0], t[1]), m12 = mid(t[1], t[2]), m20 = mid(t[2], t[0]);
-      emit([t[0], m01, m20], depth + 1);
-      emit([m01, t[1], m12], depth + 1);
-      emit([m20, m12, t[2]], depth + 1);
-      emit([m01, m12, m20], depth + 1);
+      const m01 = mid(t0, t1), m12 = mid(t1, t2), m20 = mid(t2, t0);
+      emit(t0, m01, m20, depth + 1);
+      emit(m01, t1, m12, depth + 1);
+      emit(m20, m12, t2, depth + 1);
+      emit(m01, m12, m20, depth + 1);
     };
-    // [x, y, z, r, g, b, s0..s3]
-    for (let i = 0; i < pos.length; i += 9) {
-      emit([i, i + 3, i + 6].map((k) => [...pos.slice(k, k + 3), ...col.slice(k, k + 3), ...spl.slice(((k / 3) | 0) * 4, ((k / 3) | 0) * 4 + 4)]), 0);
-    }
+    const vert = (k: number) => {
+      const j = (k / 3) | 0;
+      return [pos[k], pos[k + 1], pos[k + 2], col[k], col[k + 1], col[k + 2], spl[j * 4], spl[j * 4 + 1], spl[j * 4 + 2], spl[j * 4 + 3]];
+    };
+    for (let i = 0; i < pos.length; i += 9) emit(vert(i), vert(i + 3), vert(i + 6), 0);
   }
 
   private put(p: number[], rise: number) {
-    this.pos.push(p[0], p[1] + rise, p[2]);
-    this.col.push(p[3], p[4], p[5]);
-    this.spl.push(p[6], p[7], p[8], p[9]);
+    this.pos.push3(p[0], p[1] + rise, p[2]);
+    this.col.push3(p[3], p[4], p[5]);
+    this.spl.push4(p[6], p[7], p[8], p[9]);
   }
 }
+
+/** `Buf` do chão reaproveitado a cada `buildTile` (a função é síncrona e não se chama de dentro dela): sem alocar e crescer vetores a cada peça. */
+const SCRATCH = new Buf(true);
 
 /** Encostas: desvio máximo (altura) entre o decalque e o chão antes de dividir o triângulo, e a profundidade máxima da divisão. */
 const DRAPE_TOL = 0.016;
@@ -477,22 +564,25 @@ export function resolveFlow(edges: readonly T[], known?: readonly number[]): num
  */
 function nearestParam(x: number, z: number, p: Path) {
   const pts = p.pts;
-  let best = { d: Infinity, t: 0, tx: 1, tz: 0 };
+  let bd = Infinity, bt = 0, btx = 1, btz = 0;
   const n = pts.length - 1;
   for (let k = 0; k < n; k++) {
-    const [ax, az] = pts[k];
-    const [bx, bz] = pts[k + 1];
-    const dx = bx - ax, dz = bz - az;
+    const a = pts[k], b = pts[k + 1];
+    const ax = a[0], az = a[1];
+    const dx = b[0] - ax, dz = b[1] - az;
     const len2 = dx * dx + dz * dz || 1;
     const u = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2));
     const hw = p.hws ? p.hws[k] + (p.hws[k + 1] - p.hws[k]) * u : p.hw;
     const d = Math.hypot(x - ax - dx * u, z - az - dz * u) - hw;
-    if (d < best.d) {
+    if (d < bd) {
       const l = Math.sqrt(len2);
-      best = { d, t: (k + u) / n, tx: dx / l, tz: dz / l };
+      bd = d;
+      bt = (k + u) / n;
+      btx = dx / l;
+      btz = dz / l;
     }
   }
-  return best;
+  return { d: bd, t: bt, tx: btx, tz: btz };
 }
 
 const smooth = (a: number, b: number, x: number) => {
@@ -671,7 +761,7 @@ function waterField(shape: WaterShape, paths: Path[], widths: readonly number[],
     if (junction) d = Math.min(d, Math.hypot(x, z) - junction);
     return d + wiggle(x, z);
   };
-  const e = (x: number, z: number) => {
+  const e0 = (x: number, z: number) => {
     // Perfil das bordas próximas, misturado pelo inverso do quadrado da distância: na borda
     // vale exatamente o perfil dela (|s| − largura, ou terra), igual ao da vizinha.
     let A = 0, sw = 0, se = 0;
@@ -689,6 +779,15 @@ function waterField(shape: WaterShape, paths: Path[], widths: readonly number[],
     }
     const fi = interior(x, z);
     return A > 0 ? A * (se / sw) + (1 - A) * fi : fi;
+  };
+  // O mesmo ponto é pedido várias vezes seguidas (altura, cor, terraço, margem): guarda o último.
+  let ex = NaN, ez = NaN, ev = 0;
+  const e = (x: number, z: number) => {
+    if (x === ex && z === ez) return ev;
+    ev = e0(x, z);
+    ex = x;
+    ez = z;
+    return ev;
   };
   const ground = (x: number, z: number) => {
     const d = e(x, z);
@@ -1109,7 +1208,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   const rng = mulberry32(seed);
   const frng = mulberry32((seed ^ FOREST_SEED) >>> 0);
   const detail = opts.detail;
-  const g = new Buf(true);
+  const g = SCRATCH.reset();
   let terraces: Buf | undefined;
   const terracePatches: TileBuild['terracePatches'] = opts.continuous ? [] : undefined;
     const decos: Deco[] = [];
@@ -1309,14 +1408,19 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   center.multiplyScalar(1 / 6);
   // Rio e estrada têm chão de prado para o detalhe do shader.
   const landOf = (t: T) => (t === T.Forest ? 1 : t === T.Field ? 2 : t === T.Village ? 3 : 0);
-  const oneHot = (t: T): number[] => [0, 1, 2, 3].map((k) => (k === landOf(t) ? 1 : 0));
+  const ONE_HOT = [0, 1, 2, 3].map((l) => [0, 1, 2, 3].map((k) => (k === l ? 1 : 0)));
+  const oneHot = (t: T): number[] => ONE_HOT[landOf(t)];
   const centerSplat = [0, 0, 0, 0];
   for (const e of edges) oneHot(e).forEach((v, k) => (centerSplat[k] += v / 6));
   const topColor = (i: number, a: number, b: number, x: number, z: number): { c: THREE.Color; s: Splat } => {
     const own = groundCols[i];
     const c = own.clone();
-    let sp = oneHot(edges[i]);
-    const mixS = (o: number[], t: number) => (sp = sp.map((v, k) => v + (o[k] - v) * t));
+    const h0 = oneHot(edges[i]);
+    // Pesos de terreno misturados no lugar (um array só por vértice, em vez de um novo a cada mistura).
+    const sp = [h0[0], h0[1], h0[2], h0[3]];
+    const mixS = (o: number[], t: number) => {
+      for (let k = 0; k < 4; k++) sp[k] += (o[k] - sp[k]) * t;
+    };
     const sum = a + b;
     if (sum > 0) {
       // Faixa de mistura larga (0,6 do arco) com o limite torcido por ruído da semente e da
@@ -1336,7 +1440,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const sand = 1 - smooth(0.03, 0.085, e);
       c.lerp(bank, sand);
       c.multiplyScalar(1 - 0.3 * (1 - smooth(0.004, 0.03, e)));
-      sp = sp.map((v) => v * (1 - sand));
+      for (let k = 0; k < 4; k++) sp[k] *= 1 - sand;
     }
     return { c, s: sp as unknown as Splat };
   };
@@ -1625,9 +1729,9 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
 
   const terraceStart = terraces ? g.pos.length : undefined;
   if (terraces) {
-    g.pos.push(...terraces.pos);
-    g.col.push(...terraces.col);
-    g.spl.push(...terraces.spl);
+    g.pos.append(terraces.pos);
+    g.col.append(terraces.col);
+    g.spl.append(terraces.spl);
   }
   const groundEnd = g.pos.length;
   const chimneyHomes: V2[] = [];
@@ -1811,8 +1915,8 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   // do chão só aproxima entre os vértices.
   if (rampR) {
     for (let i = roadStart; i < g.pos.length; i += 3) {
-      const d = rampR(g.pos[i], g.pos[i + 2]);
-      g.pos[i + 1] += d + (d < -1e-4 ? 0.004 : 0);
+      const d = rampR(g.pos.a[i], g.pos.a[i + 2]);
+      g.pos.a[i + 1] += d + (d < -1e-4 ? 0.004 : 0);
     }
   }
 
@@ -3276,16 +3380,16 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
   }
   // Relevo por peça: o que foi posto depois do chão (decalques, ruas, praça) e a decoração sobem com o campo de altura, no ponto onde estão.
   if (hasSec) {
-    for (let k = groundEnd; k < g.pos.length; k += 3) g.pos[k + 1] += liftAt(g.pos[k], g.pos[k + 2]);
+    for (let k = groundEnd; k < g.pos.length; k += 3) g.pos.a[k + 1] += liftAt(g.pos.a[k], g.pos.a[k + 2]);
     for (const d of decos) d.y += liftAt(d.x, d.z);
     for (let k = 0; k < chimneys.length; k += 4) chimneys[k + 1] += liftAt(chimneys[k], chimneys[k + 2]);
   }
 
   return {
     hill,
-    pos: new Float32Array(g.pos),
-    col: new Float32Array(g.col),
-    splat: new Float32Array(g.spl),
+    pos: g.pos.f32(),
+    col: g.col.f32(),
+    splat: g.spl.f32(),
     groundEnd,
     terraceStart,
     terracePatches,
