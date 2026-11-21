@@ -1,6 +1,6 @@
 # E6: Paisagem viva
 
-A etapa seguinte registra os [celeiros por tema e o ensaio das emendas](../paisagem-viva/RELATORIO.md).
+O PR #122 registra os [celeiros por tema](../paisagem-viva/RELATORIO.md).
 
 Branch `dorf/e5-encostas`. Ideia do Roger; implementação de referência do GPT Astra (`jogo-entrepostos` 5035a34), refeita aqui como função pura do tabuleiro final. Só aparência: sem `SAVE_VERSION`, sem mudar pontos nem replay.
 
