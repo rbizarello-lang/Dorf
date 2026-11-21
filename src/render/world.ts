@@ -1247,13 +1247,16 @@ export class World {
     this.voidU.sky.value.copy(s.hemiSky).multiplyScalar(Math.min(1, s.hemiI * 0.75));
     this.voidU.fill.value.copy(s.fill);
     this.voidU.line.value.copy(s.line);
-    // À noite a laje clareia para um tom de luar e perde menos opacidade: escura sobre o mar escuro ela sumia.
-    this.slotMat.color.copy(s.line).lerp(SLOT_MOON, s.night * 0.5);
+    // À noite a laje clareia para um tom de luar e perde menos opacidade: escura sobre o mar escuro ela sumia. Sobre a areia o luar é
+    // mais fraco (D51): a laje azulada contra a duna morna desenhava uma grade forte no Egito.
+    const sand = this.voidU.sand.value > 0;
+    this.slotMat.color.copy(s.line).lerp(SLOT_MOON, s.night * (sand ? 0.3 : 0.7));
     // Nanquim dos carimbos: a tinta do tema diluída no papel.
     if (this.theme) this.stampMat.color.set(this.theme.ui.ink).lerp(s.fill, 0.5);
-    // Sobre o mar e a areia as casas livres são só uma sombra leve: o fundo já é cenário, não papel. À noite o mar sobe a 0,7 (escuro, a laje sumia) e a areia desce a 0,5 (D51: a grade marcava demais no Egito).
-    const over = this.voidU.sea.value ? 0.4 : this.voidU.sand.value ? 0.65 : 1; // sobre o cenário a laje é só uma sombra leve
-    this.slotMat.opacity = (0.55 - s.night * 0.17) * (over + ((this.voidU.sand.value ? 0.5 : Math.max(over, 0.7)) - over) * s.night);
+    // Sobre o mar e a areia as casas livres são só uma sombra leve: o fundo já é cenário, não papel. À noite o mar sobe a 0,7 (escuro,
+    // a laje sumia) e a areia desce a 0,35 (D51: a grade marcava demais no Egito; abaixo de ~0,25 a casa vazia some de novo).
+    const over = this.voidU.sea.value ? 0.4 : sand ? 0.65 : 1;
+    this.slotMat.opacity = (0.55 - s.night * 0.17) * (over + ((sand ? 0.35 : Math.max(over, 0.7)) - over) * s.night);
     slotAlpha.value = this.slotMat.opacity * 1.8;
     this.inflMat.color.set('#e0981c');
     this.sun.color.copy(s.sun);
