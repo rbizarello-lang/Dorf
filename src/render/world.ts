@@ -101,8 +101,17 @@ const CASCADES: Record<Quality, number[]> = { cinema: [0.18, 0.34, 0.56, 1], ult
  * fica abaixo dela, e as paredes, opacas, a cobrem sem teste especial. Só um fio acima do entorno, para não brigar com ele.
  */
 const SLOT_LIFT = 0.012;
+/**
+ * Marcas sobre a casa vazia (D51): carimbos (sítios, nascentes, postos) e tracejado de influência ficam um fio acima da laje, no pé das
+ * peças, e não a meia altura (-0,115): a meia altura as deixava flutuando sobre o poço entre as paredes vizinhas, ou lidas "através"
+ * delas, como a laje antes da D49. Sem somar o nível da casa, como a laje.
+ */
+const STAMP_LIFT = SLOT_LIFT + 0.02;
+const INFL_LIFT = SLOT_LIFT + 0.014;
 /** Tom da laje das casas vazias à noite (luar frio). */
 const SLOT_MOON = new THREE.Color('#b9c8ee');
+/** Anel de foco do fantasma (D51): fio de 0,055 (era 0,13) e menos opaco; ao lado das divisas das peças ele não pode pesar mais que elas. */
+const HOVER_OPACITY = 0.4;
 const tmpM = new THREE.Matrix4();
 const tmpV2 = new THREE.Vector2();
 const tmpM2 = new THREE.Matrix4();
@@ -875,7 +884,7 @@ export class World {
     this.infl.geometry.dispose();
     this.infl.geometry = dashGeometry(on);
     this.hoverRing.geometry.dispose();
-    this.hoverRing.geometry = on ? new THREE.RingGeometry(0.72, 0.86, 28).rotateX(-Math.PI / 2) : new THREE.RingGeometry(0.84, 0.97, 6).rotateX(-Math.PI / 2);
+    this.hoverRing.geometry = on ? new THREE.RingGeometry(0.79, 0.845, 28).rotateX(-Math.PI / 2) : new THREE.RingGeometry(0.9, 0.955, 6).rotateX(-Math.PI / 2);
   }
   get fluid() {
     return !!this.warp;
@@ -894,7 +903,7 @@ export class World {
   private shaped(b: TileBuild, q: number, r: number, rot: number): TileBuild {
     return this.warp && !isWarped(b) ? warpBuild(b, tileMatrix(q, r, rot, 0).elements, this.warp) : b;
   }
-  private hoverMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.9, depthWrite: false, fog: false });
+  private hoverMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: HOVER_OPACITY, depthWrite: false, fog: false });
   private markers: THREE.Mesh[] = [];
   /** Anéis dourados que se abrem em volta da peça (encaixe perfeito, nova era); cada um com o próprio material para apagar sozinho. */
   private halos: { mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicNodeMaterial>; t: number; dur: number; grow: number }[] = [];
@@ -1017,7 +1026,7 @@ export class World {
     this.scene.add(voidMesh);
 
     this.stamps = new THREE.Mesh(new THREE.BufferGeometry(), this.stampMat);
-    this.stamps.position.y = -0.115;
+    this.stamps.position.y = -TILE_T - 0.1 + STAMP_LIFT; // no pé das peças (ver STAMP_LIFT)
     this.stamps.renderOrder = 1;
     this.stamps.frustumCulled = false;
     this.stamps.visible = false;
@@ -1032,11 +1041,11 @@ export class World {
     this.infl = new THREE.InstancedMesh(dashGeometry(false), this.inflMat, 256);
     this.infl.count = 0;
     this.infl.frustumCulled = false;
-    this.infl.position.y = -0.11;
+    this.infl.position.y = -TILE_T - 0.1 + INFL_LIFT;
     this.infl.renderOrder = 2;
     this.scene.add(this.infl);
 
-    this.hoverRing = new THREE.Mesh(new THREE.RingGeometry(0.84, 0.97, 6).rotateX(-Math.PI / 2), this.hoverMat);
+    this.hoverRing = new THREE.Mesh(new THREE.RingGeometry(0.9, 0.955, 6).rotateX(-Math.PI / 2), this.hoverMat);
     this.hoverRing.visible = false;
     this.scene.add(this.hoverRing);
     // Prévia das vizinhas que sobem (Encostas) ou crescem (Paisagem viva) com a peça do fantasma: um realce suave sobre a casa delas.
@@ -1048,9 +1057,10 @@ export class World {
     this.scene.add(this.nbMesh);
     this.scene.add(this.trace.group);
 
-    const pill = new THREE.CapsuleGeometry(0.026, 0.5, 3, 8).rotateZ(Math.PI / 2);
+    // Marcas de borda do fantasma: finas (raio 0,02) e um pouco translúcidas, para não pesarem mais que as divisas (D51).
+    const pill = new THREE.CapsuleGeometry(0.02, 0.5, 3, 8).rotateZ(Math.PI / 2);
     for (let i = 0; i < 6; i++) {
-      const m = new THREE.Mesh(pill, new THREE.MeshBasicNodeMaterial({ fog: false, transparent: true, opacity: 0.95 }));
+      const m = new THREE.Mesh(pill, new THREE.MeshBasicNodeMaterial({ fog: false, transparent: true, opacity: 0.85 }));
       m.visible = false;
       this.markers.push(m);
       this.markerLocal.push(new THREE.Vector3());
@@ -1238,12 +1248,12 @@ export class World {
     this.voidU.fill.value.copy(s.fill);
     this.voidU.line.value.copy(s.line);
     // À noite a laje clareia para um tom de luar e perde menos opacidade: escura sobre o mar escuro ela sumia.
-    this.slotMat.color.copy(s.line).lerp(SLOT_MOON, s.night * 0.7);
+    this.slotMat.color.copy(s.line).lerp(SLOT_MOON, s.night * 0.5);
     // Nanquim dos carimbos: a tinta do tema diluída no papel.
     if (this.theme) this.stampMat.color.set(this.theme.ui.ink).lerp(s.fill, 0.5);
-    // Sobre o mar e a areia as casas livres são só uma sombra leve: o fundo já é cenário, não papel.
+    // Sobre o mar e a areia as casas livres são só uma sombra leve: o fundo já é cenário, não papel. À noite o mar sobe a 0,7 (escuro, a laje sumia) e a areia desce a 0,5 (D51: a grade marcava demais no Egito).
     const over = this.voidU.sea.value ? 0.4 : this.voidU.sand.value ? 0.65 : 1; // sobre o cenário a laje é só uma sombra leve
-    this.slotMat.opacity = (0.55 - s.night * 0.17) * (over + (Math.max(over, 0.7) - over) * s.night);
+    this.slotMat.opacity = (0.55 - s.night * 0.17) * (over + ((this.voidU.sand.value ? 0.5 : Math.max(over, 0.7)) - over) * s.night);
     slotAlpha.value = this.slotMat.opacity * 1.8;
     this.inflMat.color.set('#e0981c');
     this.sun.color.copy(s.sun);
@@ -1444,6 +1454,8 @@ export class World {
     setMagra(on);
     this.voidMesh.position.y = -TILE_T - 0.1;
     this.slots.position.y = this.voidMesh.position.y + SLOT_LIFT;
+    this.stamps.position.y = this.voidMesh.position.y + STAMP_LIFT;
+    this.infl.position.y = this.voidMesh.position.y + INFL_LIFT;
     this.voidU.sandK.value = MAGRA.sand;
     this.setFluid(this.fluidPref === 'on' || (this.fluidPref === 'auto' && on));
     U.rock.value = on ? 1 : 0;
@@ -2443,7 +2455,7 @@ export class World {
       if (i >= 256) break;
       const { x, z } = hexToWorld(q, r);
       const f = this.fl(x, z);
-      this.infl.setMatrixAt(i++, tmpM.makeTranslation(f.x, this.heightOf(q, r), f.z));
+      this.infl.setMatrixAt(i++, tmpM.makeTranslation(f.x, 0, f.z));
     }
     this.infl.count = i;
     this.infl.instanceMatrix.needsUpdate = true;
@@ -2473,15 +2485,15 @@ export class World {
     const geos = left.map((s) => {
       const { x, z } = this.flq(s.q, s.r);
       // Cada carimbo um pouco torto, como batido à mão (sem sorteio: vem da posição).
-      return stampGeometry(s.kind).rotateY(Math.sin(s.q * 12.9898 + s.r * 78.233) * 0.25).translate(x, this.heightOf(s.q, s.r), z);
+      return stampGeometry(s.kind).rotateY(Math.sin(s.q * 12.9898 + s.r * 78.233) * 0.25).translate(x, 0, z);
     });
     for (const sp of springs) {
       const { x, z } = this.flq(sp.q, sp.r);
-      geos.push(stampGeometry('spring').scale(1.35, 1, 1.35).rotateY(Math.sin(sp.q * 12.9898 + sp.r * 78.233) * 0.25).translate(x, this.heightOf(sp.q, sp.r), z));
+      geos.push(stampGeometry('spring').scale(1.35, 1, 1.35).rotateY(Math.sin(sp.q * 12.9898 + sp.r * 78.233) * 0.25).translate(x, 0, z));
     }
     for (const p of board.posts) {
       const { x, z } = this.flq(p.q, p.r);
-      geos.push(postStampGeometry().rotateY(0.2).translate(x, this.heightOf(p.q, p.r), z));
+      geos.push(postStampGeometry().rotateY(0.2).translate(x, 0, z));
     }
     this.stamps.geometry.dispose();
     this.stamps.geometry = geos.length ? mergeGeometries(geos)! : new THREE.BufferGeometry();
