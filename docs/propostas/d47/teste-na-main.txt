@@ -1,0 +1,21 @@
+holanda semente 1 classico 0,0 wall:4: o chão passa do piso em 0.025 (piso 0.310)
+holanda semente 1 classico 0,0 wall:4: o topo da fundação não cobre a casa em (-1, -1)
+holanda semente 1 classico 0,0 wall:4: o topo da fundação não cobre a casa em (1, -1)
+holanda semente 1 classico 0,0 wall:4: o topo da fundação não cobre a casa em (1, 1)
+holanda semente 1 classico 0,0 wall:4: o topo da fundação não cobre a casa em (-1, 1)
+holanda semente 1 classico 0,0 wall:4: o topo da fundação não cobre a casa em (0, -1)
+holanda semente 1 classico 0,0 wall:4: o topo da fundação não cobre a casa em (1, 0)
+holanda semente 1 classico 0,0 wall:4: o topo da fundação não cobre a casa em (0, 1)
+holanda semente 1 classico 0,0 wall:4: o topo da fundação não cobre a casa em (-1, 0)
+holanda semente 1 classico 0,0 wall:4: decalque 0.007 acima do topo da fundação
+holanda semente 1 classico 0,0 wall:4: decalque 0.007 acima do topo da fundação
+holanda semente 1 classico 0,0 wall:4: decalque 0.018 acima do topo da fundação
+holanda semente 1 classico 0,0 wall:4: decalque 0.004 acima do topo da fundação
+holanda semente 1 classico 0,0 wall:4: decalque 0.016 acima do topo da fundação
+holanda semente 1 classico 0,0 wall:4: decalque 0.004 acima do topo da fundação
+holanda semente 1 classico 0,0 wall:4: decalque 0.014 acima do topo da fundação
+holanda semente 1 classico 0,0 wall:4: decalque 0.008 acima do topo da fundação
+holanda semente 1 classico 0,0 wall:4: decalque 0.008 acima do topo da fundação
+holanda semente 1 classico 0,0 wall:4: decalque 0.008 acima do topo da fundação
+holanda semente 1 classico 0,0 wall:4: decalque 0.003 acima do topo da fundação
+AssertionError [ERR_ASSERTION]: fundações: 144210 falhas em 3077 casas
