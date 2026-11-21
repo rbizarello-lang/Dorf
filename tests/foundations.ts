@@ -145,6 +145,8 @@ for (let seed = 1; seed <= N; seed++) {
             const cx = (v[0][0] + v[1][0] + v[2][0]) / 3 - d.x, cz = (v[0][2] + v[1][2] + v[2][2]) / 3 - d.z;
             if (Math.abs(cx * cs - cz * sn) > body.w * d.sx * FOOT_HALF + DRAPE_RING - 0.01 || Math.abs(cx * sn + cz * cs) > body.d * d.sz * FOOT_HALF + DRAPE_RING - 0.01) continue;
             if (v.some(([x, , z]) => Math.abs((x - d.x) * cs - (z - d.z) * sn) <= body.w * d.sx * FOOT_HALF + 1e-4 && Math.abs((x - d.x) * sn + (z - d.z) * cs) <= body.d * d.sz * FOOT_HALF + 1e-4)) continue;
+            // Os degraus das ruas (villageAccess, desenhados depois do drape) são pisos horizontais e espelhos verticais: não são decalque deitado.
+            if (v.every(([, y]) => Math.abs(y - v[0][1]) < 1e-6) || v.some((p, k) => v.some((q, j) => j !== k && Math.abs(p[0] - q[0]) < 1e-6 && Math.abs(p[2] - q[2]) < 1e-6))) continue;
             const r = v.map(([x, , z]) => surface.at(x, z));
             if (Math.max(...r) - Math.min(...r) > DRAPE_STEP + 1e-3) complain(`${where}: decalque escala o arrimo (${(Math.max(...r) - Math.min(...r)).toFixed(3)})`);
           }
