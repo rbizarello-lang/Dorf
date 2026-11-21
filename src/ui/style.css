@@ -1512,7 +1512,14 @@ body.capture #floaters {
     display: inline;
   }
   .chip {
-    padding: 0 12px;
+    padding: 0 8px;
+  }
+  .tools {
+    gap: 4px;
+  }
+  .icon-btn {
+    min-width: 32px;
+    padding: 0 6px;
   }
 }
 
