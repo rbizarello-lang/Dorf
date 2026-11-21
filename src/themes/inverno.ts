@@ -68,6 +68,7 @@ export const inverno: Theme = {
   // Pórtico de dragões na entrada da vila (madeira escura e neve na travessa).
   gate: { style: 'dragon', colors: ['#4a2e22', '#e6eef5'] },
   bridge: { style: 'wood', colors: ['#5a3a26', '#cfd6dc'] },
+  barn: { style: 'stabbur', colors: ['#995137', '#dce8ec', '#47342c'] },
   crops: [
     // O lago congelado no lugar da lavoura: gelo azulado com rachaduras e buracos de pesca, e um pesqueiro
     // (tenda, varal) em muitas parcelas. É a primeira cultura: a aba da emenda herda a cor dela.

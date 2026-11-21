@@ -382,6 +382,8 @@ export interface Theme {
 
   // --- plantação e prado
   crops: CropKind[];
+  /** Armazém do cultivo desenvolvido, com paleta [parede, cobertura, detalhe]. */
+  barn: { style: 'schuur' | 'silos' | 'kura' | 'paiol' | 'stabbur'; colors: [string, string, string] };
   grass: string[];
   bush: string[];
   flowers: string[];

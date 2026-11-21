@@ -22,6 +22,7 @@ import { HillSurface } from '../src/render/hillSurface';
 import { THEMES } from '../src/themes/themes';
 import './village-terraces';
 import './foundations';
+import './village-access';
 import './inner-bays';
 
 const N = Number(process.argv[2] ?? 12);
