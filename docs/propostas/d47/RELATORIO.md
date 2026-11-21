@@ -14,7 +14,7 @@ Também havia uma diferença de cota: o piso da casa somava o leito (`groundY`),
 ## Correção (só `src/render/tileBuilder.ts`)
 - O piso é a cota mais alta do chão sob a casa mais 4 mm: grade 17×17, os 4 lados e um refino no ponto mais alto, em cota absoluta (parede, telhado e chaminé), a mesma do topo da pedra.
 - A fundação é um bloco de pedra de paredes verticais, de 0,58 da parede, que afunda 2 cm abaixo da menor cota de cada lado. Só entra se o desnível passa de 12 mm; o lado onde o chão já encosta no piso não tem parede. Some a saia de terra.
-- Os decalques com vértice dentro do retângulo descem para baixo do piso; o capim, as flores, as plantas e as árvores dentro dele somem (o resto, como poço e aldeão, sobe ao piso); num anel de 0,12 em volta, o decalque que escalaria um arrimo de mais de 5 cm não é desenhado (a face de pedra aparece).
+- Os decalques com vértice dentro do retângulo descem para baixo do piso; o capim, as flores, as plantas e as árvores dentro dele somem (o que se move (bicho, aldeão) também some, e o resto estático (poço, lampião) sobe ao piso); num anel de 0,12 em volta, o decalque que escalaria um arrimo de mais de 5 cm não é desenhado (a face de pedra aparece).
 - Não mexi em `src/core`, na emenda, na água, no replay nem no `SAVE_VERSION`. A aparência segue só de `(edges, seed, theme, opts)`.
 - Efeito colateral intencional: as casas de patamar íngreme ficam mais altas (o piso passa a ser o ponto mais alto): bloco de pedra com mediana de 0,11, p90 de 0,21 e máximo de 0,38 de altura. Se o Roger achar alto, o botão é `FOOT_HALF` (menor área medida) ou limitar o piso, o que reabre o furo da capa.
 
@@ -34,6 +34,12 @@ Também havia uma diferença de cota: o piso da casa somava o leito (`groundY`),
 - `npm run smoke`: todos os casos WebGL2 verdes (`webgl`, `relevo-webgl`, `terra-hash-webgl`, `entrepostos-*`, `buffers-de-vertice`, `vida-dos-buffers-webgl`, `ao-vivo-webgl`). Os casos WebGPU falham com "Instance dropped" do WebGPU por software, como na `main`.
 - `npm run scene`: 16 casos, cena incremental igual à reconstrução integral.
 - `npm run compare` (Alta, WebGL2, `main` × branch): holanda 2,449% / média 3,018; egito-entardecer 2,708% / 2,899; noite 1,463% / 2,635; zoom-aberto 7,914% / 4,194; rio-perto 13,633% / 7,233; vila-perto 1,623% / 2,973. Acima da tolerância, como esperado: as imagens `diff-*` mostram a diferença só nas casas (mais altas, com a pedra nova); chão, água e vegetação longe das casas não mudam.
+
+## Correção da revisão
+- A primeira versão levantava ao piso também o que se move, e a `Life` soma `groundRise` na hora: o boi do `rio-perto` ficava no ar. Agora o que tem `anim` dentro do bloco some, e o teste confere que nenhum `anim` cai no retângulo.
+- Vistas do compare olhadas depois disso (rio-perto, zoom-aberto, vila-perto, egito-entardecer, noite): a diferença está nas casas e fundações; sem bicho ou aldeão no ar. O resto (pétalas, pássaros, nuvens) é movimento que muda entre gravações.
+- Merge da `main` (#122, #126, #127): o teste de decalque junto da casa isenta os degraus de `villageAccess` (pisos horizontais e espelhos verticais, desenhados depois do `drape`). Os degraus evitam a casa a 0,60 da parede e a pedra vai a 0,58. Não consegui uma captura de rua com degraus junto de casa nesta semente; a conferência é o `tests/village-access.ts` e o `tests/foundations.ts` passando juntos.
+- Custo: `npm run hills:custo` com Encostas deu 3,9 a 4,1 ms por peça (main com D46: cerca de 3,45; carga da máquina varia). Reduzir `FOOT_GRID` de 16 para 10 não mudou o tempo de forma mensurável, então ficou 16.
 
 ## Pendente
 - Não medido em GPU real. Casas muito grandes (`long`) em encosta forte ficam com bloco alto.
