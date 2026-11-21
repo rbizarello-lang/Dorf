@@ -6,6 +6,7 @@ import { modeById } from '../src/core/modes';
 import { chart, type ChartId, type FreightContractId } from '../src/core/ports';
 import { T, type TileDef } from '../src/core/tiles';
 import { themeById } from '../src/themes/themes';
+import { auditFreight, reportFreightGeometry } from './freight-geometry';
 
 type Cell = [q: number, r: number];
 type Move = [q: number, r: number, rot: number];
@@ -325,5 +326,23 @@ if (action === '--roteiro') {
     games++;
     placements += turns.length;
   }
+  for (const [layout, freight, theme, seed] of [
+    ['confluencia', 'direto', 'holanda', 42],
+    ['forquilha', 'madeira', 'holanda', 8],
+    ['enseada', 'madeira', 'brasil', 42],
+  ] as const) {
+    const { game, turns } = sail(seed, layout, freight, theme);
+    const replay = new Game(seed, game.rules);
+    const levels = theme === 'brasil' ? [false, true] : [false];
+    for (const { q, r, rot } of turns) {
+      replay.rot = rot;
+      const result = replay.place(q, r)!;
+      for (const port of result.deliveries) for (const level of levels) for (const fluid of [false, true]) {
+        auditFreight(replay.board, port, themeById(theme), seed, fluid, level);
+      }
+      while (replay.discardIfStuck());
+    }
+  }
+  reportFreightGeometry();
   console.log(`Entrepostos: cenários de frete e ${games} viagens dirigidas em 3 cartas e 2 contratos, ${placements} jogadas com prévia e replay conferidos por oráculo.`);
 }
