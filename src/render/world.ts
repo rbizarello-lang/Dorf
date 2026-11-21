@@ -110,8 +110,10 @@ const STAMP_LIFT = SLOT_LIFT + 0.02;
 const INFL_LIFT = SLOT_LIFT + 0.014;
 /** Tom da laje das casas vazias à noite (luar frio). */
 const SLOT_MOON = new THREE.Color('#b9c8ee');
-/** Anel de foco do fantasma (D51): fio de 0,055 (era 0,13) e menos opaco; ao lado das divisas das peças ele não pode pesar mais que elas. */
+/** Anel de foco do fantasma (D51), de perto: fio de 0,055 (era 0,13) e menos opaco; ao lado das divisas das peças ele não pode pesar mais que elas. */
 const HOVER_OPACITY = 0.4;
+/** Opacidade do anel com o zoom aberto (`rig.dist` 24 ou mais): ali o fio já é fino na tela. */
+const HOVER_FAR = 0.8;
 const tmpM = new THREE.Matrix4();
 const tmpV2 = new THREE.Vector2();
 const tmpM2 = new THREE.Matrix4();
@@ -3852,6 +3854,8 @@ export class World {
       g.rotation.x = THREE.MathUtils.clamp(this.ghostVel.y * lean, -0.22, 0.22);
       g.rotation.z = THREE.MathUtils.clamp(-this.ghostVel.x * lean, -0.22, 0.22);
       for (let i = 0; i < 6; i++) if (this.markers[i].visible) this.markers[i].position.copy(g.position).add(this.markerLocal[i]);
+      // De perto o anel é um fio discreto; de longe ele fica fino na tela e volta a ser a marca de onde a peça cai.
+      this.hoverMat.opacity = HOVER_OPACITY + (HOVER_FAR - HOVER_OPACITY) * THREE.MathUtils.smoothstep(this.rig.dist, 10, 24);
     }
 
     this.stepHalos(dt);
