@@ -95,7 +95,7 @@ kbd {
   pointer-events: none;
 }
 
-.hud-top > * {
+.hud-top > :not(.toasts) {
   pointer-events: auto;
 }
 
@@ -671,15 +671,15 @@ kbd {
 }
 
 .toasts {
-  position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 18px);
+  position: absolute;
+  top: calc(100% + 10px);
   left: 50%;
   transform: translateX(-50%);
   display: grid;
   justify-items: center;
   gap: 6px;
   pointer-events: none;
-  width: min(420px, calc(100vw - 2 * var(--gutter)));
+  width: min(420px, calc(100% - 2 * var(--gutter)));
 }
 
 /* Dica das primeiras partidas: um cartão por vez, acima da linha de controles. */
@@ -739,6 +739,8 @@ kbd {
 }
 
 .toast {
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 8px 16px;
   border-radius: 999px;
   background: var(--panel);
@@ -1247,7 +1249,7 @@ kbd {
 
 /* ---------- foto e vídeo */
 /* Modo foto e vídeo: só o mapa (os avisos continuam). */
-body.capture .hud-top,
+body.capture .hud-top > :not(.toasts),
 body.capture .quests,
 body.capture .minimap,
 body.capture .stack,
@@ -1460,9 +1462,6 @@ body.capture #floaters {
   .quests {
     width: min(260px, calc(100vw - 2 * var(--gutter) - 150px));
   }
-  .toasts {
-    top: calc(env(safe-area-inset-top, 0px) + 104px);
-  }
   .tools .icon-btn#btn-quality {
     display: none;
   }
@@ -1471,9 +1470,6 @@ body.capture #floaters {
 @media (max-height: 480px) {
   .quest:nth-child(n + 4) {
     display: none;
-  }
-  .toasts {
-    top: calc(env(safe-area-inset-top, 0px) + 12px);
   }
 }
 
@@ -1597,7 +1593,6 @@ html[data-text='s'] .quests,
 html[data-text='s'] .stack,
 html[data-text='s'] .hint,
 html[data-text='s'] .tip,
-html[data-text='s'] .toasts,
 html[data-text='s'] .modal,
 html[data-text='s'] .popover,
 html[data-text='s'] .minimap {
@@ -1609,7 +1604,6 @@ html[data-text='l'] .quests,
 html[data-text='l'] .stack,
 html[data-text='l'] .hint,
 html[data-text='l'] .tip,
-html[data-text='l'] .toasts,
 html[data-text='l'] .modal,
 html[data-text='l'] .popover,
 html[data-text='l'] .minimap {
