@@ -76,6 +76,7 @@ export const brasil: Theme = {
   // Porteira da fazenda onde a estrada entra na vila.
   gates: [{ style: 'porteira', colors: ['#7a5238', '#d8b24a'] }],
   bridge: { style: 'stone', colors: ['#b8b0a0', '#9a9284'] },
+  barn: { style: 'paiol', colors: ['#94704c', '#b85437', '#553a28'] },
   crops: [
     // O café é a assinatura; a cana, o milho e o algodão completam.
     { style: 'coffee', weight: 0.3, colors: ['#3f7a3a', '#4a8a40'], soil: '#8a4a30' },
