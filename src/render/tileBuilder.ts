@@ -12,7 +12,7 @@ import { isFlat, makeTerrain, skirtDrop, skirtEnd, skirtWidth, type TerrainSpec 
 import type { SynKind } from '../core/synergy';
 import type { SiteKind } from '../core/sites';
 import type { SpecialKind } from '../core/specials';
-import { isStrict, T } from '../core/tiles';
+import { isStrict, T, type TileDef } from '../core/tiles';
 import { gatesOf, type CropKind, type Theme } from '../themes/types';
 import { BODY, CROP_LAYOUT, type HouseMeta } from './lib';
 
@@ -728,6 +728,78 @@ function waterPaths(shape: WaterShape, widths: readonly number[], seed: number):
   });
 }
 
+/** Eixo navegável da mesma curva usada para escavar o canal. Bordas na orientação de origem; -1 é o centro do lago. */
+export function riverAxis(def: TileDef, widths: readonly number[], a: number, b: number): V2[] {
+  const shape = waterShape(def.edges, def.seed);
+  if (def.special === 'watermill') shape.lake = null;
+  const paths = waterPaths(shape, widths, def.seed);
+  if (shape.idx.length === 2 && !shape.lake) {
+    const pts = paths[0].pts;
+    if (a < 0 || b < 0) {
+      const from = a < 0 ? b : a;
+      const mid = pts.length >> 1;
+      const half = from === shape.idx[0] ? pts.slice(0, mid + 1) : pts.slice(mid).reverse();
+      return a < 0 ? half.reverse() : half;
+    }
+    return a === shape.idx[0] ? pts : pts.slice().reverse();
+  }
+  const from = a < 0 ? [] : paths[shape.idx.indexOf(a)].pts;
+  const to = b < 0 ? [] : paths[shape.idx.indexOf(b)].pts;
+  const line = [...from, ...to.slice(0, from.length ? -1 : undefined).reverse()];
+  if (!shape.lake) return line;
+  const field = waterField(shape, paths, widths, [], def.seed);
+  if (!field.islet) return line;
+  const wet = ([x, z]: V2) => field.ground(x, z) < WATER_Y - 0.012;
+  const segment = (p: V2, q: V2) => {
+    const length = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    const steps = Math.ceil(length / 0.035);
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      if (!wet([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t])) return Infinity;
+    }
+    return length;
+  };
+  if (line.every((p, i) => wet(p) && (!i || Number.isFinite(segment(line[i - 1], p))))) return line;
+
+  // A ilhota é terra até dentro de um lago largo. Procura uma passagem com folga em volta da margem dela.
+  const { x, z, r } = field.islet;
+  const ring: V2[] = [];
+  for (let i = 0; i < 16; i++) {
+    const angle = (i * Math.PI) / 8;
+    const radius = r * 1.35 + 0.045;
+    const p: V2 = [x + Math.cos(angle) * radius, z + Math.sin(angle) * radius];
+    if (wet(p)) ring.push(p);
+  }
+  if (!ring.length) return [];
+  const nearest = (p: V2) => ring.reduce((best, q) =>
+    Math.hypot(q[0] - p[0], q[1] - p[1]) < Math.hypot(best[0] - p[0], best[1] - p[1]) ? q : best);
+  const start = wet(line[0]) ? line[0] : nearest(line[0]);
+  const end = wet(line[line.length - 1]) ? line[line.length - 1] : nearest(line[line.length - 1]);
+  const nodes = [start, end, ...ring];
+  const dist = nodes.map((_, i) => i ? Infinity : 0);
+  const parent = nodes.map(() => -1);
+  const pending = new Set(nodes.map((_, i) => i));
+  while (pending.size) {
+    let u = -1;
+    for (const i of pending) if (u < 0 || dist[i] < dist[u]) u = i;
+    if (!Number.isFinite(dist[u])) break;
+    if (u === 1) {
+      const out: V2[] = [];
+      for (let i = u; i >= 0; i = parent[i]) out.push(nodes[i]);
+      return out.reverse();
+    }
+    pending.delete(u);
+    for (const v of pending) {
+      const d = dist[u] + segment(nodes[u], nodes[v]);
+      if (d < dist[v]) {
+        dist[v] = d;
+        parent[v] = u;
+      }
+    }
+  }
+  return [];
+}
+
 /**
  * Campo da água de uma peça: distância assinada até a linha d'água nominal (negativa
  * dentro do rio), perfil do leito e correnteza. Junto a cada borda o campo vira o perfil
@@ -840,7 +912,7 @@ function waterField(shape: WaterShape, paths: Path[], widths: readonly number[],
     }
     return [b.tx * dir * speed, b.tz * dir * speed];
   };
-  return { e, ground, at };
+  return { e, ground, at, islet };
 }
 
 /**
