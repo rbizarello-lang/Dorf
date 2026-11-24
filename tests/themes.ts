@@ -1,4 +1,4 @@
-// Os 5 temas e a migração dos 14 antigos (etapa T0): ids, `?theme=` e tema salvo antigos, recordes dos
+// O catálogo atual e a migração dos 14 antigos (etapa T0): ids, `?theme=` e tema salvo antigos, recordes dos
 // temas fundidos (fica o maior, uma vez só) e o progresso dos temas removidos, que fica guardado sem uso.
 import { THEMES, themeById } from '../src/themes/themes';
 import { migrateBests } from '../src/themes/legacy';
@@ -26,8 +26,8 @@ class Mem {
 const modeIds = MODES.map((m) => m.id);
 const rec = (score: number, seed: number) => JSON.stringify({ score, seed });
 
-// --- os 5 temas
-ok(THEMES.map((t) => t.id).join() === 'holanda,egito,oriental,brasil,inverno', 'os 5 temas, a Holanda primeiro (padrão)');
+// --- o catálogo
+ok(THEMES.map((t) => t.id).join() === 'holanda,egito,oriental,brasil,inverno,guanabara,chamonix', 'os 7 temas, a Holanda primeiro (padrão)');
 ok(new Set(THEMES.map((t) => t.id)).size === THEMES.length, 'ids únicos');
 ok(themeById(null).id === 'holanda' && themeById(undefined).id === 'holanda' && themeById('').id === 'holanda', 'sem id vale o padrão');
 for (const t of THEMES) {

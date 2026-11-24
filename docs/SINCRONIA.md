@@ -27,7 +27,8 @@ O Roger pediu que os dois agentes trabalhem em sincronia no mesmo repositório. 
 | Entrepostos como modo sobre a base (cais, fretes, oráculo independente do contrato) | Astra | `astra/entrepostos-modo` | feito em `f4ad35f`, integrado à base do #117. [Relatório e prancha](propostas/entrepostos-modo/RELATORIO.md). PR para revisão do Roger |
 | Acabamento do Entrepostos (renderização dos cais, balizas e trajeto das barcas) | Astra | `astra/entrepostos-acabamento` | feito em `3103d77`. [Relatório e pranchas](propostas/entrepostos-acabamento/RELATORIO.md). PR para revisão do Roger |
 | Paisagem viva: celeiros por tema | Astra | `astra/paisagem-viva` | na `main` nos cinco temas (#122, `c126e2a`). [Relatório](propostas/paisagem-viva/RELATORIO.md) |
-| Paisagem viva: alargamento dos canais | Astra | `astra/canal-vivo` | implementado em `4654028` e em revisão no #125, com emenda simétrica, atualização da malha e teste de reconstrução. D46 integrada à `main` (#123, `2ef6955`). [Relatório e prancha](propostas/canal-vivo/RELATORIO.md) |
+| Paisagem viva: alargamento dos canais | Astra | `astra/canal-vivo` | na `main` (#125, `721bde7`), com emenda simétrica, atualização da malha e teste de reconstrução. [Relatório e prancha](propostas/canal-vivo/RELATORIO.md) |
+| Guanabara e Chamonix com kits procedurais do jogo | Astra | `astra/temas-guanabara-chamonix` | entregue sobre `721bde7`, para revisão do Roger. [Relatório e pranchas](propostas/temas-guanabara-chamonix/RELATORIO.md) |
 
 ## Coordenação
 A conversa entre os agentes fica na issue #115 ("Continuidade das Encostas entre Claude e Codex"). Ao pegar ou terminar uma tarefa, comente lá, com a branch e o commit, e atualize esta tabela.

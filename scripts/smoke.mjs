@@ -37,6 +37,8 @@ const cases = [
   { name: 'bench', q: 'bench&quality=low', backend: 'webgpu', bench: true },
   { name: 'webgpu', q: 'theme=holanda&seed=3&auto=12&quality=low', backend: 'webgpu' },
   { name: 'webgl', q: 'theme=egito&seed=3&auto=12&quality=low&webgl', backend: 'webgl2' },
+  { name: 'guanabara', q: 'theme=guanabara&seed=7&auto=8&quality=low', backend: 'webgpu', theme: 'Guanabara', tiles: 9 },
+  { name: 'chamonix-webgl', q: 'mode=terra&theme=chamonix&seed=7&auto=8&quality=low&webgl', backend: 'webgl2', theme: 'Chamonix', mode: 'Terra contínua', tiles: 9 },
   // O modo Relevo liga o encaixe fluido (chão, água e costa deslocados) por padrão: confere os dois backends.
   { name: 'relevo', q: 'mode=relevo&theme=holanda&seed=3&auto=12&quality=low', backend: 'webgpu' },
   { name: 'relevo-webgl', q: 'mode=relevo&theme=oriental&seed=3&auto=12&quality=low&webgl', backend: 'webgl2' },
@@ -157,6 +159,7 @@ for (const c of cases) {
     // O cabeçalho do ?bench (placa, navegador, tela, medidor de GPU, nível do Auto) precisa vir junto, para a tabela colada dizer onde foi medida.
     if (c.bench && !(await page.evaluate(() => (window.__bench?.info?.length ?? 0) >= 5 && document.querySelectorAll('.bench li').length >= 5))) problems.push('o cabeçalho do ?bench (placa, tela, medidor de GPU) não apareceu');
     if (c.mode && !(await page.evaluate((m) => document.getElementById('era')?.textContent?.includes(m) ?? false, c.mode))) problems.push(`o modo na tela não é ${c.mode}`);
+    if (c.theme && (await page.locator('#theme-name').textContent())?.trim() !== c.theme) problems.push(`o tema na tela não é ${c.theme}`);
     if (c.freightDialog && !(await page.locator('button[data-act="freight"]').first().isVisible())) problems.push('o diálogo de frete não apareceu');
     if (c.vbuf) {
       const over = await page.evaluate(() => window.__vbuf?.(9) ?? null);

@@ -3,13 +3,15 @@ import { egito } from './egito';
 import { oriental } from './oriental';
 import { brasil } from './brasil';
 import { inverno } from './inverno';
+import { guanabara } from './guanabara';
+import { chamonix } from './chamonix';
 import type { Theme } from './types';
 
 export type * from './types';
 
-// Os 5 temas do jogo, um arquivo por tema (src/themes/<id>.ts). Tudo é dado: nenhum tema tem código
+// Os temas do jogo, um arquivo por tema (src/themes/<id>.ts). Tudo é dado: nenhum tema tem código
 // próprio. O primeiro é o padrão (Holanda Dourada). A consolidação de 14 para 5 está em docs/TEMAS.md.
-export const THEMES: Theme[] = [holanda, egito, oriental, brasil, inverno];
+export const THEMES: Theme[] = [holanda, egito, oriental, brasil, inverno, guanabara, chamonix];
 
 export const PERIOD_LABEL: Record<Theme['period'], string> = {
   antiguidade: 'Antiguidade',

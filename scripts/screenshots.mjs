@@ -14,6 +14,8 @@ const all = [
   { name: 'oriental', q: 'theme=oriental&seed=3&auto=32&quality=high', wait: 12000 },
   { name: 'brasil', q: 'theme=brasil&seed=11&auto=32&quality=high', wait: 12000 },
   { name: 'inverno', q: 'theme=inverno&seed=5&auto=32&quality=high', wait: 12000 },
+  { name: 'guanabara', q: 'theme=guanabara&seed=7&auto=60&quality=high', wait: 12000 },
+  { name: 'chamonix', q: 'theme=chamonix&seed=7&auto=60&quality=high', wait: 12000 },
   { name: 'noite', q: 'theme=holanda&seed=12&auto=32&quality=high&time=night', wait: 14000 },
   { name: 'tarde', q: 'theme=brasil&seed=10&auto=32&quality=high&time=dusk', wait: 14000 },
   { name: 'amanhecer', q: 'theme=oriental&seed=7&auto=32&quality=high&time=dawn', wait: 14000 },

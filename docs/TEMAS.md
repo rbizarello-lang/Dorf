@@ -16,6 +16,13 @@
 >
 > **Anacronismos declarados.** O Brasil Dourado junta o Cerrado de hoje e as Minas do século XVIII sem ano exato: o café em larga escala e a maria-fumaça mineira são do século XIX; o tema trata tudo como "Brasil interior". O Terraços do Oriente é uma paisagem de rolo pintado (da China Song ao Japão Edo), com torii e casa de pátio na mesma vila. O Inverno Nórdico é atemporal (casa longa de turfa, stuga vermelha e drakkar convivem). O que ainda falta de cada fusão (terraços de arroz, rena, trenó, lago congelado, aurora, cachoeira, cupinzeiro, fauna do cerrado, telhado colonial, portais em lista) está nos relatórios da rodada 3 e entra nas etapas seguintes.
 
+## Guanabara e Chamonix
+
+- **Guanabara (`guanabara`).** Fundo de mar, morros de pedra cinza com copas densas, faixas de restinga e casario claro de telha de barro e laje. Na beira d'água aparecem os veleiros e as garças. O Paço da Baía fecha o crescimento do povoado.
+- **Chamonix (`chamonix`).** Vale verde com floresta de abetos, neve nos cumes e prados de feno. Chalés escuros e hospedarias claras distinguem o casario. A ferrovia leva a locomotiva a vapor pelo vale e a Ponte do Montenvers é a maravilha.
+
+Os dois temas usam os kits procedurais do jogo, com paisagem de verão e as regras padrão do modo escolhido. Cada tema tem seu id e seus recordes.
+
 ## Terraços do Oriente (`oriental`): etapa T3 da rodada 3
 
 O que o tema tem hoje, depois do aprofundamento (as seções de `song`, `edo` e `sakura` mais abaixo são a pesquisa histórica de origem):

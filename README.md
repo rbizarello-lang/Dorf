@@ -1,6 +1,6 @@
 # Retalhos
 
-Puzzle relaxante de peças hexagonais, no gênero de Dorfromantik, com **5 temas de países e épocas**, **interações entre tipos de borda** e um mundo que se mexe: trigo ondulando ao vento, barcos descendo os rios, carroças e caravanas nas estradas, moinhos girando, animais pastando e janelas que acendem à noite. Feito com Three.js (WebGPU, com WebGL2 automático onde não houver WebGPU), TypeScript e Vite, sem nenhum arquivo de arte: peças, casas, plantações, animais e sons são gerados em código.
+Puzzle relaxante de peças hexagonais, no gênero de Dorfromantik, com **7 temas de países e épocas**, **interações entre tipos de borda** e um mundo que se mexe: trigo ondulando ao vento, barcos descendo os rios, carroças e caravanas nas estradas, moinhos girando, animais pastando e janelas que acendem à noite. Feito com Three.js (WebGPU, com WebGL2 automático onde não houver WebGPU), TypeScript e Vite, sem nenhum arquivo de arte: peças, casas, plantações, animais e sons são gerados em código.
 
 ![Holanda Dourada](docs/screens/holanda.png)
 
@@ -161,14 +161,16 @@ O botão de qualidade abre a lista: **Auto**, **Ultra**, **Alta**, **Média** e 
 | Séculos XVI a XVIII | **Terraços do Oriente** | Leste Asiático em paisagem de rolo, da China Song ao Japão Edo: arrozais em terraço de três degraus, serras de névoa em tinta com pinheiros, caminho de posta de lajes de passo, torii e paifang, garças, pagodes e cerejeiras. Easter eggs: cerejeira milenar, a Grande Carpa, gato da sorte e a noite das lanternas (Obon e Lua da Colheita) |
 | Séculos XVI a XVIII | **Brasil Dourado** | Brasil interior, Minas e Cerrado: casario caiado de telhado colonial, café em terraço (com florada) e canavial com engenho, cerrado de árvores tortas e cupinzeiros, ema, lobo-guará, tamanduá e araras, carro de boi e tropa de mulas no caminho de pedra, serras de rocha vermelha com mata no topo, a chapada de capim em volta |
 | Séculos XIX a XXI | **Inverno Nórdico** | Escandinávia no inverno, sem data: casas longas de turfa, cabanas vermelhas, drakkars no fiorde, lago congelado com pesca no gelo no lugar da lavoura, trenó de rena na trilha, alce e raposa-do-ártico, pórtico de dragões, aurora boreal à noite e a Grande Stavkirke. Ovos: a aurora do solstício (20 a 22/12), o trenó de rena (24 e 25/12), Hugin e Munin sobre o lago e o troll da ponte |
+| Séculos XIX a XXI | **Guanabara** | Orla do Rio de Janeiro, com baías, morros de granito, mata, sobrados claros de telha e laje, caminho de pedra, veleiros e garças. Paisagem de verão e regras padrão |
+| Séculos XIX a XXI | **Chamonix** | Alpes franceses no início do século XX, com neve nos cumes, abetos no vale verde, chalés de madeira, hospedarias, campos de feno, rio glacial e trem a vapor. Paisagem de verão e regras padrão |
 
-Eram 14 temas. O Jardim Sakura, o Jade Song e o Edo Tranquilo viraram o Terraços do Oriente; o Cerrado Dourado e a Minas Colonial, o Brasil Dourado; a Terra dos Vikings foi para o Inverno Nórdico; Vale Pastel, Colônia Marciana, Toscana, Velho Oeste e Andes saíram. Links com `?theme=` antigo, o tema escolhido e os recordes dos temas fundidos passam para o tema novo; a partida salva de um tema que saiu é descartada. O motivo e o que veio de cada tema estão em [docs/TEMAS.md](docs/TEMAS.md).
+Na consolidação de 14 para 5 temas, o Jardim Sakura, o Jade Song e o Edo Tranquilo viraram o Terraços do Oriente, o Cerrado Dourado e a Minas Colonial viraram o Brasil Dourado e a Terra dos Vikings foi para o Inverno Nórdico. Vale Pastel, Colônia Marciana, Toscana, Velho Oeste e Andes saíram. Links com `?theme=` antigo, o tema escolhido e os recordes dos temas fundidos passam para o tema novo. A partida salva de um tema que saiu é descartada. O que veio de cada tema está em [docs/TEMAS.md](docs/TEMAS.md).
 
 ## Parâmetros de URL
 
 | Parâmetro | Efeito |
 |---|---|
-| `?theme=oriental` | tema inicial: `holanda` (padrão), `egito`, `oriental`, `brasil` ou `inverno` (ids antigos como `sakura` ou `viking` levam ao tema novo; arquivos em `src/themes/`) |
+| `?theme=guanabara` | tema inicial: `holanda` (padrão), `egito`, `oriental`, `brasil`, `inverno`, `guanabara` ou `chamonix` (ids antigos como `sakura` e `viking` continuam funcionando) |
 | `?seed=123` | partida reproduzível: a mesma semente dá a mesma sequência de peças |
 | `?time=night` | `dawn`, `aurora`, `day`, `golden`, `dusk` ou `night` |
 | `?quality=high` | `auto`, `ultra`, `high`, `medium` ou `low` (`cinema` vira `ultra`; só vale junto de `?debug`, `?perf`, `?stress`, `?auto` ou `?demo`, para medir) |
