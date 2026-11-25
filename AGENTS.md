@@ -8,7 +8,7 @@ Este arquivo existe para que qualquer agente (Claude Code, Codex, Cursor, Copilo
 
 - **O que é:** um protótipo jogável (v3) de puzzle de peças hexagonais. Cada peça tem 6 bordas de terreno, e quem joga encaixa a peça no mapa buscando bordas iguais.
 - **O que a v3 tem:**
-  - 5 temas de países e épocas (Holanda Dourada, o padrão; Egito do Nilo; Terraços do Oriente; Brasil Dourado; Inverno Nórdico), consolidados dos 14 de antes (`docs/TEMAS.md`);
+  - 7 temas de países e épocas: Holanda Dourada (padrão), Egito do Nilo, Terraços do Oriente, Brasil Dourado, Inverno Nórdico, Guanabara e Chamonix (`docs/TEMAS.md`);
   - interações entre bordas diferentes, que dão pontos e erguem construções;
   - mundo animado: trigo ao vento, barcos, trens, moinhos, animais;
   - ciclo de dia, entardecer e noite.
@@ -115,7 +115,7 @@ RUNS=300:high node scripts/stress.mjs                      # tabela de desempenh
 | `?coast=i` / `window.__coast(i?, zoom?)` | centraliza a câmera na i-ésima peça mais longe do centro (a costa: areia, espuma e saia do mar nas capturas) |
 | `window.__placeBest()` | coloca a peça atual na melhor posição, com animação |
 | `window.__ripple(idade)` | dispara a onda do chão no foco da câmera, já com essa idade em segundos |
-| `window.__weather(tipo, idade?)` | clima tocável: `'rain'`, `'snow'`, `'sun'` ou `null` (encerra); com `idade` em segundos, já entra com essa idade (capturas por software). `scripts/weather.mjs` roda os 5 temas e falha com erro no console (`SHOTS=holanda:rain,inverno:snow,egito:sun` grava capturas) |
+| `window.__weather(tipo, idade?)` | clima tocável: `'rain'`, `'snow'`, `'sun'` ou `null` (encerra); com `idade` em segundos, já entra com essa idade (capturas por software). `scripts/weather.mjs` roda os 7 temas e falha com erro no console (`SHOTS=holanda:rain,inverno:snow,egito:sun` grava capturas) |
 | `window.__celebrate()` | anel dourado e bando de pássaros no foco da câmera (efeitos de nova era) |
 | `window.__era(era, idade?, zoom?)` | centraliza no Centro da vila e o mostra na era (0 a 3); com `idade`, a onda dourada já com essa idade em segundos |
 | `window.__plaza(zoom?)` | mostra os três monumentos na praça do Centro (só a imagem) |
@@ -171,8 +171,8 @@ src/core/        regras puras: NÃO importa three.js nem DOM (os testes rodam em
   rng.ts         mulberry32 e utilitários de sorteio
 src/themes/      temas como DADOS
   types.ts       esquema Theme, com cada kit comentado: é a referência de tudo que um tema pode escolher
-  themes.ts      índice: THEMES (os 5 temas, Holanda primeiro = padrão), PERIOD_LABEL/ORDER, themeById (ids antigos fundidos levam ao tema novo; MERGED_THEMES)
-  holanda.ts, egito.ts, oriental.ts, brasil.ts, inverno.ts   um tema por arquivo (oriental = Sakura + Song + Edo; brasil = Cerrado + Colonial; inverno absorveu o Viking)
+  themes.ts      índice: THEMES (Holanda primeiro = padrão), PERIOD_LABEL/ORDER, themeById (ids antigos fundidos levam ao tema novo; MERGED_THEMES)
+  holanda.ts, egito.ts, oriental.ts, brasil.ts, inverno.ts, guanabara.ts, chamonix.ts   um tema por arquivo
   legacy.ts      migração dos recordes `best.<modo>.<tema>` dos temas fundidos para o tema novo (o maior fica; puro, testado em tests/themes.ts)
   progress.ts    housesAtEra: as casas do tema em cada era da vila (taipa e palha, o tema, enxaimel e sobrado, flâmulas)
 src/render/
@@ -229,7 +229,7 @@ tests/relief.ts     níveis de altura: determinismo, vizinhos a ≤1 degrau, ori
 tests/falls.ts      cachoeiras (`buildTile` em Node): lábio e lâmina na peça alta, espuma na baixa, largura igual nas duas metades, água plana, determinismo, nível 0 sem degrau = peça plana
 tests/storage.ts    ida e volta do backup com armazenamento falso e recusas sem gravar
 tests/eggs.ts       gatilhos dos easter eggs: horas, datas (inclusive virando o ano), sorte por semente, grupos conferidos por BFS numa partida de verdade e replay idêntico
-tests/themes.ts     os 5 temas, `?theme=` antigo, migração dos recordes dos temas fundidos e o progresso dos removidos
+tests/themes.ts     catálogo de temas, `?theme=` antigo, migração dos recordes dos temas fundidos e o progresso dos removidos
 tests/bench/        bancada de testes de encaixe (motor leve, regras como plugins em `rules/`, jogadores guloso, planejador e distraído): a regra da Terra contínua nasceu aqui, e `rules/terra.ts` guarda os botões da calibração (`BENCH_KNOBS`)
 tests/terra-bancada.ts  a mesma partida na bancada e no `Game` (modo `terra` sobre o encaixe puro), jogada a jogada e termo a termo; diferença esperada: zero
 tests/terra-view.ts  cache incremental × `patchField`, contorno/bordas abertas/fecha × busca em largura escrita no teste, candidatas que não mexem no tabuleiro, prévia × jogada, `closedViews` e umidade da vista (`npm run terra:view`)

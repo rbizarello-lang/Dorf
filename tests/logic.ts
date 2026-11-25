@@ -1073,7 +1073,7 @@ for (let g = 0; g < N_GAMES; g++) {
   inc('modo_' + mode.id);
   logs.push(lg);
 }
-// Modo Relevo: partidas à parte, com o oráculo de encaixe de altura e de degraus (cobrem os 5 temas e as 4 políticas).
+// Modo Relevo: partidas à parte, com o oráculo de encaixe de altura e de degraus (cobrem todos os temas e as 4 políticas).
 {
   const relevo = MODES.find((m) => m.id === 'relevo')!;
   for (let g = 0; g < 60; g++) {
@@ -1088,7 +1088,7 @@ for (let g = 0; g < N_GAMES; g++) {
   }
 }
 // Modo Terra contínua: partidas à parte, com o oráculo da regra (campo, continuidade, manchas, umidade, peça de volta e água do mundo) e o
-// jogo inteiro por cima (missões, eras, sítios, cartas); cobrem os 5 temas e as 4 políticas. As 20 primeiras conferem o resto a cada jogada.
+// jogo inteiro por cima (missões, eras, sítios, cartas); cobrem todos os temas e as 4 políticas. As 20 primeiras conferem o resto a cada jogada.
 {
   const terra = MODES.find((m) => m.id === 'terra')!;
   for (let g = 0; g < 60; g++) {

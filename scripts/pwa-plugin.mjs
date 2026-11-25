@@ -99,7 +99,7 @@ export function iconPng(size, scale) {
 const MANIFEST = {
   name: 'Retalhos',
   short_name: 'Retalhos',
-  description: 'Puzzle relaxante de peças hexagonais, com 14 temas de países e épocas.',
+  description: 'Puzzle relaxante de peças hexagonais com temas de países e épocas.',
   lang: 'pt-BR',
   start_url: './',
   scope: './',
