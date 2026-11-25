@@ -21,7 +21,7 @@ import { createRenderer, type Backend } from './gpu';
 import { Lib, WONDER_PODIUM, instGeometry, postStampGeometry, setInstColor, stampGeometry } from './lib';
 import { Life } from './life';
 import { HarborLayer } from './harbors';
-import { CLOUD_TOP, U, makeVoidMaterial, slotAlpha, slotBlob, softShadowFilter } from './materials';
+import { CLOUD_TOP, U, makeVoidMaterial, slotAlpha, slotBlob, slotFoot, softShadowFilter } from './materials';
 import { A, fogNode } from './atmosphere';
 import { CL, makeCloudMesh } from './clouds';
 import { seaMap } from './seaMap';
@@ -1102,6 +1102,7 @@ export class World {
     this.scene.add(this.stamps);
 
     const hex = new THREE.CircleGeometry(0.9, 6).rotateX(-Math.PI / 2);
+    this.slotMat.colorNode = slotFoot();
     this.slots = new THREE.InstancedMesh(hex, this.slotMat, 512);
     this.slots.count = 0;
     this.slots.frustumCulled = false;

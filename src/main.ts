@@ -12,7 +12,7 @@ import { SPECIALS, SPECIAL_KINDS, type SpecialKind } from './core/specials';
 import { mulberry32 } from './core/rng';
 import { T, rotateEdges } from './core/tiles';
 import { previewGrowth } from './core/living';
-import { DIRS, edgeMid, hexDistance, hexToWorld, hkey, unkey, worldToHex } from './core/hex';
+import { DIRS, edgeMid, hexDistance, HEX_R, hexToWorld, hkey, unkey, worldToHex } from './core/hex';
 import { routeMarks, type RouteHit, type RouteMark } from './core/routes';
 import type { PassingWeather, Quality, TimeOfDay } from './render/world';
 import { PITCH_MAX, PITCH_MIN } from './render/cameraRig';
@@ -39,6 +39,7 @@ import { blessingName, blessingRule, choiceHtml } from './ui/eraChoice';
 import { Minimap, timelineSvg, type TurnNote } from './ui/minimap';
 import { DEFAULT_VOYAGE, VoyagePanel, chartId, freightDialog, freightId, voyageHelp, type Voyage } from './ui/voyage';
 import { frameVoyage } from './ui/voyageCamera';
+import { frameBoard } from './ui/frameBoard';
 import './ui/style.css';
 import './ui/voyage.css';
 
@@ -584,6 +585,24 @@ function frameCamera(instant: boolean) {
   // Em retrato (celular) a largura é o limite: afasta a câmera proporcionalmente.
   const aspect = Math.min(1.4, Math.max(0.45, window.innerWidth / Math.max(1, window.innerHeight)));
   world.rig.goalDist = THREE.MathUtils.clamp((maxR * (b.ports.length ? 2.5 : 2.1) + 5) * Math.max(1, 1.25 / aspect), 7, 46);
+  // `?enquadra=0` volta à fórmula de antes (capturas antes e depois com o mesmo build).
+  if (!b.ports.length && params.get('enquadra') !== '0') {
+    // O HUD cobre cantos da tela (pilha, placar, barra): o centro da vista e, se preciso, a distância
+    // saem do que está de fato à vista, sem mexer em inclinação, giro nem no zoom de quem joga.
+    const seen = new Set<string>();
+    const pts: THREE.Vector3[] = [];
+    for (const { q, r } of b.list) {
+      const c = hexToWorld(q, r), y = world.heightOf(q, r) + 0.4;
+      for (let i = 0; i < 6; i++) {
+        const x = c.x + HEX_R * Math.cos(i * Math.PI / 3), z = c.z + HEX_R * Math.sin(i * Math.PI / 3);
+        const k = `${Math.round(x * 20)},${Math.round(z * 20)}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        pts.push(new THREE.Vector3(x, y, z));
+      }
+    }
+    frameBoard(world.rig, world.camera, pts);
+  }
   if (b.ports.length) {
     const marks = landmarks.map(({ q, r }) => {
       const { x, z } = hexToWorld(q, r);

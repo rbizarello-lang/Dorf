@@ -23,6 +23,7 @@ import {
   hash,
   instanceIndex,
   length,
+  materialColor,
   log2,
   luminance,
   max,
@@ -1123,6 +1124,19 @@ export function makeFallMaterial() {
 }
 
 /**
+ * Sombra de contato ao pé das laterais: 1 longe da peça, ~0,2 junto da parede, em ~1,3 do pé (uma faixa larga e macia mais um beiral estreito colado na parede) (`d` = distância
+ * do `seaMap`, que cada peça pinta ao assentar). O entorno e a laje das casas vazias usam a MESMA curva: sem
+ * a laje a sombra sumia (a laje, clara e meio opaca, cobre toda a faixa onde ela cai).
+ */
+export const footShade = (d: N): N => {
+  const wide = float(1).sub(smoothstep(0.0, 1.3, d)).pow(1.5);
+  const tight = float(1).sub(smoothstep(0.0, 0.35, d)).pow(2);
+  return float(1).sub(wide.mul(0.66)).mul(float(1).sub(tight.mul(0.4)));
+};
+/** Cor da laje das casas vazias: a do material com a sombra de contato no ponto, lida do mapa do mar (sem malha nem passe novo). */
+export const slotFoot = (): N => materialColor.mul(footShade(texture(seaMap.texture, positionWorld.xz.div(GROUND_EXTENT * 2).add(0.5)).r.mul(SEA_DMAX)));
+
+/**
  * Terra incógnita: o vazio é um mapa antigo de pergaminho. Perto do tabuleiro (até o raio
  * explorado R), papel com grão e fibras e a grade hexagonal a nanquim, tremida como feita à
  * mão; de R a R+4 a tinta desbota e o papel puxa para o sépia; além disso, uma névoa clara
@@ -1279,8 +1293,7 @@ export function makeVoidMaterial() {
   const emitK = mix(mix(float(1 - 0.4 * 0.95), float(0.2).mul(dim), u.sea), float(0.45).mul(dim), u.sand);
   // Sombra de contato: o entorno escurece suave ao pé das laterais (distância do `seaMap`, que cada
   // peça pinta ao assentar), no lugar da faixa clara sem sombra sob as bordas.
-  const contact = float(1).sub(float(1).sub(smoothstep(0.0, 1.2, d)).pow(1.5).mul(0.6));
-  const lit = surround.mul(contact);
+  const lit = surround.mul(footShade(d));
   m.colorNode = lit.mul(LIT);
   m.emissiveNode = lit.mul(emitK);
   m.fog = true;
