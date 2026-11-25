@@ -35,6 +35,7 @@ const cases = [
   // Sequências sorteadas: quantidade que muda, tipos e ordem que mudam, com a Viva ligada e desligada, no Clássico e no Terra.
   { name: 'sorteio-classico-viva', q: 'theme=holanda&seed=11&mode=classico&viva=1', fuzz: 22, rng: 11 },
   { name: 'sorteio-classico-sem-viva', q: 'theme=oriental&seed=12&mode=classico&viva=0', fuzz: 22, rng: 12 },
+  { name: 'sorteio-egito-sem-viva', q: 'theme=egito&seed=15&mode=classico&viva=0', fuzz: 22, rng: 15, water: true },
   { name: 'rapido-classico-viva', q: 'theme=brasil&seed=13&mode=classico&viva=1', fuzz: 14, rng: 13, fast: true },
   { name: 'rapido-classico-sem-viva', q: 'theme=egito&seed=14&mode=classico&viva=0', fuzz: 14, rng: 14, fast: true },
   { name: 'terra-viva', q: 'theme=holanda&seed=21&mode=terra&viva=1', fuzz: 22, rng: 21 },
@@ -67,7 +68,7 @@ const diffPieces = (a, b, checkWater) => {
       out.push(`${k}: decorações com posição, tipo ou cor diferente (${d.length}), ex.: ${d[0]} contra ${y.decos[x.decos.indexOf(d[0])]}`);
     }
     if (x.ground !== y.ground) out.push(`${k}: chão ${x.ground} contra ${y.ground}`);
-    if (checkWater && x.water !== y.water) out.push(`${k}: água ${x.water} contra ${y.water}`);
+    if (checkWater && x.water !== y.water) out.push(`${k}: água ${x.water} contra ${y.water} (largura|correnteza ${x.wf} contra ${y.wf})`);
     if (JSON.stringify(x.smoke) !== JSON.stringify(y.smoke)) out.push(`${k}: ${x.smoke.length} emissores de fumaça contra ${y.smoke.length}`);
     if (JSON.stringify(x.falls) !== JSON.stringify(y.falls)) out.push(`${k}: corredeira ${JSON.stringify(x.falls)} contra ${JSON.stringify(y.falls)}`);
   }

@@ -409,7 +409,7 @@ class Chunk {
     return { ...water, gStart, gCount: gAdd };
   }
 
-  private appendWater(b: TileBuild, m: THREE.Matrix4): WaterRange {
+  appendWater(b: TileBuild, m: THREE.Matrix4): WaterRange {
     const start = this.wN, count = b.water.length / 3;
     if (!count) return { start, count, capacity: count };
     const end = start + count;
@@ -2472,9 +2472,15 @@ export class World {
     // O estágio de terra sozinho muda a decoração. O canal muda também o leito e a lâmina.
     if (ground) {
       rec.chunk.replaceGround(rec, b, m);
-      if (channelOn) {
+      // O leito e a água seguem o chão da peça (a encosta muda onde a linha d'água corta o chão), com a Paisagem viva ligada ou não (D52):
+      // a reconstrução integral sempre desenha a água sobre o chão final.
+      // Vale também para a água sem borda de rio: os patamares alagados (`Theme.terraces.flooded`) seguem a encosta do mesmo jeito.
+      {
         const slot = this.waterSlots.get(p.key);
         if (slot) slot.chunk.replaceWater(slot, b, m);
+        else if (b.water.length) this.waterSlots.set(p.key, { chunk: rec.chunk, ...rec.chunk.appendWater(b, m) });
+      }
+      if (channelOn) {
         this.widths.set(p.key, nextWidths);
         this.flows.set(p.key, nextFlow);
         if (channel && this.theme.floodplain) riverMap.add(b.water, m, this.theme.floodplain.reach);
@@ -2546,7 +2552,7 @@ export class World {
   sceneSig() {
     this.falls.flush();
     const r = (v: number) => (Math.round(v * 1000) / 1000 || 0).toFixed(3);
-    const pieces: Record<string, { decos: string[]; ground: string; water: string | null; smoke: string[]; falls: unknown }> = {};
+    const pieces: Record<string, { decos: string[]; ground: string; water: string | null; wf: string; smoke: string[]; falls: unknown }> = {};
     let claimed = 0;
     for (const [key, rec] of this.baked) {
       const decos: string[] = [];
@@ -2562,7 +2568,9 @@ export class World {
       const water = this.waterSlots.get(key);
       pieces[p ? `${p.q},${p.r}` : String(key)] = {
         decos: decos.sort(), ground: rec.chunk.groundDigest(rec.gStart, rec.gCount),
-        water: water ? water.chunk.waterDigest(water.start, water.count) : null,
+        // Uma faixa esvaziada (a encosta cobriu a água) vale o mesmo que nenhuma: a reconstrução nem cria a faixa.
+        water: water ? (d => (d.startsWith('0:') ? null : d))(water.chunk.waterDigest(water.start, water.count)) : null,
+        wf: `${(this.widths.get(key) ?? []).map(r).join(',')}|${(this.flows.get(key) ?? []).join(',')}`,
         smoke: smoke.sort(), falls: this.falls.digest(key),
       };
     }
