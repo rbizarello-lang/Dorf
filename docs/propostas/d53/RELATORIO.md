@@ -10,7 +10,7 @@ Itens P3.5 e P3.6 da [avaliação autônoma](../avaliacao-autonoma/AVALIACAO.md)
 - A altura sobe `GROW.house` = 0,075 por estágio, mais até `GROW.houseTall` = 0,06 por casa: de +20% a +40% no estágio 3 (antes, +66%).
 - A largura de cada eixo (x e z, independentes) sobe de 55% a 100% de `GROW.houseWide` (5% por estágio): **no máximo +15%**, o que a fundação da D47 supõe. `FOOT_HALF` e `tests/foundations.ts` ficaram como estavam.
 - A proporção de cada casa sai de `houseHash(x, z, sal)`, um hash inteiro da posição dela na peça (sem `Math.random`). Parede e telhado da mesma casa têm o mesmo `x, z` e caem na mesma conta, então a tripla de escala continua igual nos dois. A aparência segue dependendo só de `(edges, seed, theme, opts)` mais o estágio.
-- A chaminé sobe com a altura da casa dela (a parede mais próxima da chaminé), não mais com um fator único.
+- A chaminé sobe com a altura da casa dela (a parede mais próxima da chaminé), não mais com um fator único. A cota da chaminé é absoluta (piso + altura própria): só a parte acima do piso da casa (`near.y`) é multiplicada, para a fumaça não sair solta acima da chaminé em casa de patamar (defeito que já existia antes da D53).
 - Nenhum pool novo, nenhuma instância nova, nenhum draw call novo. A escala por instância continua se compondo com a era (que troca só a geometria em `Pool.retarget`).
 
 ## 2. Palmeiras e coqueiros

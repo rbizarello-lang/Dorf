@@ -85,7 +85,8 @@ export function developBuild(tile: TileBuild, edges: readonly T[], stages: Stage
         const dd = Math.hypot(w.x - tile.chimneys[i], w.z - tile.chimneys[i + 2]);
         if (dd < nd) (nd = dd), (near = w);
       }
-      tile.chimneys[i + 1] *= near ? houseGrowth(near.x, near.z, town)[0] : 1 + GROW.house * town;
+      // A cota da chaminé é absoluta (piso da casa + altura própria): só a parte acima do piso cresce, senão a fumaça sai solta em patamar.
+      if (near) tile.chimneys[i + 1] = near.y + (tile.chimneys[i + 1] - near.y) * houseGrowth(near.x, near.z, town)[0];
     }
   }
   // Celeiro (estágios 2 e 3) num trecho já plantado: as plantas sob ele cedem lugar, e ele olha para o centro da peça.
