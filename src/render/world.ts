@@ -499,7 +499,7 @@ class Chunk {
   }
 
   freightWater(start: number, count: number, snapshot = false) {
-    // No canal vivo a fila pode realocar a faixa enquanto a barca calcula o caminho, em vários quadros.
+    // A fila das Encostas (e, com a Viva ligada, o canal vivo) pode reescrever ou realocar a faixa enquanto a barca calcula o caminho, em vários quadros.
     if (snapshot) return { pos: this.wPos.slice(start * 3, (start + count) * 3), bed: this.wBed.slice(start * 4, (start + count) * 4), start: 0, count };
     return { pos: this.wPos, bed: this.wBed, start, count };
   }
@@ -3341,9 +3341,9 @@ export class World {
     if (this.board && this.harbors && !this.reducedMotion) {
       for (const port of res.deliveries) this.harbors.depart(this.board, port, (q, r) => {
         const key = hkey(q, r);
-        if (this.vivaOn && this.hillQueue.includes(key)) return undefined;
+        if (this.hillQueue.includes(key)) return undefined;
         const slot = this.waterSlots.get(key);
-        return slot?.chunk.freightWater(slot.start, slot.count, this.vivaOn);
+        return slot?.chunk.freightWater(slot.start, slot.count, true);
       }, (x, z) => this.fl(x, z));
     }
     if (res.perfect) {
