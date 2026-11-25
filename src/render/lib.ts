@@ -586,17 +586,20 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
         { geo: jitter(ico(0.065, 0), 0.02, 4).translate(0, 0.28, 0.02), color: '#fff', tint: 1, grad: [0.85, 1.08, 0.12, 0.34] },
       ]);
     case 'palm': {
+      // D53: a copa tinha 7 folhas finas e sumia de longe (silhueta). Agora são 9 folhas mais largas e uma coroa cheia no topo
+      // (o miolo de onde elas saem), que dá volume a distância; de perto continua uma palmeira de folhas arqueadas.
       const parts: Part[] = [];
       let x = 0;
       for (let i = 0; i < 4; i++) {
-        parts.push({ geo: cyl(0.014, 0.017, 0.085, 5, x, i * 0.082, 0), color: trunk, grad: [0.85, 1.05, 0, 0.34] });
+        parts.push({ geo: cyl(0.015, 0.019, 0.085, 5, x, i * 0.082, 0), color: trunk, grad: [0.85, 1.05, 0, 0.34] });
         x += 0.008;
       }
-      for (let i = 0; i < 7; i++) {
-        const leaf = new THREE.ConeGeometry(0.03, 0.2, 3, 1).rotateZ(-Math.PI / 2 - 0.5).translate(0.09, 0.32, 0).rotateY((i / 7) * Math.PI * 2 + 0.3);
+      parts.push({ geo: oct(0.045).scale(1.15, 0.6, 1.15).translate(x + 0.005, 0.325, 0.005), color: '#fff', tint: 1, grad: [0.85, 1.1, 0.2, 0.35] });
+      for (let i = 0; i < 9; i++) {
+        const leaf = new THREE.ConeGeometry(0.042, 0.22, 3, 1).rotateZ(-Math.PI / 2 - 0.5).translate(0.095, 0.32, 0).rotateY((i / 9) * Math.PI * 2 + 0.3);
         parts.push({ geo: leaf.translate(x, 0, 0), color: '#fff', tint: 1 });
       }
-      parts.push({ geo: oct(0.012).translate(x + 0.01, 0.315, 0.01), color: '#6a4a2a' });
+      parts.push({ geo: oct(0.014).translate(x + 0.01, 0.315, 0.01), color: '#6a4a2a' });
       return kit(parts);
     }
     case 'crystal':
@@ -686,10 +689,11 @@ function treeGeometry(geo: TreeGeo, trunk: Col): THREE.BufferGeometry {
     case 'niwaki':
       return niwakiGeometry(trunk, farTree);
     case 'waxpalm': {
-      // Palmeira-de-cera dos Andes: o tronco claro e altíssimo é o que a identifica.
-      const parts: Part[] = [{ geo: cyl(0.009, 0.013, 0.46, 5), color: '#d8d2c2', grad: [0.85, 1.05, 0, 0.46] }];
-      for (let i = 0; i < 6; i++) {
-        const leaf = new THREE.ConeGeometry(0.024, 0.14, 3, 1).rotateZ(-Math.PI / 2 - 0.55).translate(0.06, 0.45, 0).rotateY((i / 6) * Math.PI * 2 + 0.4);
+      // Palmeira-de-cera dos Andes: o tronco claro e altíssimo é o que a identifica. D53: copa com 8 folhas largas e coroa cheia.
+      const parts: Part[] = [{ geo: cyl(0.011, 0.015, 0.46, 5), color: '#d8d2c2', grad: [0.85, 1.05, 0, 0.46] }];
+      parts.push({ geo: oct(0.032).scale(1.2, 0.65, 1.2).translate(0, 0.455, 0), color: '#fff', tint: 1, grad: [0.85, 1.1, 0.2, 0.35] });
+      for (let i = 0; i < 8; i++) {
+        const leaf = new THREE.ConeGeometry(0.036, 0.16, 3, 1).rotateZ(-Math.PI / 2 - 0.55).translate(0.068, 0.45, 0).rotateY((i / 8) * Math.PI * 2 + 0.4);
         parts.push({ geo: leaf, color: '#fff', tint: 1 });
       }
       parts.push({ geo: oct(0.014).translate(0, 0.45, 0), color: '#5a6a3a' });
