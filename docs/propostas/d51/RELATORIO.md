@@ -18,9 +18,9 @@ Itens da avaliação autônoma: P2.6 e P3.4 (contorno branco do fantasma e da qu
 
 ## Verificação
 
-- `npm run check`: verde (na branch já com a `origin/main` integrada: D50 e D47).
-- `npm run smoke`: ver abaixo.
-- `npm run scene`: ver abaixo.
+- `npm run check`: verde (na branch já com a `origin/main` integrada: D50, D47 e o #125 do canal vivo, merge sem conflito).
+- `npm run smoke`: todos os casos WebGL2 ok (webgl, relevo-webgl, terra-hash-webgl, entrepostos-hash-webgl, entrepostos-dialogo-webgl, buffers-de-vertice, vida-dos-buffers-webgl, ao-vivo-webgl). Os casos WebGPU (bench, webgpu, relevo, terra, entrepostos, vida-dos-buffers, hash-invalido, webgpu-alta, webgpu-ultra) caem com "Device Lost"/"Instance dropped": é o WebGPU por software deste ambiente, como na D49.
+- `npm run scene`: os 16 casos ok, cena incremental igual à reconstrução (no build com o #125).
 - `RUNS=300:high` (WebGL2, `EXTRA=&webgl`, seed 42), main -> D51: 115 -> 115 draw calls, 1241 mil -> 1241 mil triângulos, 71434 -> 71434 instâncias. Sem `&webgl` o stress perde o dispositivo (WebGPU por software deste ambiente).
 - `npm run compare` (Alta, `&webgl`, cópia local com `domcontentloaded`; referência = `origin/main` buildada; máquina carregada com o `scene` rodando junto):
 
