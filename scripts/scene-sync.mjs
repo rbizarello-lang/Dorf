@@ -86,8 +86,8 @@ for (const c of cases) {
   page.on('console', (m) => m.type() === 'error' && !IGNORE.test(m.text()) && errors.push(m.text()));
   page.on('pageerror', (e) => errors.push(String(e)));
   const t0 = Date.now();
-  // A malha da água participa da fila quando a Paisagem viva está ligada.
-  const checkWater = new URLSearchParams(c.q).get('viva') === '1';
+  // A malha da água é comparada com a Paisagem viva ligada e desligada (D52).
+  const checkWater = true;
   const problems = [];
   let note = '';
   try {
