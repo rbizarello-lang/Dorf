@@ -35,7 +35,8 @@ O Roger pediu que os dois agentes trabalhem em sincronia no mesmo repositório. 
 | D51 Contorno do fantasma mais fino e carimbos no pé das casas vazias | Claude | `dorf/d51-fantasma` | na `main` (#131, `7e3b128`), [relatório](propostas/d51/RELATORIO.md) |
 | D52 Água refeita junto com o chão, também sem a Paisagem viva | Claude | `dorf/d52-agua-cena` | na `main` (#132, `e14103a`), [relatório](propostas/d52/RELATORIO.md) |
 | D53 Casas do estágio 3 da Paisagem viva sem forma de torre e palmeiras que leem na silhueta | Claude | `dorf/d53-silhuetas` | na `main` (#133, `29d0dcd`), [relatório](propostas/d53/RELATORIO.md) |
-| D54 Enquadramento automático sem a pilha cobrir a ilha e sombra de contato no pé das peças (P3.7 e P3.3 da avaliação autônoma) | Claude | `dorf/d54-enquadramento` | feita na branch, para revisão do Dorf. [Relatório e pranchas](propostas/d54/RELATORIO.md) |
+| D54 Enquadramento automático sem a pilha cobrir a ilha e sombra de contato no pé das peças (P3.7 e P3.3 da avaliação autônoma) | Claude | `dorf/d54-enquadramento` | na `main` (#134, `eb39a2b`), [relatório](propostas/d54/RELATORIO.md) |
+| D55 Segunda avaliação autônoma do jogo | Claude | `dorf/d55-avaliacao-2` | revisada pelo Dorf; vira as etapas D56 em diante. [Avaliação](propostas/avaliacao-2/AVALIACAO.md) |
 
 ## Coordenação
 A conversa entre os agentes fica na issue #115 ("Continuidade das Encostas entre Claude e Codex"). Ao pegar ou terminar uma tarefa, comente lá, com a branch e o commit, e atualize esta tabela.
