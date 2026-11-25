@@ -8,8 +8,11 @@ import { T } from '../core/tiles';
 import type { Stages } from '../core/living';
 import type { Deco, TileBuild } from './tileBuilder';
 
-/** Quanto cada estágio soma (por estágio): altura e largura das casas, das copas e altura das plantas; tamanho do celeiro. */
-export const GROW = { house: 0.22, houseWide: 0.05, treeH: 0.18, treeW: 0.08, cropH: 0.12, barn: 0.55 } as const;
+/**
+ * Quanto cada estágio soma (por estágio): altura e largura das casas (a altura = `house` + até `houseTall` por casa; a largura
+ * chega a `houseWide` e NUNCA passa dele: a fundação da D47 supõe no máximo +15% no estágio 3, `FOOT_HALF`), das copas e altura das plantas; tamanho do celeiro.
+ * Antes (D53) a casa subia 0,22 por estágio (+66% no 3) e alargava 5%: virava torre estreita, todas iguais. */
+export const GROW = { house: 0.075, houseTall: 0.06, houseWide: 0.05, treeH: 0.18, treeW: 0.08, cropH: 0.12, barn: 0.55 } as const;
 
 const MIDS = [0, 1, 2, 3, 4, 5].map((i) => edgeMid(i));
 
@@ -21,6 +24,22 @@ function sectorAt(x: number, z: number) {
     if (d > bd) (bd = d), (best = i);
   }
   return best;
+}
+
+/** Hash determinístico de 0 a 1 da posição da casa (a parede e o telhado da mesma casa caem na mesma conta). */
+function houseHash(x: number, z: number, salt: number) {
+  let h = (Math.round(x * 1000) * 73856093) ^ (Math.round(z * 1000) * 19349663) ^ (salt * 83492791);
+  h = Math.imul(h ^ (h >>> 13), 0x5bd1e995);
+  h ^= h >>> 15;
+  return (h >>> 0) / 4294967296;
+}
+
+/** Fatores (altura, largura x, largura z) de estágio 1 de uma casa: cada uma ganha uma proporção própria, só da posição. */
+function houseGrowth(x: number, z: number, town: number): [number, number, number] {
+  const tall = 1 + (GROW.house + GROW.houseTall * houseHash(x, z, 1)) * town;
+  const wx = 1 + GROW.houseWide * (0.55 + 0.45 * houseHash(x, z, 2)) * town;
+  const wz = 1 + GROW.houseWide * (0.55 + 0.45 * houseHash(x, z, 3)) * town;
+  return [tall, wx, wz];
 }
 
 const copy = (d: Deco, over: Partial<Deco>): Deco => ({ ...d, color: d.color.clone(), ...over });
@@ -38,9 +57,10 @@ export function developBuild(tile: TileBuild, edges: readonly T[], stages: Stage
   for (const d of tile.decos) {
     const k = d.key;
     if (town && (k.startsWith('wall:') || k.startsWith('roof:'))) {
-      d.sy *= 1 + GROW.house * town;
-      d.sx *= 1 + GROW.houseWide * town;
-      d.sz *= 1 + GROW.houseWide * town;
+      const [gy, gx, gz] = houseGrowth(d.x, d.z, town);
+      d.sy *= gy;
+      d.sx *= gx;
+      d.sz *= gz;
     } else if (forest && k.startsWith('tree:') && edges[sectorAt(d.x, d.z)] === T.Forest) {
       d.sy *= 1 + GROW.treeH * forest;
       d.sx *= 1 + GROW.treeW * forest;
@@ -56,7 +76,18 @@ export function developBuild(tile: TileBuild, edges: readonly T[], stages: Stage
       add.push(copy(d, { x: d.x + 0.012, z: d.z - 0.01, sx: d.sx * 0.9, sz: d.sz * 0.9 }));
     }
   }
-  if (town) for (let i = 1; i < tile.chimneys.length; i += 4) tile.chimneys[i] *= 1 + GROW.house * town;
+  // A chaminé sobe com a casa dela (a parede mais próxima), com a mesma altura da parede.
+  if (town) {
+    const walls = tile.decos.filter((d) => d.key.startsWith('wall:'));
+    for (let i = 0; i + 3 < tile.chimneys.length; i += 4) {
+      let near: Deco | null = null, nd = Infinity;
+      for (const w of walls) {
+        const dd = Math.hypot(w.x - tile.chimneys[i], w.z - tile.chimneys[i + 2]);
+        if (dd < nd) (nd = dd), (near = w);
+      }
+      tile.chimneys[i + 1] *= near ? houseGrowth(near.x, near.z, town)[0] : 1 + GROW.house * town;
+    }
+  }
   // Celeiro (estágios 2 e 3) num trecho já plantado: as plantas sob ele cedem lugar, e ele olha para o centro da peça.
   if (barnAt) {
     const b = barnAt as Deco;
