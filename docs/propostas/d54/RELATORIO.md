@@ -44,7 +44,7 @@ A diferença de 1 draw call na Terra é o ruído da cena (o mesmo estado com a m
 - Sem `?enquadra=0`: as 6 vistas ficam acima da tolerância (`holanda` 64%, `noite` 42%, as demais 3 a 10%) porque o `?auto=` chama o `frameCamera` e a câmera muda de lugar, que é o objetivo da parte 1.
 - Com `&enquadra=0` (só a sombra): `holanda` 8,1% (média 2,2), `egito-entardecer` 10,1% (2,6), `noite` 6,9% (1,9), `zoom-aberto` 9,0% (2,5), `rio-perto` 8,6% (3,1), `vila-perto` 3,0% (0,85). Todas acima da tolerância de 0,5%, como esperado: nas imagens `diff-*` a diferença fica só nas lajes das casas vazias junto ao pé das peças (anéis e hexágonos internos); os pontinhos soltos em vermelho são fumaça, barcos e fogo (o mundo anda entre as duas gravações). Nada muda sobre as peças, a água ou o céu.
 
-**`npm run scene`**: mexi em `world.ts` só para pôr `colorNode` na laje (não toca peça, decoração nem fila). Rodei o conjunto inteiro, mas ele passou de 30 minutos nesta máquina (software, dividida com o stress) e foi interrompido sem terminar; não tenho o resultado dos 17 casos. Ver "O que ficou de fora".
+**`npm run scene`**: 17 casos ok, "cena incremental = reconstrução integral em todos os casos" (rodado depois da merge com a `main` da D53). Mexi em `world.ts` só para pôr `colorNode` na laje.
 
 ## Pranchas (`docs/propostas/d54/`, antes à esquerda, depois à direita)
 - `terra-30-1440x860.jpg`, `terra-60-1440x860.jpg`, `terra-30-1000x760.jpg`, `terra-60-1000x760.jpg`: Terra contínua, seed 7, enquadramento inicial.
@@ -54,7 +54,6 @@ A diferença de 1 draw call na Terra é o ruído da cena (o mesmo estado com a m
 O que vi: antes, a pilha encobre a ponta da ilha (30 e 60 peças) e, com 60 peças, o pé da ilha vaza pela borda de baixo; depois, a ilha inteira cabe entre a barra, o placar e a pilha, deslocada para a esquerda e um pouco menor (a 1000×760 com 60 peças, uns 35% menor, que é o teto do afastamento). No pé: no mar, uma faixa de sombra macia sob a espuma, com a parede assentada na areia molhada; na areia do Egito e no pergaminho do Chamonix o efeito é mais sutil (a laje clara e o entorno já são de valor próximo), uma faixa curta e macia colada na parede; à noite as casas vazias seguem visíveis.
 
 ## O que ficou de fora
-- `npm run scene` completo (ver acima): quem tiver uma máquina livre deve rodá-lo.
 - WebGPU: não deu para conferir nesta máquina (Instance dropped); o caminho é o mesmo nó de TSL do WebGL2.
 - Zoom por tela de celular em retrato não foi capturado; a lógica usa os mesmos retângulos, mas só conferi 1440×860 e 1000×760.
 - O enquadramento não acompanha o mapa crescendo durante a partida (a câmera nunca o fez); se quiser isso, é uma decisão de jogo à parte (a câmera saltaria a cada jogada).
