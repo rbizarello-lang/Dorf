@@ -18,3 +18,7 @@ peça (2,-3): 66 contra 152. A água de borda de rio também divergia (ex.: Terr
 - `scripts/scene-sync.mjs` compara a água nos dois modos da Viva e ganhou `sorteio-egito-sem-viva` (Egito, Clássico, `viva=0`, jogadas com água; 4 encaixes de água): 17 casos.
 - Antes: 6 casos com diferença. Depois: `npm run scene` passa nos 17 (rodado em duas levas por causa do tempo).
 - Não foi feito teste em Node das duas ordens: a causa era de render (refazer a peça vizinha), não de largura.
+
+## Verificação
+- `npm run check` verde; `npm run scene` verde nos 17 casos; `npm run smoke`: todos os casos WebGL2 ok, os de WebGPU falham por software (dispositivo perdido, ambiente).
+- `stress.mjs` usa WebGPU e aqui mede 0 draw calls (dispositivo perdido): sem números. A mudança só refaz a faixa de água de peças já refeitas pelas Encostas, sem pool nem malha nova (0 draw calls a mais). `compare` não rodado: a água desenhada de uma jogada nova não muda, só a das peças refeitas, que passa a coincidir com a reconstrução.
