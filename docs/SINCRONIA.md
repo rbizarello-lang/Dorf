@@ -29,6 +29,7 @@ O Roger pediu que os dois agentes trabalhem em sincronia no mesmo repositório. 
 | Paisagem viva: celeiros por tema | Astra | `astra/paisagem-viva` | na `main` nos cinco temas (#122, `c126e2a`). [Relatório](propostas/paisagem-viva/RELATORIO.md) |
 | Paisagem viva: alargamento dos canais | Astra | `astra/canal-vivo` | na `main` (#125, `721bde7`), com emenda simétrica, atualização da malha e teste de reconstrução. [Relatório e prancha](propostas/canal-vivo/RELATORIO.md) |
 | Guanabara e Chamonix com kits procedurais do jogo | Astra | `astra/temas-guanabara-chamonix` | entregue sobre `721bde7`, para revisão do Roger. [Relatório e pranchas](propostas/temas-guanabara-chamonix/RELATORIO.md) |
+| D54 Enquadramento automático sem a pilha cobrir a ilha e sombra de contato no pé das peças (P3.7 e P3.3 da avaliação autônoma) | Claude | `dorf/d54-enquadramento` | feita na branch, para revisão do Dorf. [Relatório e pranchas](propostas/d54/RELATORIO.md) |
 
 ## Coordenação
 A conversa entre os agentes fica na issue #115 ("Continuidade das Encostas entre Claude e Codex"). Ao pegar ou terminar uma tarefa, comente lá, com a branch e o commit, e atualize esta tabela.

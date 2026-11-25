@@ -585,7 +585,8 @@ function frameCamera(instant: boolean) {
   // Em retrato (celular) a largura é o limite: afasta a câmera proporcionalmente.
   const aspect = Math.min(1.4, Math.max(0.45, window.innerWidth / Math.max(1, window.innerHeight)));
   world.rig.goalDist = THREE.MathUtils.clamp((maxR * (b.ports.length ? 2.5 : 2.1) + 5) * Math.max(1, 1.25 / aspect), 7, 46);
-  if (!b.ports.length) {
+  // `?enquadra=0` volta à fórmula de antes (capturas antes e depois com o mesmo build).
+  if (!b.ports.length && params.get('enquadra') !== '0') {
     // O HUD cobre cantos da tela (pilha, placar, barra): o centro da vista e, se preciso, a distância
     // saem do que está de fato à vista, sem mexer em inclinação, giro nem no zoom de quem joga.
     const seen = new Set<string>();
