@@ -110,10 +110,16 @@ const STAMP_LIFT = SLOT_LIFT + 0.02;
 const INFL_LIFT = SLOT_LIFT + 0.014;
 /** Tom da laje das casas vazias à noite (luar frio). */
 const SLOT_MOON = new THREE.Color('#b9c8ee');
+/** Escurecimento da laje de dia sobre fundo claro (D57): multiplica o `fill` do entorno, mais nos canais azul e verde (quente). */
+const SLOT_DAY = new THREE.Color(0.74, 0.68, 0.6);
+/** O mesmo sobre areia e chapada: o fundo ali tem textura e é escuro em partes, então a laje precisa de mais corpo. */
+const SLOT_DAY_SAND = new THREE.Color(0.48, 0.39, 0.28);
 /** Anel de foco do fantasma (D51), de perto: fio de 0,055 (era 0,13) e menos opaco; ao lado das divisas das peças ele não pode pesar mais que elas. */
 const HOVER_OPACITY = 0.4;
 /** Opacidade do anel com o zoom aberto (`rig.dist` 24 ou mais): ali o fio já é fino na tela. */
 const HOVER_FAR = 0.8;
+/** Quanto do anel some sobre fundo claro (D57): 0,5 deixa o fio branco legível sem pesar mais que as divisas das peças. */
+const HOVER_LIGHT_CUT = 0.5;
 const tmpM = new THREE.Matrix4();
 const tmpV2 = new THREE.Vector2();
 const tmpM2 = new THREE.Matrix4();
@@ -907,6 +913,8 @@ export class World {
   private infl: THREE.InstancedMesh;
   private inflMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.95, depthWrite: false, fog: false });
   private hoverRing: THREE.Mesh;
+  /** 0 a 1: o quanto o entorno é claro (leveza do anel de foco). */
+  private hoverLight = 0;
   /** Manchas de luz no chão das vizinhas que mudam: malha que segue o terreno, com teste de profundidade (não cobre casa nem árvore). */
   private nbMesh!: THREE.Mesh;
   private nbPulse = uniform(1);
@@ -945,7 +953,7 @@ export class World {
     this.infl.geometry.dispose();
     this.infl.geometry = dashGeometry(on);
     this.hoverRing.geometry.dispose();
-    this.hoverRing.geometry = on ? new THREE.RingGeometry(0.79, 0.845, 28).rotateX(-Math.PI / 2) : new THREE.RingGeometry(0.9, 0.955, 6).rotateX(-Math.PI / 2);
+    this.hoverRing.geometry = on ? new THREE.RingGeometry(0.79, 0.845, 28).rotateX(-Math.PI / 2) : new THREE.RingGeometry(0.9, 0.945, 6).rotateX(-Math.PI / 2);
   }
   get fluid() {
     return !!this.warp;
@@ -1115,7 +1123,7 @@ export class World {
     this.infl.renderOrder = 2;
     this.scene.add(this.infl);
 
-    this.hoverRing = new THREE.Mesh(new THREE.RingGeometry(0.9, 0.955, 6).rotateX(-Math.PI / 2), this.hoverMat);
+    this.hoverRing = new THREE.Mesh(new THREE.RingGeometry(0.9, 0.945, 6).rotateX(-Math.PI / 2), this.hoverMat);
     this.hoverRing.visible = false;
     this.scene.add(this.hoverRing);
     // Prévia das vizinhas que sobem (Encostas) ou crescem (Paisagem viva) com a peça do fantasma: um realce suave sobre a casa delas.
@@ -1320,14 +1328,22 @@ export class World {
     // À noite a laje clareia para um tom de luar e perde menos opacidade: escura sobre o mar escuro ela sumia. Sobre a areia o luar é
     // mais fraco (D51): a laje azulada contra a duna morna desenhava uma grade forte no Egito.
     const sand = this.voidU.sand.value > 0;
-    this.slotMat.color.copy(s.line).lerp(SLOT_MOON, s.night * (sand ? 0.3 : 0.7));
+    // De dia, sobre fundo CLARO (areia, chapada, papel) a laje clara sumia (D57): ela vira o próprio chão do entorno escurecido e esquentado
+    // (`fill` × SLOT_DAY), a grade de casas vazias aparece como sombra no papel. Sobre o mar o fundo é escuro e a `line` clara de sempre lê bem.
+    const sea = this.voidU.sea.value > 0;
+    if (sea) this.slotMat.color.copy(s.line);
+    else this.slotMat.color.copy(s.fill).multiply(sand ? SLOT_DAY_SAND : SLOT_DAY);
+    // O anel de foco branco pesava sobre fundo claro (D57): mais leve onde o entorno é claro (mede o `fill` da hora, então à noite volta ao normal).
+    this.hoverLight = sea ? 0 : THREE.MathUtils.smoothstep(0.2126 * s.fill.r + 0.7152 * s.fill.g + 0.0722 * s.fill.b, 0.45, 0.75);
+    this.slotMat.color.lerp(SLOT_MOON, s.night * (sand ? 0.3 : sea ? 0.5 : 0.55));
     // Nanquim dos carimbos: a tinta do tema diluída no papel.
     if (this.theme) this.stampMat.color.set(this.theme.ui.ink).lerp(s.fill, 0.5);
     // Sobre o mar e a areia as casas livres são só uma sombra leve: o fundo já é cenário, não papel. À noite o mar sobe a 0,7 (escuro,
-    // a laje sumia) e a areia desce a 0,35 (D51: a grade marcava demais no Egito; abaixo de ~0,25 a casa vazia some de novo).
-    const over = this.voidU.sea.value ? 0.4 : sand ? 0.65 : 1;
-    this.slotMat.opacity = (0.55 - s.night * 0.17) * (over + ((sand ? 0.35 : Math.max(over, 0.7)) - over) * s.night);
-    slotAlpha.value = this.slotMat.opacity * 1.8;
+    // a laje sumia) e a areia desce a 0,35 (D51: a grade marcava demais no Egito; abaixo de ~0,25 a casa vazia some de novo). De dia a laje sobre areia ganhou corpo (D57).
+    const over = this.voidU.sea.value ? 0.4 : sand ? 1.1 : 1;
+    this.slotMat.opacity = (0.55 - s.night * 0.2) * (over + ((sand ? 0.35 : Math.max(over, 0.7)) - over) * s.night);
+    // Em mancha (Terra contínua) o centro do disco ficava quase opaco (0,55 × 1,8) e lia como algodão: agora mais fraco e tingido pelo entorno.
+    slotAlpha.value = this.slotMat.opacity * 1.15;
     this.inflMat.color.set('#e0981c');
     this.sun.color.copy(s.sun);
     this.sun.intensity = s.sunI;
@@ -4006,7 +4022,7 @@ export class World {
       g.rotation.z = THREE.MathUtils.clamp(-this.ghostVel.x * lean, -0.22, 0.22);
       for (let i = 0; i < 6; i++) if (this.markers[i].visible) this.markers[i].position.copy(g.position).add(this.markerLocal[i]);
       // De perto o anel é um fio discreto; de longe ele fica fino na tela e volta a ser a marca de onde a peça cai.
-      this.hoverMat.opacity = HOVER_OPACITY + (HOVER_FAR - HOVER_OPACITY) * THREE.MathUtils.smoothstep(this.rig.dist, 10, 24);
+      this.hoverMat.opacity = (HOVER_OPACITY + (HOVER_FAR - HOVER_OPACITY) * THREE.MathUtils.smoothstep(this.rig.dist, 10, 24)) * (1 - HOVER_LIGHT_CUT * this.hoverLight);
     }
 
     this.stepHalos(dt);

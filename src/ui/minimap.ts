@@ -68,6 +68,33 @@ function ink(c: string) {
   return /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : '#888888';
 }
 
+/** Luminância relativa (WCAG) de um #rrggbb. */
+function luminance(hex: string) {
+  const ch = [1, 3, 5].map((i) => {
+    const v = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+}
+
+const full = (x: string) => (x.length === 4 ? `#${x[1]}${x[1]}${x[2]}${x[2]}${x[3]}${x[3]}` : x.slice(0, 7));
+
+/** Contraste mínimo de uma série contra o cartão (D57): abaixo disso a cor escurece, no mesmo matiz, até chegar; as que já leem bem ficam como estão. */
+const SERIES_CONTRAST = 2.6;
+
+/** Cor de série do gráfico: a do terreno, escurecida só quando some sobre o fundo do cartão. */
+function seriesInk(c: string, panel: string) {
+  const base = full(ink(c));
+  const bg = luminance(full(ink(panel)));
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(base.slice(i, i + 2), 16));
+  for (let k = 1; k >= 0; k -= 0.04) {
+    const hex = `#${[r, g, b].map((v) => Math.round(v * k).toString(16).padStart(2, '0')).join('')}`;
+    const l = luminance(hex);
+    if ((Math.max(l, bg) + 0.05) / (Math.min(l, bg) + 0.05) >= SERIES_CONTRAST) return hex;
+  }
+  return '#000000';
+}
+
 function xml(s: string) {
   return s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
 }
@@ -76,7 +103,7 @@ function xml(s: string) {
  * Gráfico da partida: a pontuação em traço grosso, o maior grupo de cada terreno
  * em traço fino (escala própria) e marcas de era, missão e maravilha.
  */
-export function timelineSvg(turns: readonly TurnNote[], colors: readonly string[], accent: string, names: readonly string[] = []): string {
+export function timelineSvg(turns: readonly TurnNote[], colors: readonly string[], accent: string, names: readonly string[] = [], panel = '#fff8f3'): string {
   if (!turns.length) return '';
   const W = 320;
   const H = 128;
@@ -103,7 +130,7 @@ export function timelineSvg(turns: readonly TurnNote[], colors: readonly string[
     if (!peak) continue;
     const pts = turns.map((t, i) => `${xAt(i).toFixed(1)},${yG(t.groups[terr] ?? 0).toFixed(1)}`).join(' ');
     const title = names[terr] ? `<title>${xml(names[terr])}</title>` : '';
-    groups += `<polyline points="${pts}" fill="none" stroke="${ink(colors[terr])}" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round">${title}</polyline>`;
+    groups += `<polyline points="${pts}" fill="none" stroke="${seriesInk(colors[terr], panel)}" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round">${title}</polyline>`;
   }
 
   let marks = '';
@@ -130,7 +157,7 @@ export function timelineSvg(turns: readonly TurnNote[], colors: readonly string[
   const last = turns[n - 1];
   const swatches = colors.slice(0, 6).map((c, i) => {
     const title = names[i] ? `<title>${xml(names[i])}</title>` : '';
-    return `<rect x="${132 + i * 12}" y="${H - 13}" width="8" height="8" rx="1.5" fill="${ink(c)}">${title}</rect>`;
+    return `<rect x="${132 + i * 12}" y="${H - 13}" width="8" height="8" rx="1.5" fill="${ink(c)}" stroke="currentColor" stroke-opacity="0.45" stroke-width="0.7">${title}</rect>`;
   }).join('');
   const label = `Linha do tempo da pontuação, ${last.score} pontos no fim`;
 

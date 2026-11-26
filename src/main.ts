@@ -1327,7 +1327,7 @@ function showGameOver() {
     ${game.rules.riverTrade ? `<p><b>${CHARTS[voyageSettings.layout]} · ${FREIGHT_CONTRACTS[voyageSettings.freight]}</b></p>
       <ul>${b.ports.map((p) => `<li>${HARBORS[p.id].name} · ${p.delivered ? `entrega concluída, +${p.reward} peças` : p.connectedAt !== undefined ? 'em espera' : 'sem ligação à vila'}</li>`).join('')}</ul>
       ${voyageWon ? `<p>Bônus da pilha: +${game.finalSupplyBonus.toLocaleString('pt-BR')} pontos.</p>` : ''}` : ''}
-    ${timelineSvg(turns, shownTheme().terrainColors, theme.ui.accent, theme.terrainNames)}
+    ${timelineSvg(turns, shownTheme().terrainColors, theme.ui.accent, theme.terrainNames, theme.ui.panel)}
     ${game.rules.riverTrade ? '' : `<p class="muted">${details}.</p>`}
     ${b.blessings.length ? `<p class="muted">Cartas da vila: ${b.blessings.map((id) => blessingName(id, theme)).join(', ')}.</p>` : ''}
     ${bestLine ? `<p class="muted">${bestLine}</p>` : ''}
