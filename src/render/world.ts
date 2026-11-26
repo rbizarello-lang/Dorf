@@ -113,13 +113,13 @@ const SLOT_MOON = new THREE.Color('#b9c8ee');
 /** Escurecimento da laje de dia sobre fundo claro (D57): multiplica o `fill` do entorno, mais nos canais azul e verde (quente). */
 const SLOT_DAY = new THREE.Color(0.74, 0.68, 0.6);
 /** O mesmo sobre areia e chapada: o fundo ali tem textura e é escuro em partes, então a laje precisa de mais corpo. */
-const SLOT_DAY_SAND = new THREE.Color(0.48, 0.39, 0.28);
+const SLOT_DAY_SAND = new THREE.Color(0.62, 0.54, 0.44);
 /** Anel de foco do fantasma (D51), de perto: fio de 0,055 (era 0,13) e menos opaco; ao lado das divisas das peças ele não pode pesar mais que elas. */
 const HOVER_OPACITY = 0.4;
 /** Opacidade do anel com o zoom aberto (`rig.dist` 24 ou mais): ali o fio já é fino na tela. */
 const HOVER_FAR = 0.8;
 /** Quanto do anel some sobre fundo claro (D57): 0,5 deixa o fio branco legível sem pesar mais que as divisas das peças. */
-const HOVER_LIGHT_CUT = 0.5;
+const HOVER_LIGHT_CUT = 0.35;
 const tmpM = new THREE.Matrix4();
 const tmpV2 = new THREE.Vector2();
 const tmpM2 = new THREE.Matrix4();
@@ -1340,7 +1340,7 @@ export class World {
     if (this.theme) this.stampMat.color.set(this.theme.ui.ink).lerp(s.fill, 0.5);
     // Sobre o mar e a areia as casas livres são só uma sombra leve: o fundo já é cenário, não papel. À noite o mar sobe a 0,7 (escuro,
     // a laje sumia) e a areia desce a 0,35 (D51: a grade marcava demais no Egito; abaixo de ~0,25 a casa vazia some de novo). De dia a laje sobre areia ganhou corpo (D57).
-    const over = this.voidU.sea.value ? 0.4 : sand ? 1.1 : 1;
+    const over = this.voidU.sea.value ? 0.4 : 1;
     this.slotMat.opacity = (0.55 - s.night * 0.2) * (over + ((sand ? 0.35 : Math.max(over, 0.7)) - over) * s.night);
     // Em mancha (Terra contínua) o centro do disco ficava quase opaco (0,55 × 1,8) e lia como algodão: agora mais fraco e tingido pelo entorno.
     slotAlpha.value = this.slotMat.opacity * 1.15;
