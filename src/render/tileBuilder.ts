@@ -171,6 +171,12 @@ export interface BuildOpts {
    * recebe 0 e não desenha nada ali): ela põe a soleira de pedra, a espuma e a névoa, uma corredeira completa por borda; a água não muda.
    */
   rapids?: readonly number[];
+  /**
+   * Clássico com as Encostas: borda (origem) sem peça assentada do outro lado. Onde o rio cai para uma casa vazia mais baixa, a peça
+   * termina a água no lábio de pedra e não desce a lâmina (uma fita branca vertical até o mar); a lâmina e a espuma entram quando a
+   * vizinha chega, porque `lone` está na assinatura e a peça alta é refeita. Sem isto a queda sai como sempre.
+   */
+  lone?: readonly boolean[];
   /** 1 = densidade total de plantas e capim; menor em qualidade baixa. */
   detail: number;
   /** Interações nas bordas (setor na orientação de origem). */
@@ -395,6 +401,8 @@ const SCRATCH = new Buf(true);
 /** Encostas: desvio máximo (altura) entre o decalque e o chão antes de dividir o triângulo, e a profundidade máxima da divisão. */
 const DRAPE_TOL = 0.016;
 const DRAPE_DEPTH = 1;
+/** Comprimento de cada trecho do canal de irrigação sobre as Encostas (o decalque segue o chão a cada trecho). */
+const CANAL_STEP = 0.045;
 /** Desnível (entre os vértices) a partir do qual um decalque sobre o arrimo de uma casa é descartado, e o anel em volta da fundação onde vale. */
 export const DRAPE_STEP = 0.05, DRAPE_RING = 0.12;
 const UP: V3 = [0, 1, 0];
@@ -945,18 +953,6 @@ class WaterBuf {
       this.pos.push(x, WATER_Y, z);
       this.flow.push(fx, fz);
       this.bed.push(v.c.r, v.c.g, v.c.b, WATER_Y - y);
-    }
-  }
-
-  /** Película d'água sobre a saia (boca aberta): os vértices ficam onde estão (acompanham a encosta) e `d` é a coluna d'água. */
-  film(a: { p: V3; c: THREE.Color; d: number; at: V2 }, b: { p: V3; c: THREE.Color; d: number; at: V2 }, c: { p: V3; c: THREE.Color; d: number; at: V2 }) {
-    if (a.d <= 0 && b.d <= 0 && c.d <= 0) return;
-    const cross = (b.p[0] - a.p[0]) * (c.p[2] - a.p[2]) - (b.p[2] - a.p[2]) * (c.p[0] - a.p[0]);
-    for (const v of cross > 0 ? [a, c, b] : [a, b, c]) {
-      const [fx, fz] = this.attr(v.at[0], v.at[1]);
-      this.pos.push(...v.p);
-      this.flow.push(fx, fz);
-      this.bed.push(v.c.r, v.c.g, v.c.b, v.d);
     }
   }
 }
@@ -1605,30 +1601,14 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
     const hbOf = (v: { p: V3 }) => own0 + v.p[1] / LEVEL_STEP;
     const b0 = V(N, 0), bN = V(0, N);
     cols.push(...wedge(i, b0, hbOf(b0), false));
-    const offset = cols.length;
     for (let k = 0; k <= N; k++) {
       const v = V(N - k, k);
       const keepWater = mouth !== undefined && edges[i] === T.Water && (d0(k) > 0 || d0(Math.max(0, k - 1)) > 0 || d0(Math.min(N, k + 1)) > 0);
       cols.push(column(v, nrm[0], nrm[2], hbOf(v), keepWater));
     }
     cols.push(...wedge((i + 1) % 6, bN, hbOf(bN), true));
-    // Boca de água: a água segue pela encosta como uma película fina (espuma), até metade da saia, e some na beira do rio.
-    if (wb && edges[i] === T.Water) {
-      for (let k = 0; k < N; k++) {
-        const ca = cols[offset + k], cb = cols[offset + k + 1], da = d0(k), db = d0(k + 1);
-        if (da <= 0 && db <= 0) continue;
-        const vt = (col: P[], m: number, d: number, kk: number) => {
-          const th = d * (1 - m / MF);
-          const [bx, , bz] = V(N - kk, kk).p;
-          return { p: [col[m].p[0], col[m].p[1] + 0.003 + th, col[m].p[2]] as V3, c: col[m].c, d: d > 0 ? 0.0025 + th * (m < MF ? 1 : 0) : 0, at: [bx, bz] as V2 };
-        };
-        for (let m = 0; m < MF; m++) {
-          const p0 = vt(ca, m, da, k), p1 = vt(cb, m, db, k + 1), p2 = vt(cb, m + 1, db, k + 1), p3 = vt(ca, m + 1, da, k);
-          wb.film(p0, p1, p2);
-          wb.film(p0, p2, p3);
-        }
-      }
-    }
+    // Boca de água: sem película. A água acaba no lábio raso (`OPEN_LIP`) e a encosta cai logo (`SKIRT_CHUTE`); uma película d'água sobre a
+    // saia, no material da água, lia como uma fita branca vertical na lateral da peça (espuma da água rasa).
     const same = (a: V3, b: V3) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) < 1e-7;
     const UPH: V3 = [0, 1, 0];
     for (let j = 0; j + 1 < cols.length; j++) {
@@ -1794,7 +1774,7 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         // Corte da água na lateral (só aparece na beira aberta do mapa, como num aquário), na altura da água da rampa.
         const r0 = rampY(x0, z0), r1 = rampY(x1, z1);
         const w0 = WATER_Y + r0, w1 = WATER_Y + r1;
-        if (hasWater && !fallHi.includes(i) && (y0 - r0 < WATER_Y - 0.001 || y1 - r1 < WATER_Y - 0.001)) {
+        if (hasWater && (!fallHi.includes(i) || opts.lone?.[i]) && (y0 - r0 < WATER_Y - 0.001 || y1 - r1 < WATER_Y - 0.001)) {
           const c0 = Math.min(y0, w0), c1 = Math.min(y1, w1);
           g.quad([x0, w0, z0], [x1, w1, z1], [x1, c1, z1], [x0, c0, z0], waterSide, waterSide, waterDeep, waterDeep, [mx * 1.01, 0, mz * 1.01]);
         }
@@ -2413,8 +2393,14 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
         if (cr() < theme.irrigation.cross) chord(cx + ux * (cr() - 0.5) * 0.6 * rad, cz + uz * (cr() - 0.5) * 0.6 * rad, -uz, ux);
         const water = tc(theme.irrigation.color), rim = shade(sc, 0.7);
         for (const [a, b] of canals) {
-          strip(g, [a, b], 0.0165, h + 0.0004, rim, spIn);
-          strip(g, [a, b], 0.0105, h + 0.0009, water);
+          // Com as Encostas o canal é desenhado em trechos curtos antes do `drape`: uma fita longa de 2 triângulos sobre chão curvo ou em
+          // bancadas virava lasca (uns trechos acima das plantas, outros enterrados). Cada trecho sobe pelo chão do próprio lugar.
+          // A água fica 3 mm acima do rebordo para o `up` de cada triângulo (calculado por triângulo) não a enterrar nele.
+          const n = hill ? Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / CANAL_STEP)) : 1;
+          const line: V2[] = [];
+          for (let t = 0; t <= n; t++) line.push([a[0] + ((b[0] - a[0]) * t) / n, a[1] + ((b[1] - a[1]) * t) / n]);
+          strip(g, line, 0.0165, h + 0.0004, rim, spIn);
+          strip(g, line, 0.0105, h + (hill ? 0.0032 : 0.0009), water);
         }
       }
       const nearCanal = (x: number, z: number) => canals.some(([a, b]) => {
@@ -3222,11 +3208,20 @@ export function buildTile(edges: readonly T[], seed: number, theme: Theme, opts:
       const drop = (edgeLv(i) - opts.levels!.nb[i]) * LEVEL_STEP;
       const Wf = widths[i] + 0.012;
       const seedF = fr();
+      const toVoid = !!opts.lone?.[i];
       // Lábio de pedra: laje atravessando o rio na borda, com o topo um fio acima do fundo (a água corre sobre ela) e um
       // beiral de 7 mm além da borda; a lâmina sai dela.
       const c = onEdge(i, 0.02, 0);
       const lipTop = tc(theme.relief?.rock ?? theme.rock).clone().lerp(WHITE, 0.12);
       beam(g, [c[0] - tx * (Wf + 0.03), c[1] - tz * (Wf + 0.03)], [c[0] + tx * (Wf + 0.03), c[1] + tz * (Wf + 0.03)], 0.027, -0.1, LIP_Y + 0.004, lipTop, shade(rockFall, 0.5));
+      if (toVoid) {
+        // Casa vazia: só o lábio e as pedras (a água acaba rasa na borda). A lâmina, a espuma e a névoa vêm com a vizinha.
+        for (const sg of [-1, 1]) {
+          const [x, z] = onEdge(i, 0.06 + fr() * 0.04, sg * (Wf + 0.045 + fr() * 0.03));
+          D('rock', x, 0, z, fr() * 6, randRange(fr, 1.4, 2.1), vary(fr, rockFall, 0.1));
+        }
+        continue;
+      }
       // Lâmina: curva de lançamento (horizontal no lábio, vertical no pé), um pouco mais larga embaixo.
       const rows = sheetRows.map((o) => {
         const f = Math.max(0, o) / FALL_D;

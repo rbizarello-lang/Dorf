@@ -1660,11 +1660,21 @@ export class World {
    * Encostas da peça `def`: com `at`, o perfil dela naquela casa e giro (com as vizinhas assentadas); sem `at` (a pilha), o perfil
    * "na mão". `hand` fixa onde as casas assentam. Sem `hillsOn`, nada (o chão de antes).
    */
-  private hillFor(def: TileDef, at?: { q: number; r: number; rot: number }, board: Board | null = this.board): Pick<BuildOpts, 'hill' | 'hand' | 'skirt' | 'bay' | 'rapids'> {
+  private hillFor(def: TileDef, at?: { q: number; r: number; rot: number }, board: Board | null = this.board): Pick<BuildOpts, 'hill' | 'hand' | 'skirt' | 'bay' | 'rapids' | 'lone'> {
     if (!this.hillsOn || !board) return {};
     const hand = handHill(def, logicLevels(board, def));
     const hill = at ? boardHill(board, at.q, at.r, def, at.rot, this.reliefMax && !this.pieceRelief ? (q, r) => this.levelOf(q, r, board) : undefined) : hand;
-    if (!this.flatDraw) return { hill, hand };
+    // Clássico: só a borda sem vizinha assentada (a queda para a casa vazia não desce a lâmina até o mar, ver `BuildOpts.lone`).
+    if (!this.flatDraw) {
+      if (!at) return { hill, hand };
+      const lone = [false, false, false, false, false, false];
+      for (let i = 0; i < 6; i++) {
+        const w = (i + at.rot) % 6;
+        // Só as bordas de água entram: o resto não muda a peça, e a assinatura não pode refazer toda vizinha a cada jogada.
+        lone[i] = def.edges[i] === T.Water && !board.get(at.q + DIRS[w][0], at.r + DIRS[w][1]);
+      }
+      return { hill, hand, lone };
+    }
     // Relevo e Terra: costa da base nas bordas abertas (a vizinha ainda não veio) e corredeira onde a água pontuada desce de nível
     // para a vizinha. A corredeira é desenhada pela peça ALTA da borda (soleira, espuma e a névoa da queda), seja ela a mais nova ou a
     // mais velha: só os dois níveis decidem, nunca a ordem das jogadas (a peça baixa não desenha nada ali, e a mais velha é refeita
@@ -1758,7 +1768,7 @@ export class World {
   /** Assinatura de tudo o que, na vizinhança, muda o chão da peça: o perfil, as bordas abertas e as corredeiras. */
   private hillSig(def: TileDef, at: { q: number; r: number; rot: number }, board: Board | null = this.board) {
     const o = this.hillFor(def, at, board);
-    return `${hillSignature(o.hill)}|${o.skirt?.map(Number).join('') ?? ''}|${o.bay?.join(',') ?? ''}|${o.rapids?.join(',') ?? ''}`;
+    return `${hillSignature(o.hill)}|${o.skirt?.map(Number).join('') ?? ''}|${o.bay?.join(',') ?? ''}|${o.rapids?.join(',') ?? ''}|${o.lone?.map(Number).join('') ?? ''}`;
   }
 
   private build(def: TileDef, synergies: { sector: number; kind: SynKind }[], flow?: number[], extra?: { center?: boolean; eraMark?: number; site?: SiteKind; wonder?: boolean; widths?: number[]; spring?: boolean; eggs?: BuildOpts['eggs']; levels?: BuildOpts['levels']; at?: { q: number; r: number; rot: number } }) {
